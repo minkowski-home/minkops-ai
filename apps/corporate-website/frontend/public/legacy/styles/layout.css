@@ -1,0 +1,70 @@
+#hero-1619 {
+    padding: var(--sectionPadding);
+    padding-top: clamp(12.5rem, 31.95vw, 18.75rem);
+    position: relative;
+    z-index: 1;
+    font-family: "Poppins", sans-serif;
+    font-weight: 400;
+    font-style: normal;
+}
+
+#hero-1619 .cs-container {
+    width: 100%;
+    max-width: 80rem;
+    margin: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: clamp(3.75rem, 13vw, 11.25rem);
+}
+
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background-color: var(--primary);
+}
+
+.top-bar-content {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    justify-content: space-between;
+}
+
+.top-bar-logo img {
+    height: 100%;
+    width: auto;
+    max-height: 50px;
+}
+
+.top-menu {
+    list-style-type: none;
+    display: flex;
+    margin: 0;
+    padding: 0;
+    align-items: center;
+    justify-content: flex-end;
+    flex-grow: 1;
+}
+
+.top-menu li {
+    margin-left: 10px;
+}
+
+.top-menu a {
+    color: var(--bodyTextColorWhite);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    height: 100%;
+}
+
+.top-menu a svg,
+.top-bar a svg {
+    height: 1em;
+    width: auto;
+    vertical-align: middle;
+}

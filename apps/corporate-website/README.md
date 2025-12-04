@@ -5,7 +5,7 @@ This module contains the public-facing marketing site for pluseleven. The experi
 ## What is inside
 
 - `frontend/` — the Vite + React application whose entry point is `frontend/src/main.tsx`.
-- `frontend/public/` — static assets such as `favicon.ico` and the hero imagery.
+- `frontend/public/` — static assets (favicon, hero photography) and a `legacy/` folder containing the previous plain-HTML layout, scripts, and styles.
 - `README.md` — this onboarding note.
 
 ## Getting started locally
