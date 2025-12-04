@@ -1,14 +1,11 @@
-"""Entry point for running the Flask backend locally."""
+import uvicorn
 
-from app import create_app
-
-
-app = create_app()
+from app.main import app
 
 
 def main() -> None:
-    """Run the Flask development server."""
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    """Run the FastAPI development server."""
+    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
 
 
 if __name__ == "__main__":

@@ -22,11 +22,11 @@ This module contains the public-facing marketing site for pluseleven. The experi
 
 ## Backend blueprint
 
-The corporate site ships with a minimal Flask backend that powers the `/api` proxy used by Vite and serves health checks for orchestration tooling.
+The corporate site now ships with a minimal FastAPI backend that powers the `/api` proxy used by Vite and serves health checks for orchestration tooling.
 
 1. `cd apps/corporate-website/api/backend`
 2. `python3 -m venv .venv && source .venv/bin/activate`
 3. `pip install -r requirements.txt`
 4. `python run.py` to start the API on `http://127.0.0.1:5000`
 
-Blueprints live under `api/backend/app/` so you can add new endpoints or integrate marketing automation without touching the React layer.
+The FastAPI routers live inside `api/backend/app/`, so you can add new endpoints or integrate marketing automation without touching the React layer.
