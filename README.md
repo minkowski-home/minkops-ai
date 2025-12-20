@@ -1,10 +1,10 @@
-# pluseleven
+# MinkOps.ai
 
-pluseleven is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. This monorepo is modeled on successful enterprise layouts like the [Minkowski monorepo](https://github.com/minkowski-home/minkowski-monorepo) so apps, services, and infrastructure evolve together rather than drifting apart.
+Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. 
 
 ## Layout
 
-- `apps/` — user-facing experiences; currently `apps/corporate-website` hosts the pluseleven marketing site.
+- `apps/` — user-facing experiences; currently `apps/corporate-website` hosts the Minkops marketing site.
 - `services/` — production and prototype services; `services/ai-suite` is the conversational/operational agent platform plus legacy notebooks and tooling.
 - `infra/` — infrastructure plans and automation (currently contains a README placeholder but can grow Terraform, Kubernetes, or GH Actions artifacts).
 - `docs/` — cross-cutting playbooks, architecture notes, or governance policies shared across modules.
