@@ -1,0 +1,26 @@
+This directory contains the agents in this structure:
+
+agents/
+    interior-design/
+        customer-service-rep/
+            agent.yaml
+            src/
+            prompts/
+            pipelines/
+            models/
+            evals/
+            tests/
+            ui/
+            deploy/
+            .../
+        calendar-manager/
+            .../
+        social-media-creator/
+            .../
+    fast-food/
+        order-taker/
+            .../
+        managers-assistant/
+            .../
+
+Remove this file later. The files/folders in main agent folder are as per initial plan - no need to follow super-strictly
