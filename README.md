@@ -21,6 +21,19 @@ This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, b
 4. Study `all_legacy_code/` for the FastAPI/GUI agents and the notebooks that capture training workflows.  
 5. When the orchestrator stack arrives, `infra/` will host the compose/Kubernetes manifests needed to bring the agents online.
 
+### Planned Agents
+| Persona | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
+| ------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- | --------- |
+|         | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
+|         | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Moderate  |
+|         | Ad Copy / Email Copy Generator  | Generates marketing content based on brand kit and company knowledge               | Generic         | High      |
+|         | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
+|         | Front of the House              |                                                                                    | Fast Food       | Very Low  |
+|         | Back of the House               |                                                                                    | Fast Food       | Very Low  |
+|         | Phone Call/Customer Support Rep |                                                                                    | Generic         | Moderate  |
+| Sarah   | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
+|         | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
+
 ### Corporate website (apps/corporate-website)
 
 1. `cd apps/corporate-website`  
