@@ -24,15 +24,15 @@ This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, b
 ### Planned Agents
 | Persona | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
 | ------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- | --------- |
-|         | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
-|         | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Moderate  |
-|         | Ad Copy / Email Copy Generator  | Generates marketing content based on brand kit and company knowledge               | Generic         | High      |
-|         | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
-|         | Front of the House              |                                                                                    | Fast Food       | Very Low  |
-|         | Back of the House               |                                                                                    | Fast Food       | Very Low  |
-|         | Phone Call/Customer Support Rep |                                                                                    | Generic         | Moderate  |
+| Bianca  | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
+| Ryan    | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Moderate  |
+| Ethan   | Ad Copy / Email Copy Generator  | Generates marketing content based on brand kit and company knowledge               | Generic         | High      |
+| Devin   | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
+| Emily   | Front of the House              |                                                                                    | Fast Food       | Very Low  |
+| Tony    | Back of the House               |                                                                                    | Fast Food       | Very Low  |
+| Jaina   | Phone Call/Customer Support Rep |                                                                                    | Generic         | High      |
 | Sarah   | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
-|         | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
+| Kim     | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
 
 ### Corporate website (apps/corporate-website)
 
