@@ -5,5 +5,5 @@ node_modules/
 .DS_Store
 dist/
 deprecated/
-data/       # Temporary data files for short-term use
+data/
 .vscode/
