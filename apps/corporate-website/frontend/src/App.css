@@ -240,16 +240,20 @@ body {
   align-items: center;
   justify-content: center;
   gap: 3rem;
-  margin-top: -2rem; /* Pull up closer to the models */
+  margin-top: -6rem;
+  /* Pulled up significantly closer to models */
   z-index: 20;
   width: 100%;
+  position: relative;
+  /* Ensure it stays on top */
 }
 
 /* Agent Info Overlay - Modified for new layout */
 .agent-info-overlay {
   text-align: center;
   pointer-events: none;
-  width: 300px; /* Fixed width to prevent shifting */
+  width: 300px;
+  /* Fixed width to prevent shifting */
 }
 
 .agent-name {
@@ -278,7 +282,8 @@ body {
   color: var(--text-muted);
   border-radius: 50%;
   transition: all 0.3s ease;
-  /* background: rgba(255, 255, 255, 0.5); */ /* Optional backdrop */
+  /* background: rgba(255, 255, 255, 0.5); */
+  /* Optional backdrop */
 }
 
 .nav-arrow:hover {
@@ -300,8 +305,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3rem 2rem 4rem;
-  margin-top: -3rem;
+  padding: 0 2rem 4rem;
+  /* Reduced top padding */
+  margin-top: -5rem;
+  /* Reduced gap between agents and video */
   position: relative;
   overflow: hidden;
 }
