@@ -63,10 +63,6 @@ export default function MinkopsLanding() {
 
     return (
         <div className="minkops-bg">
-            {/* Background Gradients */}
-            <div className="gradient-orb orb-1" />
-            <div className="gradient-orb orb-2" />
-
             {/* Navbar */}
             <nav className="glass-nav">
                 <div className="nav-logo">Minkops</div>
@@ -80,6 +76,8 @@ export default function MinkopsLanding() {
             <main>
                 {/* Hero Section */}
                 <section className="hero-section">
+                    <div className="gradient-orb orb-1" />
+                    <div className="gradient-orb orb-2" />
                     <motion.div
                         initial={{ opacity: 0, y: 50 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -92,11 +90,11 @@ export default function MinkopsLanding() {
                         <p className="hero-subtitle">
                             The next generation of autonomous corporate agents.
                         </p>
-                        <div className="scroll-indicator">
-                            <span>Scroll to Explore</span>
-                            <div className="arrow-down"></div>
-                        </div>
                     </motion.div>
+                    <div className="scroll-indicator">
+                        <span>Scroll to Explore</span>
+                        <div className="arrow-down"></div>
+                    </div>
                 </section>
 
                 {/* 3D Agent Selector */}
@@ -160,10 +158,46 @@ export default function MinkopsLanding() {
                 </section>
 
                 {/* Footer */}
-                <footer className="simple-footer">
-                    <p>&copy; 2025 Minkops AI.</p>
+                <footer className="main-footer">
+                    <div className="footer-content">
+                        <div className="footer-column brand-col">
+                            <div className="footer-logo">Minkops</div>
+                            <p>Operating system for zero-man companies</p>
+                        </div>
+
+                        <div className="footer-column">
+                            <h4>Platform</h4>
+                            <a href="#agents">Agents</a>
+                            <a href="#orchestration">Orchestration</a>
+                            <a href="#security">Security</a>
+                            <a href="#pricing">Pricing</a>
+                        </div>
+
+                        <div className="footer-column">
+                            <h4>Company</h4>
+                            <a href="/about">About Us</a>
+                            <a href="/careers">Careers</a>
+                            <a href="/blog">Blog</a>
+                            <a href="/contact">Contact</a>
+                        </div>
+
+                        <div className="footer-column">
+                            <h4>Connect</h4>
+                            <a href="https://twitter.com/minkops">Twitter</a>
+                            <a href="https://linkedin.com/company/minkops">LinkedIn</a>
+                            <a href="https://github.com/minkops">GitHub</a>
+                        </div>
+                    </div>
+
+                    <div className="footer-bottom">
+                        <p>&copy; 2025 Minkops AI Inc. All rights reserved.</p>
+                        <div className="legal-links">
+                            <a href="/privacy">Privacy Policy</a>
+                            <a href="/terms">Terms of Service</a>
+                        </div>
+                    </div>
                 </footer>
             </main>
-        </div>
+        </div >
     );
 }
