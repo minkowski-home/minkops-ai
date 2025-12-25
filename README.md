@@ -26,14 +26,15 @@ This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, b
 | -------------- | ---------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- | --------- |
 | Bianca         | Ora        | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
 | Ryan           | Eko        | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Moderate  |
-| Ethan          | Flox       | Ad Copy / Email Copy Generator  | Generates marketing content based on brand kit and company knowledge               | Generic         | High      |
+| Ethan          | Flox       | Content Creator (Ad/Email copies)| Generates marketing content based on brand kit and company knowledge              | Generic         | High      |
 | Devin          | Cruz       | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
 | Emily          | Hosi       | Front of the House              |                                                                                    | Fast Food       | Very Low  |
 | Tony           | Prex       | Back of the House               |                                                                                    | Fast Food       | Very Low  |
 | Jaina          | Kall       | Phone Call/Customer Support Rep |                                                                                    | Generic         | High      |
-| Sarah          | Lea        | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
+| Sarah          | Leed       | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
 | Kim            | Opi        | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
 | Mark           | Insy       | Business Analyst                |                                                                                    | Generic         | Low       |
+| Nathan         | Imel       | Email Handler                   |                                                                                    | Generic         | Immediate |
 
 ### Corporate website (apps/corporate-website)
 
