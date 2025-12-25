@@ -88,7 +88,9 @@ export default function MinkopsLanding() {
                             Intelligence <span className="text-gradient">Redefined</span>
                         </h1>
                         <p className="hero-subtitle">
-                            The next generation of autonomous corporate agents.
+                            Meet the full suite of AI Employees
+                            <br />
+                            Powering zero-man companies
                         </p>
                     </motion.div>
                     <div className="scroll-indicator">
