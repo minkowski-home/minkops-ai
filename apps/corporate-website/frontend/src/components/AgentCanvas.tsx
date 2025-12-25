@@ -1,111 +1,118 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { ContactShadows, Environment, Float, OrbitControls } from "@react-three/drei";
+import { ContactShadows, Environment } from "@react-three/drei";
 import * as THREE from "three";
 
-interface AgentModelProps {
-  position: [number, number, number];
-  color: string;
-  type: "sphere" | "box" | "cone" | "torus";
-  isSelected: boolean;
-  onClick: () => void;
-}
-
-function AgentModel({ position, color, type, isSelected, onClick }: AgentModelProps) {
-  const meshRef = useRef<THREE.Mesh>(null!);
-  const [hovered, setHover] = useState(false);
+// Humanoid shape using primitives
+function HumanoidModel({ color, targetPosition, targetScale, opacity, onClick }: {
+  color: string,
+  targetPosition: [number, number, number],
+  targetScale: number,
+  opacity: number,
+  onClick: () => void
+}) {
+  const groupRef = useRef<THREE.Group>(null!);
 
   useFrame((state, delta) => {
-    if (meshRef.current) {
-      if (isSelected) {
-         meshRef.current.rotation.y += delta;
-      } else {
-         meshRef.current.rotation.y += delta * 0.2;
-      }
+    if (groupRef.current) {
+      // Smooth lerp to target position
+      groupRef.current.position.x = THREE.MathUtils.lerp(groupRef.current.position.x, targetPosition[0], delta * 4);
+      groupRef.current.position.y = THREE.MathUtils.lerp(groupRef.current.position.y, targetPosition[1], delta * 4);
+      groupRef.current.position.z = THREE.MathUtils.lerp(groupRef.current.position.z, targetPosition[2], delta * 4);
+
+      // Smooth lerp scale
+      const currentScale = groupRef.current.scale.x;
+      const newScale = THREE.MathUtils.lerp(currentScale, targetScale, delta * 4);
+      groupRef.current.scale.set(newScale, newScale, newScale);
+
+      // Breathing animation
+      const breathingOffset = Math.sin(state.clock.elapsedTime + targetPosition[0]) * 0.05;
+      groupRef.current.position.y += breathingOffset * delta;
     }
   });
 
-  const scale = isSelected ? 1.5 : hovered ? 1.2 : 1;
-
-  let Geometry;
-  switch (type) {
-    case "sphere":
-      Geometry = <sphereGeometry args={[1, 32, 32]} />;
-      break;
-    case "box":
-      Geometry = <boxGeometry args={[1.5, 1.5, 1.5]} />;
-      break;
-    case "cone":
-      Geometry = <coneGeometry args={[1, 2, 32]} />;
-      break;
-    case "torus":
-      Geometry = <torusGeometry args={[0.8, 0.4, 16, 100]} />;
-      break;
-    default:
-        Geometry = <sphereGeometry args={[1, 32, 32]} />;
-  }
+  const materialProps = {
+    color: color,
+    roughness: 0.3,
+    metalness: 0.1,
+    transparent: true,
+    opacity: opacity,
+  };
 
   return (
-    <Float floatIntensity={isSelected ? 2 : 1} rotationIntensity={1}>
-      <mesh
-        ref={meshRef} // @ts-ignore
-        position={position}
-        scale={[scale, scale, scale]}
-        onClick={(e) => {
-             e.stopPropagation();
-             onClick();
-        }}
-        onPointerOver={() => setHover(true)}
-        onPointerOut={() => setHover(false)}
-      >
-        {Geometry}
-        <meshStandardMaterial
-          color={isSelected ? "#00ff88" : color} // Highlight color if selected
-          roughness={0.2}
-          metalness={0.8}
-        />
+    <group ref={groupRef} position={targetPosition} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      {/* Head */}
+      <mesh position={[0, 1.4, 0]}>
+        <sphereGeometry args={[0.4, 32, 32]} />
+        <meshStandardMaterial {...materialProps} />
       </mesh>
-    </Float>
+
+      {/* Body */}
+      <mesh position={[0, 0.6, 0]}>
+        <capsuleGeometry args={[0.35, 1, 4, 16]} />
+        <meshStandardMaterial {...materialProps} />
+      </mesh>
+    </group>
   );
 }
 
 interface AgentCanvasProps {
-  selectedId: number;
-  onSelect: (id: number) => void;
+  agents: any[];
+  selectedIndex: number;
+  onSelect: (index: number) => void;
 }
 
-export default function AgentCanvas({ selectedId, onSelect }: AgentCanvasProps) {
-  const agents = [
-    { id: 0, type: "sphere" as const, color: "#ff0080", position: [-4, 0, 0] },
-    { id: 1, type: "box" as const, color: "#4d4dff", position: [-1.5, 0, 0] },
-    { id: 2, type: "cone" as const, color: "#ffff00", position: [1.5, 0, 0] },
-    { id: 3, type: "torus" as const, color: "#00ffff", position: [4, 0, 0] },
-  ];
+export default function AgentCanvas({ agents, selectedIndex, onSelect }: AgentCanvasProps) {
+
+  const getAgentTargetProps = (index: number) => {
+    const diff = index - selectedIndex;
+
+    // Position
+    const x = diff * 2.5;
+    const z = Math.abs(diff) * -2;
+
+    // Opacity
+    const isSelected = diff === 0;
+    const opacity = isSelected ? 1 : Math.max(0.2, 1 - Math.abs(diff) * 0.4);
+
+    // Scale
+    const scale = isSelected ? 1.2 : 0.8;
+
+    return {
+      position: [x, -1, z] as [number, number, number],
+      scale,
+      opacity,
+      isSelected
+    };
+  };
 
   return (
     <div className="agent-canvas-container">
-      <Canvas shadows camera={{ position: [0, 0, 8], fov: 45 }}>
-        <ambientLight intensity={0.5} />
+      <Canvas shadows camera={{ position: [0, 0, 8], fov: 35 }}>
+        <ambientLight intensity={0.8} />
         <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={1} castShadow />
-        <pointLight position={[-10, -10, -10]} intensity={1} color="#ff0080" />
-        
-        <group position={[0, -0.5, 0]}>
-            {agents.map((agent) => (
-            <AgentModel
+
+        <group>
+          {agents.map((agent, index) => {
+            const props = getAgentTargetProps(index);
+            // Render limits
+            if (Math.abs(index - selectedIndex) > 3) return null;
+
+            return (
+              <HumanoidModel
                 key={agent.id}
-                type={agent.type}
                 color={agent.color}
-                // @ts-ignore
-                position={agent.position}
-                isSelected={selectedId === agent.id}
-                onClick={() => onSelect(agent.id)}
-            />
-            ))}
+                targetPosition={props.position}
+                targetScale={props.scale}
+                opacity={props.opacity}
+                onClick={() => onSelect(index)}
+              />
+            );
+          })}
         </group>
 
-        <ContactShadows position={[0, -2, 0]} opacity={0.5} scale={20} blur={2} far={4} />
+        <ContactShadows position={[0, -2, 0]} opacity={0.4} scale={20} blur={2.5} far={4} />
         <Environment preset="city" />
-        <OrbitControls enableZoom={false} enablePan={false} maxPolarAngle={Math.PI / 2} minPolarAngle={Math.PI / 3} />
       </Canvas>
     </div>
   );

@@ -1,39 +1,65 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import AgentCanvas from "./components/AgentCanvas";
-import "./App.css"; // We will update this next
+import "./App.css";
 
+// Real Agent Data from README
+// Colors assigned for visual distinction
 const agentsInfo = [
     {
-        id: 0,
-        title: "Conversational",
-        description: "Natural language processing for seamless human-like interactions.",
-        videoColor: "#ff0080"
+        id: "sarah",
+        name: "Sarah",
+        role: "Lead Generation Caller",
+        description: "Proactive outreach agent that qualifies leads and schedules meetings immediately.",
+        color: "#FF0080", // Pink (Primary)
+        priority: "Immediate"
     },
     {
-        id: 1,
-        title: "Operational",
-        description: "Streamline workflows and manage resources with precision.",
-        videoColor: "#4d4dff"
+        id: "jaina",
+        name: "Jaina",
+        role: "Customer Support Rep",
+        description: "Handles phone calls and tickets with high empathy and perfect policy compliance.",
+        color: "#00BFFF", // Sky Blue (Secondary)
+        priority: "High"
     },
     {
-        id: 2,
-        title: "Analytical",
-        description: "Deep insights and predictive modeling for data-driven decisions.",
-        videoColor: "#ffff00"
+        id: "ethan",
+        name: "Ethan",
+        role: "Marketing Specialist",
+        description: "Generates high-converting ad copy and email campaigns tailored to your brand voice.",
+        color: "#7000FF", // Purple
+        priority: "High"
     },
     {
-        id: 3,
-        title: "Communications",
-        description: "Centralized hub for internal and external messaging.",
-        videoColor: "#00ffff"
+        id: "bianca",
+        name: "Bianca",
+        role: "Moodboard Generator",
+        description: "Visual agent creates aesthetic moodboards and style guides for interior design.",
+        color: "#FFD700", // Gold
+        priority: "Moderate"
+    },
+    {
+        id: "ryan",
+        name: "Ryan",
+        role: "Social Media Handler",
+        description: "Engages with your audience and manages posting schedules across platforms.",
+        color: "#FF4500", // Orange
+        priority: "Moderate"
     }
 ];
 
 export default function MinkopsLanding() {
-    const [selectedAgentId, setSelectedAgentId] = useState(0);
+    const [selectedIndex, setSelectedIndex] = useState(2); // Start with Ethan (index 2) as in sketch
 
-    const selectedAgent = agentsInfo.find((a) => a.id === selectedAgentId);
+    const selectedAgent = agentsInfo[selectedIndex];
+
+    const handleNext = () => {
+        setSelectedIndex((prev) => (prev + 1) % agentsInfo.length);
+    };
+
+    const handlePrev = () => {
+        setSelectedIndex((prev) => (prev - 1 + agentsInfo.length) % agentsInfo.length);
+    };
 
     return (
         <div className="minkops-bg">
@@ -75,54 +101,57 @@ export default function MinkopsLanding() {
 
                 {/* 3D Agent Selector */}
                 <section id="agents" className="agents-section">
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        whileInView={{ opacity: 1 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.8 }}
-                        className="agents-header"
-                    >
-                        <h2>Select Your Agent</h2>
-                        <p>Interact with the models below to see their capabilities.</p>
-                    </motion.div>
 
                     <div className="canvas-wrapper">
-                        <AgentCanvas selectedId={selectedAgentId} onSelect={setSelectedAgentId} />
+                        {/* Navigation Overlay */}
+                        <div className="nav-arrow nav-prev" onClick={handlePrev}>&lt;</div>
+                        <div className="nav-arrow nav-next" onClick={handleNext}>&gt;</div>
+
+                        <AgentCanvas
+                            agents={agentsInfo}
+                            selectedIndex={selectedIndex}
+                            onSelect={setSelectedIndex}
+                        />
                     </div>
+
+                    {/* Selected Agent Info - Below Canvas as per logic flows better here */}
+                    <motion.div
+                        key={selectedAgent.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="agent-info-overlay"
+                    >
+                        <span className="agent-name" style={{ backgroundImage: `linear-gradient(45deg, #333, ${selectedAgent.color})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                            {selectedAgent.name}
+                        </span>
+                        <p className="agent-desc">{selectedAgent.role}</p>
+                    </motion.div>
                 </section>
 
                 {/* Demo Video Section */}
                 <section className="demo-section">
                     <AnimatePresence mode="wait">
                         <motion.div
-                            key={selectedAgentId}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: 20 }}
+                            key={selectedAgent.id}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
                             transition={{ duration: 0.5 }}
                             className="demo-container"
                         >
                             <div className="demo-text">
-                                <h3>{selectedAgent?.title}</h3>
-                                <p>{selectedAgent?.description}</p>
+                                <h3>Meet <span style={{ color: selectedAgent.color }}>{selectedAgent.name}</span></h3>
+                                <p>{selectedAgent.description}</p>
                             </div>
 
-                            <div
-                                className="video-placeholder"
-                                style={{
-                                    boxShadow: `0 0 50px ${selectedAgent?.videoColor}40`,
-                                    border: `1px solid ${selectedAgent?.videoColor}`
-                                }}
-                            >
-                                <div
-                                    className="video-content"
-                                    style={{ backgroundColor: `${selectedAgent?.videoColor}20` }}
-                                >
-                                    <span style={{ color: selectedAgent?.videoColor, fontSize: '2rem' }}>
-                                        DEMO VIDEO: {selectedAgent?.title.toUpperCase()}
-                                    </span>
-                                    <div className="play-button" style={{ borderColor: selectedAgent?.videoColor }}>
-                                        ▶
+                            <div className="video-wrapper">
+                                <div className="seamless-video">
+                                    {/* In a real app, this would be a <video> tag with autoPlay loop muted */}
+                                    <div
+                                        className="video-mock"
+                                        style={{ background: `linear-gradient(135deg, #f5f5f5 0%, ${selectedAgent.color}20 100%)` }}
+                                    >
+                                        Video of {selectedAgent.name}
                                     </div>
                                 </div>
                             </div>
