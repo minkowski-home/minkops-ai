@@ -119,12 +119,23 @@ body {
   color: var(--text-main);
 }
 
+/* CTA Button */
 .cta-button {
-  padding: 0.8rem 1.5rem;
-  background: #000;
+  background: white;
+  color: black;
+  padding: 0.8rem 2rem;
   border-radius: 30px;
-  color: white !important;
+  text-decoration: none;
+  font-weight: 500;
   transition: all 0.3s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.cta-button.large-cta {
+  padding: 1rem 3rem;
+  font-size: 1.1rem;
+  letter-spacing: 0.5px;
 }
 
 .cta-button:hover {

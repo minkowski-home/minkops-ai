@@ -121,7 +121,7 @@ const industriesInfo = [
         role: "Personal Assistant",
         description: "Organize your life with a dedicated personal AI assistant.",
         color: "#FF0080", // Pink
-        shape: "sphere",
+        shape: "person",
         filterKey: "generic"
     },
     {
@@ -130,7 +130,7 @@ const industriesInfo = [
         role: "Automated Drive-Thru",
         description: "Voice agents that handle orders with speed and accuracy.",
         color: "#FFA500", // Orange
-        shape: "box",
+        shape: "burger",
         filterKey: "fastfood"
     },
     {
@@ -139,7 +139,7 @@ const industriesInfo = [
         role: "Style Curator",
         description: "AI that generates moodboards and sources furniture.",
         color: "#7000FF", // Purple
-        shape: "torus",
+        shape: "chair",
         filterKey: "interiordesign"
     },
     {
@@ -148,7 +148,7 @@ const industriesInfo = [
         role: "Inventory Manager",
         description: "Predict stock levels and automate reordering.",
         color: "#00BFFF", // Sky Blue
-        shape: "cone",
+        shape: "store",
         filterKey: "store"
     },
     {
@@ -157,8 +157,17 @@ const industriesInfo = [
         role: "Enterprise Solution",
         description: "Build a custom fleet of agents tailored to your business.",
         color: "#FFD700", // Gold
-        shape: "icosahedron",
+        shape: "custom",
         filterKey: "all"
+    },
+    {
+        id: "researcher",
+        name: "Researcher",
+        role: "Market Analyst",
+        description: "Deep dive into market trends, competitor analysis, and data synthesis.",
+        color: "#00CED1", // Dark Turquoise
+        shape: "researcher",
+        filterKey: "generic"
     }
 ];
 
@@ -296,7 +305,7 @@ export default function MinkopsLanding() {
                                         <p className="agent-desc">{selectedIndustry.description}</p>
 
                                         <div style={{ marginTop: '1.5rem', pointerEvents: 'auto' }}>
-                                            <button className="cta-button" onClick={handleProceedToAgents}>
+                                            <button className="cta-button large-cta" onClick={handleProceedToAgents}>
                                                 Explore Agents
                                             </button>
                                         </div>
@@ -344,18 +353,27 @@ export default function MinkopsLanding() {
                                         </span>
                                         <p className="agent-desc">{selectedAgent.role}</p>
 
-                                        <div style={{ marginTop: '1.5rem', pointerEvents: 'auto' }}>
+                                        <div className="action-buttons" style={{ marginTop: '1.5rem', pointerEvents: 'auto', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                                            <button className="cta-button btn-hire">
+                                                Hire {selectedAgent.name}
+                                            </button>
+                                            <button className="cta-button btn-interview">
+                                                Interview {selectedAgent.name}
+                                            </button>
+                                        </div>
+
+                                        <div style={{ marginTop: '1rem', pointerEvents: 'auto' }}>
                                             <button
                                                 className="secondary-button"
                                                 onClick={handleBackToIndustries}
                                                 style={{
                                                     background: 'transparent',
-                                                    border: '1px solid currentColor',
+                                                    border: 'none',
                                                     padding: '0.5rem 1rem',
-                                                    borderRadius: '20px',
                                                     cursor: 'pointer',
                                                     color: 'var(--text-muted)',
-                                                    fontSize: '0.9rem'
+                                                    fontSize: '0.9rem',
+                                                    textDecoration: 'underline'
                                                 }}
                                             >
                                                 Back to Industries
