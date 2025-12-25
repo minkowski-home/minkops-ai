@@ -13,6 +13,7 @@ dependencies = [
     "langchain-openai>=1.1.6",
     "langgraph>=1.0.5",
     "ollama>=0.6.1",
+    "pydantic>=2.12.5",
 ]
 
 [tool.uv.sources]
