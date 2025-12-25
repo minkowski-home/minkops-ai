@@ -8,7 +8,7 @@ import "./App.css";
 const agentsInfo = [
     {
         id: "sarah",
-        name: "Sarah",
+        name: "Leed",
         role: "Lead Generation Caller",
         description: "Proactive outreach agent that qualifies leads and schedules meetings immediately.",
         color: "#FF0080", // Pink (Primary)
@@ -16,7 +16,7 @@ const agentsInfo = [
     },
     {
         id: "jaina",
-        name: "Jaina",
+        name: "Kall",
         role: "Customer Support Rep",
         description: "Handles phone calls and tickets with high empathy and perfect policy compliance.",
         color: "#00BFFF", // Sky Blue (Secondary)
@@ -24,7 +24,7 @@ const agentsInfo = [
     },
     {
         id: "ethan",
-        name: "Ethan",
+        name: "Flox",
         role: "Marketing Specialist",
         description: "Generates high-converting ad copy and email campaigns tailored to your brand voice.",
         color: "#7000FF", // Purple
@@ -32,7 +32,7 @@ const agentsInfo = [
     },
     {
         id: "bianca",
-        name: "Bianca",
+        name: "Ora",
         role: "Moodboard Generator",
         description: "Visual agent creates aesthetic moodboards and style guides for interior design.",
         color: "#FFD700", // Gold
@@ -40,7 +40,7 @@ const agentsInfo = [
     },
     {
         id: "ryan",
-        name: "Ryan",
+        name: "Eko",
         role: "Social Media Handler",
         description: "Engages with your audience and manages posting schedules across platforms.",
         color: "#FF4500", // Orange
