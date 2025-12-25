@@ -1,12 +1,16 @@
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import IndustryCanvas from "./components/IndustryCanvas";
 import AgentCanvas from "./components/AgentCanvas";
 import "./App.css";
 
-// Real Agent Data from README
-// Colors assigned for visual distinction
+// Real Agent Data from README with Industry Mapping
+// Mapping:
+// indiv -> generic
+// fastfood -> fastfood
+// interiordesign -> interiordesign
+// store -> store
 const agentsInfo = [
     {
         id: "sarah",
@@ -14,7 +18,8 @@ const agentsInfo = [
         role: "Lead Generation Caller",
         description: "Proactive outreach agent that qualifies leads and schedules meetings immediately.",
         color: "#FF0080", // Pink (Primary)
-        priority: "Immediate"
+        priority: "Immediate",
+        industry: "generic"
     },
     {
         id: "jaina",
@@ -22,7 +27,8 @@ const agentsInfo = [
         role: "Customer Support Rep",
         description: "Handles phone calls and tickets with high empathy and perfect policy compliance.",
         color: "#00BFFF", // Sky Blue (Secondary)
-        priority: "High"
+        priority: "High",
+        industry: "generic"
     },
     {
         id: "ethan",
@@ -30,7 +36,26 @@ const agentsInfo = [
         role: "Marketing Specialist",
         description: "Generates high-converting ad copy and email campaigns tailored to your brand voice.",
         color: "#7000FF", // Purple
-        priority: "High"
+        priority: "High",
+        industry: "generic"
+    },
+    {
+        id: "nathan",
+        name: "Imel",
+        role: "Email Handler",
+        description: "Manages inbox, drafts responses, and organizes communication threads.",
+        color: "#FFA500", // Orange
+        priority: "Immediate",
+        industry: "generic"
+    },
+    {
+        id: "ryan",
+        name: "Eko",
+        role: "Social Media Handler",
+        description: "Engages with your audience and manages posting schedules across platforms.",
+        color: "#FF4500", // Red-Orange
+        priority: "Moderate",
+        industry: "generic"
     },
     {
         id: "bianca",
@@ -38,15 +63,53 @@ const agentsInfo = [
         role: "Moodboard Generator",
         description: "Visual agent creates aesthetic moodboards and style guides for interior design.",
         color: "#FFD700", // Gold
-        priority: "Moderate"
+        priority: "Moderate",
+        industry: "interiordesign"
     },
     {
-        id: "ryan",
-        name: "Eko",
-        role: "Social Media Handler",
-        description: "Engages with your audience and manages posting schedules across platforms.",
-        color: "#FF4500", // Orange
-        priority: "Moderate"
+        id: "devin",
+        name: "Cruz",
+        role: "Manager's Assistant",
+        description: "Assists with shift scheduling, inventory checks, and team communication.",
+        color: "#20B2AA", // Light Sea Green
+        priority: "Very Low",
+        industry: "fastfood"
+    },
+    {
+        id: "emily",
+        name: "Hosi",
+        role: "Front of House",
+        description: "Manages reservations, guest greeting, and seating arrangements.",
+        color: "#FF69B4", // Hot Pink
+        priority: "Very Low",
+        industry: "fastfood"
+    },
+    {
+        id: "tony",
+        name: "Prex",
+        role: "Back of House",
+        description: "Monitors kitchen workflow, order tickets, and prep stations.",
+        color: "#8B0000", // Dark Red
+        priority: "Very Low",
+        industry: "fastfood"
+    },
+    {
+        id: "kim",
+        name: "Opi",
+        role: "Store Manager's Assistant",
+        description: "Helps with daily store operations, reporting, and staff coordination.",
+        color: "#4682B4", // Steel Blue
+        priority: "Low",
+        industry: "store"
+    },
+    {
+        id: "mark",
+        name: "Insy",
+        role: "Business Analyst",
+        description: "Analyzes sales data and market trends to provide actionable insights.",
+        color: "#2E8B57", // Sea Green
+        priority: "Low",
+        industry: "store" // Generic/Store fit
     }
 ];
 
@@ -58,7 +121,8 @@ const industriesInfo = [
         role: "Personal Assistant",
         description: "Organize your life with a dedicated personal AI assistant.",
         color: "#FF0080", // Pink
-        shape: "sphere"
+        shape: "sphere",
+        filterKey: "generic"
     },
     {
         id: "fastfood",
@@ -66,7 +130,8 @@ const industriesInfo = [
         role: "Automated Drive-Thru",
         description: "Voice agents that handle orders with speed and accuracy.",
         color: "#FFA500", // Orange
-        shape: "box"
+        shape: "box",
+        filterKey: "fastfood"
     },
     {
         id: "interiordesign",
@@ -74,7 +139,8 @@ const industriesInfo = [
         role: "Style Curator",
         description: "AI that generates moodboards and sources furniture.",
         color: "#7000FF", // Purple
-        shape: "torus"
+        shape: "torus",
+        filterKey: "interiordesign"
     },
     {
         id: "store",
@@ -82,7 +148,8 @@ const industriesInfo = [
         role: "Inventory Manager",
         description: "Predict stock levels and automate reordering.",
         color: "#00BFFF", // Sky Blue
-        shape: "cone"
+        shape: "cone",
+        filterKey: "store"
     },
     {
         id: "custom",
@@ -90,7 +157,8 @@ const industriesInfo = [
         role: "Enterprise Solution",
         description: "Build a custom fleet of agents tailored to your business.",
         color: "#FFD700", // Gold
-        shape: "icosahedron"
+        shape: "icosahedron",
+        filterKey: "all"
     }
 ];
 
@@ -101,15 +169,34 @@ export default function MinkopsLanding() {
     const [selectedIndustryIndex, setSelectedIndustryIndex] = useState(2);
     const selectedIndustry = industriesInfo[selectedIndustryIndex];
 
+    // Filter Agents based on selected Industry
+    const filteredAgents = useMemo(() => {
+        const filter = selectedIndustry.filterKey;
+        if (filter === "all") return agentsInfo;
+
+        // For specific industries, show industry-specific AND generic agents
+        // For 'generic' (Individual), show only generic
+        if (filter === "generic") {
+            return agentsInfo.filter(a => a.industry === "generic");
+        }
+
+        return agentsInfo.filter(a => a.industry === filter || a.industry === "generic");
+    }, [selectedIndustry]);
+
     // Agent Selection State
-    const [selectedAgentIndex, setSelectedAgentIndex] = useState(2);
-    const selectedAgent = agentsInfo[selectedAgentIndex];
+    const [selectedAgentIndex, setSelectedAgentIndex] = useState(0);
+    const selectedAgent = filteredAgents[selectedAgentIndex] || filteredAgents[0];
+
+    // Reset agent selection when industry changes
+    useEffect(() => {
+        setSelectedAgentIndex(0);
+    }, [selectedIndustryIndex]);
 
     const handleNextSelection = () => {
         if (viewState === 'industry') {
             setSelectedIndustryIndex((prev) => (prev + 1) % industriesInfo.length);
         } else {
-            setSelectedAgentIndex((prev) => (prev + 1) % agentsInfo.length);
+            setSelectedAgentIndex((prev) => (prev + 1) % filteredAgents.length);
         }
     };
 
@@ -117,7 +204,7 @@ export default function MinkopsLanding() {
         if (viewState === 'industry') {
             setSelectedIndustryIndex((prev) => (prev - 1 + industriesInfo.length) % industriesInfo.length);
         } else {
-            setSelectedAgentIndex((prev) => (prev - 1 + agentsInfo.length) % agentsInfo.length);
+            setSelectedAgentIndex((prev) => (prev - 1 + filteredAgents.length) % filteredAgents.length);
         }
     };
 
@@ -125,13 +212,24 @@ export default function MinkopsLanding() {
         setViewState('agents');
     };
 
+    const handleBackToIndustries = () => {
+        setViewState('industry');
+    };
+
+    const handleHomeClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setViewState('industry');
+        // Optional: scroll to top if needed, but current single page design fits within viewport mostly
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     return (
         <div className="minkops-bg">
             {/* Navbar */}
             <nav className="glass-nav">
-                <div className="nav-logo">Minkops</div>
+                <div className="nav-logo" onClick={handleHomeClick} style={{ cursor: 'pointer' }}>Minkops</div>
                 <div className="nav-links">
-                    <a href="#agents">Agents</a>
+                    <a href="#agents" onClick={(e) => { e.preventDefault(); setViewState('agents'); }}>Agents</a>
                     <a href="#about">About</a>
                     <a href="#contact" className="cta-button">Get Access</a>
                 </div>
@@ -222,7 +320,7 @@ export default function MinkopsLanding() {
                             >
                                 <div className="canvas-wrapper">
                                     <AgentCanvas
-                                        agents={agentsInfo}
+                                        agents={filteredAgents}
                                         selectedIndex={selectedAgentIndex}
                                         onSelect={setSelectedAgentIndex}
                                     />
@@ -245,6 +343,24 @@ export default function MinkopsLanding() {
                                             {selectedAgent.name}
                                         </span>
                                         <p className="agent-desc">{selectedAgent.role}</p>
+
+                                        <div style={{ marginTop: '1.5rem', pointerEvents: 'auto' }}>
+                                            <button
+                                                className="secondary-button"
+                                                onClick={handleBackToIndustries}
+                                                style={{
+                                                    background: 'transparent',
+                                                    border: '1px solid currentColor',
+                                                    padding: '0.5rem 1rem',
+                                                    borderRadius: '20px',
+                                                    cursor: 'pointer',
+                                                    color: 'var(--text-muted)',
+                                                    fontSize: '0.9rem'
+                                                }}
+                                            >
+                                                Back to Industries
+                                            </button>
+                                        </div>
                                     </motion.div>
 
                                     <div className="nav-arrow nav-next" onClick={handleNextSelection}>
@@ -308,7 +424,7 @@ export default function MinkopsLanding() {
 
                         <div className="footer-column">
                             <h4>Platform</h4>
-                            <a href="#agents">Agents</a>
+                            <a href="#agents" onClick={() => setViewState('agents')}>Agents</a>
                             <a href="#orchestration">Orchestration</a>
                             <a href="#security">Security</a>
                             <a href="#pricing">Pricing</a>
