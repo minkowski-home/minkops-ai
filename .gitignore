@@ -7,3 +7,4 @@ dist/
 deprecated/
 data/
 .vscode/
+**/*/__pycache__
