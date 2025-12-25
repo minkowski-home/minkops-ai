@@ -7,10 +7,16 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "agents"
+version = "0.1.0"
+source = { editable = "../../agents" }
+
+[[package]]
 name = "ai-suite"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "agents" },
     { name = "dotenv" },
     { name = "ipykernel" },
     { name = "jupyter" },
@@ -22,6 +28,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agents", editable = "../../agents" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
