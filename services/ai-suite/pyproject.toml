@@ -10,6 +10,7 @@ dependencies = [
     "ipykernel>=7.1.0",
     "jupyter>=1.1.1",
     "langchain>=1.2.0",
+    "langchain-ollama>=1.0.1",
     "langchain-openai>=1.1.6",
     "langgraph>=1.0.5",
     "ollama>=0.6.1",
