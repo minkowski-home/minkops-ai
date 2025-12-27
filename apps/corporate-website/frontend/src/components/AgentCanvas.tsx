@@ -68,15 +68,15 @@ export default function AgentCanvas({ agents, selectedIndex, onSelect }: AgentCa
     const diff = index - selectedIndex;
 
     // Position
-    const x = diff * 2.5;
-    const z = Math.abs(diff) * -2;
+    const x = diff * 4.5;
+    const z = Math.abs(diff) * -2.5;
 
     // Opacity
     const isSelected = diff === 0;
     const opacity = isSelected ? 1 : Math.max(0.2, 1 - Math.abs(diff) * 0.4);
 
-    // Scale
-    const scale = isSelected ? 1.2 : 0.8;
+    // Scale - Increased significantly
+    const scale = isSelected ? 4.0 : 2.0;
 
     return {
       position: [x, -1, z] as [number, number, number],
