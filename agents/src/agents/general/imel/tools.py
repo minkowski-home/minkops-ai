@@ -44,6 +44,55 @@ def lookup_company_kb(*, tenant_id: str | None, query: str) -> list[str]:
     return []
 
 
+def classify_email_heuristic(*, email_content: str, sender_email: str) -> EmailClassification:
+    """A tiny, dependency-free classifier for demos.
+
+    This keeps your agent runnable before you have:
+    - an LLM configured
+    - LangChain/LangGraph installed everywhere
+    - a robust intent classifier
+    """
+
+    text = f"{sender_email}\n{email_content}".lower()
+
+    # Very rough signals.
+    is_spam = any(s in text for s in ["unsubscribe", "win money", "crypto", "airdrop", "free gift", "click here"])
+    wants_cancel = any(s in text for s in ["cancel", "cancellation", "stop my order"])
+    is_complaint = any(s in text for s in ["complaint", "not happy", "angry", "terrible", "refund", "chargeback"])
+    order_related = any(s in text for s in ["order", "tracking", "shipment", "shipping", "invoice", "account"])
+    wants_update = any(s in text for s in ["change", "update", "edit", "modify"]) and order_related
+
+    if is_spam:
+        intent = "spam"
+    elif wants_cancel:
+        intent = "cancel_order"
+    elif is_complaint:
+        intent = "complaint"
+    elif wants_update:
+        intent = "update_order"
+    elif order_related:
+        intent = "order_or_account_details"
+    else:
+        intent = "inquiry"
+
+    # Human escalation triggers (demo-level heuristics).
+    human_required = any(s in text for s in ["lawyer", "sue", "threat", "harass", "fraud", "police"])
+    urgency = "human_intervention_required" if human_required else ("medium" if intent in {"complaint", "cancel_order"} else "low")
+
+    topic = "order/account" if intent in {"order_or_account_details", "update_order", "cancel_order"} else (
+        "complaint" if intent == "complaint" else "general"
+    )
+    summary = (email_content.strip().replace("\n", " ")[:160] + ("…" if len(email_content.strip()) > 160 else "")).strip()
+
+    return {
+        "intent": intent,  # type: ignore[literal-required]
+        "urgency": urgency,  # type: ignore[literal-required]
+        "topic": topic,
+        "summary": summary or "No content.",
+        "is_human_intervention_required": bool(human_required),
+    }
+
+
 def _safe_json_extract(text: str) -> dict[str, Any]:
     """Best-effort JSON extraction from an LLM response."""
 
@@ -128,6 +177,17 @@ def classify_email_via_llm(*, system_prompt: str, email_prompt: str, llm=None) -
     return coerce_email_classification(payload)
 
 
+def classify_email(*, system_prompt: str, email_prompt: str, email_content: str, sender_email: str, llm=None) -> EmailClassification:
+    """Classify using an LLM if provided; otherwise use heuristics.
+
+    This design keeps the agent runnable for demos without any external services.
+    """
+
+    if llm is None:
+        return classify_email_heuristic(email_content=email_content, sender_email=sender_email)
+    return classify_email_via_llm(system_prompt=system_prompt, email_prompt=email_prompt, llm=llm)
+
+
 def draft_reply_via_llm(*, system_prompt: str, draft_prompt: str, llm=None) -> str:
     """Call an LLM to draft a response email."""
 
@@ -136,6 +196,27 @@ def draft_reply_via_llm(*, system_prompt: str, draft_prompt: str, llm=None) -> s
     llm = llm or get_chat_model()
     result = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=draft_prompt)])
     return (getattr(result, "content", str(result)) or "").strip()
+
+
+def draft_reply(*, system_prompt: str, draft_prompt: str, classification: EmailClassification | None, llm=None) -> str:
+    """Draft using an LLM if provided; otherwise use a simple template."""
+
+    if llm is not None:
+        return draft_reply_via_llm(system_prompt=system_prompt, draft_prompt=draft_prompt, llm=llm)
+
+    # Demo fallback: a short, safe reply that doesn't invent details.
+    topic = (classification or {}).get("topic", "your message")
+    return "\n".join(
+        [
+            "Thanks for reaching out.",
+            "",
+            f"I received your email about {topic}.",
+            "To help you quickly, could you share any relevant details (order number, account email, dates) if applicable?",
+            "",
+            "Best,",
+            "Imel (Nathan)",
+        ]
+    ).strip()
 
 
 def send_email(*, email_id: str, to: str, subject: str, body: str) -> None:

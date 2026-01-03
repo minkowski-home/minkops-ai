@@ -10,6 +10,7 @@ because it forces you to keep inputs/outputs explicit and easy to test.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agents.general.imel.policy import build_imel_system_prompt
@@ -21,11 +22,13 @@ from agents.general.imel.prompts import (
 )
 from agents.general.imel.state import AgentHandoff, ImelState, Ticket
 from agents.general.imel.tools import (
-    classify_email_via_llm,
     create_ticket_in_db,
-    draft_reply_via_llm,
+    classify_email,
+    draft_reply,
     lookup_company_kb,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def init_imel_state(
@@ -66,9 +69,16 @@ def classify_intent_node(state: ImelState, *, llm=None) -> ImelState:
         email_content=state["email_content"],
         sender_email=state["sender_email"],
     )
-    classification = classify_email_via_llm(system_prompt=system_prompt, email_prompt=email_prompt, llm=llm)
+    classification = classify_email(
+        system_prompt=system_prompt,
+        email_prompt=email_prompt,
+        email_content=state["email_content"],
+        sender_email=state["sender_email"],
+        llm=llm,
+    )
 
     state["classification"] = classification
+    logger.info("Classified email %s as: %s", state["email_id"], classification)
     return state
 
 
@@ -90,6 +100,7 @@ def company_kb_lookup_node(state: ImelState) -> ImelState:
 
     snippets = lookup_company_kb(tenant_id=state.get("tenant_id"), query=query)
     state["kb_snippets"] = snippets
+    logger.info("KB lookup returned %d snippet(s) for email %s", len(snippets), state["email_id"])
     return state
 
 
@@ -106,9 +117,15 @@ def draft_inquiry_response_node(state: ImelState, *, llm=None) -> ImelState:
         email_content=state["email_content"],
         kb_snippets=kb_snippets or "(none)",
     )
-    draft = draft_reply_via_llm(system_prompt=system_prompt, draft_prompt=draft_prompt, llm=llm)
+    draft = draft_reply(
+        system_prompt=system_prompt,
+        draft_prompt=draft_prompt,
+        classification=state.get("classification"),
+        llm=llm,
+    )
     state["draft_response"] = draft
     state["action"] = "respond"
+    logger.info("Drafted response for email %s (len=%d)", state["email_id"], len(draft))
     return state
 
 
@@ -138,6 +155,15 @@ def handoff_to_order_manager_node(state: ImelState) -> ImelState:
     }
     state["handoff"] = handoff
     state["action"] = "handoff"
+    logger.info(
+        "Route to Order Manager with this data: %s",
+        {
+            "email_id": state["email_id"],
+            "sender_email": state["sender_email"],
+            "intent": classification["intent"],
+            "topic": classification.get("topic"),
+        },
+    )
     return state
 
 
@@ -191,6 +217,15 @@ def create_ticket_and_handoff_to_kall_node(state: ImelState) -> ImelState:
     state["ticket"] = ticket
     state["handoff"] = handoff
     state["action"] = "handoff"
+    logger.info(
+        "Route to Kall with ticket: %s",
+        {
+            "ticket_id": ticket["ticket_id"],
+            "ticket_type": ticket["ticket_type"],
+            "email_id": state["email_id"],
+            "sender_email": state["sender_email"],
+        },
+    )
     return state
 
 
@@ -202,6 +237,7 @@ def archive_node(state: ImelState) -> ImelState:
     """
 
     state["action"] = "archive"
+    logger.info("Archived email %s (no response needed)", state["email_id"])
     return state
 
 
@@ -238,4 +274,3 @@ def route_by_intent_node(state: ImelState, *, llm=None) -> ImelState:
     # Everything else: use the company knowledge base and respond.
     state = company_kb_lookup_node(state)
     return draft_inquiry_response_node(state, llm=llm)
-
