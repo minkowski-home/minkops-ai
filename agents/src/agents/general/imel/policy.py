@@ -51,9 +51,8 @@ def _format_layer2_tenant_branding(tenant_brand: ImelTenantBrandConfig | None) -
     if not tenant_brand:
         return ""
 
-    '''
-    This function needs to be modified based on the frontend provided to the tenant.
-    '''
+    # This function needs to be modified based on the frontend provided to the tenant.
+    
     agent_display_name = (tenant_brand.get("agent_display_name") or "").strip()
     tone = (tenant_brand.get("tone") or "").strip()
     keywords = tenant_brand.get("keywords") or []
@@ -93,14 +92,3 @@ def build_imel_system_prompt(*, tenant_brand: ImelTenantBrandConfig | None = Non
         parts.append(layer2)
     return "\n\n".join(parts).strip() + "\n"
 
-
-IMEL_POLICY = {
-    "agent_id": "imel",
-    "persona_name": "Nathan",
-    "agent_name": "Imel",
-    "role": "Email Handler",
-    "domain": "Generic",
-    "priority": "Immediate",
-    "system_prompt_layer0_core": IMEL_LAYER0_CORE_POLICY,
-    "system_prompt_layer1_default": IMEL_LAYER1_DEFAULT_PERSONA,
-}
