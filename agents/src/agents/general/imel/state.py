@@ -1,4 +1,6 @@
-from typing import Literal, TypedDict, Any
+from __future__ import annotations
+
+from typing import Any, Literal, TypedDict
 
 # Define classification structure
 class EmailClassification(TypedDict):
@@ -9,6 +11,36 @@ class EmailClassification(TypedDict):
     summary: str
     is_human_intervention_required: bool
 
+
+class Ticket(TypedDict):
+    """A minimal "ticket row" representation.
+
+    In production this would be persisted to a database table (e.g. `tickets`).
+    For now we keep it in-memory inside the agent state so you can build the
+    orchestration flow before the DB exists.
+    """
+
+    ticket_id: str
+    ticket_type: Literal["cancel_order", "complaint"]
+    status: Literal["open", "closed"]
+    email_id: str
+    sender_email: str
+    summary: str
+    raw_email: str
+
+
+class AgentHandoff(TypedDict):
+    """A request to another agent.
+
+    Think of this as a "message" the orchestrator will deliver to a different
+    agent (e.g. Order Manager or Kall) along with instructions and context.
+    """
+
+    target_agent: Literal["order_manager", "kall"]
+    instructions_prompt: str
+    context: dict[str, Any]
+
+
 # Define the overall state structure for the Email Agent
 class ImelState(TypedDict):
     # Raw email data
@@ -16,14 +48,21 @@ class ImelState(TypedDict):
     sender_email: str
     email_id: str
 
+    # Multi-tenant fields (placeholders until you add a DB)
+    tenant_id: str | None
+    tenant_brand: dict[str, Any] | None  # TODO(DB): load brand config per tenant/agent
+
     # Classification result
     classification: EmailClassification | None
 
     # Raw search/API results
-    search_results: list[str] | None  # List of raw document chunks
-    customer_history: dict[str, Any] | None  # Raw customer data from CRM
+    kb_snippets: list[str] | None  # List of raw knowledge-base snippets/chunks
+
+    # Tickets / handoffs (used for cancel/complaint + order/account flows)
+    ticket: Ticket | None
+    handoff: AgentHandoff | None
 
     # Generated content
     draft_response: str | None
+    action: Literal["respond", "handoff", "archive"] | None
     messages: list[str] | None
-    
