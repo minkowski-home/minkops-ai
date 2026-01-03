@@ -26,4 +26,3 @@ class ImelState(TypedDict):
     # Generated content
     draft_response: str | None
     messages: list[str] | None
-    
