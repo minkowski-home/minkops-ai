@@ -1,23 +1,22 @@
-from __future__ import annotations
-
+import datetime
 import json
+import typing
 import uuid
-from datetime import datetime, timezone
-from typing import Any
-
-from agents.general.imel.state import EmailClassification, Ticket
+from agents.general.imel import state as imel_state
 
 
 def utc_now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
 
-def create_ticket_in_db(*, ticket_type: str, email_id: str, sender_email: str, summary: str, raw_email: str) -> Ticket:
+def create_ticket_in_db(
+    *, ticket_type: str, email_id: str, sender_email: str, summary: str, raw_email: str
+) -> imel_state.Ticket:
     """Create a ticket for human follow-up.
 
     TODO(DB): Insert into a real `tickets` table and return the inserted row.
     Suggested columns: ticket_id (uuid), type, status, email_id, sender_email,
-    summary, raw_email, created_at, updated_at.
+    summary, raw_email, created_at, updated_at. 
     """
 
     # This is intentionally "fake DB" logic to keep the agent flow moving early on.
@@ -44,7 +43,7 @@ def lookup_company_kb(*, tenant_id: str | None, query: str) -> list[str]:
     return []
 
 
-def classify_email_heuristic(*, email_content: str, sender_email: str) -> EmailClassification:
+def classify_email_heuristic(*, email_content: str, sender_email: str) -> imel_state.EmailClassification:
     """A tiny, dependency-free classifier for demos.
 
     This keeps your agent runnable before you have:
@@ -93,7 +92,7 @@ def classify_email_heuristic(*, email_content: str, sender_email: str) -> EmailC
     }
 
 
-def _safe_json_extract(text: str) -> dict[str, Any]:
+def _safe_json_extract(text: str) -> dict[str, typing.Any]:
     """Best-effort JSON extraction from an LLM response."""
 
     text = text.strip()
@@ -111,7 +110,7 @@ def _safe_json_extract(text: str) -> dict[str, Any]:
         raise
 
 
-def coerce_email_classification(payload: dict[str, Any]) -> EmailClassification:
+def coerce_email_classification(payload: dict[str, typing.Any]) -> imel_state.EmailClassification:
     """Coerce untrusted JSON into an `EmailClassification` shape.
 
     We keep validation light here to avoid blocking iteration. In production
@@ -161,23 +160,27 @@ def get_chat_model(*, model: str = "gemma3:4b", temperature: float = 0.3):
     The only LangChain-specific part is hidden behind this constructor.
     """
 
-    from langchain_ollama import ChatOllama
+    import langchain_ollama
 
-    return ChatOllama(model=model, temperature=temperature)
+    return langchain_ollama.ChatOllama(model=model, temperature=temperature)
 
 
-def classify_email_via_llm(*, system_prompt: str, email_prompt: str, llm=None) -> EmailClassification:
+def classify_email_via_llm(*, system_prompt: str, email_prompt: str, llm=None) -> imel_state.EmailClassification:
     """Call an LLM to classify an email and return structured JSON."""
 
-    from langchain_core.messages import HumanMessage, SystemMessage
+    import langchain_core.messages as lc_messages
 
     llm = llm or get_chat_model()
-    result = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=email_prompt)])
+    result = llm.invoke(
+        [lc_messages.SystemMessage(content=system_prompt), lc_messages.HumanMessage(content=email_prompt)]
+    )
     payload = _safe_json_extract(getattr(result, "content", str(result)))
     return coerce_email_classification(payload)
 
 
-def classify_email(*, system_prompt: str, email_prompt: str, email_content: str, sender_email: str, llm=None) -> EmailClassification:
+def classify_email(
+    *, system_prompt: str, email_prompt: str, email_content: str, sender_email: str, llm=None
+) -> imel_state.EmailClassification:
     """Classify using an LLM if provided; otherwise use heuristics.
 
     This design keeps the agent runnable for demos without any external services.
@@ -191,14 +194,18 @@ def classify_email(*, system_prompt: str, email_prompt: str, email_content: str,
 def draft_reply_via_llm(*, system_prompt: str, draft_prompt: str, llm=None) -> str:
     """Call an LLM to draft a response email."""
 
-    from langchain_core.messages import HumanMessage, SystemMessage
+    import langchain_core.messages as lc_messages
 
     llm = llm or get_chat_model()
-    result = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=draft_prompt)])
+    result = llm.invoke(
+        [lc_messages.SystemMessage(content=system_prompt), lc_messages.HumanMessage(content=draft_prompt)]
+    )
     return (getattr(result, "content", str(result)) or "").strip()
 
 
-def draft_reply(*, system_prompt: str, draft_prompt: str, classification: EmailClassification | None, llm=None) -> str:
+def draft_reply(
+    *, system_prompt: str, draft_prompt: str, classification: imel_state.EmailClassification | None, llm=None
+) -> str:
     """Draft using an LLM if provided; otherwise use a simple template."""
 
     if llm is not None:
@@ -228,3 +235,10 @@ def send_email(*, email_id: str, to: str, subject: str, body: str) -> None:
 
     _ = (email_id, to, subject, body)
     return None
+
+# TODO
+# - `tiktoken` for token counting and prompt size management
+# - real DB integration for tickets
+# - real email sending integration
+# - knowledge base integration for `lookup_company_kb`
+# - more robust JSON extraction and validation using Pydantic

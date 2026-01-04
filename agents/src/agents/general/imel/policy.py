@@ -5,12 +5,10 @@ This file defines the non-overridable (Layer 0) rules and the default persona
 runtime by the orchestrator.
 """
 
-from __future__ import annotations
-
-from typing import TypedDict
+import typing
 
 
-class ImelTenantBrandConfig(TypedDict, total=False):
+class ImelTenantBrandConfig(typing.TypedDict, total=False):
     """Tenant-customizable brand details (Layer 2).
 
     NOTE: Load this content from your DB per tenant/agent instance at runtime.
@@ -48,10 +46,11 @@ Role and scope:
 
 
 def _format_layer2_tenant_branding(tenant_brand: ImelTenantBrandConfig | None) -> str:
+    
+    '''Build the prompt section for tenant-specific branding (Layer 2).'''
+    
     if not tenant_brand:
         return ""
-
-    # This function needs to be modified based on the frontend provided to the tenant.
     
     agent_display_name = (tenant_brand.get("agent_display_name") or "").strip()
     tone = (tenant_brand.get("tone") or "").strip()
@@ -91,4 +90,3 @@ def build_imel_system_prompt(*, tenant_brand: ImelTenantBrandConfig | None = Non
     if layer2:
         parts.append(layer2)
     return "\n\n".join(parts).strip() + "\n"
-

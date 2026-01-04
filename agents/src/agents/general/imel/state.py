@@ -1,18 +1,25 @@
-from __future__ import annotations
-
-from typing import Any, Literal, TypedDict
+import typing
 
 # Define classification structure
-class EmailClassification(TypedDict):
+class EmailClassification(typing.TypedDict):
     '''Define the structure for email classification. This will be used with `llm.with_structured_output` to get structured output from the LLM.'''
-    intent: Literal['inquiry', 'complaint', 'feedback', 'order_or_account_details', 'update_order', 'cancel_order', 'other', 'spam']
-    urgency: Literal['low', 'medium', 'human_intervention_required']
+    intent: typing.Literal[
+        "inquiry",
+        "complaint",
+        "feedback",
+        "order_or_account_details",
+        "update_order",
+        "cancel_order",
+        "other",
+        "spam",
+    ]
+    urgency: typing.Literal["low", "medium", "human_intervention_required"]
     topic: str
     summary: str
     is_human_intervention_required: bool
 
 
-class Ticket(TypedDict):
+class Ticket(typing.TypedDict):
     """A minimal "ticket row" representation.
 
     In production this would be persisted to a database table (e.g. `tickets`).
@@ -21,28 +28,28 @@ class Ticket(TypedDict):
     """
 
     ticket_id: str
-    ticket_type: Literal["cancel_order", "complaint"]
-    status: Literal["open", "closed"]
+    ticket_type: typing.Literal["cancel_order", "complaint"]
+    status: typing.Literal["open", "closed"]
     email_id: str
     sender_email: str
     summary: str
     raw_email: str
 
 
-class AgentHandoff(TypedDict):
+class AgentHandoff(typing.TypedDict):
     """A request to another agent.
 
     Think of this as a "message" the orchestrator will deliver to a different
     agent (e.g. Order Manager or Kall) along with instructions and context.
     """
 
-    target_agent: Literal["order_manager", "kall"]
+    target_agent: typing.Literal["order_manager", "kall"]
     instructions_prompt: str
-    context: dict[str, Any]
+    context: dict[str, typing.Any]
 
 
 # Define the overall state structure for the Email Agent
-class ImelState(TypedDict):
+class ImelState(typing.TypedDict):
     # Raw email data
     email_content: str
     sender_email: str
@@ -50,7 +57,7 @@ class ImelState(TypedDict):
 
     # Multi-tenant fields (placeholders until you add a DB)
     tenant_id: str | None
-    tenant_brand: dict[str, Any] | None  # TODO(DB): load brand config per tenant/agent
+    tenant_brand: dict[str, typing.Any] | None  # TODO(DB): load brand config per tenant/agent
 
     # Classification result
     classification: EmailClassification | None
@@ -64,5 +71,5 @@ class ImelState(TypedDict):
 
     # Generated content
     draft_response: str | None
-    action: Literal["respond", "handoff", "archive"] | None
+    action: typing.Literal["respond", "handoff", "archive"] | None
     messages: list[str] | None
