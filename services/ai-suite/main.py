@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import argparse
 import json
 import logging
+import pathlib
 import sys
 import uuid
-from pathlib import Path
 
 
 def _import_run_imel():
@@ -18,16 +16,16 @@ def _import_run_imel():
     """
 
     try:
-        from agents.general.imel.graph import run_imel
+        from agents.general.imel import graph as imel_graph
 
-        return run_imel
+        return imel_graph.run_imel
     except ModuleNotFoundError:
-        repo_root = Path(__file__).resolve().parents[2]
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
         agents_src = repo_root / "agents" / "src"
         sys.path.insert(0, str(agents_src))
-        from agents.general.imel.graph import run_imel  # type: ignore
+        from agents.general.imel import graph as imel_graph  # type: ignore
 
-        return run_imel
+        return imel_graph.run_imel
 
 
 def _read_email_from_stdin() -> str:
@@ -86,9 +84,9 @@ def main():
         # If this fails on your machine, just run without `--use-llm` and the
         # agent will use heuristic classification + template replies.
         try:
-            from agents.general.imel.tools import get_chat_model
+            from agents.general.imel import tools as imel_tools
 
-            llm = get_chat_model()
+            llm = imel_tools.get_chat_model()
         except Exception as exc:  # pragma: no cover
             raise SystemExit(f"Failed to initialize LLM. Re-run without --use-llm. Error: {exc}") from exc
 

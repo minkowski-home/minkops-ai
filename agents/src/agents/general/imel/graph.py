@@ -5,11 +5,9 @@ Later, if you adopt LangGraph, you can keep the same node functions and just
 wire them into a graph.
 """
 
-from __future__ import annotations
+import typing
 
-from typing import Any
-
-from agents.general.imel.nodes import classify_intent_node, init_imel_state, route_by_intent_node
+from agents.general.imel import nodes as imel_nodes
 
 
 def run_imel(
@@ -18,7 +16,7 @@ def run_imel(
     sender_email: str,
     email_content: str,
     tenant_id: str | None = None,
-    tenant_brand: dict[str, Any] | None = None,
+    tenant_brand: dict[str, typing.Any] | None = None,
     llm=None,
 ):
     """Run Imel on a single email and return the final state.
@@ -38,7 +36,7 @@ def run_imel(
     - persisting tickets and logs in a real database
     """
 
-    state = init_imel_state(
+    state = imel_nodes.init_imel_state(
         email_id=email_id,
         sender_email=sender_email,
         email_content=email_content,
@@ -46,8 +44,8 @@ def run_imel(
         tenant_brand=tenant_brand,
     )
 
-    state = classify_intent_node(state, llm=llm)
-    state = route_by_intent_node(state, llm=llm)
+    state = imel_nodes.classify_intent_node(state, llm=llm)
+    state = imel_nodes.route_by_intent_node(state, llm=llm)
     return state
 
 
@@ -58,15 +56,13 @@ def build_imel_langgraph():
     want streaming, retries, conditional edges, and observability.
     """
 
-    from langgraph.graph import END, StateGraph
+    import langgraph.graph as langgraph_graph
+    from agents.general.imel import state as imel_state
 
-    from agents.general.imel.state import ImelState
-
-    graph = StateGraph(ImelState)
-    graph.add_node("classify_intent", classify_intent_node)
-    graph.add_node("route_by_intent", route_by_intent_node)
+    graph = langgraph_graph.StateGraph(imel_state.ImelState)
+    graph.add_node("classify_intent", imel_nodes.classify_intent_node)
+    graph.add_node("route_by_intent", imel_nodes.route_by_intent_node)
     graph.set_entry_point("classify_intent")
     graph.add_edge("classify_intent", "route_by_intent")
-    graph.add_edge("route_by_intent", END)
+    graph.add_edge("route_by_intent", langgraph_graph.END)
     return graph.compile()
-
