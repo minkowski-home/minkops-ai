@@ -48,10 +48,11 @@ Role and scope:
 
 
 def _format_layer2_tenant_branding(tenant_brand: ImelTenantBrandConfig | None) -> str:
+    
+    '''Build the prompt section for tenant-specific branding (Layer 2).'''
+    
     if not tenant_brand:
         return ""
-
-    # This function needs to be modified based on the frontend provided to the tenant.
     
     agent_display_name = (tenant_brand.get("agent_display_name") or "").strip()
     tone = (tenant_brand.get("tone") or "").strip()

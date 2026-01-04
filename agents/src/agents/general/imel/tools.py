@@ -17,7 +17,7 @@ def create_ticket_in_db(*, ticket_type: str, email_id: str, sender_email: str, s
 
     TODO(DB): Insert into a real `tickets` table and return the inserted row.
     Suggested columns: ticket_id (uuid), type, status, email_id, sender_email,
-    summary, raw_email, created_at, updated_at.
+    summary, raw_email, created_at, updated_at. 
     """
 
     # This is intentionally "fake DB" logic to keep the agent flow moving early on.
@@ -228,3 +228,10 @@ def send_email(*, email_id: str, to: str, subject: str, body: str) -> None:
 
     _ = (email_id, to, subject, body)
     return None
+
+# TODO
+# - `tiktoken` for token counting and prompt size management
+# - real DB integration for tickets
+# - real email sending integration
+# - knowledge base integration for `lookup_company_kb`
+# - more robust JSON extraction and validation using Pydantic

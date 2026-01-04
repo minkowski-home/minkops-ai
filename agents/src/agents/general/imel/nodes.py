@@ -53,7 +53,8 @@ def init_imel_state(
         "handoff": None,
         "draft_response": None,
         "action": None,
-        "messages": [],
+        "messages": [], # We are not initializing SystemMessages here, as LLM calls should be stateless,
+        # SystemPrompt should be injected per LLM call.
     }
 
 
@@ -182,7 +183,7 @@ def _create_ticket_for_kall(state: ImelState, *, ticket_type: str) -> Ticket:
 def create_ticket_and_handoff_to_kall_node(state: ImelState) -> ImelState:
     """Create a ticket and route to Kall for follow-up.
 
-    Per your flowchart: ALL cancel-order requests and ALL complaints are followed
+    ALL cancel-order requests and ALL complaints are followed
     up by Kall (callback agent).
     """
 
