@@ -1,5 +1,6 @@
 
 import { useState, useMemo, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import IndustryCanvas from "./components/IndustryCanvas";
 import AgentCanvas from "./components/AgentCanvas";
@@ -239,7 +240,7 @@ export default function MinkopsLanding() {
                 <div className="nav-logo" onClick={handleHomeClick} style={{ cursor: 'pointer' }}>Minkops</div>
                 <div className="nav-links">
                     <a href="#agents" onClick={(e) => { e.preventDefault(); setViewState('agents'); }}>Agents</a>
-                    <a href="#about">About</a>
+                    <Link to="/about">About</Link>
                     <a href="#contact" className="cta-button">Get Access</a>
                 </div>
             </nav>
@@ -450,7 +451,7 @@ export default function MinkopsLanding() {
 
                         <div className="footer-column">
                             <h4>Company</h4>
-                            <a href="/about">About Us</a>
+                            <Link to="/about">About Us</Link>
                             <a href="/careers">Careers</a>
                             <a href="/blog">Blog</a>
                             <a href="/contact">Contact</a>
