@@ -1,6 +1,6 @@
 # MinkOps.ai
 
-Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. 
+Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. A typical customer can "hire" any set of agents, which work together (fully-intercommunicating and accessing company knowledge as real human employees would) perfoming actual job duties - each agent tends to replace one real human employee with disjoint skills.
 
 ## Layout
 
@@ -11,29 +11,20 @@ Minkops.ai is a suite of autonomous AI employees that handle customer intake, op
 
 This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, backend/data work in `services/` or `infra/`, and shared knowledge in `docs/`, preventing the drift that results from ad-hoc “modules” and making it easy for contributors to find the right home for new work.
 
-## Getting started
-
-### AI suite (services/ai-suite)
-
-1. `cd services/ai-suite`  
-2. Create an environment: `python3 -m venv .venv && source .venv/bin/activate`.  
-3. Install dependencies with either `pip install -r requirements.txt` for a slim sandbox or `conda create --name pluseleven --file all_legacy_code/requirements/requirements.txt` for the legacy stack.  
-4. Study `all_legacy_code/` for the FastAPI/GUI agents and the notebooks that capture training workflows.  
-5. When the orchestrator stack arrives, `infra/` will host the compose/Kubernetes manifests needed to bring the agents online.
 
 ### Planned Agents
 | Persona (at MH) | Agent Name | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
 | -------------- | ---------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- | --------- |
 | Bianca         | Ora        | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
 | Ryan           | Eko        | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Moderate  |
-| Ethan          | Flox       | Content Creator (Ad/Email copies)| Generates marketing content based on brand kit and company knowledge              | Generic         | High      |
+| Ethan          | Floc       | Content Creator (Ad/Email copies)| Generates marketing content based on brand kit and company knowledge              | Generic         | High      |
 | Devin          | Cruz       | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
 | Emily          | Hosi       | Front of the House              |                                                                                    | Fast Food       | Very Low  |
 | Tony           | Prex       | Back of the House               |                                                                                    | Fast Food       | Very Low  |
 | Jaina          | Kall       | Phone Call/Customer Support Rep |                                                                                    | Generic         | High      |
 | Sarah          | Leed       | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
-| Kim            | Opi        | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
-| Mark           | Insy       | Business Analyst                |                                                                                    | Generic         | Low       |
+| Kim            | Kim        | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
+| Mark           | Insi       | Business Analyst                |                                                                                    | Generic         | Low       |
 | Nathan         | Imel       | Email Handler                   |                                                                                    | Generic         | Immediate |
 
 ### Corporate website (apps/corporate-website)

@@ -1,6 +1,6 @@
 # Infrastructure
 
-This folder will hold Terraform, Docker Compose, Kubernetes overlays, and GitHub automation that deploys the pluseleven AI suite and the corporate website. Infrastructure manifests should reference the same shared policies described elsewhere in the repo and expose environment-specific overlays (dev/stage/prod) similar to the `env/` directory from Minkowski’s layout.
+This folder will hold Terraform, Docker Compose, Kubernetes overlays, and GitHub automation that deploys the AI suite and other apps. Infrastructure manifests should reference the same shared policies described elsewhere in the repo and expose environment-specific overlays (dev/stage/prod) similar to the `env/` directory from Minkowski’s layout.
 
 ### Current
 The `docker-compose.yml` is for local/dev. It launches infra + one gateway/orchestrator:
@@ -8,9 +8,10 @@ The `docker-compose.yml` is for local/dev. It launches infra + one gateway/orche
 - Vector DBs
 - Relational DBs
 - Message Broker (optional)
+- etc.
 
 ### For multiple orgs
-This is handles inside the app. Each request carries `org_id`. Shared KB client always filters/uses `org_id`. Agent availability is config/DB rule, not a separate service.
+This is handled inside the app. Each request carries `org_id`. Shared KB client always filters/uses `org_id`. Agent availability is config/DB rule, not a separate service.
 
 #### Different orgs use different agent sets
 - Keep a per-org config table `org_agents` (with keys like `org_id`, `agent_id`, `enabled`, `config_json`)
