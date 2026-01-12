@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import InterestForm from "./components/InterestForm";
+import AgentDemoSection from "./components/AgentDemoSection";
 import "./App.css";
 
 export default function MinkopsLanding() {
@@ -63,6 +64,9 @@ export default function MinkopsLanding() {
                         <InterestForm />
                     </motion.div>
                 </section>
+
+                {/* Demo Section */}
+                <AgentDemoSection />
 
                 {/* Footer */}
                 <footer className="main-footer">
