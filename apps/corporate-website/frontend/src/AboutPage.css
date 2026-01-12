@@ -9,7 +9,6 @@
   position: relative;
   overflow: hidden;
   color: var(--about-ink);
-  font-family: "Outfit", "Poppins", sans-serif;
   background:
     radial-gradient(circle at 15% 10%, rgba(255, 0, 128, 0.12), transparent 55%),
     radial-gradient(circle at 85% 90%, rgba(0, 191, 255, 0.12), transparent 60%),
@@ -56,10 +55,12 @@
 }
 
 @keyframes float-glow {
+
   0%,
   100% {
     transform: translateY(0) scale(1);
   }
+
   50% {
     transform: translateY(18px) scale(1.04);
   }
