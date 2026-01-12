@@ -87,7 +87,7 @@ export default function MinkopsLanding() {
                         <div className="footer-column">
                             <h4>Company</h4>
                             <Link to="/about">About Us</Link>
-                            <a href="/careers">Careers</a>
+                            <Link to="/careers">Careers</Link>
                             <a href="/blog">Blog</a>
                             <a href="/contact">Contact</a>
                         </div>
@@ -101,10 +101,10 @@ export default function MinkopsLanding() {
                     </div>
 
                     <div className="footer-bottom">
-                        <p>&copy; 2025 Minkops AI Inc. All rights reserved.</p>
+                        <p>&copy; 2025 Minkops. A product of Minkowski Home. All rights reserved.</p>
                         <div className="legal-links">
-                            <a href="/privacy">Privacy Policy</a>
-                            <a href="/terms">Terms of Service</a>
+                            <Link to="/privacy">Privacy Policy</Link>
+                            <Link to="/terms">Terms of Service</Link>
                         </div>
                     </div>
                 </footer>
