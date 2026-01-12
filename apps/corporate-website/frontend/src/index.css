@@ -1,7 +1,18 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap");
 
 :root {
-  font-family: "Poppins", system-ui, -apple-system, sans-serif;
+  --font-main: "Outfit", sans-serif;
+  --font-secondary: "Poppins", sans-serif;
+
+  --fw-light: 300;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extrabold: 800;
+
+  font-family: var(--font-main);
   background-color: #f2f3f5;
 }
 
@@ -12,6 +23,9 @@
 body {
   margin: 0;
   background: #f2f3f5;
+  font-family: var(--font-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
