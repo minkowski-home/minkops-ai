@@ -1,0 +1,6 @@
+(Airflow): `services/orchestrator` is our "Manager." It doesn't know how to be an agent or a worker (`services/ai-suite` is the worker, it knows how to execute agent logic), it just knows when to wake up an agent for a specific customer.
+
+We have one Airflow with a dynamic DAG (Workflow) that says:
+Loop through Active Tenants:
+    Trigger "Agent Job" (passing tenant_id="client_A")
+    Trigger "Transformation Job" (passing tenant_id="client_A")
