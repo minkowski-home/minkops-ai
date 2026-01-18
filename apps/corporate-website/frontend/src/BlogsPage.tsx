@@ -24,16 +24,26 @@ export default function BlogsPage() {
               Insights from the future of autonomous work.
             </p>
 
-            <div style={{ 
-              padding: "2rem", 
-              background: "rgba(255,255,255,0.5)", 
-              borderRadius: "20px", 
-              border: "1px solid rgba(0,0,0,0.05)" 
-            }}>
-              <h2 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>Coming Soon</h2>
-              <p style={{ color: "var(--text-muted)" }}>
-                Our team is busy building the future. Check back later for updates.
-              </p>
+            <div style={{ display: "grid", gap: "2rem" }}>
+              <Link to="/blogs/minkowski-case-study" style={{ textDecoration: "none", color: "inherit" }}>
+                <motion.div
+                  whileHover={{ y: -5 }}
+                  style={{
+                    padding: "2rem",
+                    background: "rgba(255,255,255,0.6)",
+                    borderRadius: "20px",
+                    border: "1px solid rgba(0,0,0,0.05)",
+                    cursor: "pointer"
+                  }}
+                >
+                  <span style={{ fontSize: "0.8rem", color: "var(--primary-glow)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>Case Study</span>
+                  <h2 style={{ fontSize: "1.8rem", margin: "0.5rem 0 1rem", fontWeight: "700" }}>Zero-Man Operations: How Minkowski Home achieved 100% automated accuracy</h2>
+                  <p style={{ color: "var(--text-muted)", lineHeight: "1.6" }}>
+                    How we utilized Leed, Eko, and Kall to handle lead generation, social media, and support without a single human employee.
+                  </p>
+                  <div style={{ marginTop: "1.5rem", fontWeight: "500", fontSize: "0.9rem" }}>Read Article →</div>
+                </motion.div>
+              </Link>
             </div>
           </motion.div>
         </div>

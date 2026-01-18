@@ -5,6 +5,8 @@ import TermsOfService from "./TermsOfService";
 import PrivacyPolicy from "./PrivacyPolicy";
 import CareersPage from "./CareersPage";
 import BlogsPage from "./BlogsPage";
+import BlogPost1 from "./BlogPost1";
+import OrchestrationPage from "./OrchestrationPage";
 
 function App() {
   return (
@@ -16,6 +18,8 @@ function App() {
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/careers" element={<CareersPage />} />
         <Route path="/blogs" element={<BlogsPage />} />
+        <Route path="/blogs/minkowski-case-study" element={<BlogPost1 />} />
+        <Route path="/orchestration" element={<OrchestrationPage />} />
         <Route path="*" element={<MinkopsLanding />} />
       </Routes>
     </BrowserRouter>

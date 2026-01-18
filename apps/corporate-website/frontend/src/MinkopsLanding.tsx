@@ -79,9 +79,8 @@ export default function MinkopsLanding() {
                         <div className="footer-column">
                             <h4>Platform</h4>
                             <a href="#access">Agents</a>
-                            <a href="#orchestration">Orchestration</a>
-
-                            <a href="#pricing">Pricing</a>
+                            <Link to="/orchestration">Orchestration</Link>
+                            <a href="#access">Pricing</a>
                         </div>
 
                         <div className="footer-column">
