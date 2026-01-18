@@ -39,9 +39,8 @@ Minkops presents autonomous intelligence with a clean, glassy, and luminous aest
 
 ## Typography
 ### Typeface
-- Primary: Poppins (loaded via Google Fonts)
-- Display: Outfit (intended for hero and large headlines)
-- Fallbacks: Inter, system sans-serif
+- Primary: Apple SD Gothic Neo (or system equivalent)
+- Fallbacks: Inter, Roboto, system sans-serif
 
 ### Weights and Sizing
 - Logo: 800 weight, letter-spacing `-0.05em`
