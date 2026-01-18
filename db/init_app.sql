@@ -45,7 +45,7 @@ CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     run_id UUID NOT NULL REFERENCES runs(id),
     tenant_id TEXT NOT NULL,
-    current_role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
+    current_role TEXT NOT NULL CHECK (current_role IN ('user', 'assistant', 'system', 'tool')),
     content TEXT NOT NULL,
     meta JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
