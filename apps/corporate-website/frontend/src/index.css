@@ -1,9 +1,6 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap");
-
 :root {
-  --font-main: "Outfit", sans-serif;
-  --font-secondary: "Poppins", sans-serif;
+  --font-main: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Inter", "Roboto", sans-serif;
+  --font-secondary: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Inter", "Roboto", sans-serif;
 
   --fw-light: 300;
   --fw-regular: 400;

@@ -80,7 +80,7 @@ export default function MinkopsLanding() {
                             <h4>Platform</h4>
                             <a href="#access">Agents</a>
                             <a href="#orchestration">Orchestration</a>
-                            <a href="#security">Security</a>
+
                             <a href="#pricing">Pricing</a>
                         </div>
 
@@ -88,15 +88,9 @@ export default function MinkopsLanding() {
                             <h4>Company</h4>
                             <Link to="/about">About Us</Link>
                             <Link to="/careers">Careers</Link>
-                            <a href="/blog">Blog</a>
+                            <Link to="/blogs">Blog</Link>
                             <a href="/contact">Contact</a>
-                        </div>
-
-                        <div className="footer-column">
-                            <h4>Connect</h4>
-                            <a href="https://twitter.com/minkops">Twitter</a>
                             <a href="https://linkedin.com/company/minkops">LinkedIn</a>
-                            <a href="https://github.com/minkops">GitHub</a>
                         </div>
                     </div>
 

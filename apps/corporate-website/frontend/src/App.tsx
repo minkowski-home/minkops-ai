@@ -4,6 +4,7 @@ import MinkopsLanding from "./MinkopsLanding";
 import TermsOfService from "./TermsOfService";
 import PrivacyPolicy from "./PrivacyPolicy";
 import CareersPage from "./CareersPage";
+import BlogsPage from "./BlogsPage";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="/terms" element={<TermsOfService />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/careers" element={<CareersPage />} />
+        <Route path="/blogs" element={<BlogsPage />} />
         <Route path="*" element={<MinkopsLanding />} />
       </Routes>
     </BrowserRouter>
