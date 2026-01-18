@@ -52,7 +52,7 @@ def run_imel(
 def build_imel_langgraph():
     """Optional: build a LangGraph graph for Imel.
 
-    You do NOT need this to ship a first version. Keep it for later when you
+    We do NOT need this to ship a first version. Keeping it for later when we will
     want streaming, retries, conditional edges, and observability.
     """
 

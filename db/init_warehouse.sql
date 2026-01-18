@@ -1,0 +1,1 @@
+-- TODO: this should create bronze, silver, and gold schemas for our data warehouse.
