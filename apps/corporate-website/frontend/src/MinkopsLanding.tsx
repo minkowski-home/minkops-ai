@@ -1,10 +1,15 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import InterestForm from "./components/InterestForm";
 import AgentDemoSection from "./components/AgentDemoSection";
 import "./App.css";
 
 export default function MinkopsLanding() {
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+    const toggleMenu = () => setIsMobileMenuOpen(!isMobileMenuOpen);
+
     const handleHomeClick = (e: React.MouseEvent) => {
         e.preventDefault();
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -15,7 +20,9 @@ export default function MinkopsLanding() {
             {/* Navbar */}
             <nav className="glass-nav">
                 <div className="nav-logo" onClick={handleHomeClick} style={{ cursor: 'pointer' }}>Minkops</div>
-                <div className="nav-links">
+
+                {/* Desktop Links */}
+                <div className="nav-links desktop-only">
                     <a href="#access" onClick={(e) => {
                         e.preventDefault();
                         const element = document.getElementById('access');
@@ -24,7 +31,39 @@ export default function MinkopsLanding() {
                     <Link to="/about">About</Link>
                     <a href="#access" className="cta-button">Get Access</a>
                 </div>
+
+                {/* Mobile Menu Toggle */}
+                <div className="mobile-toggle" onClick={toggleMenu}>
+                    <div className={`hamburger ${isMobileMenuOpen ? 'open' : ''}`}>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
             </nav>
+
+            {/* Mobile Menu Overlay */}
+            <AnimatePresence>
+                {isMobileMenuOpen && (
+                    <motion.div
+                        className="mobile-menu-overlay"
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        transition={{ duration: 0.2 }}
+                    >
+                        <div className="mobile-nav-links">
+                            <Link to="/about" onClick={toggleMenu}>About</Link>
+                            <Link to="/orchestration" onClick={toggleMenu}>Orchestration</Link>
+                            <a href="#access" className="cta-button" onClick={() => {
+                                toggleMenu();
+                                const element = document.getElementById('access');
+                                if (element) element.scrollIntoView({ behavior: 'smooth' });
+                            }}>Get Access</a>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <main>
                 {/* Hero Section */}
