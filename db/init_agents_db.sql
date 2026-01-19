@@ -15,6 +15,8 @@ CREATE TABLE tenants (
 
 -- 2. RUNS (The "Session" or "Job")
 -- Tracks a single execution flow (e.g. processing one email).
+-- A run is not a "run" in the traditional sense because the agents are desinged to be long-running and event-driven.
+-- Instead, think of a "run" as a unit of atomic work for one particular trigger (e.g.replying to a new email, escalating a ticket, etc).
 CREATE TABLE runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id TEXT NOT NULL REFERENCES tenants(id),
@@ -69,8 +71,8 @@ CREATE TABLE event_outbox (
 -- A flattened log table purely for Airbyte to slurp up.
 CREATE TABLE activity_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,    -- does not REFERENCE because logs are loosedly coupled - they are mainly for record keeping and dont control the flow of the app
+    agent_id TEXT NOT NULL,     -- same as above
     run_id UUID,
     event TEXT NOT NULL,                       -- "processed_email", "escalated_ticket"
     summary TEXT,                              -- Human readable summary
