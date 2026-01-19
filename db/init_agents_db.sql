@@ -1,6 +1,10 @@
 -- Production Database Schema (minkops_app)
 -- optimized for high-concurrency, OLTP, and State Management.
 
+DROP DATABASE IF EXISTS minkops_app;
+CREATE DATABASE minkops_app;
+\c minkops_app
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. TENANTS
@@ -81,3 +85,8 @@ CREATE TABLE activity_logs (
 );
 -- Airbyte will do standard Incremental Sync on `created_at`
 CREATE INDEX idx_logs_sync ON activity_logs(created_at);
+
+-- 7. SEED DATA
+INSERT INTO tenants (id, name, config, enabled) VALUES
+('acme_corp', 'Acme Corp', '{"region": "us-east-1", "plan": "enterprise"}'::jsonb, TRUE),
+('start_up_inc', 'StartUp Inc', '{"region": "us-west-2", "plan": "starter"}'::jsonb, TRUE);
