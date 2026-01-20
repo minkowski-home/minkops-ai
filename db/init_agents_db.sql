@@ -86,7 +86,69 @@ CREATE TABLE activity_logs (
 -- Airbyte will do standard Incremental Sync on `created_at`
 CREATE INDEX idx_logs_sync ON activity_logs(created_at);
 
--- 7. SEED DATA
+-- 7. HUMAN INSTRUCTIONS QUEUE
+-- For human managers to instruct daily tasks, instructions, goals for the day/week, and agents to request human help asynchronously.
+CREATE TABLE human_instructions_queue (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id),
+    run_id UUID REFERENCES runs(id),
+    author_id TEXT NOT NULL,                  -- Human manager identifier (email/handle)
+    target_agent_id TEXT,                     -- Optional specific agent target (e.g. "imel")
+    target_role TEXT,                         -- Optional group target (e.g. "support")
+    instruction TEXT NOT NULL,
+    payload JSONB DEFAULT '{}'::jsonb,
+    priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
+        'queued', 'acknowledged', 'in_progress', 'completed', 'blocked', 'dismissed', 'expired'
+    )),
+    due_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '2 days'),
+    acknowledged_at TIMESTAMP WITH TIME ZONE,
+    acknowledged_by TEXT,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    completed_by TEXT,
+    agent_response TEXT,
+    human_feedback TEXT,                      -- Capture human feedback for RLHF training data
+    feedback_score INT CHECK (feedback_score BETWEEN 1 AND 5),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_hiq_tenant_status ON human_instructions_queue(tenant_id, status, created_at DESC);
+CREATE INDEX idx_hiq_target_agent ON human_instructions_queue(tenant_id, target_agent_id, status);
+CREATE INDEX idx_hiq_expires ON human_instructions_queue(expires_at);
+
+-- 8. AGENT INTER-COMMUNICATIONS QUEUE
+-- For multi-agent systems to talk to each other asynchronously.
+CREATE TABLE agent_intercom_queue (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id),
+    run_id UUID REFERENCES runs(id),
+    from_agent_id TEXT NOT NULL,
+    to_agent_id TEXT,                         -- Null implies broadcast within tenant/channel
+    channel TEXT,                             -- Optional topic/channel for routing
+    kind TEXT NOT NULL DEFAULT 'message' CHECK (kind IN (
+        'message', 'instruction', 'question', 'thought', 'handoff', 'signal'
+    )),
+    priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
+        'queued', 'delivered', 'consumed', 'archived', 'failed', 'expired'
+    )),
+    message TEXT NOT NULL,
+    payload JSONB DEFAULT '{}'::jsonb,
+    reply_to UUID REFERENCES agent_intercom_queue(id),
+    expires_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '2 days'),
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    consumed_by TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_aiq_tenant_status ON agent_intercom_queue(tenant_id, status, created_at DESC);
+CREATE INDEX idx_aiq_recipient ON agent_intercom_queue(tenant_id, to_agent_id, status);
+CREATE INDEX idx_aiq_channel ON agent_intercom_queue(tenant_id, channel, created_at DESC);
+CREATE INDEX idx_aiq_expires ON agent_intercom_queue(expires_at);
+
+-- 9. SEED DATA (remove later)
 INSERT INTO tenants (id, name, config, enabled) VALUES
 ('acme_corp', 'Acme Corp', '{"region": "us-east-1", "plan": "enterprise"}'::jsonb, TRUE),
 ('start_up_inc', 'StartUp Inc', '{"region": "us-west-2", "plan": "starter"}'::jsonb, TRUE);

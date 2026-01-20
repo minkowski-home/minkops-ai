@@ -2,6 +2,10 @@
 
 Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. A typical customer can "hire" any set of agents, which work together (fully-intercommunicating and accessing company knowledge as real human employees would) perfoming actual job duties - each agent tends to replace one real human employee with disjoint skills. Each fleet of agents (for an organization) runs continuously 24x7 instead of one-time jobs. 
 
+**Important**
+
+Initially, the graphs will be slightly more deterministic to ensure predictability and easier debugging. There will be more interrupts and agents will wait for human feedback before taking a final action. The database, DWH and systems must be designed in a way to use this human interaction data to train agents using RLHF to take decisions and learn from mistakes, leading to fully autonomous agents.
+
 ## Layout
 
 - `apps/` — user-facing experiences; currently `apps/corporate-website` hosts the Minkops marketing site.
@@ -32,11 +36,4 @@ This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, b
 1. `cd apps/corporate-website`  
 2. Serve the folder with your favorite static server (for example `npm install --global http-server` followed by `http-server . -c-1`).  
 3. Update the HTML, CSS, or assets to tell pluseleven’s story, then redeploy that folder to your CDN/hosting platform.  
-4. Keep this site static so it can be deployed anywhere without additional compute.
-
-## Governance
-
-- Treat each directory as a mini-module with its own README (like Minkowski’s `apps/` and `services/`).  
-- Add new functionality under `apps/`, `services/`, or `infra/` depending on whether it is user-facing, service-level, or infrastructure-related.  
-- Sync policies, onboarding, and architecture notes inside `docs/` so every contributor can see the same playbook.  
-- Keep cross-cutting scripts and helper data in `packages/` (to be added later) or under `services/ai-suite/docs/` until we add a dedicated shared space.
+4. Keep this site static so it can be deployed anywhere without additional compute. Currently hosted on Vercel at minkops.com
