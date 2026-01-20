@@ -6,6 +6,7 @@ CREATE DATABASE minkops_app;
 \c minkops_app
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- 1. TENANTS
 -- The "Employers". Every piece of data must link back to this.
@@ -148,7 +149,30 @@ CREATE INDEX idx_aiq_recipient ON agent_intercom_queue(tenant_id, to_agent_id, s
 CREATE INDEX idx_aiq_channel ON agent_intercom_queue(tenant_id, channel, created_at DESC);
 CREATE INDEX idx_aiq_expires ON agent_intercom_queue(expires_at);
 
--- 9. SEED DATA (remove later)
+-- 9. TENANT KB CHUNKS (Vector Store)
+-- Stores vectorized company knowledge (brand kit, FAQs, policies, run notes, etc.) per tenant.
+-- Ingest pipeline should chunk files from `data/` or human-entered text and upsert into this table.
+CREATE TABLE tenant_kb_chunks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id),
+    doc_id TEXT NOT NULL,                         -- Stable identifier per source document
+    source_uri TEXT,                              -- e.g., path in data/, S3 URI
+    source_type TEXT NOT NULL CHECK (source_type IN (
+        'file', 'manual_entry', 'brand_kit', 'faq', 'policy', 'run_note', 'other'
+    )),
+    chunk_index INT NOT NULL,                     -- Chunk order within a doc
+    content TEXT NOT NULL,
+    embedding vector(1536) NOT NULL,              -- pgvector column for similarity search
+    metadata JSONB DEFAULT '{}'::jsonb,           -- Arbitrary ingest metadata (checksum, mime_type, tags, etc.)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_kb_chunks_tenant_doc ON tenant_kb_chunks(tenant_id, doc_id);
+CREATE INDEX idx_kb_chunks_tenant_source ON tenant_kb_chunks(tenant_id, source_type);
+-- Cosine distance is commonly used for normalized embeddings (e.g., OpenAI).
+CREATE INDEX idx_kb_chunks_embedding ON tenant_kb_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- 10. SEED DATA (remove later)
 INSERT INTO tenants (id, name, config, enabled) VALUES
 ('acme_corp', 'Acme Corp', '{"region": "us-east-1", "plan": "enterprise"}'::jsonb, TRUE),
 ('start_up_inc', 'StartUp Inc', '{"region": "us-west-2", "plan": "starter"}'::jsonb, TRUE);

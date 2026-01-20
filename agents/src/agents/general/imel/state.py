@@ -48,6 +48,28 @@ class AgentHandoff(typing.TypedDict):
     context: dict[str, typing.Any]
 
 
+class TenantProfile(typing.TypedDict, total=False):
+    """Tenant-specific branding/profile details pulled from the KB."""
+
+    agent_display_name: str
+    tone: str
+    keywords: list[str]
+    email_signature: str
+    brand_kit: dict[str, str]
+    brand_kit_text: str
+    source_uri: str
+
+
+class KBChunk(typing.TypedDict, total=False):
+    """A single retrieved KB chunk with provenance."""
+
+    content: str
+    source_uri: str | None
+    source_type: str | None
+    metadata: dict[str, typing.Any]
+    score: float | None
+
+
 # Define the overall state structure for the Email Agent
 class ImelState(typing.TypedDict):
     # Raw email data
@@ -55,15 +77,15 @@ class ImelState(typing.TypedDict):
     sender_email: str
     email_id: str
 
-    # Multi-tenant fields (placeholders until you add a DB)
+    # Multi-tenant fields (loaded from DB/KB)
     tenant_id: str | None
-    tenant_brand: dict[str, typing.Any] | None  # TODO(DB): load brand config per tenant/agent
+    tenant_profile: TenantProfile | None  # Loaded from vector-backed KB
 
     # Classification result
     classification: EmailClassification | None
 
     # Raw search/API results
-    kb_snippets: list[str] | None  # List of raw knowledge-base snippets/chunks
+    kb_snippets: list[KBChunk] | None  # List of KB chunks with provenance
 
     # Tickets / handoffs (used for cancel/complaint + order/account flows)
     ticket: Ticket | None

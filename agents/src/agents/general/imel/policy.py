@@ -8,7 +8,7 @@ runtime by the orchestrator.
 import typing
 
 
-class ImelTenantBrandConfig(typing.TypedDict, total=False):
+class ImelTenantProfile(typing.TypedDict, total=False):
     """Tenant-customizable brand details (Layer 2).
 
     NOTE: Load this content from your DB per tenant/agent instance at runtime.
@@ -20,6 +20,8 @@ class ImelTenantBrandConfig(typing.TypedDict, total=False):
     keywords: list[str]
     email_signature: str
     brand_kit: dict[str, str]
+    brand_kit_text: str
+    source_uri: str
 
 
 # Layer 0: non-overridable policy/guardrails (product-owned).
@@ -45,18 +47,19 @@ Role and scope:
 """
 
 
-def _format_layer2_tenant_branding(tenant_brand: ImelTenantBrandConfig | None) -> str:
-    
+def _format_layer2_tenant_profile(tenant_profile: ImelTenantProfile | None) -> str:
     '''Build the prompt section for tenant-specific branding (Layer 2).'''
-    
-    if not tenant_brand:
+
+    if not tenant_profile:
         return ""
-    
-    agent_display_name = (tenant_brand.get("agent_display_name") or "").strip()
-    tone = (tenant_brand.get("tone") or "").strip()
-    keywords = tenant_brand.get("keywords") or []
-    email_signature = (tenant_brand.get("email_signature") or "").strip()
-    brand_kit = tenant_brand.get("brand_kit") or {}
+
+    agent_display_name = (tenant_profile.get("agent_display_name") or "").strip()
+    tone = (tenant_profile.get("tone") or "").strip()
+    keywords = tenant_profile.get("keywords") or []
+    email_signature = (tenant_profile.get("email_signature") or "").strip()
+    brand_kit = tenant_profile.get("brand_kit") or {}
+    brand_kit_text = (tenant_profile.get("brand_kit_text") or "").strip()
+    source_uri = (tenant_profile.get("source_uri") or "").strip()
 
     lines: list[str] = []
     lines.append("Tenant brand preferences (must not override core policy):")
@@ -72,20 +75,25 @@ def _format_layer2_tenant_branding(tenant_brand: ImelTenantBrandConfig | None) -
         brand_kv = ", ".join([f"{k}: {v}" for k, v in brand_kit.items() if k and v])
         if brand_kv:
             lines.append(f"- Brand kit: {brand_kv}")
+    if brand_kit_text:
+        lines.append("- Brand narrative / style guide:")
+        lines.append(brand_kit_text)
     if email_signature:
         lines.append("- Email signature to use when sending replies:")
         lines.append(email_signature)
+    if source_uri:
+        lines.append(f"- Source: {source_uri}")
 
     return "\n".join(lines).strip()
 
 
-def build_imel_system_prompt(*, tenant_brand: ImelTenantBrandConfig | None = None) -> str:
+def build_imel_system_prompt(*, tenant_profile: ImelTenantProfile | None = None) -> str:
     """Build the final system prompt from layered policy.
 
     Layer 2 is tenant-specific branding loaded from the DB at runtime.
     """
 
-    layer2 = _format_layer2_tenant_branding(tenant_brand)
+    layer2 = _format_layer2_tenant_profile(tenant_profile)
     parts = [IMEL_LAYER0_CORE_POLICY.strip(), IMEL_LAYER1_DEFAULT_PERSONA.strip()]
     if layer2:
         parts.append(layer2)
