@@ -16,6 +16,7 @@ dependencies = [
     "numpy>=2.4.0",
     "ollama>=0.6.1",
     "pandas>=2.3.3",
+    "psycopg2>=2.9.11",
     "pydantic>=2.12.5",
 ]
 

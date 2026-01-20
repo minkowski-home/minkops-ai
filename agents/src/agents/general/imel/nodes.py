@@ -25,7 +25,7 @@ def init_imel_state(
     sender_email: str,
     email_content: str,
     tenant_id: str | None = None,
-    tenant_brand: dict[str, typing.Any] | None = None,
+    tenant_profile: dict[str, typing.Any] | None = None,
 ) -> imel_state.ImelState:
     """Create the initial Imel state for an email run."""
 
@@ -34,7 +34,7 @@ def init_imel_state(
         "sender_email": sender_email,
         "email_content": email_content,
         "tenant_id": tenant_id,
-        "tenant_brand": tenant_brand,  # TODO(DB): load from tenant config table
+        "tenant_profile": tenant_profile,  # Loaded from KB/DB
         "classification": None,
         "kb_snippets": None,
         "ticket": None,
@@ -53,7 +53,7 @@ def classify_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state
     flow can be deterministic and easy to reason about.
     """
 
-    system_prompt = imel_policy.build_imel_system_prompt(tenant_brand=state.get("tenant_brand"))
+    system_prompt = imel_policy.build_imel_system_prompt(tenant_profile=state.get("tenant_profile"))
     email_prompt = imel_prompts.CLASSIFY_EMAIL_PROMPT.format(
         email_content=state["email_content"],
         sender_email=state["sender_email"],
@@ -74,8 +74,7 @@ def classify_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state
 def company_kb_lookup_node(state: imel_state.ImelState) -> imel_state.ImelState:
     """Fetch relevant company knowledge for generic inquiries.
 
-    This is a placeholder; it will later call your retrieval system (vector DB,
-    Postgres, etc.) using the tenant's knowledge sources.
+    This pulls chunks from the tenant_kb_chunks pgvector store (if configured).
     """
 
     classification = state.get("classification") or {}
@@ -87,7 +86,7 @@ def company_kb_lookup_node(state: imel_state.ImelState) -> imel_state.ImelState:
         ]
     ).strip()
 
-    snippets = imel_tools.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query)
+    snippets = imel_tools.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query) or []
     state["kb_snippets"] = snippets
     logger.info("KB lookup returned %d snippet(s) for email %s", len(snippets), state["email_id"])
     return state
@@ -100,8 +99,9 @@ def draft_inquiry_response_node(state: imel_state.ImelState, *, llm=None) -> ime
     orchestrator (services/ai-suite) so you can log/audit/retry centrally.
     """
 
-    system_prompt = imel_policy.build_imel_system_prompt(tenant_brand=state.get("tenant_brand"))
-    kb_snippets = "\n\n".join(state.get("kb_snippets") or [])
+    system_prompt = imel_policy.build_imel_system_prompt(tenant_profile=state.get("tenant_profile"))
+    kb_chunks = state.get("kb_snippets") or []
+    kb_snippets = "\n\n".join([chunk.get("content", "") for chunk in kb_chunks if chunk.get("content")])
     draft_prompt = imel_prompts.INQUIRY_DRAFT_REPLY_PROMPT.format(
         email_content=state["email_content"],
         kb_snippets=kb_snippets or "(none)",

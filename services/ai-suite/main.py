@@ -69,14 +69,14 @@ def main():
 
     run_imel = _import_run_imel()
 
-    tenant_brand = {
-        # TODO(DB): Load these fields from your tenant configuration table.
-        # Tenants can customize brand details only (tone, signature, keywords, etc.).
+    tenant_profile = {
+        # TODO(DB): Load these fields from your tenant configuration table or tenant_kb_chunks.
         "agent_display_name": "Imel",
         "tone": "concise, friendly, and professional",
         "keywords": ["Minkops", "support", "quick resolution"],
         "email_signature": "— Minkops Support Team",
         "brand_kit": {"brand_name": "Minkops.ai"},
+        "brand_kit_text": "Default Minkops.ai style and brand voice.",
     }
 
     llm = None
@@ -95,7 +95,7 @@ def main():
         sender_email=args.sender,
         email_content=email_content,
         tenant_id=args.tenant_id,
-        tenant_brand=tenant_brand,
+        tenant_profile=tenant_profile,
         llm=llm,
     )
 
