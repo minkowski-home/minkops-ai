@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY,                       -- e.g. "acme_corp"
     name TEXT NOT NULL,
-    config JSONB DEFAULT '{}'::jsonb,          -- branding, specific rules, API keys
+    config JSONB DEFAULT '{}'::jsonb,          -- specific rules, API keys
     enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -59,18 +59,32 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_run ON messages(run_id, created_at);
 
--- 5. EVENT OUTBOX (The "Nervous System" Output)
--- When an agent wants to "do" something (send email, call caller), 
--- it writes here. A separate worker picks it up.
+-- 5. EVENT OUTBOX (External Side Effects)
+-- For durable, idempotent delivery of side effects to external systems.
+-- Examples: send_email, create_ticket, sync_crm, trigger_webhook.
 CREATE TABLE event_outbox (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     run_id UUID REFERENCES runs(id),
     tenant_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,                  -- e.g. "send_email", "trigger_agent"
+    event_type TEXT NOT NULL,                  -- e.g. "send_email", "sync_crm"
     payload JSONB NOT NULL,
-    processed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    idempotency_key TEXT,                      -- Optional dedupe key per tenant/event
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
+        'queued', 'processing', 'succeeded', 'failed', 'dead'
+    )),
+    attempts INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+    available_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    locked_at TIMESTAMP WITH TIME ZONE,
+    locked_by TEXT,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+CREATE INDEX idx_event_outbox_tenant_status ON event_outbox(tenant_id, status, available_at);
+CREATE INDEX idx_event_outbox_available ON event_outbox(available_at);
+CREATE UNIQUE INDEX idx_event_outbox_idempotency ON event_outbox(tenant_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
 
 -- 6. AUDIT LOGS (Sync to Warehouse)
 -- A flattened log table purely for Airbyte to slurp up.
@@ -118,8 +132,8 @@ CREATE INDEX idx_hiq_tenant_status ON human_instructions_queue(tenant_id, status
 CREATE INDEX idx_hiq_target_agent ON human_instructions_queue(tenant_id, target_agent_id, status);
 CREATE INDEX idx_hiq_expires ON human_instructions_queue(expires_at);
 
--- 8. AGENT INTER-COMMUNICATIONS QUEUE
--- For multi-agent systems to talk to each other asynchronously.
+-- 8. AGENT INTER-COMMUNICATIONS QUEUE (Internal Messaging)
+-- For multi-agent coordination only; no external side effects.
 CREATE TABLE agent_intercom_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id TEXT NOT NULL REFERENCES tenants(id),
