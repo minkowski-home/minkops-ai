@@ -8,6 +8,8 @@
   min-height: 100vh;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   color: var(--about-ink);
   background:
     radial-gradient(circle at 15% 10%, rgba(255, 0, 128, 0.12), transparent 55%),
@@ -55,7 +57,6 @@
 }
 
 @keyframes float-glow {
-
   0%,
   100% {
     transform: translateY(0) scale(1);
@@ -78,6 +79,7 @@
   display: flex;
   flex-direction: column;
   gap: 96px;
+  flex: 1;
 }
 
 .about-hero {
@@ -126,7 +128,9 @@
   padding: 0.75rem 1.6rem;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.7);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 .about-secondary:hover {

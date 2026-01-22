@@ -1,6 +1,10 @@
 :root {
-  --font-main: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Inter", "Roboto", sans-serif;
-  --font-secondary: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Inter", "Roboto", sans-serif;
+  --font-main:
+    -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Inter", "Roboto",
+    sans-serif;
+  --font-secondary:
+    -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Inter", "Roboto",
+    sans-serif;
 
   --fw-light: 300;
   --fw-regular: 400;
