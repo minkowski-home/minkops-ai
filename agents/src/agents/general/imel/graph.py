@@ -8,6 +8,7 @@ wire them into a graph.
 import typing
 
 from agents.general.imel import nodes as imel_nodes
+from agents.general.imel import tools as imel_tools
 
 
 def run_imel(
@@ -16,7 +17,7 @@ def run_imel(
     sender_email: str,
     email_content: str,
     tenant_id: str | None = None,
-    tenant_brand: dict[str, typing.Any] | None = None,
+    tenant_profile: dict[str, typing.Any] | None = None,
     llm=None,
 ):
     """Run Imel on a single email and return the final state.
@@ -36,12 +37,16 @@ def run_imel(
     - persisting tickets and logs in a real database
     """
 
+    tenant_profile = tenant_profile or (
+        imel_tools.load_tenant_profile(tenant_id=tenant_id) if tenant_id else None
+    )
+
     state = imel_nodes.init_imel_state(
         email_id=email_id,
         sender_email=sender_email,
         email_content=email_content,
         tenant_id=tenant_id,
-        tenant_brand=tenant_brand,
+        tenant_profile=tenant_profile,
     )
 
     state = imel_nodes.classify_intent_node(state, llm=llm)
