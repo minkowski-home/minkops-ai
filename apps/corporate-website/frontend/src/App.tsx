@@ -6,6 +6,7 @@ import PrivacyPolicy from "./PrivacyPolicy";
 import CareersPage from "./CareersPage";
 import BlogsPage from "./BlogsPage";
 import BlogPost1 from "./BlogPost1";
+import BlogPost2 from "./BlogPost2";
 import OrchestrationPage from "./OrchestrationPage";
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
         <Route path="/careers" element={<CareersPage />} />
         <Route path="/blogs" element={<BlogsPage />} />
         <Route path="/blogs/minkowski-case-study" element={<BlogPost1 />} />
+        <Route path="/blogs/auto-lead-generation-agent" element={<BlogPost2 />} />
         <Route path="/orchestration" element={<OrchestrationPage />} />
         <Route path="*" element={<MinkopsLanding />} />
       </Routes>
