@@ -1,8 +1,16 @@
+"""State and schema definitions for the Imel email agent.
+
+These types are intentionally lightweight (built on `typing.TypedDict`) so the
+rest of the agent can stay plain Python. The orchestrator owns persistence; the
+agent state is treated as an in-memory, request-scoped data structure.
+"""
+
 import typing
 
-# Define classification structure
+
 class EmailClassification(typing.TypedDict):
-    '''Define the structure for email classification. This will be used with `llm.with_structured_output` to get structured output from the LLM.'''
+    """Structured intent classification returned by the classifier."""
+
     intent: typing.Literal[
         "inquiry",
         "complaint",
@@ -72,6 +80,12 @@ class KBChunk(typing.TypedDict, total=False):
 
 # Define the overall state structure for the Email Agent
 class ImelState(typing.TypedDict):
+    """End-to-end state for a single Imel run.
+
+    Keys are populated gradually as the run progresses (e.g., `classification`,
+    then `kb_snippets`, then either `draft_response` or `handoff`).
+    """
+
     # Raw email data
     email_content: str
     sender_email: str

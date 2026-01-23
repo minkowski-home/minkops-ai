@@ -1,3 +1,10 @@
+"""Imel agent tools and integrations.
+
+This module keeps external dependencies (LLMs, embeddings, DB access) behind a
+small set of functions so the rest of the agent can remain plain Python. Most
+functions have safe, dependency-free fallbacks to keep local development simple.
+"""
+
 import datetime
 import json
 import logging
