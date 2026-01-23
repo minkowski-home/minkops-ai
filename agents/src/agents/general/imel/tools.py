@@ -21,6 +21,8 @@ EMBEDDING_DIMENSION = 1536
 
 
 def utc_now_iso() -> str:
+    """Return the current UTC timestamp in ISO 8601 format."""
+
     return datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
 
@@ -31,7 +33,17 @@ def create_ticket_in_db(
 
     TODO(DB): Insert into a real `tickets` table and return the inserted row.
     Suggested columns: ticket_id (uuid), type, status, email_id, sender_email,
-    summary, raw_email, created_at, updated_at. 
+    summary, raw_email, created_at, updated_at.
+
+    Args:
+        ticket_type: Category for the ticket (e.g., "cancel_order", "complaint").
+        email_id: Provider or internal identifier for the inbound email.
+        sender_email: Sender address of the inbound email.
+        summary: Short summary suitable for a ticket list view.
+        raw_email: Full raw email body (stored for audit/debug).
+
+    Returns:
+        The created ticket row (currently an in-memory representation).
     """
 
     # This is intentionally "fake DB" logic to keep the agent flow moving early on.
@@ -48,7 +60,11 @@ def create_ticket_in_db(
 
 
 def _get_db_conn():
-    """Return a Postgres connection if AGENTS_DB_URL/DATABASE_URL is set."""
+    """Return a Postgres connection if AGENTS_DB_URL/DATABASE_URL is set.
+
+    Returns:
+        A DB connection object, or `None` if not configured or unavailable.
+    """
 
     db_url = os.getenv("AGENTS_DB_URL") or os.getenv("DATABASE_URL")
     if not db_url:
@@ -63,13 +79,24 @@ def _get_db_conn():
 
 
 def _format_pgvector(values: Sequence[float]) -> str:
-    """Format a Python sequence into pgvector literal."""
+    """Format a Python sequence into a pgvector literal.
+
+    Args:
+        values: Vector values to format.
+
+    Returns:
+        A pgvector literal string (e.g., "[0.123000,0.456000,...]").
+    """
 
     return "[" + ",".join(f"{float(v):.6f}" for v in values) + "]"
 
 
 def _get_default_embedder():
-    """Create a default embeddings client if configured."""
+    """Create a default embeddings client if configured.
+
+    Returns:
+        An embeddings client, or `None` if the optional dependency or API key is missing.
+    """
 
     try:
         from langchain_openai import OpenAIEmbeddings
@@ -93,7 +120,18 @@ def lookup_company_kb(
     embedder=None,
     conn=None,
 ) -> list[imel_state.KBChunk]:
-    """Return KB chunks via pgvector similarity search, per tenant."""
+    """Return KB chunks via pgvector similarity search, per tenant.
+
+    Args:
+        tenant_id: Tenant identifier used to scope retrieval.
+        query: Natural language query built from the email + classification.
+        top_k: Max number of chunks to return.
+        embedder: Optional embeddings client with an `embed_query(str)` method.
+        conn: Optional existing DB connection.
+
+    Returns:
+        A list of KB chunks with provenance; empty if not configured or unavailable.
+    """
 
     if not tenant_id:
         logger.info("Skipping KB lookup because tenant_id is missing")
@@ -166,7 +204,15 @@ def lookup_company_kb(
 
 
 def load_tenant_profile(*, tenant_id: str | None, conn=None) -> imel_state.TenantProfile | None:
-    """Load tenant branding/profile details from KB (brand_kit chunks)."""
+    """Load tenant branding/profile details from KB (brand_kit chunks).
+
+    Args:
+        tenant_id: Tenant identifier used to scope retrieval.
+        conn: Optional existing DB connection.
+
+    Returns:
+        The latest tenant profile data found, or `None` if unavailable.
+    """
 
     if not tenant_id:
         return None
@@ -230,6 +276,13 @@ def classify_email_heuristic(*, email_content: str, sender_email: str) -> imel_s
     - an LLM configured
     - LangChain/LangGraph installed everywhere
     - a robust intent classifier
+
+    Args:
+        email_content: Raw email body.
+        sender_email: Sender address of the inbound email.
+
+    Returns:
+        A best-effort `EmailClassification` based on simple string matching.
     """
 
     text = f"{sender_email}\n{email_content}".lower()
@@ -273,7 +326,17 @@ def classify_email_heuristic(*, email_content: str, sender_email: str) -> imel_s
 
 
 def _safe_json_extract(text: str) -> dict[str, typing.Any]:
-    """Best-effort JSON extraction from an LLM response."""
+    """Best-effort JSON extraction from an LLM response.
+
+    Args:
+        text: LLM response text, possibly containing JSON in markdown fences.
+
+    Returns:
+        Parsed JSON object.
+
+    Raises:
+        json.JSONDecodeError: If no valid JSON object can be extracted.
+    """
 
     text = text.strip()
     try:
@@ -295,6 +358,12 @@ def coerce_email_classification(payload: dict[str, typing.Any]) -> imel_state.Em
 
     We keep validation light here to avoid blocking iteration. In production
     you’d typically use Pydantic for strict validation + better error messages.
+
+    Args:
+        payload: Untrusted JSON payload parsed from an LLM response.
+
+    Returns:
+        A normalized `EmailClassification` with safe fallbacks for unknown values.
     """
 
     intent = payload.get("intent", "other")
@@ -338,6 +407,13 @@ def get_chat_model(*, model: str = "gemma3:4b", temperature: float = 0.3):
 
     This is kept in `tools.py` so the rest of the agent code can be plain Python.
     The only LangChain-specific part is hidden behind this constructor.
+
+    Args:
+        model: Model identifier to pass through to the provider client.
+        temperature: Sampling temperature.
+
+    Returns:
+        A LangChain chat model instance.
     """
 
     import langchain_ollama
@@ -346,7 +422,16 @@ def get_chat_model(*, model: str = "gemma3:4b", temperature: float = 0.3):
 
 
 def classify_email_via_llm(*, system_prompt: str, email_prompt: str, llm=None) -> imel_state.EmailClassification:
-    """Call an LLM to classify an email and return structured JSON."""
+    """Call an LLM to classify an email and return structured JSON.
+
+    Args:
+        system_prompt: System prompt (policy/persona).
+        email_prompt: User prompt containing the email content.
+        llm: Optional chat model instance.
+
+    Returns:
+        A normalized `EmailClassification`.
+    """
 
     import langchain_core.messages as lc_messages
 
@@ -364,6 +449,16 @@ def classify_email(
     """Classify using an LLM if provided; otherwise use heuristics.
 
     This design keeps the agent runnable for demos without any external services.
+
+    Args:
+        system_prompt: System prompt (policy/persona).
+        email_prompt: User prompt containing the email content.
+        email_content: Raw email body (used for heuristic fallback).
+        sender_email: Sender address (used for heuristic fallback).
+        llm: Optional chat model instance to use for classification.
+
+    Returns:
+        A normalized `EmailClassification`.
     """
 
     if llm is None:
@@ -372,7 +467,16 @@ def classify_email(
 
 
 def draft_reply_via_llm(*, system_prompt: str, draft_prompt: str, llm=None) -> str:
-    """Call an LLM to draft a response email."""
+    """Call an LLM to draft a response email.
+
+    Args:
+        system_prompt: System prompt (policy/persona).
+        draft_prompt: User prompt containing the email + any KB snippets.
+        llm: Optional chat model instance.
+
+    Returns:
+        The drafted reply text.
+    """
 
     import langchain_core.messages as lc_messages
 
@@ -386,7 +490,17 @@ def draft_reply_via_llm(*, system_prompt: str, draft_prompt: str, llm=None) -> s
 def draft_reply(
     *, system_prompt: str, draft_prompt: str, classification: imel_state.EmailClassification | None, llm=None
 ) -> str:
-    """Draft using an LLM if provided; otherwise use a simple template."""
+    """Draft using an LLM if provided; otherwise use a simple template.
+
+    Args:
+        system_prompt: System prompt (policy/persona).
+        draft_prompt: User prompt containing the email + any KB snippets.
+        classification: Optional classification results used for safe templating.
+        llm: Optional chat model instance to use for drafting.
+
+    Returns:
+        The drafted reply text.
+    """
 
     if llm is not None:
         return draft_reply_via_llm(system_prompt=system_prompt, draft_prompt=draft_prompt, llm=llm)
@@ -411,6 +525,12 @@ def send_email(*, email_id: str, to: str, subject: str, body: str) -> None:
 
     TODO(INTEGRATION): Connect to your email provider (Gmail, SES, SendGrid, etc).
     For now this is a no-op; orchestration can still proceed with draft replies.
+
+    Args:
+        email_id: Provider or internal identifier for the inbound email.
+        to: Recipient address.
+        subject: Email subject line.
+        body: Email body content.
     """
 
     _ = (email_id, to, subject, body)

@@ -48,7 +48,14 @@ Role and scope:
 
 
 def _format_layer2_tenant_profile(tenant_profile: ImelTenantProfile | None) -> str:
-    '''Build the prompt section for tenant-specific branding (Layer 2).'''
+    """Build the prompt section for tenant-specific branding (Layer 2).
+
+    Args:
+        tenant_profile: Tenant-provided branding/profile values loaded by the orchestrator.
+
+    Returns:
+        A formatted, human-readable prompt section (or an empty string).
+    """
 
     if not tenant_profile:
         return ""
@@ -91,6 +98,12 @@ def build_imel_system_prompt(*, tenant_profile: ImelTenantProfile | None = None)
     """Build the final system prompt from layered policy.
 
     Layer 2 is tenant-specific branding loaded from the DB at runtime.
+
+    Args:
+        tenant_profile: Optional tenant branding/profile values to include (Layer 2).
+
+    Returns:
+        The full system prompt string, ending with a trailing newline.
     """
 
     layer2 = _format_layer2_tenant_profile(tenant_profile)

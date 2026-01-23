@@ -27,7 +27,18 @@ def init_imel_state(
     tenant_id: str | None = None,
     tenant_profile: dict[str, typing.Any] | None = None,
 ) -> imel_state.ImelState:
-    """Create the initial Imel state for an email run."""
+    """Create the initial Imel state for an email run.
+
+    Args:
+        email_id: Provider or internal identifier for the inbound email.
+        sender_email: Sender address of the inbound email.
+        email_content: Raw email body (plain text or pre-rendered content).
+        tenant_id: Optional tenant identifier for multi-tenant deployments.
+        tenant_profile: Optional tenant branding/profile details preloaded by the orchestrator.
+
+    Returns:
+        A newly initialized state dict for a single Imel run.
+    """
 
     return {
         "email_id": email_id,
@@ -41,8 +52,7 @@ def init_imel_state(
         "handoff": None,
         "draft_response": None,
         "action": None,
-        "messages": [], # We are not initializing SystemMessages here, as LLM calls should be stateless,
-        # SystemPrompt should be injected per LLM call.
+        "messages": [],  # LLM calls should be stateless; inject SystemPrompt per call.
     }
 
 
@@ -51,6 +61,14 @@ def classify_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state
 
     This is intentionally a "small" classification schema so the rest of the
     flow can be deterministic and easy to reason about.
+
+    Args:
+        state: The current Imel state.
+        llm: Optional chat model instance to use for classification. If omitted,
+            `tools.classify_email` may fall back to heuristics.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
     """
 
     system_prompt = imel_policy.build_imel_system_prompt(tenant_profile=state.get("tenant_profile"))
@@ -75,6 +93,12 @@ def company_kb_lookup_node(state: imel_state.ImelState) -> imel_state.ImelState:
     """Fetch relevant company knowledge for generic inquiries.
 
     This pulls chunks from the tenant_kb_chunks pgvector store (if configured).
+
+    Args:
+        state: The current Imel state.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
     """
 
     classification = state.get("classification") or {}
@@ -97,6 +121,14 @@ def draft_inquiry_response_node(state: imel_state.ImelState, *, llm=None) -> ime
 
     Note: This drafts a reply only. Sending the email should be done by your
     orchestrator (services/ai-suite) so you can log/audit/retry centrally.
+
+    Args:
+        state: The current Imel state.
+        llm: Optional chat model instance to use for drafting. If omitted,
+            `tools.draft_reply` may fall back to a template.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
     """
 
     system_prompt = imel_policy.build_imel_system_prompt(tenant_profile=state.get("tenant_profile"))
@@ -123,6 +155,15 @@ def handoff_to_order_manager_node(state: imel_state.ImelState) -> imel_state.Ime
 
     IMPORTANT: Imel must NOT access accounts/orders/products DBs. The Order
     Manager agent is the only component allowed to read/write those records.
+
+    Args:
+        state: The current Imel state. Must contain a `classification`.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
+
+    Raises:
+        ValueError: If called without a populated `classification`.
     """
 
     classification = state["classification"]
@@ -157,6 +198,16 @@ def handoff_to_order_manager_node(state: imel_state.ImelState) -> imel_state.Ime
 
 
 def _create_ticket_for_kall(state: imel_state.ImelState, *, ticket_type: str) -> imel_state.Ticket:
+    """Create a minimal ticket record for Kall follow-up.
+
+    Args:
+        state: The current Imel state.
+        ticket_type: The ticket category to create (e.g., "cancel_order", "complaint").
+
+    Returns:
+        The created ticket row (currently an in-memory representation).
+    """
+
     classification = state.get("classification") or {}
     summary = str(classification.get("summary") or "") or state["email_content"][:200]
     return imel_tools.create_ticket_in_db(
@@ -173,6 +224,15 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> imel_
 
     ALL cancel-order requests and ALL complaints are followed
     up by Kall (callback agent).
+
+    Args:
+        state: The current Imel state. Must contain a `classification`.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
+
+    Raises:
+        ValueError: If called without a populated `classification`.
     """
 
     classification = state["classification"]
@@ -223,6 +283,12 @@ def archive_node(state: imel_state.ImelState) -> imel_state.ImelState:
 
     TODO(INTEGRATION): Your orchestrator should mark the email as archived/handled
     in the email provider (Gmail/Outlook/etc.).
+
+    Args:
+        state: The current Imel state.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
     """
 
     state["action"] = "archive"
@@ -239,6 +305,16 @@ def route_by_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state
     - cancel order -> ticket + Kall (handoff)
     - complaint -> ticket/log + Kall (handoff)
     - spam -> archive
+
+    Args:
+        state: The current Imel state. Must contain a `classification`.
+        llm: Optional chat model instance to use for drafting/classification-dependent steps.
+
+    Returns:
+        The updated state. The input dict is mutated in-place.
+
+    Raises:
+        ValueError: If called without a populated `classification`.
     """
 
     classification = state.get("classification")
