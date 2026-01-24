@@ -1,0 +1,11 @@
+PURPOSE:
+This folder is for "Models" (The Core Logic).
+Every .sql file in this directory represents a Table or View in your data warehouse.
+dbt takes these SELECT statements and wraps them in `CREATE VIEW/TABLE AS ...`.
+
+HOW TO START:
+1. Create subfolders for organization: `staging` (raw cleanup) and `marts` (business logic).
+2. Create a file (e.g., `staging/stg_users.sql`).
+3. Write a SELECT statement.
+4. Run `dbt run`.
+5. Check your database; the table `stg_users` will exist.

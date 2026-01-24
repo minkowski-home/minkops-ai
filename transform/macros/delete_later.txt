@@ -1,0 +1,12 @@
+PURPOSE:
+This folder is for "Macros".
+Macros are reusable snippets of SQL (written in Jinja) that work like functions.
+If you find yourself copy-pasting the same WHERE clause or CASE statement, turn it into a macro.
+
+HOW TO START:
+1. Create a file here (e.g., `cents_to_dollars.sql`).
+2. Define a macro block:
+   {% macro cents_to_dollars(column_name) %}
+       ({{ column_name }} / 100)::numeric(16, 2)
+   {% endmacro %}
+3. Use it in your models: `{{ cents_to_dollars('amount_in_cents') }}`.

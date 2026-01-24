@@ -1,0 +1,10 @@
+PURPOSE:
+This folder is for "Analyses" (Ad-hoc queries).
+These are SQL files that are compiled by dbt but NOT run against the database to create tables/views.
+They are useful for saving analytical queries that you want to version control but don't need to materialize.
+
+HOW TO START:
+1. Create a file here (e.g., `monthly_revenue_report.sql`).
+2. Write a SELECT statement. You can use Jinja and refs like `{{ ref('my_model') }}`.
+3. Run `dbt compile`.
+4. Go to `target/compiled/...` to see the executable SQL.
