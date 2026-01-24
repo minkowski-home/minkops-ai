@@ -49,7 +49,7 @@ export default function BlogPost2() {
               </p>
 
               <p>
-                This post is a deep dive into what we&apos;re building, why we believe it
+                This post throws light on what we&apos;re building, why we believe it
                 will change how businesses operate, and how we&apos;re approaching the
                 hard parts: quality, compliance, personalization, and measurement.
               </p>
@@ -82,7 +82,7 @@ export default function BlogPost2() {
               </ul>
 
               <p>
-                A lead gen agent should solve this by keeping the entire workflow in one
+                A lead generation agent should solve this by keeping the entire workflow in one
                 coherent loop:{" "}
                 <strong>
                   target → discover → validate → personalize → outreach → respond → route
@@ -95,7 +95,8 @@ export default function BlogPost2() {
               <p>
                 We&apos;re not building a spam bot. We&apos;re building an agent that
                 behaves like a highly disciplined SDR—one that never forgets the playbook,
-                never loses track of context, and never stops iterating.
+                never loses track of context, and never stops iterating. The true power of the agent
+                shows up when it teams up with other agents to create a seamless workflow.
               </p>
 
               <div className="blog-callout">

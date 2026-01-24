@@ -1,0 +1,11 @@
+PURPOSE:
+This folder is for "Singular Tests".
+Most tests (not null, unique) are defined in YAML files in the `models/` directory (Generic Tests).
+This folder is for specific, complex SQL queries that assert data quality.
+If the query returns > 0 rows, the test FAILS.
+
+HOW TO START:
+1. Create a file here (e.g., `assert_total_payment_is_positive.sql`).
+2. Write: `SELECT * FROM {{ ref('orders') }} WHERE amount < 0`.
+3. Run `dbt test`.
+4. If any rows are returned (i.e., negative payments exist), dbt will flag it as a failure.
