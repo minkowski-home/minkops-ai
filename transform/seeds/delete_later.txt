@@ -1,0 +1,9 @@
+PURPOSE:
+This folder is for CSV files (e.g., `country_codes.csv`, `legacy_mapping.csv`).
+These are "Seeds": static data files that you want to load into your data warehouse but don't want to manage via complex ETL.
+
+HOW TO START:
+1. Drop a CSV file here (e.g., `my_static_data.csv`).
+2. Run `dbt seed`.
+3. dbt will create a table in your warehouse with the data.
+4. Reference it in your models using `{{ ref('my_static_data') }}`.

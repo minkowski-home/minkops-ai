@@ -35,6 +35,18 @@ def run_imel(
     - sending the drafted response
     - delivering handoffs to other agents
     - persisting tickets and logs in a real database
+
+    Args:
+        email_id: Provider or internal identifier for the inbound email.
+        sender_email: Sender address of the inbound email.
+        email_content: Raw email body (plain text or pre-rendered content).
+        tenant_id: Optional tenant identifier for multi-tenant deployments.
+        tenant_profile: Optional tenant branding/profile details. If omitted and
+            `tenant_id` is provided, this will attempt to load from the DB/KB.
+        llm: Optional chat model instance to use for LLM-backed steps.
+
+    Returns:
+        The final Imel state dict for this run.
     """
 
     tenant_profile = tenant_profile or (
@@ -59,6 +71,12 @@ def build_imel_langgraph():
 
     We do NOT need this to ship a first version. Keeping it for later when we will
     want streaming, retries, conditional edges, and observability.
+
+    Returns:
+        A compiled LangGraph graph.
+
+    Raises:
+        ImportError: If LangGraph is not installed.
     """
 
     import langgraph.graph as langgraph_graph

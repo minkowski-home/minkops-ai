@@ -1,0 +1,11 @@
+PURPOSE:
+This folder is for "Snapshots".
+Snapshots implement Type-2 Slowly Changing Dimensions (SCD).
+They record changes to a mutable table over time (e.g., tracking when a user changes their email address).
+
+HOW TO START:
+1. Create a file here (e.g., `users_snapshot.sql`).
+2. defined a {% snapshot %} block.
+3. Configure the `unique_key` and `updated_at` strategy.
+4. Run `dbt snapshot`.
+5. dbt will create a table with `dbt_valid_from` and `dbt_valid_to` columns to track history.
