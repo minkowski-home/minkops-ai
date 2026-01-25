@@ -4,4 +4,5 @@ CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;
 CREATE SCHEMA IF NOT EXISTS gold;
 
--- Bronze: Raw data from external sources
+-- Bronze: Raw data from external sources - test table, should be removed later
+
