@@ -8,7 +8,7 @@ wire them into a graph.
 import typing
 
 from agents.general.imel import nodes as imel_nodes
-from agents.general.imel import tools as imel_tools
+from agents.shared import kb as shared_kb
 
 
 def run_imel(
@@ -50,7 +50,7 @@ def run_imel(
     """
 
     tenant_profile = tenant_profile or (
-        imel_tools.load_tenant_profile(tenant_id=tenant_id) if tenant_id else None
+        shared_kb.load_tenant_profile(tenant_id=tenant_id) if tenant_id else None
     )
 
     state = imel_nodes.init_imel_state(
