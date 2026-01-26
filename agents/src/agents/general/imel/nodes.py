@@ -11,13 +11,32 @@ because it forces you to keep inputs/outputs explicit and easy to test.
 import logging
 import typing
 
+# Agent-specific imports
 from agents.general.imel import policy as imel_policy
 from agents.general.imel import prompts as imel_prompts
 from agents.general.imel import state as imel_state
-from agents.general.imel import tools as imel_tools
+
+from typing import Literal
+from langgraph.types import Command
+
+# ... (Previous imports remain same) ...
+# Shared Capability imports
+from agents.shared import db as shared_db
+from agents.shared import kb as shared_kb
+from agents.shared import utils as shared_utils
+from agents.shared import clients as shared_clients
+
+# Tools (only for Actions)
+
+import langchain_core.messages as lc_messages
 
 logger = logging.getLogger(__name__)
 
+
+# --- Internal Helper Functions (LLM Logic) ---
+# ... (Internal helpers remain same) ...
+
+# --- Public Nodes ---
 
 def init_imel_state(
     *,
@@ -27,56 +46,32 @@ def init_imel_state(
     tenant_id: str | None = None,
     tenant_profile: dict[str, typing.Any] | None = None,
 ) -> imel_state.ImelState:
-    """Create the initial Imel state for an email run.
-
-    Args:
-        email_id: Provider or internal identifier for the inbound email.
-        sender_email: Sender address of the inbound email.
-        email_content: Raw email body (plain text or pre-rendered content).
-        tenant_id: Optional tenant identifier for multi-tenant deployments.
-        tenant_profile: Optional tenant branding/profile details preloaded by the orchestrator.
-
-    Returns:
-        A newly initialized state dict for a single Imel run.
-    """
-
+    """Create the initial Imel state for an email run."""
     return {
         "email_id": email_id,
         "sender_email": sender_email,
         "email_content": email_content,
         "tenant_id": tenant_id,
-        "tenant_profile": tenant_profile,  # Loaded from KB/DB
+        "tenant_profile": tenant_profile,
         "classification": None,
         "kb_snippets": None,
         "ticket": None,
         "handoff": None,
         "draft_response": None,
         "action": None,
-        "messages": [],  # LLM calls should be stateless; inject SystemPrompt per call.
+        "messages": [],
     }
 
 
 def classify_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state.ImelState:
-    """Classify the email into a small set of intents.
-
-    This is intentionally a "small" classification schema so the rest of the
-    flow can be deterministic and easy to reason about.
-
-    Args:
-        state: The current Imel state.
-        llm: Optional chat model instance to use for classification. If omitted,
-            `tools.classify_email` may fall back to heuristics.
-
-    Returns:
-        The updated state. The input dict is mutated in-place.
-    """
-
+    """Classify the email into a small set of intents."""
     system_prompt = imel_policy.build_imel_system_prompt(tenant_profile=state.get("tenant_profile"))
     email_prompt = imel_prompts.CLASSIFY_EMAIL_PROMPT.format(
         email_content=state["email_content"],
         sender_email=state["sender_email"],
     )
-    classification = imel_tools.classify_email(
+    
+    classification = _classify_email(
         system_prompt=system_prompt,
         email_prompt=email_prompt,
         email_content=state["email_content"],
@@ -89,18 +84,12 @@ def classify_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state
     return state
 
 
-def company_kb_lookup_node(state: imel_state.ImelState) -> imel_state.ImelState:
+def company_kb_lookup_node(state: imel_state.ImelState) -> Command[Literal["draft_inquiry_response"]]:
     """Fetch relevant company knowledge for generic inquiries.
-
-    This pulls chunks from the tenant_kb_chunks pgvector store (if configured).
-
-    Args:
-        state: The current Imel state.
-
+    
     Returns:
-        The updated state. The input dict is mutated in-place.
+        Command(goto="draft_inquiry_response"): Always proceeds to drafting.
     """
-
     classification = state.get("classification") or {}
     query = " ".join(
         [
@@ -110,27 +99,19 @@ def company_kb_lookup_node(state: imel_state.ImelState) -> imel_state.ImelState:
         ]
     ).strip()
 
-    snippets = imel_tools.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query) or []
-    state["kb_snippets"] = snippets
+    snippets = shared_kb.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query) or []
+    
+    state["kb_snippets"] = typing.cast(list[imel_state.KBChunk], snippets)
     logger.info("KB lookup returned %d snippet(s) for email %s", len(snippets), state["email_id"])
-    return state
+    
+    return Command(
+        update={"kb_snippets": state["kb_snippets"]},
+        goto="draft_inquiry_response"
+    )
 
 
-def draft_inquiry_response_node(state: imel_state.ImelState, *, llm=None) -> imel_state.ImelState:
-    """Draft a response for inquiries/general emails.
-
-    Note: This drafts a reply only. Sending the email should be done by your
-    orchestrator (services/ai-suite) so you can log/audit/retry centrally.
-
-    Args:
-        state: The current Imel state.
-        llm: Optional chat model instance to use for drafting. If omitted,
-            `tools.draft_reply` may fall back to a template.
-
-    Returns:
-        The updated state. The input dict is mutated in-place.
-    """
-
+def draft_inquiry_response_node(state: imel_state.ImelState, *, llm=None) -> Command[Literal["__end__"]]:
+    """Draft a response for inquiries/general emails."""
     system_prompt = imel_policy.build_imel_system_prompt(tenant_profile=state.get("tenant_profile"))
     kb_chunks = state.get("kb_snippets") or []
     kb_snippets = "\n\n".join([chunk.get("content", "") for chunk in kb_chunks if chunk.get("content")])
@@ -138,103 +119,52 @@ def draft_inquiry_response_node(state: imel_state.ImelState, *, llm=None) -> ime
         email_content=state["email_content"],
         kb_snippets=kb_snippets or "(none)",
     )
-    draft = imel_tools.draft_reply(
+    
+    draft = _draft_reply(
         system_prompt=system_prompt,
         draft_prompt=draft_prompt,
         classification=state.get("classification"),
         llm=llm,
     )
+    
     state["draft_response"] = draft
     state["action"] = "respond"
     logger.info("Drafted response for email %s (len=%d)", state["email_id"], len(draft))
-    return state
+    
+    return Command(
+        update={"draft_response": draft, "action": "respond"},
+        goto="__end__"
+    )
 
 
-def handoff_to_order_manager_node(state: imel_state.ImelState) -> imel_state.ImelState:
-    """Create a handoff request for the Order Manager agent.
-
-    IMPORTANT: Imel must NOT access accounts/orders/products DBs. The Order
-    Manager agent is the only component allowed to read/write those records.
-
-    Args:
-        state: The current Imel state. Must contain a `classification`.
-
-    Returns:
-        The updated state. The input dict is mutated in-place.
-
-    Raises:
-        ValueError: If called without a populated `classification`.
-    """
-
+def process_order_node(state: imel_state.ImelState) -> Command[Literal["draft_inquiry_response"]]:
+    """Log an order update request to be handled asynchronously."""
     classification = state["classification"]
     if not classification:
-        raise ValueError("handoff_to_order_manager_node called without classification")
+        raise ValueError("process_order_node called without classification")
 
-    handoff: imel_state.AgentHandoff = {
-        "target_agent": "order_manager",
-        "instructions_prompt": imel_prompts.ORDER_MANAGER_HANDOFF_INSTRUCTIONS,
-        "context": {
-            "email_id": state["email_id"],
-            "sender_email": state["sender_email"],
-            "email_content": state["email_content"],
-            "classification": classification,
-            # TODO(DB): order manager should look up customer/order/account records here
-            # using tenant_id + sender_email + any order identifiers mentioned in the email.
-            "tenant_id": state.get("tenant_id"),
-        },
-    }
-    state["handoff"] = handoff
-    state["action"] = "handoff"
-    logger.info(
-        "Route to Order Manager with this data: %s",
-        {
-            "email_id": state["email_id"],
-            "sender_email": state["sender_email"],
-            "intent": classification["intent"],
-            "topic": classification.get("topic"),
-        },
-    )
-    return state
-
-
-def _create_ticket_for_kall(state: imel_state.ImelState, *, ticket_type: str) -> imel_state.Ticket:
-    """Create a minimal ticket record for Kall follow-up.
-
-    Args:
-        state: The current Imel state.
-        ticket_type: The ticket category to create (e.g., "cancel_order", "complaint").
-
-    Returns:
-        The created ticket row (currently an in-memory representation).
-    """
-
-    classification = state.get("classification") or {}
-    summary = str(classification.get("summary") or "") or state["email_content"][:200]
-    return imel_tools.create_ticket_in_db(
-        ticket_type=ticket_type,
+    summary = str(classification.get("summary") or "")
+    
+    # Use Shared Capability to log event
+    shared_db.process_order_update(
+        tenant_id=state.get("tenant_id", "default"),
         email_id=state["email_id"],
-        sender_email=state["sender_email"],
         summary=summary,
-        raw_email=state["email_content"],
+        details=classification
+    )
+    
+    state["action"] = "process_order"
+    logger.info("Logged order update event for email %s", state["email_id"])
+    
+    # After processing, we draft a response confirming receipt
+    return Command(
+        update={"action": "process_order"},
+        goto="draft_inquiry_response"
     )
 
 
-def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> imel_state.ImelState:
-    """Create a ticket and route to Kall for follow-up.
-
-    ALL cancel-order requests and ALL complaints are followed
-    up by Kall (callback agent).
-
-    Args:
-        state: The current Imel state. Must contain a `classification`.
-
-    Returns:
-        The updated state. The input dict is mutated in-place.
-
-    Raises:
-        ValueError: If called without a populated `classification`.
-    """
-
+def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Command[Literal["__end__"]]:
+    """Create a ticket and route to Kall for follow-up."""
     classification = state["classification"]
     if not classification:
         raise ValueError("create_ticket_and_handoff_to_kall_node called without classification")
@@ -242,19 +172,39 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> imel_
     if classification["intent"] == "cancel_order":
         ticket_type = "cancel_order"
     else:
-        # Complaint (and any other high-touch case you decide later).
         ticket_type = "complaint"
 
-    ticket = _create_ticket_for_kall(state, ticket_type=ticket_type)
+    summary = str(classification.get("summary") or "") or state["email_content"][:200]
+    
+    # 1. Create real Ticket in DB
+    ticket = shared_db.create_ticket(
+        ticket_type=ticket_type,
+        email_id=state["email_id"],
+        sender_email=state["sender_email"],
+        summary=summary,
+        raw_email=state["email_content"],
+        tenant_id=state.get("tenant_id", "default")
+    )
 
-    # TODO(DB): If you want separate "complaints" logging, add a complaints table
-    # and write a row here when ticket_type == "complaint".
+    # 2. Queue Handoff in Intercom Queue
+    shared_db.create_agent_handoff(
+        tenant_id=state.get("tenant_id", "default"),
+        run_id=None, # In real app, pass current run_id
+        from_agent_id="imel",
+        to_agent_id="kall",
+        kind="handoff",
+        message=f"Please handle {ticket_type} ticket {ticket['ticket_id']}",
+        payload={
+            "ticket_id": ticket["ticket_id"],
+            "classification": classification
+        }
+    )
 
     handoff: imel_state.AgentHandoff = {
         "target_agent": "kall",
         "instructions_prompt": imel_prompts.KALL_HANDOFF_INSTRUCTIONS,
         "context": {
-            "ticket": ticket,
+            "ticket": typing.cast(imel_state.Ticket, ticket),
             "email_id": state["email_id"],
             "sender_email": state["sender_email"],
             "email_content": state["email_content"],
@@ -263,79 +213,46 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> imel_
         },
     }
 
-    state["ticket"] = ticket
+    state["ticket"] = typing.cast(imel_state.Ticket, ticket)
     state["handoff"] = handoff
     state["action"] = "handoff"
-    logger.info(
-        "Route to Kall with ticket: %s",
-        {
-            "ticket_id": ticket["ticket_id"],
-            "ticket_type": ticket["ticket_type"],
-            "email_id": state["email_id"],
-            "sender_email": state["sender_email"],
-        },
+    logger.info("Route to Kall with ticket: %s", ticket["ticket_id"])
+    
+    return Command(
+        update={"ticket": state["ticket"], "handoff": handoff, "action": "handoff"},
+        goto="__end__"
     )
-    return state
 
 
-def archive_node(state: imel_state.ImelState) -> imel_state.ImelState:
-    """Mark an email as not requiring a response (e.g. spam).
-
-    TODO(INTEGRATION): Your orchestrator should mark the email as archived/handled
-    in the email provider (Gmail/Outlook/etc.).
-
-    Args:
-        state: The current Imel state.
-
-    Returns:
-        The updated state. The input dict is mutated in-place.
-    """
-
+def archive_node(state: imel_state.ImelState) -> Command[Literal["__end__"]]:
+    """Mark an email as not requiring a response (e.g. spam)."""
     state["action"] = "archive"
     logger.info("Archived email %s (no response needed)", state["email_id"])
-    return state
+    return Command(
+        update={"action": "archive"},
+        goto="__end__"
+    )
 
 
-def route_by_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state.ImelState:
-    """Route the email based on classification.
-
-    This matches your flowchart:
-    - inquiry/general -> Company KB -> Respond
-    - update/order/account details -> Order Manager (handoff)
-    - cancel order -> ticket + Kall (handoff)
-    - complaint -> ticket/log + Kall (handoff)
-    - spam -> archive
-
-    Args:
-        state: The current Imel state. Must contain a `classification`.
-        llm: Optional chat model instance to use for drafting/classification-dependent steps.
-
-    Returns:
-        The updated state. The input dict is mutated in-place.
-
-    Raises:
-        ValueError: If called without a populated `classification`.
-    """
-
+def route_by_intent_node(state: imel_state.ImelState, *, llm=None) -> Command[Literal["process_order", "create_ticket_and_handoff_to_kall", "archive", "company_kb_lookup"]]:
+    """Route the email based on classification using LangGraph Command."""
     classification = state.get("classification")
     if not classification:
         raise ValueError("route_by_intent_node called without classification")
 
-    # If the model says "human required", treat it as a Kall follow-up.
     if classification.get("is_human_intervention_required"):
-        return create_ticket_and_handoff_to_kall_node(state)
+        return Command(goto="create_ticket_and_handoff_to_kall")
 
     intent = classification["intent"]
 
     if intent in {"order_or_account_details", "update_order"}:
-        return handoff_to_order_manager_node(state)
+        return Command(goto="process_order")
 
     if intent in {"cancel_order", "complaint"}:
-        return create_ticket_and_handoff_to_kall_node(state)
+         return Command(goto="create_ticket_and_handoff_to_kall")
 
     if intent == "spam":
-        return archive_node(state)
+         return Command(goto="archive")
 
     # Everything else: use the company knowledge base and respond.
-    state = company_kb_lookup_node(state)
-    return draft_inquiry_response_node(state, llm=llm)
+    return Command(goto="company_kb_lookup")

@@ -59,6 +59,24 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_run ON messages(run_id, created_at);
 
+-- 4.5 TICKETS (Support Cases)
+-- Persisted tickets for human or agent follow-up.
+CREATE TABLE tickets (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id),
+    email_id TEXT NOT NULL,                    -- Link to source email
+    ticket_type TEXT NOT NULL,                 -- e.g. "cancel_order", "complaint"
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed')),
+    priority TEXT NOT NULL DEFAULT 'normal',
+    sender_email TEXT NOT NULL,
+    summary TEXT,
+    raw_email TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_tickets_tenant_status ON tickets(tenant_id, status);
+CREATE INDEX idx_tickets_email_id ON tickets(email_id);
+
 -- 5. EVENT OUTBOX (External Side Effects)
 -- For durable, idempotent delivery of side effects to external systems.
 -- Examples: send_email, create_ticket, sync_crm, trigger_webhook.

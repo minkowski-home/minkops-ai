@@ -8,7 +8,7 @@ wire them into a graph.
 import typing
 
 from agents.general.imel import nodes as imel_nodes
-from agents.general.imel import tools as imel_tools
+from agents.shared import kb as shared_kb
 
 
 def run_imel(
@@ -50,7 +50,7 @@ def run_imel(
     """
 
     tenant_profile = tenant_profile or (
-        imel_tools.load_tenant_profile(tenant_id=tenant_id) if tenant_id else None
+        shared_kb.load_tenant_profile(tenant_id=tenant_id) if tenant_id else None
     )
 
     state = imel_nodes.init_imel_state(
@@ -83,9 +83,25 @@ def build_imel_langgraph():
     from agents.general.imel import state as imel_state
 
     graph = langgraph_graph.StateGraph(imel_state.ImelState)
+    
+    # Register Nodes
     graph.add_node("classify_intent", imel_nodes.classify_intent_node)
     graph.add_node("route_by_intent", imel_nodes.route_by_intent_node)
+    graph.add_node("company_kb_lookup", imel_nodes.company_kb_lookup_node)
+    graph.add_node("draft_inquiry_response", imel_nodes.draft_inquiry_response_node)
+    graph.add_node("process_order", imel_nodes.process_order_node)
+    graph.add_node("create_ticket_and_handoff_to_kall", imel_nodes.create_ticket_and_handoff_to_kall_node)
+    graph.add_node("archive", imel_nodes.archive_node)
+
+    # Define Edges
     graph.set_entry_point("classify_intent")
+    
+    # Static edge: always route to router after classification
     graph.add_edge("classify_intent", "route_by_intent")
-    graph.add_edge("route_by_intent", langgraph_graph.END)
+
+    # Command-based routing happens in 'route_by_intent', 'company_kb_lookup', and 'process_order'.
+    # We implicitly define that they can go to their Command targets.
+    # Note: Explicit edge company_kb_lookup -> draft_inquiry_response matches the Command,
+    # but strictly speaking Command overrides.
+    
     return graph.compile()
