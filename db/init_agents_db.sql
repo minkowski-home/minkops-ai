@@ -80,6 +80,10 @@ CREATE INDEX idx_tickets_email_id ON tickets(email_id);
 -- 5. EVENT OUTBOX (External Side Effects)
 -- For durable, idempotent delivery of side effects to external systems.
 -- Examples: send_email, create_ticket, sync_crm, trigger_webhook.
+-- The Transactional Outbox pattern means the "work" (e.g., updating a customer's moodboard status in the projects table)
+-- and the "instruction" (e.g., an entry in the outbox table saying "Notify the Social Media Agent") 
+-- happen inside the exact same database transaction.
+-- The goal is to ensure that side effects happen atomically with the rest of the transaction.
 CREATE TABLE event_outbox (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     run_id UUID REFERENCES runs(id),
