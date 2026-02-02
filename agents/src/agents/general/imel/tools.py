@@ -3,6 +3,10 @@
 This module keeps external side-effects (actions) here.
 Logic for thinking (LLM), data access (DB), and retrieval (KB) has been moved
 to `nodes.py` and `agents.shared`.
+
+For DE roles:
+Give `tools` a high priority - these are the part of the graph that are directly relevant to Data Engineering,
+and need to be specially designed in DE fashion (think querying large DWHs, etc)
 """
 
 import logging
