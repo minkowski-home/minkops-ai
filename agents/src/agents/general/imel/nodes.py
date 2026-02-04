@@ -9,7 +9,6 @@ because it forces you to keep inputs/outputs explicit and easy to test.
 """
 
 import logging
-import typing
 
 # Agent-specific imports
 from agents.general.imel import policy as imel_policy
@@ -19,7 +18,6 @@ from agents.general.imel import state as imel_state
 from typing import Literal
 from langgraph.types import Command
 
-# ... (Previous imports remain same) ...
 # Shared Capability imports
 from agents.shared import db as shared_db
 from agents.shared import kb as shared_kb
@@ -44,7 +42,7 @@ def init_imel_state(
     sender_email: str,
     email_content: str,
     tenant_id: str | None = None,
-    tenant_profile: dict[str, typing.Any] | None = None,
+    tenant_profile: imel_state.TenantProfile | None = None,
 ) -> imel_state.ImelState:
     """Create the initial Imel state for an email run."""
     return {
@@ -101,7 +99,7 @@ def company_kb_lookup_node(state: imel_state.ImelState) -> Command[Literal["draf
 
     snippets = shared_kb.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query) or []
     
-    state["kb_snippets"] = typing.cast(list[imel_state.KBChunk], snippets)
+    state["kb_snippets"] = snippets
     logger.info("KB lookup returned %d snippet(s) for email %s", len(snippets), state["email_id"])
     
     return Command(
@@ -164,7 +162,12 @@ def process_order_node(state: imel_state.ImelState) -> Command[Literal["draft_in
 
 
 def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Command[Literal["__end__"]]:
-    """Create a ticket and route to Kall for follow-up."""
+    """Create a ticket and route to Kall for follow-up.
+       Creating a ticket and handing off to call happen transactionally (not by design, just by coincidence here),
+       both are triggered when a cancel order request arrives. Later, we shall create separate functions for:
+       1. Creating ticket (as a graph "node", logically different from the create ticket "tool",
+       2. Handing off (not just to call, but a general function to hand-off to any agent decided by LLM (another LLM node might be needed)
+    """
     classification = state["classification"]
     if not classification:
         raise ValueError("create_ticket_and_handoff_to_kall_node called without classification")
@@ -204,7 +207,7 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Comma
         "target_agent": "kall",
         "instructions_prompt": imel_prompts.KALL_HANDOFF_INSTRUCTIONS,
         "context": {
-            "ticket": typing.cast(imel_state.Ticket, ticket),
+            "ticket": ticket,
             "email_id": state["email_id"],
             "sender_email": state["sender_email"],
             "email_content": state["email_content"],
@@ -213,7 +216,7 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Comma
         },
     }
 
-    state["ticket"] = typing.cast(imel_state.Ticket, ticket)
+    state["ticket"] = ticket
     state["handoff"] = handoff
     state["action"] = "handoff"
     logger.info("Route to Kall with ticket: %s", ticket["ticket_id"])

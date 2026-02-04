@@ -11,7 +11,7 @@ def _import_run_imel():
 
     In a proper install, `agents` is an installed dependency of ai-suite.
     When running this file directly from the repo, Python may not know where the
-    `agents/` package is. This fallback adds `agents/src` to `sys.path` so you
+    `agents/` package is. This fallback adds `agents/src` to `sys.path` so we
     can run a demo without packaging work.
     """
 

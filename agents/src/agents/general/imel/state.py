@@ -7,6 +7,8 @@ agent state is treated as an in-memory, request-scoped data structure.
 
 import typing
 
+from agents.shared.schemas import KBChunk, TenantProfile, Ticket
+
 
 class EmailClassification(typing.TypedDict):
     """Structured intent classification returned by the classifier."""
@@ -27,23 +29,6 @@ class EmailClassification(typing.TypedDict):
     is_human_intervention_required: bool
 
 
-class Ticket(typing.TypedDict):
-    """A minimal "ticket row" representation.
-
-    In production this would be persisted to a database table (e.g. `tickets`).
-    For now we keep it in-memory inside the agent state so you can build the
-    orchestration flow before the DB exists.
-    """
-
-    ticket_id: str
-    ticket_type: typing.Literal["cancel_order", "complaint"]
-    status: typing.Literal["open", "closed"]
-    email_id: str
-    sender_email: str
-    summary: str
-    raw_email: str
-
-
 class AgentHandoff(typing.TypedDict):
     """A request to another agent.
 
@@ -54,28 +39,6 @@ class AgentHandoff(typing.TypedDict):
     target_agent: typing.Literal["order_manager", "kall"]
     instructions_prompt: str
     context: dict[str, typing.Any]
-
-
-class TenantProfile(typing.TypedDict, total=False):
-    """Tenant-specific branding/profile details pulled from the KB."""
-
-    agent_display_name: str
-    tone: str
-    keywords: list[str]
-    email_signature: str
-    brand_kit: dict[str, str]
-    brand_kit_text: str
-    source_uri: str
-
-
-class KBChunk(typing.TypedDict, total=False):
-    """A single retrieved KB chunk with provenance."""
-
-    content: str
-    source_uri: str | None
-    source_type: str | None
-    metadata: dict[str, typing.Any]
-    score: float | None
 
 
 # Define the overall state structure for the Email Agent
