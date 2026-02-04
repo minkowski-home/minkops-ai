@@ -11,15 +11,7 @@ import psycopg2
 
 logger = logging.getLogger(__name__)
 
-# Simple type definitions to avoid circular dependency on imel.state
-class Ticket(typing.TypedDict):
-    ticket_id: str
-    ticket_type: str
-    status: str
-    email_id: str
-    sender_email: str
-    summary: str
-    raw_email: str
+from .schemas import Ticket, TicketType
 
 def get_db_conn():
     """Return a Postgres connection if AGENTS_DB_URL/DATABASE_URL is set.
@@ -38,7 +30,7 @@ def get_db_conn():
         return None
 
 def create_ticket(
-    *, ticket_type: str, email_id: str, sender_email: str, summary: str, raw_email: str, tenant_id: str
+    *, ticket_type: TicketType, email_id: str, sender_email: str, summary: str, raw_email: str, tenant_id: str
 ) -> Ticket:
     """Create a ticket for human follow-up.
 

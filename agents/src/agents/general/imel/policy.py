@@ -5,23 +5,7 @@ This file defines the non-overridable (Layer 0) rules and the default persona
 runtime by the orchestrator.
 """
 
-import typing
-
-
-class ImelTenantProfile(typing.TypedDict, total=False):
-    """Tenant-customizable brand details (Layer 2).
-
-    NOTE: Load this content from your DB per tenant/agent instance at runtime.
-    Tenants must NOT be able to modify core skills/guardrails (Layer 0).
-    """
-
-    agent_display_name: str
-    tone: str
-    keywords: list[str]
-    email_signature: str
-    brand_kit: dict[str, str]
-    brand_kit_text: str
-    source_uri: str
+from agents.shared.schemas import TenantProfile as ImelTenantProfile
 
 
 # Layer 0: non-overridable policy/guardrails (product-owned).

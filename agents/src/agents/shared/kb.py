@@ -3,31 +3,52 @@ This module contains the agents' shared ability to access and modify the knowled
 '''
 
 import os
-import typing
 import logging
 from typing import Sequence, Any
 
 # Import sibling db module
 from . import db
+from .schemas import KBChunk, TenantProfile
 
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIMENSION = 1536
 
-class KBChunk(typing.TypedDict):
-    content: str
-    metadata: dict[str, Any]
-    source_uri: str | None
-    source_type: str | None
+def _normalize_brand_kit(value: object) -> dict[str, str]:
+    """Best-effort normalization of brand kit metadata into string values.
 
-class TenantProfile(typing.TypedDict):
-    brand_kit_text: str
-    brand_kit: dict[str, Any]
-    source_uri: str
-    agent_display_name: typing.NotRequired[str]
-    tone: typing.NotRequired[str]
-    keywords: typing.NotRequired[str]
-    email_signature: typing.NotRequired[str]
+    KB metadata can be user-supplied and may contain non-string values. Prompt
+    formatting expects readable key/value strings, so we coerce defensively.
+    """
+
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, raw in value.items():
+        if not key:
+            continue
+        try:
+            normalized[str(key)] = str(raw) if raw is not None else ""
+        except Exception:
+            continue
+    return {k: v for k, v in normalized.items() if k and v}
+
+
+def _normalize_keywords(value: object) -> list[str] | None:
+    """Normalize keywords metadata into a list of non-empty strings."""
+
+    if value is None:
+        return None
+    if isinstance(value, list):
+        keywords = [str(v).strip() for v in value if v is not None]
+        keywords = [k for k in keywords if k]
+        return keywords or None
+    if isinstance(value, str):
+        # Accept comma-separated strings as a convenience for KB authoring.
+        keywords = [part.strip() for part in value.split(",")]
+        keywords = [k for k in keywords if k]
+        return keywords or None
+    return None
 
 def _format_pgvector(values: Sequence[float]) -> str:
     """Format a Python sequence into a pgvector literal."""
@@ -176,13 +197,25 @@ def load_tenant_profile(*, tenant_id: str | None, conn=None) -> TenantProfile | 
     metadata = metadata or {}
     profile: TenantProfile = {
         "brand_kit_text": content or "",
-        "brand_kit": metadata.get("brand_kit", {}) if isinstance(metadata.get("brand_kit"), dict) else {},
-        "source_uri": source_uri or metadata.get("source_uri", ""),
+        "brand_kit": _normalize_brand_kit(metadata.get("brand_kit")),
+        "source_uri": str(source_uri or metadata.get("source_uri", "") or ""),
     }
 
-    for key in ("agent_display_name", "tone", "keywords", "email_signature"):
-        value = metadata.get(key)
-        if value:
-            profile[key] = value
+    # Optional, human-friendly fields used by prompt formatting.
+    agent_display_name = metadata.get("agent_display_name")
+    if isinstance(agent_display_name, str) and agent_display_name.strip():
+        profile["agent_display_name"] = agent_display_name.strip()
+
+    tone = metadata.get("tone")
+    if isinstance(tone, str) and tone.strip():
+        profile["tone"] = tone.strip()
+
+    email_signature = metadata.get("email_signature")
+    if isinstance(email_signature, str) and email_signature.strip():
+        profile["email_signature"] = email_signature.strip()
+
+    keywords = _normalize_keywords(metadata.get("keywords"))
+    if keywords:
+        profile["keywords"] = keywords
 
     return profile
