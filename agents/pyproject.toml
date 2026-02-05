@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Shared agent implementations for MinkOps."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # `agents.general.*.nodes` uses `langgraph.types.Command` for routing.
+    "langgraph>=1.0.5",
+]
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]

@@ -14,25 +14,13 @@ import logging
 from agents.general.imel import policy as imel_policy
 from agents.general.imel import prompts as imel_prompts
 from agents.general.imel import state as imel_state
+from agents.general.imel import tools as imel_tools
 
 from typing import Literal
 from langgraph.types import Command
 
-# Shared Capability imports
-from agents.shared import db as shared_db
-from agents.shared import kb as shared_kb
-from agents.shared import utils as shared_utils
-from agents.shared import clients as shared_clients
-
-# Tools (only for Actions)
-
-import langchain_core.messages as lc_messages
-
 logger = logging.getLogger(__name__)
 
-
-# --- Internal Helper Functions (LLM Logic) ---
-# ... (Internal helpers remain same) ...
 
 # --- Public Nodes ---
 
@@ -57,7 +45,7 @@ def init_imel_state(
         "handoff": None,
         "draft_response": None,
         "action": None,
-        "messages": [],
+        "messages": [], # No system prompt here, it should be added during runtime per run
     }
 
 
@@ -82,7 +70,9 @@ def classify_intent_node(state: imel_state.ImelState, *, llm=None) -> imel_state
     return state
 
 
-def company_kb_lookup_node(state: imel_state.ImelState) -> Command[Literal["draft_inquiry_response"]]:
+def company_kb_lookup_node(
+    state: imel_state.ImelState, *, tools: imel_tools.ImelTools
+) -> Command[Literal["draft_inquiry_response"]]:
     """Fetch relevant company knowledge for generic inquiries.
     
     Returns:
@@ -97,7 +87,7 @@ def company_kb_lookup_node(state: imel_state.ImelState) -> Command[Literal["draf
         ]
     ).strip()
 
-    snippets = shared_kb.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query) or []
+    snippets = tools.lookup_company_kb(tenant_id=state.get("tenant_id"), query=query) or []
     
     state["kb_snippets"] = snippets
     logger.info("KB lookup returned %d snippet(s) for email %s", len(snippets), state["email_id"])
@@ -135,7 +125,9 @@ def draft_inquiry_response_node(state: imel_state.ImelState, *, llm=None) -> Com
     )
 
 
-def process_order_node(state: imel_state.ImelState) -> Command[Literal["draft_inquiry_response"]]:
+def process_order_node(
+    state: imel_state.ImelState, *, tools: imel_tools.ImelTools
+) -> Command[Literal["draft_inquiry_response"]]:
     """Log an order update request to be handled asynchronously."""
     classification = state["classification"]
     if not classification:
@@ -143,8 +135,8 @@ def process_order_node(state: imel_state.ImelState) -> Command[Literal["draft_in
 
     summary = str(classification.get("summary") or "")
     
-    # Use Shared Capability to log event
-    shared_db.process_order_update(
+    # Service-layer tool implementation owns DB transactions/outbox semantics.
+    tools.process_order_update(
         tenant_id=state.get("tenant_id", "default"),
         email_id=state["email_id"],
         summary=summary,
@@ -161,7 +153,9 @@ def process_order_node(state: imel_state.ImelState) -> Command[Literal["draft_in
     )
 
 
-def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Command[Literal["__end__"]]:
+def create_ticket_and_handoff_to_kall_node(
+    state: imel_state.ImelState, *, tools: imel_tools.ImelTools
+) -> Command[Literal["__end__"]]:
     """Create a ticket and route to Kall for follow-up.
        Creating a ticket and handing off to call happen transactionally (not by design, just by coincidence here),
        both are triggered when a cancel order request arrives. Later, we shall create separate functions for:
@@ -179,8 +173,8 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Comma
 
     summary = str(classification.get("summary") or "") or state["email_content"][:200]
     
-    # 1. Create real Ticket in DB
-    ticket = shared_db.create_ticket(
+    # 1. Persist Ticket (service layer owns DB write semantics).
+    ticket = tools.create_ticket(
         ticket_type=ticket_type,
         email_id=state["email_id"],
         sender_email=state["sender_email"],
@@ -189,8 +183,8 @@ def create_ticket_and_handoff_to_kall_node(state: imel_state.ImelState) -> Comma
         tenant_id=state.get("tenant_id", "default")
     )
 
-    # 2. Queue Handoff in Intercom Queue
-    shared_db.create_agent_handoff(
+    # 2. Queue Handoff in Intercom Queue (service layer owns DB write semantics).
+    tools.create_agent_handoff(
         tenant_id=state.get("tenant_id", "default"),
         run_id=None, # In real app, pass current run_id
         from_agent_id="imel",
