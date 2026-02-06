@@ -6,6 +6,14 @@ runtime infrastructure (Postgres drivers, provider SDKs, retry loops).
 
 In production, the orchestrator/service layer provides concrete implementations
 of these interfaces and injects them into `run_imel(...)` / node functions.
+
+A Protocol (from typing) is basically an “interface” in Python: it describes
+the methods/attributes an object must have, without caring what concrete class it is.
+It’s used so agent code can say “I need something that can create_ticket(...) and
+lookup_company_kb(...)” without importing Postgres code or email provider code.
+The orchestrator then injects any object that matches that shape
+(a real Postgres-backed implementation in prod, a fake in tests).
+This is standard “dependency inversion” / “ports and adapters” design in Python.
 """
 
 from __future__ import annotations
@@ -70,18 +78,7 @@ class ImelTools(typing.Protocol):
 
 
 def send_email(*, email_id: str, to: str, subject: str, body: str) -> None:
-    """Send an email reply.
-
-    TODO(INTEGRATION): Connect to your email provider (Gmail, SES, SendGrid, etc).
-    For now this is a no-op; orchestration can still proceed with draft replies.
-
-    Args:
-        email_id: Provider or internal identifier for the inbound email.
-        to: Recipient address.
-        subject: Email subject line.
-        body: Email body content.
     """
-
-    _ = (email_id, to, subject, body)
-    # real implementation would go here
-    return None
+    Either remove it or convert it into a contract. The actual email functionality happens in services/ai-suite/capabilities.
+    """
+    pass
