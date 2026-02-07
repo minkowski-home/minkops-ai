@@ -17,7 +17,8 @@ import uuid
 import psycopg2
 
 from agents.general.imel import tools as imel_tools
-from agents.shared.schemas import KBChunk, TenantProfile, Ticket, TicketType
+from agents.general.kall import tools as kall_tools
+from agents.shared.schemas import KBChunk, TenantProfile, Ticket, TicketStatus, TicketType
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,99 @@ class PostgresCapabilities:
         """
 
         return psycopg2.connect(self._database_url)
+
+    def _create_agent_handoff(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str | None,
+        from_agent_id: str,
+        to_agent_id: str,
+        kind: str = "handoff",
+        message: str | None = None,
+        payload: dict[str, typing.Any] | None = None,
+    ) -> None:
+        """Queue an inter-agent message/handoff in the shared intercom table."""
+
+        conn = self._conn()
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO agent_intercom_queue
+                    (tenant_id, run_id, from_agent_id, to_agent_id, kind, message, payload, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'queued')
+                    """,
+                    (
+                        tenant_id,
+                        run_id,
+                        from_agent_id,
+                        to_agent_id,
+                        kind,
+                        message or "",
+                        json.dumps(payload or {}),
+                    ),
+                )
+        except Exception as exc:
+            logger.error("Failed to queue handoff: %s", exc)
+            raise
+        finally:
+            conn.close()
+
+    def _get_ticket(self, *, ticket_id: str, tenant_id: str) -> Ticket | None:
+        """Load a ticket row and map DB status to the agent-facing `Ticket` schema."""
+
+        conn = self._conn()
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, ticket_type, status, email_id, sender_email, summary, raw_email
+                    FROM tickets
+                    WHERE id = %s AND tenant_id = %s
+                    LIMIT 1
+                    """,
+                    (ticket_id, tenant_id),
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return None
+
+        db_status = str(row[2] or "").lower()
+        # The database supports intermediate statuses; agent-facing schema keeps a smaller contract.
+        mapped_status: TicketStatus = "closed" if db_status in {"closed", "resolved"} else "open"
+        return {
+            "ticket_id": str(row[0]),
+            "ticket_type": typing.cast(TicketType, str(row[1])),
+            "status": mapped_status,
+            "email_id": str(row[3] or ""),
+            "sender_email": str(row[4] or ""),
+            "summary": str(row[5] or ""),
+            "raw_email": str(row[6] or ""),
+        }
+
+    def _update_ticket_status(self, *, ticket_id: str, tenant_id: str, status: TicketStatus) -> None:
+        """Persist a ticket status transition.
+
+        Agent-facing `closed` maps to DB status `closed`; `open` maps to `open`.
+        """
+
+        conn = self._conn()
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE tickets
+                    SET status = %s, updated_at = NOW()
+                    WHERE id = %s AND tenant_id = %s
+                    """,
+                    (status, ticket_id, tenant_id),
+                )
+        finally:
+            conn.close()
 
     # --- Imel tool implementation (implements the agent contract) ---
     def imel_tools(self) -> imel_tools.ImelTools:
@@ -303,30 +397,15 @@ class PostgresCapabilities:
                 message: str | None = None,
                 payload: dict[str, typing.Any] | None = None,
             ) -> None:
-                conn = parent._conn()
-                try:
-                    with conn, conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO agent_intercom_queue
-                            (tenant_id, run_id, from_agent_id, to_agent_id, kind, message, payload, status)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'queued')
-                            """,
-                            (
-                                tenant_id,
-                                run_id,
-                                from_agent_id,
-                                to_agent_id,
-                                kind,
-                                message or "",
-                                json.dumps(payload or {}),
-                            ),
-                        )
-                except Exception as exc:
-                    logger.error("Failed to queue handoff: %s", exc)
-                    raise
-                finally:
-                    conn.close()
+                parent._create_agent_handoff(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    from_agent_id=from_agent_id,
+                    to_agent_id=to_agent_id,
+                    kind=kind,
+                    message=message,
+                    payload=payload,
+                )
 
             def process_order_update(
                 self,
@@ -354,3 +433,41 @@ class PostgresCapabilities:
                     conn.close()
 
         return typing.cast(imel_tools.ImelTools, _ImelToolsImpl())
+
+    # --- Kall tool implementation (implements the agent contract) ---
+    def kall_tools(self) -> kall_tools.KallTools:
+        """Return an object implementing `agents.general.kall.tools.KallTools`."""
+
+        parent = self
+
+        class _KallToolsImpl:
+            """Concrete Kall tool implementation backed by Postgres."""
+
+            def get_ticket(self, *, ticket_id: str, tenant_id: str) -> Ticket | None:
+                return parent._get_ticket(ticket_id=ticket_id, tenant_id=tenant_id)
+
+            def update_ticket_status(self, *, ticket_id: str, tenant_id: str, status: TicketStatus) -> None:
+                parent._update_ticket_status(ticket_id=ticket_id, tenant_id=tenant_id, status=status)
+
+            def create_agent_handoff(
+                self,
+                *,
+                tenant_id: str,
+                run_id: str | None,
+                from_agent_id: str,
+                to_agent_id: str,
+                kind: str = "message",
+                message: str | None = None,
+                payload: dict[str, typing.Any] | None = None,
+            ) -> None:
+                parent._create_agent_handoff(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    from_agent_id=from_agent_id,
+                    to_agent_id=to_agent_id,
+                    kind=kind,
+                    message=message,
+                    payload=payload,
+                )
+
+        return typing.cast(kall_tools.KallTools, _KallToolsImpl())
