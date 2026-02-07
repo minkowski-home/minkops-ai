@@ -3,6 +3,9 @@
 This module exposes both:
 - `build_imel_langgraph(...)`: compiled LangGraph object wiring nodes/edges.
 - `run_imel(...)`: thin runtime entrypoint that invokes the compiled graph.
+
+Current issues to check later:
+ - run_id or email_id is used as thread_id in config
 """
 
 from __future__ import annotations
@@ -29,22 +32,7 @@ def run_imel(
     run_id: str | None = None,
     llm=None,
 ):
-    """Run Imel by invoking the compiled LangGraph workflow.
-
-    Args:
-        email_id: Provider or internal identifier for the inbound email.
-        sender_email: Sender address of the inbound email.
-        email_content: Raw email body (plain text or pre-rendered content).
-        tenant_id: Optional tenant identifier for multi-tenant deployments.
-        tenant_profile: Optional tenant branding/profile details. If omitted and
-            `tenant_id` is provided, this will attempt to load via `tools`.
-        tools: Service-layer implementation of the tool contracts required by the graph.
-        run_id: Optional runtime run identifier used as LangGraph thread id.
-        llm: Optional chat model instance to use for LLM-backed steps.
-
-    Returns:
-        The final Imel state dict for this run.
-    """
+    """Run Imel by invoking the compiled LangGraph workflow and return the final Imel state dict for this run."""
 
     # The orchestrator typically loads tenant context and injects it; we keep
     # this convenience fallback so demo runners can omit `tenant_profile`.

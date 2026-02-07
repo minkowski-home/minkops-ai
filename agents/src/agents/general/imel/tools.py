@@ -1,6 +1,6 @@
 """Imel tool contracts (agent-facing).
 
-This module defines *interfaces* ("ports") that the Imel graph can call to read
+This module defines interfaces ("ports") that the Imel graph can call to read
 from data stores and request side effects, without binding the agent package to
 runtime infrastructure (Postgres drivers, provider SDKs, retry loops).
 
