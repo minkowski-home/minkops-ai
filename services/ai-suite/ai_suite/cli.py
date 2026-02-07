@@ -15,7 +15,7 @@ import argparse
 import json
 import logging
 import sys
-import uuid
+import typing
 
 from ai_suite.config import load_settings
 from ai_suite.persistence.seed import seed_database
@@ -29,6 +29,18 @@ def _read_stdin() -> str:
     if sys.stdin.isatty():
         return ""
     return sys.stdin.read()
+
+
+def _parse_input_json(value: str) -> dict[str, typing.Any]:
+    """Parse a JSON object string into a dictionary."""
+
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError as exc:  # pragma: no cover - user input
+        raise SystemExit(f"Invalid JSON payload: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit("Input payload must be a JSON object.")
+    return typing.cast(dict[str, typing.Any], data)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,14 +69,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the psql seed SQL file (default: db/init_agents_db.sql).",
     )
 
-    imel = sub.add_parser("run-imel", help="Run the Imel agent on a single email payload.")
+    run_agent = sub.add_parser("run-agent", help="Run any registered agent using a JSON payload.")
+    run_agent.add_argument("--agent-id", required=True, help="Registered agent id (e.g., imel, kall).")
+    run_agent.add_argument("--tenant-id", default="tenant_001", help="Tenant id for the run.")
+    run_agent.add_argument(
+        "--input-json",
+        default=None,
+        help="JSON object payload. If omitted, payload is read from stdin.",
+    )
+    run_agent.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="Use the configured LLM for agents that support it.",
+    )
+
+    imel = sub.add_parser("run-imel", help="Run the Imel agent (email convenience wrapper).")
     imel.add_argument("--tenant-id", default="tenant_001", help="Tenant id for the run.")
     imel.add_argument("--sender", default="customer@example.com", help="Sender email address.")
-    imel.add_argument(
-        "--email-id",
-        default=None,
-        help="Optional email identifier. If omitted, a UUID is generated.",
-    )
     imel.add_argument(
         "--email",
         default=None,
@@ -74,6 +95,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--use-llm",
         action="store_true",
         help="Use the configured LLM (requires LangChain + Ollama/OpenAI).",
+    )
+
+    kall = sub.add_parser("run-kall", help="Run the Kall agent (ticket convenience wrapper).")
+    kall.add_argument("--tenant-id", default="tenant_001", help="Tenant id for the run.")
+    kall.add_argument("--ticket-id", required=True, help="Ticket id Kall should process.")
+    kall.add_argument(
+        "--sender",
+        default=None,
+        help="Optional sender email for customer update notification.",
+    )
+    kall.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="Use the configured LLM for agents that support it.",
     )
 
     return parser
@@ -97,19 +132,54 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if args.cmd == "run-agent":
+        payload_raw = args.input_json if args.input_json is not None else _read_stdin()
+        if not payload_raw.strip():
+            raise SystemExit("Provide input payload via --input-json or stdin.")
+
+        agent = get_agent(args.agent_id)
+        final_state = run_agent_once(
+            agent=agent,
+            tenant_id=args.tenant_id,
+            input_payload=_parse_input_json(payload_raw),
+            database_url=settings.database_url,
+            use_llm=args.use_llm,
+        )
+
+        print("\n=== FINAL STATE ===")
+        print(json.dumps(final_state, indent=2, default=str))
+        return 0
+
     if args.cmd == "run-imel":
         email_content = args.email if args.email is not None else _read_stdin()
         if not email_content.strip():
             raise SystemExit("Provide an email body via --email or stdin.")
 
         agent = get_agent("imel")
-        email_id = args.email_id or str(uuid.uuid4())
         final_state = run_agent_once(
             agent=agent,
             tenant_id=args.tenant_id,
-            email_id=email_id,
-            sender_email=args.sender,
-            email_content=email_content,
+            input_payload={
+                "sender_email": args.sender,
+                "email_content": email_content,
+            },
+            database_url=settings.database_url,
+            use_llm=args.use_llm,
+        )
+
+        print("\n=== FINAL STATE ===")
+        print(json.dumps(final_state, indent=2, default=str))
+        return 0
+
+    if args.cmd == "run-kall":
+        agent = get_agent("kall")
+        final_state = run_agent_once(
+            agent=agent,
+            tenant_id=args.tenant_id,
+            input_payload={
+                "ticket_id": args.ticket_id,
+                "sender_email": args.sender,
+            },
             database_url=settings.database_url,
             use_llm=args.use_llm,
         )
@@ -119,4 +189,3 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     raise SystemExit(f"Unknown command: {args.cmd!r}")
-

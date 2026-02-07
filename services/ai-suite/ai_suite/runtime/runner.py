@@ -34,17 +34,14 @@ def run_agent_once(
     *,
     agent: AgentSpec,
     tenant_id: str,
-    email_id: str,
-    sender_email: str,
-    email_content: str,
+    input_payload: dict[str, typing.Any],
     database_url: str | None,
     use_llm: bool = False,
 ) -> dict[str, typing.Any]:
-    """Run one agent on one email payload and execute service-owned side effects.
+    """Run one agent on one trigger payload and execute service-owned side effects.
 
-    This runner is symmetric across agents: it builds a capability bundle once,
-    injects it into the agent entrypoint, and then performs any final "external
-    action" (e.g., sending email) based on the returned state.
+    This runner is symmetric across agents: each agent provides an adapter that
+    validates payload, maps kwargs to its graph runner, and handles post-run effects.
     """
 
     if not database_url:
@@ -59,10 +56,7 @@ def run_agent_once(
         run_id=run_id,
         tenant_id=tenant_id,
         agent_id=agent.agent_id,
-        input_payload={
-            "email_id": email_id,
-            "sender_email": sender_email,
-        },
+        input_payload=input_payload,
     )
 
     llm = None
@@ -73,16 +67,19 @@ def run_agent_once(
         llm = shared_clients.get_chat_model()
 
     run_fn = _import_attr(agent.runner_import)
+    adapter = _import_attr(agent.adapter_import)()
+    normalized_payload = adapter.validate_payload(input_payload)
 
-    logger.info("Running agent=%s tenant=%s run_id=%s email_id=%s", agent.agent_id, tenant_id, run_id, email_id)
+    logger.info("Running agent=%s tenant=%s run_id=%s", agent.agent_id, tenant_id, run_id)
     try:
         final_state = run_fn(
-            email_id=email_id,
-            sender_email=sender_email,
-            email_content=email_content,
-            tenant_id=tenant_id,
-            tools=capabilities.imel_tools(),
-            llm=llm,
+            **adapter.build_run_kwargs(
+                tenant_id=tenant_id,
+                run_id=run_id,
+                payload=normalized_payload,
+                capabilities=capabilities,
+                llm=llm,
+            )
         )
 
         # Persist the final state as a single checkpoint. In a full runtime we'd checkpoint per node.
@@ -97,14 +94,18 @@ def run_agent_once(
         capabilities.runs.mark_failed(run_id=run_id)
         raise
 
-    # External action demo: "send email" if the agent produced a response.
-    if final_state.get("action") == "respond" and final_state.get("draft_response"):
-        email_sender.send_email(
-            email_id=email_id,
-            to=sender_email,
-            subject="Re: Your inquiry",
-            body=str(final_state["draft_response"]),
-        )
+    # Let agent adapters own post-run external effects.
+    adapter.handle_post_run(
+        tenant_id=tenant_id,
+        payload=normalized_payload,
+        final_state=typing.cast(dict[str, typing.Any], final_state),
+        email_sender=email_sender,
+    )
 
-    logger.info("Completed run_id=%s action=%s", run_id, final_state.get("action"))
+    logger.info(
+        "Completed run_id=%s agent=%s action=%s",
+        run_id,
+        agent.agent_id,
+        final_state.get("action"),
+    )
     return typing.cast(dict[str, typing.Any], final_state)
