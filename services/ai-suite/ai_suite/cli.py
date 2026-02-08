@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    if args.cmd == "run-agent":
+    if args.cmd == "run-agent": # the only mandatory part to run agents. "run-imel" and "run-kall" are just convenience shortcuts.
         payload_raw = args.input_json if args.input_json is not None else _read_stdin()
         if not payload_raw.strip():
             raise SystemExit("Provide input payload via --input-json or stdin.")
