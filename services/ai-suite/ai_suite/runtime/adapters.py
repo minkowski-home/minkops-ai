@@ -56,7 +56,7 @@ class AgentRuntimeAdapter(typing.Protocol):
         """Execute post-run actions such as sending customer-facing notifications."""
 
 
-class ImelRuntimeAdapter:
+class ImelRuntimeAdapter(AgentRuntimeAdapter):
     """Imel-specific mapping between trigger payload and `run_imel(...)`."""
 
     def validate_payload(self, payload: dict[str, typing.Any]) -> dict[str, typing.Any]:
@@ -111,7 +111,7 @@ class ImelRuntimeAdapter:
             )
 
 
-class KallRuntimeAdapter:
+class KallRuntimeAdapter(AgentRuntimeAdapter):
     """Kall-specific mapping between trigger payload and `run_kall(...)`."""
 
     def validate_payload(self, payload: dict[str, typing.Any]) -> dict[str, typing.Any]:

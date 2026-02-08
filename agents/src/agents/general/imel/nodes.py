@@ -8,7 +8,10 @@ Even if you never use LangGraph, writing your agent logic in this style is usefu
 because it forces you to keep inputs/outputs explicit and easy to test.
 """
 
+import json
 import logging
+import re
+import typing
 
 # Agent-specific imports
 from agents.general.imel import policy as imel_policy
@@ -253,3 +256,208 @@ def route_by_intent_node(state: imel_state.ImelState, *, llm=None) -> Command[Li
 
     # Everything else: use the company knowledge base and respond.
     return Command(goto="company_kb_lookup")
+
+
+def _extract_text(value: typing.Any) -> str:
+    """Normalize provider responses into plain text."""
+
+    if isinstance(value, str):
+        return value
+    content = getattr(value, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Some chat providers return a list of content blocks.
+        return "".join(str(part) for part in content)
+    return str(value) if value is not None else ""
+
+
+def _extract_json_object(text: str) -> dict[str, typing.Any] | None:
+    """Extract and parse the first JSON object from free-form model output."""
+
+    text = text.strip()
+    if not text:
+        return None
+
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _fallback_classification(*, email_content: str) -> imel_state.EmailClassification:
+    """Deterministic classifier used when no model is available or parsing fails."""
+
+    content = email_content.lower()
+
+    if any(token in content for token in ("unsubscribe", "winner", "lottery", "bitcoin", "free money")):
+        intent = "spam"
+    elif "cancel" in content:
+        intent = "cancel_order"
+    elif any(token in content for token in ("problem", "issue", "broken", "angry", "complaint")):
+        intent = "complaint"
+    elif any(token in content for token in ("update", "status", "track", "order")):
+        intent = "update_order"
+    elif any(token in content for token in ("account", "invoice", "billing", "plan")):
+        intent = "order_or_account_details"
+    elif any(token in content for token in ("thanks", "great", "love")):
+        intent = "feedback"
+    else:
+        intent = "inquiry"
+
+    is_human = intent in {"complaint", "cancel_order"}
+    urgency: typing.Literal["low", "medium", "human_intervention_required"] = (
+        "human_intervention_required" if is_human else "medium"
+    )
+
+    return {
+        "intent": typing.cast(
+            typing.Literal[
+                "inquiry",
+                "complaint",
+                "feedback",
+                "order_or_account_details",
+                "update_order",
+                "cancel_order",
+                "other",
+                "spam",
+            ],
+            intent,
+        ),
+        "urgency": urgency,
+        "topic": "customer_email",
+        "summary": email_content.strip()[:200],
+        "is_human_intervention_required": is_human,
+    }
+
+
+def _normalize_classification(raw: dict[str, typing.Any], *, email_content: str) -> imel_state.EmailClassification:
+    """Validate/coerce raw model output into the agent's classification schema."""
+
+    allowed_intents = {
+        "inquiry",
+        "complaint",
+        "feedback",
+        "order_or_account_details",
+        "update_order",
+        "cancel_order",
+        "other",
+        "spam",
+    }
+    intent_raw = str(raw.get("intent") or "").strip().lower()
+    intent = intent_raw if intent_raw in allowed_intents else "other"
+
+    urgency_raw = str(raw.get("urgency") or "").strip().lower()
+    urgency: typing.Literal["low", "medium", "human_intervention_required"]
+    if urgency_raw in {"low", "medium", "human_intervention_required"}:
+        urgency = typing.cast(typing.Literal["low", "medium", "human_intervention_required"], urgency_raw)
+    else:
+        urgency = "human_intervention_required" if intent in {"complaint", "cancel_order"} else "medium"
+
+    topic = str(raw.get("topic") or "customer_email").strip() or "customer_email"
+    summary = str(raw.get("summary") or "").strip() or email_content.strip()[:200]
+
+    human_flag = raw.get("is_human_intervention_required")
+    if isinstance(human_flag, bool):
+        is_human = human_flag
+    else:
+        is_human = urgency == "human_intervention_required" or intent in {"complaint", "cancel_order"}
+
+    return {
+        "intent": typing.cast(
+            typing.Literal[
+                "inquiry",
+                "complaint",
+                "feedback",
+                "order_or_account_details",
+                "update_order",
+                "cancel_order",
+                "other",
+                "spam",
+            ],
+            intent,
+        ),
+        "urgency": urgency,
+        "topic": topic,
+        "summary": summary,
+        "is_human_intervention_required": is_human,
+    }
+
+
+def _classify_email(
+    *,
+    system_prompt: str,
+    email_prompt: str,
+    email_content: str,
+    sender_email: str,
+    llm=None,
+) -> imel_state.EmailClassification:
+    """Return a schema-safe classification, with deterministic fallback."""
+
+    if llm is None:
+        return _fallback_classification(email_content=email_content)
+
+    try:
+        response = llm.invoke(f"{system_prompt}\n\n{email_prompt}")
+        parsed = _extract_json_object(_extract_text(response))
+        if parsed:
+            return _normalize_classification(parsed, email_content=email_content)
+    except Exception as exc:
+        logger.warning("LLM classification failed for %s: %s", sender_email, exc)
+
+    return _fallback_classification(email_content=email_content)
+
+
+def _fallback_draft(*, classification: imel_state.EmailClassification | None) -> str:
+    """Deterministic reply when no model is available."""
+
+    intent = (classification or {}).get("intent")
+    if intent in {"update_order", "order_or_account_details"}:
+        return (
+            "Thanks for reaching out. We received your request and queued an order/account update. "
+            "We will follow up with details shortly."
+        )
+    if intent in {"cancel_order", "complaint"}:
+        return (
+            "Thanks for your message. We have opened a support ticket and escalated this to a specialist. "
+            "You will receive a follow-up shortly."
+        )
+    if intent == "spam":
+        return "Thanks for contacting us."
+    return (
+        "Thanks for your email. We received your request and will follow up shortly "
+        "with the most accurate next steps."
+    )
+
+
+def _draft_reply(
+    *,
+    system_prompt: str,
+    draft_prompt: str,
+    classification: imel_state.EmailClassification | None,
+    llm=None,
+) -> str:
+    """Generate a reply draft with LLM when available, fallback otherwise."""
+
+    if llm is None:
+        return _fallback_draft(classification=classification)
+
+    try:
+        response = llm.invoke(f"{system_prompt}\n\n{draft_prompt}")
+        content = _extract_text(response).strip()
+        if content:
+            return content
+    except Exception as exc:
+        logger.warning("LLM drafting failed: %s", exc)
+
+    return _fallback_draft(classification=classification)

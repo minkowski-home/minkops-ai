@@ -37,6 +37,26 @@ def _read_text(path: str) -> str:
     return pathlib.Path(path).read_text(encoding="utf-8")
 
 
+def _resolve_path(path: str) -> pathlib.Path:
+    """Resolve a path from CWD first, then monorepo root.
+
+    The CLI is often executed from `services/ai-suite`, while defaults like
+    `db/init_agents_db.sql` and `data/...` are rooted at the repo top level.
+    """
+
+    candidate = pathlib.Path(path)
+    if candidate.exists():
+        return candidate
+    if candidate.is_absolute():
+        return candidate
+
+    repo_root = pathlib.Path(__file__).resolve().parents[4]
+    repo_candidate = repo_root / candidate
+    if repo_candidate.exists():
+        return repo_candidate
+    return candidate
+
+
 def _placeholder_vector(dims: int = 1536) -> str:
     """Return a pgvector literal for a zero-vector of the desired dimension.
 
@@ -45,6 +65,16 @@ def _placeholder_vector(dims: int = 1536) -> str:
     """
 
     return "[" + ",".join(["0"] * dims) + "]"
+
+
+def _placeholder_vector_json(dims: int = 1536) -> str:
+    """Return a JSON array string for fallback embedding storage.
+
+    This is used when pgvector is not enabled and `tenant_kb_chunks` uses the
+    `embedding_json` column in local development.
+    """
+
+    return json.dumps([0] * dims)
 
 
 def seed_database(
@@ -60,7 +90,7 @@ def seed_database(
     if not database_url:
         raise RuntimeError("DATABASE_URL/AGENTS_DB_URL is required for seeding.")
 
-    sql_file = pathlib.Path(sql_path)
+    sql_file = _resolve_path(sql_path)
     if not sql_file.exists():
         raise FileNotFoundError(f"Seed SQL file not found: {sql_path}")
 
@@ -78,11 +108,29 @@ def seed_database(
         ) from exc
 
     # After DB is created, connect to it and upsert tenant + KB content.
-    kb_markdown = _read_text(kb_markdown_path)
+    kb_path = _resolve_path(kb_markdown_path)
+    if not kb_path.exists():
+        raise FileNotFoundError(f"KB markdown file not found: {kb_markdown_path}")
+    kb_markdown = _read_text(str(kb_path))
 
     conn = psycopg2.connect(database_url)
     try:
         with conn, conn.cursor() as cur:
+            # The bootstrap SQL can create either a pgvector column (`embedding`)
+            # or a JSON fallback (`embedding_json`) depending on DB privileges.
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'tenant_kb_chunks'
+                      AND column_name = 'embedding'
+                )
+                """
+            )
+            has_vector_column = bool(cur.fetchone()[0])
+
             cur.execute(
                 """
                 INSERT INTO tenants (id, name, config, enabled)
@@ -92,32 +140,62 @@ def seed_database(
                 (tenant_id, "Tenant 001"),
             )
 
-            cur.execute(
-                """
-                INSERT INTO tenant_kb_chunks
-                  (tenant_id, doc_id, source_uri, source_type, chunk_index, content, embedding, metadata)
-                VALUES
-                  (%s, %s, %s, 'brand_kit', 0, %s, (%s)::vector, %s::jsonb)
-                """,
-                (
-                    tenant_id,
-                    "kb_md",
-                    kb_markdown_path,
-                    kb_markdown,
-                    _placeholder_vector(),
-                    json.dumps(
-                        {
-                            "kind": "brand_kit",
-                            "agent_display_name": "MH Concierge",
-                            "tone": "senior designer, vibe-first luxury",
-                            "keywords": ["vibe-first", "luxury", "modularity", "Minkowski", "MH"],
-                            "email_signature": "— MH (Minkowski) Concierge",
-                            "brand_kit": {"brand_name": "MH / Minkowski"},
-                        }
+            if has_vector_column:
+                cur.execute(
+                    """
+                    INSERT INTO tenant_kb_chunks
+                      (tenant_id, doc_id, source_uri, source_type, chunk_index, content, embedding, metadata)
+                    VALUES
+                      (%s, %s, %s, 'brand_kit', 0, %s, (%s)::vector, %s::jsonb)
+                    """,
+                    (
+                        tenant_id,
+                        "kb_md",
+                        str(kb_path),
+                        kb_markdown,
+                        _placeholder_vector(),
+                        json.dumps(
+                            {
+                                "kind": "brand_kit",
+                                "agent_display_name": "MH Concierge",
+                                "tone": "senior designer, vibe-first luxury",
+                                "keywords": ["vibe-first", "luxury", "modularity", "Minkowski", "MH"],
+                                "email_signature": "— MH (Minkowski) Concierge",
+                                "brand_kit": {"brand_name": "MH / Minkowski"},
+                            }
+                        ),
                     ),
-                ),
-            )
+                )
+            else:
+                logger.warning(
+                    "pgvector column not found in tenant_kb_chunks; using JSON embedding fallback for local dev."
+                )
+                cur.execute(
+                    """
+                    INSERT INTO tenant_kb_chunks
+                      (tenant_id, doc_id, source_uri, source_type, chunk_index, content, embedding_json, metadata)
+                    VALUES
+                      (%s, %s, %s, 'brand_kit', 0, %s, %s::jsonb, %s::jsonb)
+                    """,
+                    (
+                        tenant_id,
+                        "kb_md",
+                        str(kb_path),
+                        kb_markdown,
+                        _placeholder_vector_json(),
+                        json.dumps(
+                            {
+                                "kind": "brand_kit",
+                                "agent_display_name": "MH Concierge",
+                                "tone": "senior designer, vibe-first luxury",
+                                "keywords": ["vibe-first", "luxury", "modularity", "Minkowski", "MH"],
+                                "email_signature": "— MH (Minkowski) Concierge",
+                                "brand_kit": {"brand_name": "MH / Minkowski"},
+                            }
+                        ),
+                    ),
+                )
     finally:
         conn.close()
 
-    logger.info("Seed complete for tenant_id=%s using %s", tenant_id, kb_markdown_path)
+    logger.info("Seed complete for tenant_id=%s using %s", tenant_id, str(kb_path))

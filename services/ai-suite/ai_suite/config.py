@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from dotenv import load_dotenv
+
+load_dotenv(verbose=True)   # Remove in production: Should be handled by docker/K8s
 
 
 @dataclasses.dataclass(frozen=True)

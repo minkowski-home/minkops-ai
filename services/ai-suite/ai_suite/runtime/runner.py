@@ -66,8 +66,8 @@ def run_agent_once(
 
         llm = shared_clients.get_chat_model()
 
-    run_fn = _import_attr(agent.runner_import)
-    adapter = _import_attr(agent.adapter_import)()
+    run_fn = _import_attr(agent.runner_import)  # The run_<agent> function in graph.py
+    adapter = _import_attr(agent.adapter_import)()  # The AgentRuntimeAdapter object in adapters.py
     normalized_payload = adapter.validate_payload(input_payload)
 
     logger.info("Running agent=%s tenant=%s run_id=%s", agent.agent_id, tenant_id, run_id)
