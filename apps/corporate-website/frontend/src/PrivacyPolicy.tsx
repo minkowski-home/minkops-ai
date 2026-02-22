@@ -56,6 +56,14 @@ export default function PrivacyPolicy() {
                   .
                 </p>
               </section>
+
+              <section className="legal-section">
+                <h2>5. Corporate Address</h2>
+                <p>
+                  Minkops is a product of Minkowski Home. Our corporate mailing address
+                  is 375 University Avenue Suite 3215, Toronto, ON M5G 2J5, Canada.
+                </p>
+              </section>
             </div>
           </motion.div>
         </div>
