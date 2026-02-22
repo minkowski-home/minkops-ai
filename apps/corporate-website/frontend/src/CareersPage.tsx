@@ -67,6 +67,16 @@ export default function CareersPage() {
               </a>
               .
             </p>
+            <p style={{ color: "var(--text-muted)", marginBottom: "0" }}>
+              For general business enquiries and collaborations, contact{" "}
+              <a
+                href="mailto:info@minkowskihome.com"
+                style={{ color: "var(--primary-glow)" }}
+              >
+                info@minkowskihome.com
+              </a>
+              .
+            </p>
           </div>
         </div>
       </main>

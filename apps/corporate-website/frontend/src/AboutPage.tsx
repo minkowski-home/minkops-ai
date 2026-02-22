@@ -49,7 +49,7 @@ export default function AboutPage() {
               <Link className="cta-button" to="/">
                 View Agents
               </Link>
-              <a className="about-secondary" href="mailto:hello@minkops.ai">
+              <a className="about-secondary" href="mailto:info@minkowskihome.com">
                 Join Waitlist
               </a>
             </div>
@@ -134,7 +134,7 @@ export default function AboutPage() {
               </p>
             </div>
             <div className="cta-actions">
-              <a className="cta-button" href="mailto:hello@minkops.ai">
+              <a className="cta-button" href="mailto:info@minkowskihome.com">
                 Request Early Access
               </a>
             </div>

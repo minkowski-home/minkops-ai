@@ -29,7 +29,12 @@ export default function SiteFooter() {
           <Link to="/about">About Us</Link>
           <Link to="/careers">Careers</Link>
           <Link to="/blogs">Blog</Link>
-          <a href="mailto:hello@minkops.ai">Contact</a>
+          <a href="mailto:info@minkowskihome.com">
+            Enquiries: info@minkowskihome.com
+          </a>
+          <a href="mailto:hr@minkowskihome.com">
+            HR & Verification: hr@minkowskihome.com
+          </a>
           <a href="https://linkedin.com/company/minkops">LinkedIn</a>
         </div>
       </div>

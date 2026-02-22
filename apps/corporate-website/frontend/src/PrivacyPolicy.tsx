@@ -45,13 +45,21 @@ export default function PrivacyPolicy() {
               <section className="legal-section">
                 <h2>4. Contact Us</h2>
                 <p>
-                  If you have any questions about this Privacy Policy, please contact us
-                  at{" "}
+                  If you have questions about this Privacy Policy or business
+                  collaborations, contact{" "}
                   <a
                     href="mailto:info@minkowskihome.com"
                     style={{ color: "var(--primary-glow)" }}
                   >
                     info@minkowskihome.com
+                  </a>
+                  . For HR-related requests, employee verification, and job
+                  applications, contact{" "}
+                  <a
+                    href="mailto:hr@minkowskihome.com"
+                    style={{ color: "var(--primary-glow)" }}
+                  >
+                    hr@minkowskihome.com
                   </a>
                   .
                 </p>
