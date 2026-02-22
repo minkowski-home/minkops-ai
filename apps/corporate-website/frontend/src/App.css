@@ -456,6 +456,22 @@ body {
   max-width: 300px;
 }
 
+.footer-address-label {
+  margin-top: 0.6rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #777;
+}
+
+.footer-address {
+  margin: 0;
+  font-style: normal;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 .footer-column h4 {
   font-size: 0.9rem;
   text-transform: uppercase;

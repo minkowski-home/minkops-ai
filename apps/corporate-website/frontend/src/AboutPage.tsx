@@ -49,7 +49,7 @@ export default function AboutPage() {
               <Link className="cta-button" to="/">
                 View Agents
               </Link>
-              <a className="about-secondary" href="mailto:hello@minkops.ai">
+              <a className="about-secondary" href="mailto:info@minkowskihome.com">
                 Join Waitlist
               </a>
             </div>
@@ -119,6 +119,49 @@ export default function AboutPage() {
         </motion.section>
 
         <motion.section
+          className="about-section"
+          variants={containerVariants}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, amount: 0.3 }}
+        >
+          <motion.div className="section-heading" variants={itemVariants}>
+            <span className="section-eyebrow">Origins</span>
+            <h2>How MinkOps emerged from real operating pressure.</h2>
+          </motion.div>
+
+          <motion.div className="site-glass-card about-story-copy" variants={itemVariants}>
+            <p>
+              Minkowski Home began as an interior product design company with a long-term
+              vision of AIoT-enabled furniture and a tightly integrated design ecosystem.
+              As the scope expanded, operational demands grew faster than our manpower.
+              Instead of immediately hiring across every function, we built internal AI
+              agents to automate specific business tasks, from content generation to
+              workflow coordination.
+            </p>
+
+            <p>
+              Those early agents proved effective. They reduced execution time, improved
+              consistency, and handled repetitive cognitive work that would otherwise
+              require additional hires. We expanded their scope across departments,
+              formalized their communication layers, and engineered persistent role-based
+              personas aligned with real business functions.
+            </p>
+
+            <p>That internal system evolved into MinkOps.</p>
+
+            <p>
+              Today, MinkOps operates a wide range of operational tasks within Minkowski
+              Home that would traditionally require multiple specialized professionals. It
+              is built as a modular suite of autonomous, inter-communicating AI employees
+              designed to support modern businesses with structured, scalable execution.
+              MinkOps will soon be available beyond our internal ecosystem for companies
+              seeking leverage without linear headcount growth.
+            </p>
+          </motion.div>
+        </motion.section>
+
+        <motion.section
           className="about-cta"
           variants={containerVariants}
           initial="hidden"
@@ -134,7 +177,7 @@ export default function AboutPage() {
               </p>
             </div>
             <div className="cta-actions">
-              <a className="cta-button" href="mailto:hello@minkops.ai">
+              <a className="cta-button" href="mailto:info@minkowskihome.com">
                 Request Early Access
               </a>
             </div>
