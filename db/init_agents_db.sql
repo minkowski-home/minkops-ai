@@ -9,12 +9,15 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- `vector` may require elevated DB privileges on local installs.
 -- For developer ergonomics we degrade gracefully when unavailable and use a
 -- JSONB fallback column in `tenant_kb_chunks` instead of failing bootstrap.
+
+-- Use a DO block for conditional execution with graceful failure.
 DO $$
 BEGIN
     CREATE EXTENSION IF NOT EXISTS vector;
 EXCEPTION
     WHEN insufficient_privilege THEN
         RAISE WARNING 'Insufficient privilege to create extension "vector". Falling back to JSONB embeddings.';
+        -- This fallback mechanism lives in the second DO block later in the script while creating `tenant_kb_chunks`
 END $$;
 
 -- 1. TENANTS
