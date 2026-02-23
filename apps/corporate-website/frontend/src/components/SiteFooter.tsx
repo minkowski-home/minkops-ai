@@ -7,6 +7,14 @@ export default function SiteFooter() {
         <div className="footer-column brand-col">
           <div className="footer-logo">Minkops</div>
           <p>Operating system for zero-man companies</p>
+          <p className="footer-address-label">Minkowski Home Address</p>
+          <address className="footer-address">
+            375 University Avenue Suite 3215
+            <br />
+            Toronto, ON M5G 2J5
+            <br />
+            Canada
+          </address>
         </div>
 
         <div className="footer-column">
@@ -21,7 +29,12 @@ export default function SiteFooter() {
           <Link to="/about">About Us</Link>
           <Link to="/careers">Careers</Link>
           <Link to="/blogs">Blog</Link>
-          <a href="mailto:hello@minkops.ai">Contact</a>
+          <a href="mailto:info@minkowskihome.com">
+            Enquiries: info@minkowskihome.com
+          </a>
+          <a href="mailto:hr@minkowskihome.com">
+            HR & Verification: hr@minkowskihome.com
+          </a>
           <a href="https://linkedin.com/company/minkops">LinkedIn</a>
         </div>
       </div>

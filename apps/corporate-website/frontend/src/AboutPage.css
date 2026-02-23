@@ -232,6 +232,13 @@
   line-height: 1.6;
 }
 
+.about-story-copy {
+  color: var(--about-muted);
+  display: grid;
+  gap: 1.1rem;
+  line-height: 1.8;
+}
+
 .values-grid,
 .steps-grid,
 .stats-grid {

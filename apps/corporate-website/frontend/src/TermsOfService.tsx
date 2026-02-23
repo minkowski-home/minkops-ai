@@ -46,14 +46,30 @@ export default function TermsOfService() {
               <section className="legal-section">
                 <h2>4. Contact Information</h2>
                 <p>
-                  For any questions regarding these Terms, please contact us at{" "}
+                  For business enquiries and collaborations, contact{" "}
                   <a
                     href="mailto:info@minkowskihome.com"
                     style={{ color: "var(--primary-glow)" }}
                   >
                     info@minkowskihome.com
                   </a>
+                  . For HR matters, employee verification, and job applications,
+                  contact{" "}
+                  <a
+                    href="mailto:hr@minkowskihome.com"
+                    style={{ color: "var(--primary-glow)" }}
+                  >
+                    hr@minkowskihome.com
+                  </a>
                   .
+                </p>
+              </section>
+
+              <section className="legal-section">
+                <h2>5. Corporate Address</h2>
+                <p>
+                  Minkops is a product of Minkowski Home. Our corporate mailing address
+                  is 375 University Avenue Suite 3215, Toronto, ON M5G 2J5, Canada.
                 </p>
               </section>
             </div>
