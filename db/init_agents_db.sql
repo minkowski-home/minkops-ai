@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- For developer ergonomics we degrade gracefully when unavailable and use a
 -- JSONB fallback column in `tenant_kb_chunks` instead of failing bootstrap.
 
--- Use a DO block for conditional execution with graceful failure.
+-- Use a DO block for conditional execution with graceful failure. DO blocks implement procedural programming languages, not SQL (here, the language is PL/pgSQL)
 DO $$
 BEGIN
     CREATE EXTENSION IF NOT EXISTS vector;
@@ -203,6 +203,9 @@ CREATE INDEX idx_aiq_expires ON agent_intercom_queue(expires_at);
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+       -- Use EXECUTE because it defers the SQL validation to run-time rather than compile time
+       -- If pg_vector is absent, the compile-time validation would fail due the presence of vector() column,
+       -- So, this IF statement would never execute. We don't want that.
         EXECUTE $vector_table$
             CREATE TABLE tenant_kb_chunks (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
