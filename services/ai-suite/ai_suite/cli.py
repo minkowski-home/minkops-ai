@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     seed = sub.add_parser(
         "seed-db",
-        help="Drop & recreate the dev database using db/init_agents_db.sql (DANGEROUS).",
+        help="Drop & recreate all tables in minkops_app using db/schema.sql (DANGEROUS). Run db/bootstrap.sql first if the database does not exist.",
     )
     seed.add_argument(
         "--tenant-id",
@@ -65,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     seed.add_argument(
         "--sql-path",
-        default="db/init_agents_db.sql",
-        help="Path to the psql seed SQL file (default: db/init_agents_db.sql).",
+        default="db/schema.sql",
+        help="Path to the psql schema SQL file (default: db/schema.sql).",
     )
 
     run_agent = sub.add_parser("run-agent", help="Run any registered agent using a JSON payload.")
@@ -127,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             sql_path=args.sql_path,
             tenant_id=args.tenant_id,
             kb_markdown_path=args.kb_path,
+            admin_db_url=settings.admin_db_url,
             database_url=settings.database_url,
             psql_path=settings.psql_path,
         )

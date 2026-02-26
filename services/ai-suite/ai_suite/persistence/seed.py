@@ -1,8 +1,13 @@
 """Dev database seeding.
 
-This module intentionally shells out to `psql` to apply `db/init_agents_db.sql`
-because that file contains `psql`-specific meta-commands (`\\c`) and is designed
+This module intentionally shells out to `psql` to apply `db/schema.sql`
+because that file contains `psql`-specific meta-commands and is designed
 to be executed exactly as-is (similar to how Docker init scripts run).
+
+Prerequisites: `db/bootstrap.sql` must have been run once as a superuser to
+create the `minkops_app` database, install extensions, and configure the
+`minkops` role. `seed_database()` assumes the database already exists and
+connects directly to it.
 """
 
 from __future__ import annotations
@@ -12,25 +17,9 @@ import logging
 import pathlib
 import subprocess
 import typing
-import urllib.parse
-
 import psycopg2
 
 logger = logging.getLogger(__name__)
-
-
-def _admin_url(database_url: str) -> str:
-    """Derive a maintenance DB URL for `DROP/CREATE DATABASE` operations.
-
-    `db/init_agents_db.sql` drops/creates `minkops_app` and then `\\c` into it.
-    To avoid being connected to the DB we're about to drop, we connect to the
-    server's maintenance database (typically `postgres`).
-    """
-
-    parsed = urllib.parse.urlparse(database_url)
-    if not parsed.path or parsed.path == "/":
-        return database_url
-    return urllib.parse.urlunparse(parsed._replace(path="/postgres"))
 
 
 def _read_text(path: str) -> str:
@@ -41,7 +30,7 @@ def _resolve_path(path: str) -> pathlib.Path:
     """Resolve a path from CWD first, then monorepo root.
 
     The CLI is often executed from `services/ai-suite`, while defaults like
-    `db/init_agents_db.sql` and `data/...` are rooted at the repo top level.
+    `db/schema.sql` and `data/...` are rooted at the repo top level.
     """
 
     candidate = pathlib.Path(path)
@@ -82,11 +71,19 @@ def seed_database(
     sql_path: str,
     tenant_id: str,
     kb_markdown_path: str,
+    admin_db_url: str | None,
     database_url: str | None,
     psql_path: str = "psql",
 ) -> None:
-    """Reset the dev DB and seed a tenant + brand kit KB chunk."""
+    """Reset the dev DB schema and seed a tenant + brand kit KB chunk.
 
+    `admin_db_url` (superuser / gauss) is used for the psql DDL pass — dropping
+    and recreating tables requires table ownership. `database_url` (app user /
+    minkops) is used for the subsequent psycopg2 seeding inserts.
+    """
+
+    if not admin_db_url:
+        raise RuntimeError("ADMIN_DB_URL is required for seeding (DDL operations require superuser access).")
     if not database_url:
         raise RuntimeError("DATABASE_URL/AGENTS_DB_URL is required for seeding.")
 
@@ -94,10 +91,9 @@ def seed_database(
     if not sql_file.exists():
         raise FileNotFoundError(f"Seed SQL file not found: {sql_path}")
 
-    logger.warning("About to DROP and recreate database `minkops_app`. This is destructive.")
+    logger.warning("About to DROP and recreate all tables in `minkops_app`. This is destructive.")
 
-    admin_url = _admin_url(database_url)
-    cmd = [psql_path, admin_url, "-v", "ON_ERROR_STOP=1", "-f", str(sql_file)]
+    cmd = [psql_path, admin_db_url, "-v", "ON_ERROR_STOP=1", "-f", str(sql_file)]
     logger.info("Running: %s", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)

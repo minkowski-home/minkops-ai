@@ -17,7 +17,8 @@ load_dotenv(verbose=True)   # Remove in production: Should be handled by docker/
 class Settings:
     """Typed runtime settings for the AI Suite orchestrator."""
 
-    database_url: str | None
+    admin_db_url: str | None    # superuser — DDL operations only (seed-db)
+    database_url: str | None    # app user  — runtime DML operations
     psql_path: str
     log_level: str
 
@@ -26,13 +27,23 @@ def load_settings() -> Settings:
     """Load runtime settings from environment variables.
 
     Environment variables:
-    - `AGENTS_DB_URL` / `DATABASE_URL`: Postgres connection URL.
+    - `ADMIN_DB_URL`: Superuser Postgres URL used exclusively by `seed-db` for
+      DDL operations (DROP/CREATE tables). Falls back to `DATABASE_URL` if unset,
+      which preserves backwards compatibility for single-URL local setups.
+    - `AGENTS_DB_URL` / `DATABASE_URL`: Least-privilege app user URL used by the
+      runtime for all DML operations.
     - `PSQL_PATH`: Optional override for the `psql` binary location.
     - `LOG_LEVEL`: Python logging level (default: INFO).
     """
 
     database_url = os.getenv("AGENTS_DB_URL") or os.getenv("DATABASE_URL")
+    admin_db_url = os.getenv("ADMIN_DB_URL") or database_url
     psql_path = os.getenv("PSQL_PATH") or "psql"
     log_level = os.getenv("LOG_LEVEL") or "INFO"
-    return Settings(database_url=database_url, psql_path=psql_path, log_level=log_level)
+    return Settings(
+        admin_db_url=admin_db_url,
+        database_url=database_url,
+        psql_path=psql_path,
+        log_level=log_level,
+    )
 

@@ -1,26 +1,28 @@
+-- db/schema.sql
+--
+-- Repeatable schema reset. Run via `seed-db` during development:
+--
+--   seed-db [--sql-path db/schema.sql]
+--
+-- Assumes `minkops_app` already exists (run db/bootstrap.sql first if starting fresh).
+-- Connects directly to minkops_app — no CREATE DATABASE or \c here.
+
 -- Production Database Schema (minkops_app)
--- optimized for high-concurrency, OLTP, and State Management.
+-- Optimized for high-concurrency, OLTP, and state management.
 
-DROP DATABASE IF EXISTS minkops_app;
-CREATE DATABASE minkops_app;
-\c minkops_app
+-- ─── Teardown (reverse FK dependency order) ───────────────────────────────────
+DROP TABLE IF EXISTS tenant_kb_chunks;
+DROP TABLE IF EXISTS activity_logs;
+DROP TABLE IF EXISTS agent_intercom_queue;
+DROP TABLE IF EXISTS human_instructions_queue;
+DROP TABLE IF EXISTS event_outbox;
+DROP TABLE IF EXISTS tickets;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS agent_state;
+DROP TABLE IF EXISTS runs;
+DROP TABLE IF EXISTS tenants;
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
--- `vector` may require elevated DB privileges on local installs.
--- For developer ergonomics we degrade gracefully when unavailable and use a
--- JSONB fallback column in `tenant_kb_chunks` instead of failing bootstrap.
-
--- Use a DO block for conditional execution with graceful failure. DO blocks implement procedural programming languages, not SQL (here, the language is PL/pgSQL)
-DO $$
-BEGIN
-    CREATE EXTENSION IF NOT EXISTS vector;
-EXCEPTION
-    WHEN insufficient_privilege THEN
-        RAISE WARNING 'Insufficient privilege to create extension "vector". Falling back to JSONB embeddings.';
-        -- This fallback mechanism lives in the second DO block later in the script while creating `tenant_kb_chunks`
-END $$;
-
--- 1. TENANTS
+-- ─── 1. TENANTS ───────────────────────────────────────────────────────────────
 -- The "Employers". Every piece of data must link back to this.
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY,                       -- e.g. "acme_corp"
@@ -30,10 +32,10 @@ CREATE TABLE tenants (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 2. RUNS (The "Session" or "Job")
+-- ─── 2. RUNS (The "Session" or "Job") ─────────────────────────────────────────
 -- Tracks a single execution flow (e.g. processing one email).
--- A run is not a "run" in the traditional sense because the agents are desinged to be long-running and event-driven.
--- Instead, think of a "run" as a unit of atomic work for one particular trigger (e.g.replying to a new email, escalating a ticket, etc).
+-- A run is not a "run" in the traditional sense because the agents are designed to be long-running and event-driven.
+-- Instead, think of a "run" as a unit of atomic work for one particular trigger (e.g. replying to a new email, escalating a ticket, etc).
 CREATE TABLE runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id TEXT NOT NULL REFERENCES tenants(id),
@@ -44,10 +46,11 @@ CREATE TABLE runs (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_runs_tenant ON runs(tenant_id);
-CREATE INDEX idx_runs_status ON runs(status);
+CREATE INDEX idx_runs_tenant ON runs(tenant_id); -- filter by tenant_id first because in a multi-tenant system, no tenant should ever see another tenant's data
+CREATE INDEX idx_runs_status ON runs(status); -- this might be replaced by the following partial index in production
+-- CREATE INDEX ON runs(tenant_id, status) WHERE status IN ('queued', 'running') -- since completed and failed runs are rarely queried.
 
--- 3. AGENT STATE (Short-Term Memory)
+-- ─── 3. AGENT STATE (Short-Term Memory) ───────────────────────────────────────
 -- This is where LangGraph checkpoints are saved.
 -- It's a "Journal" of the agent's brain.
 CREATE TABLE agent_state (
@@ -58,7 +61,7 @@ CREATE TABLE agent_state (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. MESSAGES (Context)
+-- ─── 4. MESSAGES (Context) ────────────────────────────────────────────────────
 -- Chat history
 CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -71,7 +74,7 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_run ON messages(run_id, created_at);
 
--- 4.5 TICKETS (Support Cases)
+-- ─── 4.5 TICKETS (Support Cases) ──────────────────────────────────────────────
 -- Persisted tickets for human or agent follow-up.
 CREATE TABLE tickets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -89,11 +92,11 @@ CREATE TABLE tickets (
 CREATE INDEX idx_tickets_tenant_status ON tickets(tenant_id, status);
 CREATE INDEX idx_tickets_email_id ON tickets(email_id);
 
--- 5. EVENT OUTBOX (External Side Effects)
+-- ─── 5. EVENT OUTBOX (External Side Effects) ──────────────────────────────────
 -- For durable, idempotent delivery of side effects to external systems.
 -- Examples: send_email, create_ticket, sync_crm, trigger_webhook.
 -- The Transactional Outbox pattern means the "work" (e.g., updating a customer's moodboard status in the projects table)
--- and the "instruction" (e.g., an entry in the outbox table saying "Notify the Social Media Agent") 
+-- and the "instruction" (e.g., an entry in the outbox table saying "Notify the Social Media Agent")
 -- happen inside the exact same database transaction.
 -- The goal is to ensure that side effects happen atomically with the rest of the transaction.
 CREATE TABLE event_outbox (
@@ -120,11 +123,11 @@ CREATE INDEX idx_event_outbox_available ON event_outbox(available_at);
 CREATE UNIQUE INDEX idx_event_outbox_idempotency ON event_outbox(tenant_id, idempotency_key)
 WHERE idempotency_key IS NOT NULL;
 
--- 6. AUDIT LOGS (Sync to Warehouse)
+-- ─── 6. AUDIT LOGS (Sync to Warehouse) ────────────────────────────────────────
 -- A flattened log table purely for Airbyte to slurp up.
 CREATE TABLE activity_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id TEXT NOT NULL,    -- does not REFERENCE because logs are loosedly coupled - they are mainly for record keeping and dont control the flow of the app
+    tenant_id TEXT NOT NULL,    -- does not REFERENCE because logs are loosely coupled - they are mainly for record keeping and dont control the flow of the app
     agent_id TEXT NOT NULL,     -- same as above
     run_id UUID,
     event TEXT NOT NULL,                       -- "processed_email", "escalated_ticket"
@@ -135,7 +138,7 @@ CREATE TABLE activity_logs (
 -- Airbyte will do standard Incremental Sync on `created_at`
 CREATE INDEX idx_logs_sync ON activity_logs(created_at);
 
--- 7. HUMAN INSTRUCTIONS QUEUE
+-- ─── 7. HUMAN INSTRUCTIONS QUEUE ──────────────────────────────────────────────
 -- For human managers to instruct daily tasks, instructions, goals for the day/week, and agents to request human help asynchronously.
 CREATE TABLE human_instructions_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -166,7 +169,7 @@ CREATE INDEX idx_hiq_tenant_status ON human_instructions_queue(tenant_id, status
 CREATE INDEX idx_hiq_target_agent ON human_instructions_queue(tenant_id, target_agent_id, status);
 CREATE INDEX idx_hiq_expires ON human_instructions_queue(expires_at);
 
--- 8. AGENT INTER-COMMUNICATIONS QUEUE (Internal Messaging)
+-- ─── 8. AGENT INTER-COMMUNICATIONS QUEUE (Internal Messaging) ─────────────────
 -- For multi-agent coordination only; no external side effects.
 CREATE TABLE agent_intercom_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -197,15 +200,15 @@ CREATE INDEX idx_aiq_recipient ON agent_intercom_queue(tenant_id, to_agent_id, s
 CREATE INDEX idx_aiq_channel ON agent_intercom_queue(tenant_id, channel, created_at DESC);
 CREATE INDEX idx_aiq_expires ON agent_intercom_queue(expires_at);
 
--- 9. TENANT KB CHUNKS (Vector Store)
+-- ─── 9. TENANT KB CHUNKS (Vector Store) ───────────────────────────────────────
 -- Stores company knowledge per tenant. If `vector` is unavailable in local
 -- dev, we keep the same table contract with a JSONB embedding fallback.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
-       -- Use EXECUTE because it defers the SQL validation to run-time rather than compile time
-       -- If pg_vector is absent, the compile-time validation would fail due the presence of vector() column,
-       -- So, this IF statement would never execute. We don't want that.
+       -- Use EXECUTE because it defers the SQL validation to run-time rather than compile time.
+       -- If pg_vector is absent, the compile-time validation would fail due to the presence of vector() column,
+       -- so this IF statement would never execute. We don't want that.
         EXECUTE $vector_table$
             CREATE TABLE tenant_kb_chunks (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -252,7 +255,7 @@ BEGIN
     END IF;
 END $$;
 
--- 10. SEED DATA (remove later)
+-- ─── 10. SEED DATA (remove later) ─────────────────────────────────────────────
 INSERT INTO tenants (id, name, config, enabled) VALUES
 ('acme_corp', 'Acme Corp', '{"region": "us-east-1", "plan": "enterprise"}'::jsonb, TRUE),
 ('start_up_inc', 'StartUp Inc', '{"region": "us-west-2", "plan": "starter"}'::jsonb, TRUE);
