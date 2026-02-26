@@ -30,7 +30,7 @@ def _resolve_path(path: str) -> pathlib.Path:
     """Resolve a path from CWD first, then monorepo root.
 
     The CLI is often executed from `services/ai-suite`, while defaults like
-    `db/init_agents_db.sql` and `data/...` are rooted at the repo top level.
+    `db/schema.sql` and `data/...` are rooted at the repo top level.
     """
 
     candidate = pathlib.Path(path)
@@ -71,11 +71,19 @@ def seed_database(
     sql_path: str,
     tenant_id: str,
     kb_markdown_path: str,
+    admin_db_url: str | None,
     database_url: str | None,
     psql_path: str = "psql",
 ) -> None:
-    """Reset the dev DB and seed a tenant + brand kit KB chunk."""
+    """Reset the dev DB schema and seed a tenant + brand kit KB chunk.
 
+    `admin_db_url` (superuser / gauss) is used for the psql DDL pass — dropping
+    and recreating tables requires table ownership. `database_url` (app user /
+    minkops) is used for the subsequent psycopg2 seeding inserts.
+    """
+
+    if not admin_db_url:
+        raise RuntimeError("ADMIN_DB_URL is required for seeding (DDL operations require superuser access).")
     if not database_url:
         raise RuntimeError("DATABASE_URL/AGENTS_DB_URL is required for seeding.")
 
@@ -85,7 +93,7 @@ def seed_database(
 
     logger.warning("About to DROP and recreate all tables in `minkops_app`. This is destructive.")
 
-    cmd = [psql_path, database_url, "-v", "ON_ERROR_STOP=1", "-f", str(sql_file)]
+    cmd = [psql_path, admin_db_url, "-v", "ON_ERROR_STOP=1", "-f", str(sql_file)]
     logger.info("Running: %s", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True)

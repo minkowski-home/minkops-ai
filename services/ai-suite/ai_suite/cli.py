@@ -127,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             sql_path=args.sql_path,
             tenant_id=args.tenant_id,
             kb_markdown_path=args.kb_path,
+            admin_db_url=settings.admin_db_url,
             database_url=settings.database_url,
             psql_path=settings.psql_path,
         )
