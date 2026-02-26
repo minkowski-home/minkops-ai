@@ -2,6 +2,47 @@
 
 Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. A typical customer can "hire" any set of agents, which work together (fully-intercommunicating and accessing company knowledge as real human employees would) perfoming actual job duties - each agent tends to replace one real human employee with disjoint skills. Each fleet of agents (for an organization) runs continuously 24x7 instead of one-time jobs. 
 
+### Test one run (Updated 2026-02-26)
+
+**Prerequisites:** copy `services/ai-suite/.env.example` to `services/ai-suite/.env` and fill in `ADMIN_DB_URL`, `DATABASE_URL`, `MINKOPS_DB_PASSWORD`, and `PSQL_PATH` for your machine.
+
+**Step 1 — Bootstrap** *(first time only, or after a fresh Postgres install)*
+
+Creates the `minkops` app role, the `minkops_app` database if it doesn't exist, installs extensions, and sets default privileges. The password is passed at invocation time — never hardcoded. Safe to re-run.
+
+```bash
+psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/bootstrap.sql
+```
+
+> If `psql` is not on your PATH, use the full binary path from `PSQL_PATH` in your `.env`.
+
+**Step 2 — Seed the schema**
+
+Drops all tables and recreates them. Run from the repo root or `services/ai-suite`.
+
+```bash
+cd services/ai-suite
+seed-db
+```
+
+**Step 3 — Run an agent**
+
+```bash
+run-imel --email "Hi, I placed an order last week and haven't received a confirmation. Can you help?"
+```
+
+Or with the LLM:
+
+```bash
+run-imel --use-llm --email "Hi, I placed an order last week and haven't received a confirmation. Can you help?"
+```
+
+**What to watch for:**
+
+- Step 1 → `NOTICE: Role minkops created.` (or "already exists" on repeat runs)
+- Step 2 → `psql` prints all `CREATE TABLE` / `CREATE INDEX` lines cleanly, then Python logs `Seed complete for tenant_id=tenant_001`
+- Step 3 auth error → bootstrap hasn't run yet, or `MINKOPS_DB_PASSWORD` doesn't match the password in `DATABASE_URL` — fix `.env` and re-run Step 1
+
 **Important**
 
 Initially, the graphs will be slightly more deterministic to ensure predictability and easier debugging. There will be more interrupts and agents will wait for human feedback before taking a final action. The database, DWH and systems must be designed in a way to use this human interaction data to train agents using RLHF to take decisions and learn from mistakes, leading to fully autonomous agents.

@@ -1,9 +1,11 @@
 -- db/bootstrap.sql
 --
--- One-time cluster-level setup. Run as a superuser (e.g., OS user `gauss`):
+-- One-time cluster-level setup. Run as a superuser against the maintenance database,
+-- passing the minkops app-user password via psql variable substitution:
 --
---   psql postgres -f db/bootstrap.sql
+--   psql postgres -v minkops_password=YOUR_PASSWORD -f db/bootstrap.sql
 --
+-- The password must match DATABASE_URL in .env (e.g. MINKOPS_DB_PASSWORD there).
 -- This script is idempotent and safe to re-run.
 -- After running this once, use `seed-db` (schema.sql) for all subsequent resets.
 
@@ -13,7 +15,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'minkops') THEN
-        CREATE ROLE minkops LOGIN PASSWORD 'changeme_in_prod';
+        CREATE ROLE minkops LOGIN PASSWORD :'minkops_password';
         RAISE NOTICE 'Role minkops created.';
     ELSE
         RAISE NOTICE 'Role minkops already exists — skipping creation.';
