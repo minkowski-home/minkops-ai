@@ -1,10 +1,11 @@
 -- Additional analytics-heavy practice dataset for Minkops.
 -- Safe usage pattern:
---   1) Run db/init_agents_db.sql first.
+--   1) Run db/bootstrap.sql + seed-db (schema.sql) first.
 --   2) Run this file to add advanced SQL practice tables + data.
 --
--- This script does NOT alter existing tables or db/init_agents_db.sql.
+-- This script does NOT alter existing tables or db/schema.sql.
 -- It only creates new tables and inserts synthetic, coherent metrics data.
+-- It is supposed to be removed later and is not the part of the database design.
 
 BEGIN;
 
@@ -99,7 +100,7 @@ prepared AS (
         (
             run_date::timestamptz
             + make_interval(
-                hours => ((slot * 2 + tenant_ord) % 24),
+                hours => ((slot * 2 + tenant_ord) % 24)::int,
                 mins => (h_a % 60)::int
             )
         ) AS run_started_at,
@@ -525,7 +526,8 @@ SELECT
             WHEN (pr.h1 % 100) < 70 THEN 'medium'
             ELSE 'high'
         END
-    ) AS metadata;
+    ) AS metadata
+FROM picked_run pr;
 
 -- 4) Tenant daily economics table (row grain: tenant + day aggregate)
 CREATE TABLE analytics_tenant_daily_economics (

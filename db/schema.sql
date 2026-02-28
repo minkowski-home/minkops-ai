@@ -103,6 +103,8 @@ CREATE TABLE event_outbox (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     run_id UUID REFERENCES runs(id),
     tenant_id TEXT NOT NULL,
+    -- Notice that event_type is not a check constrained value, but a free-form text.
+    -- This is for extensibility - everytime a new capability gets built, a new event_types get registered
     event_type TEXT NOT NULL,                  -- e.g. "send_email", "sync_crm"
     payload JSONB NOT NULL,
     idempotency_key TEXT,                      -- Optional dedupe key per tenant/event
@@ -139,35 +141,105 @@ CREATE TABLE activity_logs (
 CREATE INDEX idx_logs_sync ON activity_logs(created_at);
 
 -- ─── 7. HUMAN INSTRUCTIONS QUEUE ──────────────────────────────────────────────
--- For human managers to instruct daily tasks, instructions, goals for the day/week, and agents to request human help asynchronously.
+-- Pull-based work queue for human→agent task delegation (human instructs, agent executes).
+-- Agent→human interrupts are intentionally kept in agent_intercom_queue
+-- (kind='question'|'signal', channel='human_interrupts') to preserve distinct
+-- semantics: who consumes, SLA model, and ack contract differ between the two lanes.
 CREATE TABLE human_instructions_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id TEXT NOT NULL REFERENCES tenants(id),
-    run_id UUID REFERENCES runs(id),
-    author_id TEXT NOT NULL,                  -- Human manager identifier (email/handle)
-    target_agent_id TEXT,                     -- Optional specific agent target (e.g. "imel")
-    target_role TEXT,                         -- Optional group target (e.g. "support")
+
+    -- last run spawned for this instruction; renamed from run_id because retries
+    -- can spawn multiple runs — this always points to the most recent one.
+    last_run_id UUID REFERENCES runs(id),
+
+    author_id TEXT NOT NULL,                        -- Human manager identifier (email/handle)
+
+    -- Routing: "target" = human intent, "assigned" = planner/runtime decision.
+    -- Keeping them separate supports role-based routing, load balancing, and
+    -- reassignment without overwriting the original human intent.
+    target_agent_id TEXT,                           -- Preferred agent (e.g. "imel")
+    target_role TEXT,                               -- Preferred role group (e.g. "support")
+    assigned_agent_id TEXT,                         -- Resolved agent that will execute
+    assigned_by TEXT,                               -- Who made the assignment (planner agent id or "system")
+    assigned_at TIMESTAMP WITH TIME ZONE,
+
+    -- Content
     instruction TEXT NOT NULL,
     payload JSONB DEFAULT '{}'::jsonb,
+
+    -- Scheduling / priority
     priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
-    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
-        'queued', 'acknowledged', 'in_progress', 'completed', 'blocked', 'dismissed', 'expired'
-    )),
+    available_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- earliest claimable time; used for backoff scheduling
     due_at TIMESTAMP WITH TIME ZONE,
     expires_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() + INTERVAL '2 days'),
+
+    -- Status machine:
+    --   claimable   → queued
+    --   claimed     → acknowledged  (lease acquired)
+    --   running     → in_progress
+    --   success     → completed     (terminal)
+    --   non-success → dismissed, expired, dead  (terminal)
+    --   retryable   → failed        (non-terminal; re-enters queued after backoff)
+    --   waiting     → blocked       (non-terminal; awaiting human input, not auto-retried)
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
+        'queued', 'acknowledged', 'in_progress', 'completed',
+        'failed', 'dead', 'blocked', 'dismissed', 'expired'
+    )),
+
+    -- Retry / backoff (mirrors event_outbox contract for consistency)
+    attempts INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 3,            -- intentionally lower than event_outbox (3 vs 10):
+                                                    -- human-authored tasks should surface failures quickly
+    last_error TEXT,
+
+    -- Leasing: standard FOR UPDATE SKIP LOCKED pattern for safe concurrent workers.
+    -- If a worker dies mid-run, another worker can reclaim once lease_expires_at passes.
+    locked_at TIMESTAMP WITH TIME ZONE,
+    locked_by TEXT,                                 -- worker identity, e.g. "ai-suite:hostname:pid"
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+
+    -- Lifecycle timestamps
     acknowledged_at TIMESTAMP WITH TIME ZONE,
     acknowledged_by TEXT,
     completed_at TIMESTAMP WITH TIME ZONE,
     completed_by TEXT,
-    agent_response TEXT,
-    human_feedback TEXT,                      -- Capture human feedback for RLHF training data
+
+    -- Results
+    agent_response TEXT,                            -- human-readable summary for UI display
+    result_payload JSONB NOT NULL DEFAULT '{}'::jsonb, -- structured output for dashboard and downstream automation
+
+    -- RLHF training data
+    human_feedback TEXT,
     feedback_score INT CHECK (feedback_score BETWEEN 1 AND 5),
+
+    -- Idempotency: prevents duplicate agendas from UI retries or integration double-submits
+    idempotency_key TEXT,
+
+    -- Audit
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-CREATE INDEX idx_hiq_tenant_status ON human_instructions_queue(tenant_id, status, created_at DESC);
-CREATE INDEX idx_hiq_target_agent ON human_instructions_queue(tenant_id, target_agent_id, status);
+
+-- Primary claim query: next claimable work for a tenant, ordered by priority then age
+CREATE INDEX idx_hiq_claim ON human_instructions_queue(tenant_id, status, available_at, created_at DESC);
+
+-- Targeted claim: worker looks for explicitly assigned work first
+CREATE INDEX idx_hiq_assigned ON human_instructions_queue(tenant_id, assigned_agent_id, status, available_at);
+
+-- Targeted claim: fallback routing via original human intent
+CREATE INDEX idx_hiq_target_agent ON human_instructions_queue(tenant_id, target_agent_id, status, available_at);
+
+-- Lease expiry sweep: reclaim instructions whose worker died
+CREATE INDEX idx_hiq_lease_expires ON human_instructions_queue(lease_expires_at)
+WHERE lease_expires_at IS NOT NULL;
+
+-- Expiry sweep: mark overdue instructions expired
 CREATE INDEX idx_hiq_expires ON human_instructions_queue(expires_at);
+
+-- Idempotency enforcement
+CREATE UNIQUE INDEX idx_hiq_idempotency ON human_instructions_queue(tenant_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
 
 -- ─── 8. AGENT INTER-COMMUNICATIONS QUEUE (Internal Messaging) ─────────────────
 -- For multi-agent coordination only; no external side effects.
