@@ -327,7 +327,30 @@ BEGIN
     END IF;
 END $$;
 
--- ─── 10. SEED DATA (remove later) ─────────────────────────────────────────────
+-- 11. Users table for login management
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (tenant_id, email)  -- unique email per tenant, not globally
+);
+
+-- 12. Refresh Token table for JWT
+CREATE TABLE refresh_tokens (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  TEXT NOT NULL UNIQUE,     -- store hash of the token, not the token itself
+    expires_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked     BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- ─── SEED DATA (remove later) ─────────────────────────────────────────────
 INSERT INTO tenants (id, name, config, enabled) VALUES
 ('acme_corp', 'Acme Corp', '{"region": "us-east-1", "plan": "enterprise"}'::jsonb, TRUE),
 ('start_up_inc', 'StartUp Inc', '{"region": "us-west-2", "plan": "starter"}'::jsonb, TRUE);
