@@ -9,4 +9,5 @@ data/
 .vscode/
 .idea/
 **/*/__pycache__
+**/*/.venv*
 .claude/
