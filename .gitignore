@@ -11,3 +11,4 @@ data/
 **/*/__pycache__
 **/*/.venv*
 .claude/
+.de-practice-tasks.md
