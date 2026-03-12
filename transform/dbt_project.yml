@@ -37,4 +37,4 @@ models:
     silver:
       +materialized: view
     gold:
-      +materialized: view
+      +materialized: table
