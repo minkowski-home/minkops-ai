@@ -1,0 +1,305 @@
+/**
+ * Minkops Brand Design Tokens
+ * ============================================================
+ * Central source of truth for all design tokens across every app
+ * in the monorepo. Editing variables here propagates changes to
+ * apps/corporate-website, apps/client-app, and any future app.
+ *
+ * Usage:
+ *   In each app's index.css: @import "@minkops/brand/tokens.css";
+ *   Apply a theme via the `data-theme` attribute on <html>:
+ *     <html data-theme="light"> | "dark" | "minkowski"
+ *
+ * Token namespacing:
+ *   --color-*        Color primitives and semantic aliases
+ *   --glass-*        Glassmorphism surface values
+ *   --font-*         Typeface stacks
+ *   --fw-*           Font weight scale
+ *   --radius-*       Border radius scale
+ *   --shadow-*       Box shadow scale
+ *   --transition-*   Animation timing
+ * ============================================================
+ */
+
+/* ============================================================
+ * LIGHT THEME (default)
+ * Clean, glassy, luminous. Airy neutrals + neon accents.
+ * ============================================================ */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* --- Backgrounds --- */
+  --color-bg: #f8f9fa;
+  --color-bg-offset: #f0f1f3;       /* slightly recessed surfaces */
+  --color-surface: rgba(255, 255, 255, 0.7);
+  --color-surface-raised: rgba(255, 255, 255, 0.92);
+  --color-surface-border: rgba(0, 0, 0, 0.06);
+
+  /* --- Typography --- */
+  --color-text: #1a1a1a;
+  --color-text-muted: #666666;
+  --color-text-subtle: #999999;
+  --color-ink: #111111;
+
+  /* --- Brand accents --- */
+  --color-primary: #ff0080;          /* hot pink — main brand glow */
+  --color-primary-dim: rgba(255, 0, 128, 0.15);
+  --color-primary-hover: #e6006e;
+  --color-secondary: #00bfff;        /* electric blue */
+  --color-secondary-dim: rgba(0, 191, 255, 0.15);
+  --color-secondary-hover: #00a8e0;
+
+  /* --- Semantic accents --- */
+  --color-accent-purple: #7000ff;
+  --color-accent-gold: #ffd700;
+  --color-accent-orange: #ff4500;
+
+  /* --- CTA --- */
+  --color-cta: #000000;
+  --color-cta-text: #ffffff;
+  --color-cta-hover: #1a1a1a;
+
+  /* --- Utility fills --- */
+  --color-fill-soft: #eeeeee;
+  --color-fill-subtle: #f3f3f3;
+
+  /* --- Semantic status --- */
+  --color-success: #22c55e;
+  --color-success-dim: rgba(34, 197, 94, 0.12);
+  --color-warning: #f59e0b;
+  --color-warning-dim: rgba(245, 158, 11, 0.12);
+  --color-danger: #ef4444;
+  --color-danger-dim: rgba(239, 68, 68, 0.12);
+  --color-info: #3b82f6;
+  --color-info-dim: rgba(59, 130, 246, 0.12);
+
+  /* --- Glassmorphism --- */
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-bg-heavy: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-blur: 12px;
+  --glass-blur-heavy: 24px;
+
+  /* --- Sidebar / navigation --- */
+  --color-sidebar-bg: rgba(255, 255, 255, 0.55);
+  --color-sidebar-border: rgba(0, 0, 0, 0.06);
+  --color-sidebar-item-hover: rgba(0, 0, 0, 0.04);
+  --color-sidebar-item-active: rgba(255, 0, 128, 0.08);
+  --color-sidebar-item-active-text: #ff0080;
+  --color-sidebar-item-active-icon: #ff0080;
+
+  /* --- Atmospheric gradients (decorative orbs) --- */
+  --gradient-orb-primary: radial-gradient(
+    circle,
+    rgba(255, 0, 128, 0.2) 0%,
+    transparent 70%
+  );
+  --gradient-orb-secondary: radial-gradient(
+    circle,
+    rgba(0, 191, 255, 0.2) 0%,
+    transparent 70%
+  );
+}
+
+/* ============================================================
+ * DARK THEME
+ * Same pink/blue brand palette on deep dark backgrounds.
+ * ============================================================ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0b0b12;
+  --color-bg-offset: #0f0f18;
+  --color-surface: rgba(22, 22, 36, 0.78);
+  --color-surface-raised: rgba(28, 28, 46, 0.92);
+  --color-surface-border: rgba(255, 255, 255, 0.07);
+
+  --color-text: #e8e8f0;
+  --color-text-muted: #8888aa;
+  --color-text-subtle: #55556a;
+  --color-ink: #f0f0f8;
+
+  --color-primary: #ff2090;
+  --color-primary-dim: rgba(255, 32, 144, 0.18);
+  --color-primary-hover: #ff4da6;
+  --color-secondary: #00ccff;
+  --color-secondary-dim: rgba(0, 204, 255, 0.15);
+  --color-secondary-hover: #33d6ff;
+
+  --color-accent-purple: #9955ff;
+  --color-accent-gold: #ffd700;
+  --color-accent-orange: #ff6633;
+
+  --color-cta: #ff2090;
+  --color-cta-text: #ffffff;
+  --color-cta-hover: #ff4da6;
+
+  --color-fill-soft: #1a1a2e;
+  --color-fill-subtle: #13131f;
+
+  --color-success: #34d86b;
+  --color-success-dim: rgba(52, 216, 107, 0.14);
+  --color-warning: #fbbf24;
+  --color-warning-dim: rgba(251, 191, 36, 0.14);
+  --color-danger: #f87171;
+  --color-danger-dim: rgba(248, 113, 113, 0.14);
+  --color-info: #60a5fa;
+  --color-info-dim: rgba(96, 165, 250, 0.14);
+
+  --glass-bg: rgba(18, 18, 32, 0.72);
+  --glass-bg-heavy: rgba(22, 22, 40, 0.92);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-highlight: rgba(255, 255, 255, 0.04);
+  --glass-blur: 12px;
+  --glass-blur-heavy: 24px;
+
+  --color-sidebar-bg: rgba(12, 12, 22, 0.82);
+  --color-sidebar-border: rgba(255, 255, 255, 0.06);
+  --color-sidebar-item-hover: rgba(255, 255, 255, 0.05);
+  --color-sidebar-item-active: rgba(255, 32, 144, 0.16);
+  --color-sidebar-item-active-text: #ff2090;
+  --color-sidebar-item-active-icon: #ff2090;
+
+  --gradient-orb-primary: radial-gradient(
+    circle,
+    rgba(255, 32, 144, 0.25) 0%,
+    transparent 70%
+  );
+  --gradient-orb-secondary: radial-gradient(
+    circle,
+    rgba(0, 204, 255, 0.22) 0%,
+    transparent 70%
+  );
+}
+
+/* ============================================================
+ * MINKOWSKI THEME
+ * Warm solarized palette. Elegant, readable, minimal burgundy
+ * accents used sparingly — not as primary brand color.
+ * Named after Hermann Minkowski (founder's reference).
+ * ============================================================ */
+[data-theme="minkowski"] {
+  color-scheme: light;
+
+  /* Solarized base palette */
+  --color-bg: #fdf6e3;              /* base3  — warm off-white */
+  --color-bg-offset: #eee8d5;       /* base2  — parchment */
+  --color-surface: rgba(253, 246, 227, 0.85);
+  --color-surface-raised: rgba(238, 232, 213, 0.95);
+  --color-surface-border: rgba(147, 161, 161, 0.18);
+
+  --color-text: #657b83;            /* base00 — slate blue-grey */
+  --color-text-muted: #93a1a1;      /* base1  — muted */
+  --color-text-subtle: #839496;     /* base0  — very muted */
+  --color-ink: #002b36;             /* base03 — near-black teal */
+
+  /* Primary = teal (solarized cyan), secondary = orange */
+  --color-primary: #268bd2;         /* solarized blue */
+  --color-primary-dim: rgba(38, 139, 210, 0.12);
+  --color-primary-hover: #1a7abf;
+  --color-secondary: #2aa198;       /* solarized cyan */
+  --color-secondary-dim: rgba(42, 161, 152, 0.12);
+  --color-secondary-hover: #229189;
+
+  /* Burgundy as the sole accent — used sparingly (badges, alerts) */
+  --color-accent-purple: #6c71c4;   /* solarized violet */
+  --color-accent-gold: #b58900;     /* solarized yellow */
+  --color-accent-orange: #cb4b16;   /* solarized orange */
+
+  /* Burgundy CTA — the signature accent */
+  --color-cta: #722f37;
+  --color-cta-text: #fdf6e3;
+  --color-cta-hover: #8b3a43;
+
+  --color-fill-soft: #eee8d5;
+  --color-fill-subtle: #f5f0e2;
+
+  --color-success: #859900;         /* solarized green */
+  --color-success-dim: rgba(133, 153, 0, 0.12);
+  --color-warning: #b58900;
+  --color-warning-dim: rgba(181, 137, 0, 0.12);
+  --color-danger: #dc322f;          /* solarized red */
+  --color-danger-dim: rgba(220, 50, 47, 0.12);
+  --color-info: #268bd2;
+  --color-info-dim: rgba(38, 139, 210, 0.12);
+
+  --glass-bg: rgba(238, 232, 213, 0.7);
+  --glass-bg-heavy: rgba(253, 246, 227, 0.92);
+  --glass-border: rgba(147, 161, 161, 0.2);
+  --glass-highlight: rgba(253, 246, 227, 0.9);
+  --glass-blur: 12px;
+  --glass-blur-heavy: 24px;
+
+  --color-sidebar-bg: rgba(238, 232, 213, 0.65);
+  --color-sidebar-border: rgba(147, 161, 161, 0.2);
+  --color-sidebar-item-hover: rgba(147, 161, 161, 0.12);
+  --color-sidebar-item-active: rgba(38, 139, 210, 0.1);
+  --color-sidebar-item-active-text: #268bd2;
+  --color-sidebar-item-active-icon: #268bd2;
+
+  --gradient-orb-primary: radial-gradient(
+    circle,
+    rgba(114, 47, 55, 0.12) 0%,
+    transparent 70%
+  );
+  --gradient-orb-secondary: radial-gradient(
+    circle,
+    rgba(38, 139, 210, 0.15) 0%,
+    transparent 70%
+  );
+}
+
+/* ============================================================
+ * THEME-INVARIANT TOKENS
+ * These don't change between themes.
+ * ============================================================ */
+:root {
+  /* --- Typography --- */
+  --font-main:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Apple SD Gothic Neo",
+    "Inter",
+    "Roboto",
+    sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+
+  /* --- Font weight scale --- */
+  --fw-light: 300;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extrabold: 800;
+
+  /* --- Border radius scale --- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-pill: 30px;
+  --radius-full: 9999px;
+
+  /* --- Box shadow scale --- */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-glow-primary: 0 0 20px var(--color-primary-dim);
+  --shadow-glow-secondary: 0 0 20px var(--color-secondary-dim);
+
+  /* --- Animation --- */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.25s ease;
+  --transition-slow: 0.4s ease;
+
+  /* --- Layout --- */
+  --sidebar-width-collapsed: 60px;
+  --sidebar-width-expanded: 240px;
+  --header-height: 56px;
+  --pane-agents-width: 288px;
+  --pane-interrupts-width: 320px;
+}
