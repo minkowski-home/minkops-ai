@@ -32,7 +32,7 @@ export const THEMES: ThemeConfig[] = [
   {
     name: "minkowski",
     label: "Minkowski",
-    description: "Warm solarized, burgundy accents"
+    description: "Warm ivory & parchment, burgundy accents"
   }
 ];
 

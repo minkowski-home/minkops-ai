@@ -8,6 +8,7 @@ import AppShell from "../components/layout/AppShell";
 import AgentPanel from "../components/agents/AgentPanel";
 import TaskPanel from "../components/task/TaskPanel";
 import InterruptPanel from "../components/interrupt/InterruptPanel";
+import ThemeSelector from "../components/theme/ThemeSelector";
 import { MOCK_INTERRUPTS } from "../mock/interrupts";
 
 export default function Dashboard() {
@@ -20,6 +21,7 @@ export default function Dashboard() {
       leftPane={<AgentPanel />}
       centerPane={<TaskPanel />}
       rightPane={<InterruptPanel />}
+      headerRight={<ThemeSelector />}
     />
   );
 }
