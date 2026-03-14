@@ -255,6 +255,9 @@
     rgba(196, 149, 106, 0.2) 0%,
     transparent 70%
   );
+
+  /* Serif chat typeface — signature of the Minkowski premium experience */
+  --font-chat: var(--font-serif);
 }
 
 /* ============================================================
@@ -271,6 +274,14 @@
     "Roboto",
     sans-serif;
   --font-mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  /* Elegant serif for premium/editorial contexts. Loaded in client-app index.html. */
+  --font-serif: "Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  /*
+   * --font-chat is the typeface used in the task chat interface.
+   * Defaults to the system sans-serif; overridden per-theme below.
+   * Components reference this token so theme changes take effect automatically.
+   */
+  --font-chat: var(--font-main);
 
   /* --- Font weight scale --- */
   --fw-light: 300;

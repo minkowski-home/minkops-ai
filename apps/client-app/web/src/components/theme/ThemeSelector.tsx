@@ -91,7 +91,6 @@ export default function ThemeSelector() {
 
               <div className="theme-option-text">
                 <div className="theme-option-name">{t.label}</div>
-                <div className="theme-option-desc">{t.description}</div>
               </div>
 
               <span className="theme-option-check" aria-hidden="true">
