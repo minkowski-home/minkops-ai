@@ -26,6 +26,15 @@
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
+  /*
+   * backdrop-filter creates a new stacking context, which means the header's
+   * children (including the ThemeSelector dropdown) only compete z-index-wise
+   * within that context. Without an explicit z-index here the content grid rows
+   * that follow in the DOM paint on top, burying the dropdown. Setting a positive
+   * z-index hoists the entire header above the content area.
+   */
+  position: relative;
+  z-index: 20;
 }
 
 .app-shell-header-left {
