@@ -1,0 +1,44 @@
+/* Import central brand tokens — edit shared/brand/tokens.css to affect all Minkops apps */
+@import "@minkops/brand/tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-main);
+  background-color: var(--color-bg);
+  /* Theme is applied via data-theme attribute set by ThemeContext */
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  font-family: var(--font-main);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Scrollbar styling — applied globally, respects theme via CSS vars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-border);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-subtle);
+}

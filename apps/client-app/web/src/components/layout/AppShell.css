@@ -1,0 +1,131 @@
+.app-shell {
+  display: grid;
+  /* Sidebar column width is driven by the CSS variable mutated in Sidebar.css */
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 1fr;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+/* The main content area sits to the right of the sidebar */
+.app-shell-main {
+  display: grid;
+  grid-template-rows: var(--header-height) 1fr;
+  overflow: hidden;
+}
+
+/* ---- Top header bar ---- */
+.app-shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.25rem;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+  /*
+   * backdrop-filter creates a new stacking context, which means the header's
+   * children (including the ThemeSelector dropdown) only compete z-index-wise
+   * within that context. Without an explicit z-index here the content grid rows
+   * that follow in the DOM paint on top, burying the dropdown. Setting a positive
+   * z-index hoists the entire header above the content area.
+   */
+  position: relative;
+  z-index: 20;
+}
+
+.app-shell-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-shell-page-title {
+  font-size: 0.95rem;
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+}
+
+.app-shell-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Interrupt badge on bell icon */
+.header-bell-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.header-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: var(--fw-bold);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.header-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.header-icon-btn:hover {
+  background: var(--color-sidebar-item-hover);
+  color: var(--color-text);
+}
+
+/* Tenant chip */
+.header-tenant-chip {
+  font-size: 0.78rem;
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+  white-space: nowrap;
+}
+
+/* ---- Content area: three-pane grid ---- */
+.app-shell-content {
+  display: grid;
+  /* Agents | Chat (flex) | Interrupts */
+  grid-template-columns: var(--pane-agents-width) 1fr var(--pane-interrupts-width);
+  overflow: hidden;
+  height: 100%;
+}
+
+/* Individual panes just need overflow and a border */
+.app-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--color-surface-border);
+}
+.app-pane:last-child {
+  border-right: none;
+}

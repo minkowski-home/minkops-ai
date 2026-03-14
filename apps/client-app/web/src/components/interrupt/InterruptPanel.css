@@ -1,0 +1,247 @@
+.interrupt-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+/* ---- Panel header ---- */
+.interrupt-panel-header {
+  padding: 0.875rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  flex-shrink: 0;
+}
+.interrupt-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.625rem;
+}
+.interrupt-panel-title {
+  font-size: 0.78rem;
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--color-text-subtle);
+  margin: 0;
+}
+
+/* Summary pills */
+.interrupt-summary {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.interrupt-summary-pill {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-weight: var(--fw-semibold);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.interrupt-summary-pill.critical {
+  background: var(--color-danger-dim);
+  color: var(--color-danger);
+}
+.interrupt-summary-pill.high {
+  background: var(--color-warning-dim);
+  color: var(--color-warning);
+}
+.interrupt-summary-pill.medium {
+  background: var(--color-info-dim);
+  color: var(--color-info);
+}
+.interrupt-summary-pill.low {
+  background: var(--color-fill-soft);
+  color: var(--color-text-muted);
+}
+
+/* ---- Scroll body ---- */
+.interrupt-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.625rem 0;
+}
+
+/* Empty state */
+.interrupt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 2rem;
+  gap: 0.5rem;
+}
+.interrupt-empty-headline {
+  font-size: 0.88rem;
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+}
+.interrupt-empty-hint {
+  font-size: 0.78rem;
+  color: var(--color-text-subtle);
+  line-height: 1.5;
+}
+
+/* ---- Interrupt Card ---- */
+.interrupt-card {
+  margin: 0.25rem 0.625rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface-raised);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  cursor: default;
+}
+.interrupt-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+.interrupt-card.acknowledged {
+  opacity: 0.6;
+}
+
+/* Priority left stripe */
+.interrupt-card {
+  position: relative;
+  padding-left: 1rem;
+  overflow: hidden;
+}
+.interrupt-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
+}
+.interrupt-card.priority-critical::before { background: var(--color-danger); }
+.interrupt-card.priority-high::before     { background: var(--color-warning); }
+.interrupt-card.priority-medium::before   { background: var(--color-info); }
+.interrupt-card.priority-low::before      { background: var(--color-text-subtle); }
+
+/* Card top row */
+.interrupt-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.interrupt-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.65rem;
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.interrupt-type-badge.approval   { background: var(--color-primary-dim); color: var(--color-primary); }
+.interrupt-type-badge.escalation { background: var(--color-danger-dim); color: var(--color-danger); }
+.interrupt-type-badge.review     { background: var(--color-info-dim); color: var(--color-info); }
+.interrupt-type-badge.error      { background: var(--color-danger-dim); color: var(--color-danger); }
+
+.interrupt-card-time {
+  font-size: 0.68rem;
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Title + description */
+.interrupt-card-title {
+  font-size: 0.84rem;
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  line-height: 1.35;
+  margin-bottom: 0.3rem;
+}
+.interrupt-card-desc {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  margin-bottom: 0.5rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Agent attribution */
+.interrupt-card-agent {
+  font-size: 0.7rem;
+  color: var(--color-text-subtle);
+  margin-bottom: 0.5rem;
+}
+.interrupt-card-agent strong {
+  color: var(--color-text-muted);
+  font-weight: var(--fw-medium);
+}
+
+/* Suggested action */
+.interrupt-suggested {
+  padding: 0.35rem 0.5rem;
+  background: var(--color-fill-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.73rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  margin-bottom: 0.625rem;
+  border-left: 2px solid var(--color-secondary);
+}
+
+/* Action buttons */
+.interrupt-card-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.interrupt-action-btn {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-surface-border);
+  font-family: var(--font-main);
+  font-size: 0.75rem;
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+}
+.interrupt-action-btn.primary {
+  background: var(--color-primary-dim);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.interrupt-action-btn.primary:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+.interrupt-action-btn.secondary {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+.interrupt-action-btn.secondary:hover {
+  background: var(--color-sidebar-item-hover);
+  color: var(--color-text);
+}
+.interrupt-action-btn.danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-subtle);
+}
+.interrupt-action-btn.danger:hover {
+  color: var(--color-danger);
+}

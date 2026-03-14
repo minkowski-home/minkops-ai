@@ -1,0 +1,163 @@
+.login-root {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Atmospheric orbs — purely decorative */
+.login-root::before,
+.login-root::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.login-root::before {
+  width: 640px;
+  height: 640px;
+  background: var(--gradient-orb-primary);
+  top: -160px;
+  left: -160px;
+  animation: orb-drift 10s ease-in-out infinite alternate;
+}
+.login-root::after {
+  width: 500px;
+  height: 500px;
+  background: var(--gradient-orb-secondary);
+  bottom: -120px;
+  right: -100px;
+  animation: orb-drift 12s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes orb-drift {
+  from { transform: scale(1) translate(0, 0); opacity: 0.8; }
+  to   { transform: scale(1.12) translate(20px, 16px); opacity: 1; }
+}
+
+/* Card */
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 400px;
+  padding: 2.5rem;
+  background: var(--glass-bg-heavy);
+  backdrop-filter: blur(var(--glass-blur-heavy));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Brand mark */
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+.login-brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  box-shadow: 0 0 8px var(--color-primary);
+}
+.login-brand-name {
+  font-size: 1.2rem;
+  font-weight: var(--fw-extrabold);
+  letter-spacing: -0.04em;
+  color: var(--color-ink);
+}
+
+/* Heading */
+.login-heading {
+  font-size: 1.65rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.03em;
+  color: var(--color-text);
+  margin: 0 0 0.35rem;
+}
+.login-subheading {
+  font-size: 0.92rem;
+  color: var(--color-text-muted);
+  margin: 0 0 2rem;
+}
+
+/* Form */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.login-label {
+  font-size: 0.8rem;
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.login-input {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-family: var(--font-main);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.login-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-dim);
+}
+.login-input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+/* Submit button */
+.login-btn {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--color-cta);
+  color: var(--color-cta-text);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-main);
+  font-size: 0.95rem;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+.login-btn:hover:not(:disabled) {
+  background: var(--color-cta-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+.login-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.login-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Footer note */
+.login-footer-note {
+  margin-top: 1.5rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--color-text-subtle);
+}
