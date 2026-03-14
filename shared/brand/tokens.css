@@ -101,6 +101,8 @@
     rgba(0, 191, 255, 0.2) 0%,
     transparent 70%
   );
+
+  --font-chat: var(--font-main);
 }
 
 /* ============================================================
@@ -172,6 +174,8 @@
     rgba(0, 204, 255, 0.22) 0%,
     transparent 70%
   );
+
+  --font-chat: var(--font-main);
 }
 
 /* ============================================================
@@ -278,10 +282,10 @@
   --font-serif: "Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   /*
    * --font-chat is the typeface used in the task chat interface.
-   * Defaults to the system sans-serif; overridden per-theme below.
-   * Components reference this token so theme changes take effect automatically.
+   * Defined in each theme block (not here) so theme-specific overrides
+   * are never silently defeated by cascade ordering.
+   * Light + Dark → var(--font-main)  |  Minkowski → var(--font-serif)
    */
-  --font-chat: var(--font-main);
 
   /* --- Font weight scale --- */
   --fw-light: 300;
