@@ -33,6 +33,7 @@ models:
   minkops_analytics:
     bronze:
       +materialized: view     # Thin wrappers — views keep bronze always current without storage cost
+      +schema: bronze
     silver:
       +materialized: view
     gold:
