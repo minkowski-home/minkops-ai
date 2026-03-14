@@ -20,5 +20,5 @@
       "@minkops/brand/*": ["../../../shared/brand/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../../../shared/brand"]
 }
