@@ -5,12 +5,17 @@
  */
 
 import AppShell from "../components/layout/AppShell";
+import AgentPanel from "../components/agents/AgentPanel";
+import { MOCK_INTERRUPTS } from "../mock/interrupts";
 
 export default function Dashboard() {
+  const pendingInterrupts = MOCK_INTERRUPTS.filter((i) => i.status === "pending").length;
+
   return (
     <AppShell
       pageTitle="Dashboard"
-      interruptCount={0}
+      interruptCount={pendingInterrupts}
+      leftPane={<AgentPanel />}
     />
   );
 }
