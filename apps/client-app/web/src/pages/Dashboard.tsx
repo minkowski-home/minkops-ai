@@ -6,6 +6,7 @@
 
 import AppShell from "../components/layout/AppShell";
 import AgentPanel from "../components/agents/AgentPanel";
+import TaskPanel from "../components/task/TaskPanel";
 import { MOCK_INTERRUPTS } from "../mock/interrupts";
 
 export default function Dashboard() {
@@ -16,6 +17,7 @@ export default function Dashboard() {
       pageTitle="Dashboard"
       interruptCount={pendingInterrupts}
       leftPane={<AgentPanel />}
+      centerPane={<TaskPanel />}
     />
   );
 }
