@@ -1,0 +1,202 @@
+version: 2
+
+sources:
+  - name: minkops_app
+    description: >
+      The Minkops OLTP application database. Every row here was written by the
+      live application. These seven tables represent the complete operational
+      picture of the platform: tenant identity, agent execution, messaging,
+      support cases, audit events, and both directions of the human↔agent work
+      queues.
+    database: minkops_app
+    schema: public
+
+    tables:
+
+      - name: tenants
+        description: >
+          Root of multi-tenant isolation. Every other table in the platform
+          carries a tenant_id that references this table.
+        columns:
+          - name: id
+            description: Slug-style tenant identifier (e.g. "acme_corp").
+            tests:
+              - unique
+              - not_null
+          - name: name
+            description: Human-readable display name.
+          - name: config
+            description: Tenant-specific runtime config (API keys, region, plan tier). JSONB.
+          - name: enabled
+            description: Hard kill-switch; disabled tenants are blocked at the API layer.
+          - name: created_at
+            description: Timestamp when the tenant was provisioned.
+
+      - name: runs
+        description: >
+          A run is a single, atomic unit of agent work triggered by one event
+          (e.g. an inbound email, a scheduled check, a manual instruction).
+          Think of it as a job record — not a long-running process.
+          Status machine: queued → running → completed | failed | sleeping.
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: tenant_id
+            tests:
+              - not_null
+              - relationships:
+                  to: source('minkops_app', 'tenants')
+                  field: id
+          - name: agent_id
+            description: Which agent handled this run (e.g. "imel", "kall").
+          - name: status
+            description: "State machine: queued → running → completed | failed | sleeping."
+          - name: input_payload
+            description: The raw trigger payload that started this run. JSONB.
+          - name: created_at
+          - name: updated_at
+
+      - name: tickets
+        description: >
+          Persisted support cases created by agents or humans from inbound email.
+          Status lifecycle: open → in_progress → resolved → closed.
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: tenant_id
+            tests:
+              - not_null
+          - name: email_id
+            description: Reference to the source email that originated this ticket.
+          - name: ticket_type
+            description: Classification label (e.g. "cancel_order", "complaint").
+          - name: status
+            description: "Lifecycle: open → in_progress → resolved → closed."
+          - name: priority
+          - name: sender_email
+          - name: summary
+            description: Agent-generated one-liner summarising the issue.
+          - name: created_at
+          - name: updated_at
+
+      - name: messages
+        description: >
+          Full conversation history attached to a run. Includes all four roles:
+          user, assistant, system, and tool calls.
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: run_id
+            tests:
+              - not_null
+          - name: tenant_id
+            tests:
+              - not_null
+          - name: role
+            description: "Message author: user | assistant | system | tool."
+          - name: content
+            description: Raw message text. May contain PII — restrict access in silver+.
+          - name: meta
+            description: Arbitrary metadata (model name, token counts, tool names, etc.). JSONB.
+          - name: created_at
+
+      - name: activity_logs
+        description: >
+          Append-only audit log emitted by agents after significant events.
+          Designed for incremental sync to the warehouse via Airbyte on
+          created_at. Intentionally loosely coupled — tenant_id and agent_id
+          are denormalized strings, not enforced FKs, so rows survive
+          tenant/agent lifecycle changes.
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: tenant_id
+            tests:
+              - not_null
+          - name: agent_id
+          - name: run_id
+            description: Optional back-reference to the run that produced this entry.
+          - name: event
+            description: Canonical event name (e.g. "processed_email", "escalated_ticket").
+          - name: summary
+            description: Human-readable one-liner for dashboards and audit UIs.
+          - name: details
+            description: Structured payload with full event context. JSONB.
+          - name: created_at
+
+      - name: human_instructions_queue
+        description: >
+          Pull-based work queue for human→agent task delegation. A human
+          manager posts an instruction; an agent worker claims and executes it.
+          Implements standard lease/retry semantics with priority ordering.
+          Also carries human quality ratings (feedback_score) used as RLHF
+          training signal.
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: tenant_id
+            tests:
+              - not_null
+          - name: last_run_id
+            description: Most recent run spawned for this instruction (retries may spawn multiple).
+          - name: author_id
+            description: Human manager who posted the instruction (email or handle).
+          - name: target_agent_id
+            description: Human's preferred agent (routing hint, not enforced).
+          - name: assigned_agent_id
+            description: Resolved agent after planner routing.
+          - name: instruction
+            description: Free-text task given to the agent.
+          - name: priority
+            description: "low | normal | high | urgent."
+          - name: status
+            description: >
+              Full lifecycle: queued → acknowledged → in_progress → completed
+              | failed | dead | blocked | dismissed | expired.
+          - name: attempts
+          - name: feedback_score
+            description: "1–5 human quality rating for RLHF training data."
+          - name: created_at
+          - name: updated_at
+
+      - name: agent_intercom_queue
+        description: >
+          Internal multi-agent messaging bus. Carries coordination traffic
+          between agents only — no external side effects. Kinds include
+          message, instruction, question, thought, handoff, and signal.
+          The channel='human_interrupts' lane (kind='question'|'signal')
+          is the primary path for agent→human escalation.
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: tenant_id
+            tests:
+              - not_null
+          - name: run_id
+          - name: from_agent_id
+          - name: to_agent_id
+            description: Null implies broadcast within the tenant/channel.
+          - name: channel
+            description: Optional topic/routing key (e.g. "human_interrupts").
+          - name: kind
+            description: "message | instruction | question | thought | handoff | signal."
+          - name: priority
+          - name: status
+            description: "queued → delivered → consumed | archived | failed | expired."
+          - name: message
+          - name: reply_to
+            description: Self-referencing FK for threaded replies.
+          - name: created_at
+          - name: updated_at
