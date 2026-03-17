@@ -23,14 +23,19 @@
   color: var(--color-ink);
 }
 
+.access-agent-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-radius: 28px;
+  padding: 0.45rem 1rem 1rem 0.2rem;
+  scrollbar-gutter: stable;
+}
+
 .access-agent-list {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 0.25rem;
 }
 
 .access-agent-item {
@@ -107,6 +112,10 @@
   .access-agent-card {
     padding: 1.25rem;
     border-radius: 28px;
+  }
+
+  .access-agent-list-scroll {
+    padding: 0.35rem 0.7rem 0.8rem 0.1rem;
   }
 
   .access-agent-item {

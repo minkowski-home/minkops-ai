@@ -116,26 +116,28 @@ export default function AgentRosterCard() {
         <h2 className="access-agent-title">Know your future employees</h2>
       </div>
 
-      <div className="access-agent-list">
-        {AGENT_DIRECTORY.map((agent) => (
-          <article
-            key={agent.name}
-            className="access-agent-item glass-panel"
-            style={{ "--agent-color": agent.color } as CSSProperties}
-          >
-            <span className="access-agent-icon" aria-hidden="true">
-              <AgentRoleIcon kind={agent.illustration} />
-            </span>
+      <div className="access-agent-list-scroll">
+        <div className="access-agent-list">
+          {AGENT_DIRECTORY.map((agent) => (
+            <article
+              key={agent.name}
+              className="access-agent-item glass-panel"
+              style={{ "--agent-color": agent.color } as CSSProperties}
+            >
+              <span className="access-agent-icon" aria-hidden="true">
+                <AgentRoleIcon kind={agent.illustration} />
+              </span>
 
-            <div className="access-agent-heading">
-              <strong>{agent.name}</strong>
-            </div>
+              <div className="access-agent-heading">
+                <strong>{agent.name}</strong>
+              </div>
 
-            <div className="access-agent-roleline">
-              <span>{agent.tool}</span>
-            </div>
-          </article>
-        ))}
+              <div className="access-agent-roleline">
+                <span>{agent.tool}</span>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </aside>
   );
