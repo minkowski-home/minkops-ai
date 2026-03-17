@@ -24,12 +24,11 @@
 }
 
 .access-agent-list {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 0.8rem;
   flex: 1;
   min-height: 0;
-  max-height: 100%;
   overflow-y: auto;
   padding-right: 0.25rem;
 }
@@ -39,10 +38,12 @@
   grid-template-columns: 2.15rem minmax(0, 1fr);
   column-gap: 0.75rem;
   row-gap: 0.22rem;
+  min-height: 5.35rem;
   padding: 0.95rem 1rem 0.95rem 1.15rem;
   border-radius: 22px;
   position: relative;
   overflow: hidden;
+  flex: 0 0 auto;
 }
 
 .access-agent-item::before {
@@ -64,7 +65,7 @@
   align-items: center;
   justify-content: center;
   width: 2rem;
-  height: 2.35rem;
+  height: 2.9rem;
   color: var(--agent-color);
   flex-shrink: 0;
   grid-row: 1 / span 2;
@@ -89,6 +90,7 @@
 
 .access-agent-roleline {
   min-width: 0;
+  align-self: start;
 }
 
 .access-agent-roleline span {
@@ -109,6 +111,7 @@
 
   .access-agent-item {
     grid-template-columns: 1.95rem minmax(0, 1fr);
+    min-height: 5rem;
   }
 
   .access-agent-roleline {
