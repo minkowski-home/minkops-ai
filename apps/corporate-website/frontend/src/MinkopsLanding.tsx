@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import PageShell from "./components/PageShell";
 import SiteFooter from "./components/SiteFooter";
 import SiteNav from "./components/SiteNav";
+import AgentRosterCard from "./components/AgentRosterCard";
 import InterestForm from "./components/InterestForm";
 import AgentDemoSection from "./components/AgentDemoSection";
 
@@ -36,15 +37,27 @@ export default function MinkopsLanding() {
         </section>
 
         <section id="access" className="access-section">
-          <motion.div
-            className="access-form-wrap"
-            initial={{ opacity: 0, scale: 0.95 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-          >
-            <InterestForm />
-          </motion.div>
+          <div className="access-shell">
+            <motion.div
+              className="access-roster-wrap"
+              initial={{ opacity: 0, y: 24 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8 }}
+            >
+              <AgentRosterCard />
+            </motion.div>
+
+            <motion.div
+              className="access-form-wrap"
+              initial={{ opacity: 0, scale: 0.95 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8 }}
+            >
+              <InterestForm />
+            </motion.div>
+          </div>
         </section>
 
         <section className="demo-section-shell">

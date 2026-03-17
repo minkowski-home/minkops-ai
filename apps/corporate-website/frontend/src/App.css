@@ -457,13 +457,9 @@
 
 .access-shell {
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(360px, 0.88fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
   gap: 1rem;
   align-items: start;
-}
-
-.access-copy {
-  padding: 2rem 0.5rem 0;
 }
 
 .section-title {
@@ -499,6 +495,12 @@
 }
 
 .access-form-wrap {
+  width: min(100%, 35rem);
+  min-width: 0;
+  justify-self: end;
+}
+
+.access-roster-wrap {
   min-width: 0;
 }
 
@@ -935,6 +937,11 @@
   .access-shell,
   .footer-content {
     grid-template-columns: 1fr;
+  }
+
+  .access-form-wrap {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .hero-metrics {

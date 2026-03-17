@@ -1,0 +1,122 @@
+.access-agent-card {
+  width: 100%;
+  padding: 1.6rem;
+  border-radius: 32px;
+}
+
+.access-agent-card-header {
+  margin-bottom: 1.25rem;
+}
+
+.access-agent-kicker {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.access-agent-title {
+  margin: 0;
+  max-width: 14ch;
+  font-size: clamp(2rem, 3.8vw, 3.1rem);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  color: var(--color-ink);
+}
+
+.access-agent-copy {
+  margin: 0.9rem 0 0;
+  max-width: 36rem;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--color-text-muted);
+}
+
+.access-agent-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.access-agent-item {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+  padding: 1rem;
+  border-radius: 22px;
+}
+
+.access-agent-icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.08)),
+    color-mix(in srgb, var(--glass-bg-heavy) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass-border) 56%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 26%, transparent),
+    0 14px 28px rgba(0, 0, 0, 0.08);
+  color: var(--color-primary);
+}
+
+.access-agent-icon svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.access-agent-body {
+  min-width: 0;
+}
+
+.access-agent-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.3rem;
+}
+
+.access-agent-meta strong {
+  font-size: 0.98rem;
+  color: var(--color-ink);
+  letter-spacing: -0.03em;
+}
+
+.access-agent-meta span {
+  font-size: 0.7rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.access-agent-body p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .access-agent-card {
+    padding: 1.25rem;
+    border-radius: 28px;
+  }
+
+  .access-agent-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+}
