@@ -14,7 +14,7 @@
   gap: 0.875rem;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .app-shell-header {
@@ -109,7 +109,7 @@
   grid-template-columns: minmax(240px, var(--pane-agents-width)) minmax(0, 1fr) minmax(260px, var(--pane-interrupts-width));
   gap: 0.875rem;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .app-pane {
