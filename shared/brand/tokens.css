@@ -8,7 +8,7 @@
  * Usage:
  *   In each app's index.css: @import "@minkops/brand/tokens.css";
  *   Apply a theme via the `data-theme` attribute on <html>:
- *     <html data-theme="light"> | "dark" | "minkowski"
+ *     <html data-theme="light"> | "dark" | "paper"
  *
  * Token namespacing:
  *   --color-*        Color primitives and semantic aliases
@@ -23,82 +23,100 @@
 
 /* ============================================================
  * LIGHT THEME (default)
- * Clean, glassy, luminous. Airy neutrals + neon accents.
+ * Ice-blue daylight with forged orange accents.
  * ============================================================ */
 :root,
 [data-theme="light"] {
   color-scheme: light;
 
   /* --- Backgrounds --- */
-  --color-bg: #f8f9fa;
-  --color-bg-offset: #f0f1f3;       /* slightly recessed surfaces */
-  --color-surface: rgba(255, 255, 255, 0.7);
-  --color-surface-raised: rgba(255, 255, 255, 0.92);
-  --color-surface-border: rgba(0, 0, 0, 0.06);
+  --color-bg: #eef4f8;
+  --color-bg-rgb: 238 244 248;
+  --color-bg-offset: #dbe6ef;
+  --color-bg-offset-rgb: 219 230 239;
+  --color-surface: rgba(248, 251, 253, 0.58);
+  --color-surface-rgb: 248 251 253;
+  --color-surface-raised: rgba(252, 253, 255, 0.76);
+  --color-surface-raised-rgb: 252 253 255;
+  --color-surface-border: rgba(26, 39, 48, 0.1);
+  --color-surface-border-rgb: 26 39 48;
 
   /* --- Typography --- */
-  --color-text: #1a1a1a;
-  --color-text-muted: #666666;
-  --color-text-subtle: #999999;
-  --color-ink: #111111;
+  --color-text: #1a2730;
+  --color-text-rgb: 26 39 48;
+  --color-text-muted: #45586c;
+  --color-text-muted-rgb: 69 88 108;
+  --color-text-subtle: #6f8192;
+  --color-text-subtle-rgb: 111 129 146;
+  --color-ink: #10171d;
 
   /* --- Brand accents --- */
-  --color-primary: #ff0080;          /* hot pink — main brand glow */
-  --color-primary-dim: rgba(255, 0, 128, 0.15);
-  --color-primary-hover: #e6006e;
-  --color-secondary: #00bfff;        /* electric blue */
-  --color-secondary-dim: rgba(0, 191, 255, 0.15);
-  --color-secondary-hover: #00a8e0;
+  --color-primary: #e95d2c;
+  --color-primary-rgb: 233 93 44;
+  --color-primary-dim: rgba(233, 93, 44, 0.16);
+  --color-primary-hover: #a63e1b;
+  --color-secondary: #b0cee2;
+  --color-secondary-rgb: 176 206 226;
+  --color-secondary-dim: rgba(176, 206, 226, 0.24);
+  --color-secondary-hover: #8cb0c8;
 
   /* --- Semantic accents --- */
-  --color-accent-purple: #7000ff;
-  --color-accent-gold: #ffd700;
-  --color-accent-orange: #ff4500;
+  --color-accent-purple: #424048;
+  --color-accent-gold: #b0cee2;
+  --color-accent-orange: #a63e1b;
 
   /* --- CTA --- */
-  --color-cta: #000000;
+  --color-cta: #e95d2c;
+  --color-cta-rgb: 233 93 44;
   --color-cta-text: #ffffff;
-  --color-cta-hover: #1a1a1a;
+  --color-cta-text-rgb: 255 255 255;
+  --color-cta-hover: #a63e1b;
 
   /* --- Utility fills --- */
-  --color-fill-soft: #eeeeee;
-  --color-fill-subtle: #f3f3f3;
+  --color-fill-soft: #d5dfe8;
+  --color-fill-soft-rgb: 213 223 232;
+  --color-fill-subtle: #edf3f7;
+  --color-fill-subtle-rgb: 237 243 247;
 
   /* --- Semantic status --- */
   --color-success: #22c55e;
+  --color-success-rgb: 34 197 94;
   --color-success-dim: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
+  --color-warning-rgb: 245 158 11;
   --color-warning-dim: rgba(245, 158, 11, 0.12);
   --color-danger: #ef4444;
+  --color-danger-rgb: 239 68 68;
   --color-danger-dim: rgba(239, 68, 68, 0.12);
-  --color-info: #3b82f6;
-  --color-info-dim: rgba(59, 130, 246, 0.12);
+  --color-info: #45586c;
+  --color-info-rgb: 69 88 108;
+  --color-info-dim: rgba(69, 88, 108, 0.14);
 
   /* --- Glassmorphism --- */
-  --glass-bg: rgba(255, 255, 255, 0.65);
-  --glass-bg-heavy: rgba(255, 255, 255, 0.88);
-  --glass-border: rgba(0, 0, 0, 0.06);
-  --glass-highlight: rgba(255, 255, 255, 0.9);
-  --glass-blur: 12px;
-  --glass-blur-heavy: 24px;
+  --glass-bg: rgba(244, 249, 252, 0.48);
+  --glass-bg-heavy: rgba(252, 253, 255, 0.68);
+  --glass-border: rgba(26, 39, 48, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.82);
+  --glass-blur: 18px;
+  --glass-blur-heavy: 30px;
 
   /* --- Sidebar / navigation --- */
-  --color-sidebar-bg: rgba(255, 255, 255, 0.55);
-  --color-sidebar-border: rgba(0, 0, 0, 0.06);
-  --color-sidebar-item-hover: rgba(0, 0, 0, 0.04);
-  --color-sidebar-item-active: rgba(255, 0, 128, 0.08);
-  --color-sidebar-item-active-text: #ff0080;
-  --color-sidebar-item-active-icon: #ff0080;
+  --color-sidebar-bg: rgba(238, 244, 248, 0.5);
+  --color-sidebar-border: rgba(26, 39, 48, 0.08);
+  --color-sidebar-item-hover: rgba(26, 39, 48, 0.05);
+  --color-sidebar-item-active: rgba(233, 93, 44, 0.14);
+  --color-sidebar-item-active-text: #a63e1b;
+  --color-sidebar-item-active-icon: #a63e1b;
 
   /* --- Atmospheric gradients (decorative orbs) --- */
   --gradient-orb-primary: radial-gradient(
     circle,
-    rgba(255, 0, 128, 0.2) 0%,
+    rgba(233, 93, 44, 0.22) 0%,
     transparent 70%
   );
   --gradient-orb-secondary: radial-gradient(
     circle,
-    rgba(0, 191, 255, 0.2) 0%,
+    rgba(176, 206, 226, 0.34) 0%,
     transparent 70%
   );
 
@@ -107,71 +125,89 @@
 
 /* ============================================================
  * DARK THEME
- * Same pink/blue brand palette on deep dark backgrounds.
+ * Midnight slate with ember-orange glow and steel-blue contrast.
  * ============================================================ */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --color-bg: #0b0b12;
-  --color-bg-offset: #0f0f18;
-  --color-surface: rgba(22, 22, 36, 0.78);
-  --color-surface-raised: rgba(28, 28, 46, 0.92);
-  --color-surface-border: rgba(255, 255, 255, 0.07);
+  --color-bg: #0d171e;
+  --color-bg-rgb: 13 23 30;
+  --color-bg-offset: #1a2730;
+  --color-bg-offset-rgb: 26 39 48;
+  --color-surface: rgba(26, 39, 48, 0.72);
+  --color-surface-rgb: 26 39 48;
+  --color-surface-raised: rgba(37, 51, 62, 0.88);
+  --color-surface-raised-rgb: 37 51 62;
+  --color-surface-border: rgba(176, 206, 226, 0.07);
+  --color-surface-border-rgb: 176 206 226;
 
-  --color-text: #e8e8f0;
-  --color-text-muted: #8888aa;
-  --color-text-subtle: #55556a;
-  --color-ink: #f0f0f8;
+  --color-text: #e7eef3;
+  --color-text-rgb: 231 238 243;
+  --color-text-muted: #93a2b1;
+  --color-text-muted-rgb: 147 162 177;
+  --color-text-subtle: #627180;
+  --color-text-subtle-rgb: 98 113 128;
+  --color-ink: #f3f8fb;
 
-  --color-primary: #ff2090;
-  --color-primary-dim: rgba(255, 32, 144, 0.18);
-  --color-primary-hover: #ff4da6;
-  --color-secondary: #00ccff;
-  --color-secondary-dim: rgba(0, 204, 255, 0.15);
-  --color-secondary-hover: #33d6ff;
+  --color-primary: #e95d2c;
+  --color-primary-rgb: 233 93 44;
+  --color-primary-dim: rgba(233, 93, 44, 0.18);
+  --color-primary-hover: #ff7441;
+  --color-secondary: #b0cee2;
+  --color-secondary-rgb: 176 206 226;
+  --color-secondary-dim: rgba(176, 206, 226, 0.2);
+  --color-secondary-hover: #d2e4ef;
 
-  --color-accent-purple: #9955ff;
-  --color-accent-gold: #ffd700;
-  --color-accent-orange: #ff6633;
+  --color-accent-purple: #424048;
+  --color-accent-gold: #b0cee2;
+  --color-accent-orange: #a63e1b;
 
-  --color-cta: #ff2090;
+  --color-cta: #e95d2c;
+  --color-cta-rgb: 233 93 44;
   --color-cta-text: #ffffff;
-  --color-cta-hover: #ff4da6;
+  --color-cta-text-rgb: 255 255 255;
+  --color-cta-hover: #ff7441;
 
-  --color-fill-soft: #1a1a2e;
-  --color-fill-subtle: #13131f;
+  --color-fill-soft: #16232b;
+  --color-fill-soft-rgb: 22 35 43;
+  --color-fill-subtle: #121d25;
+  --color-fill-subtle-rgb: 18 29 37;
 
   --color-success: #34d86b;
+  --color-success-rgb: 52 216 107;
   --color-success-dim: rgba(52, 216, 107, 0.14);
   --color-warning: #fbbf24;
+  --color-warning-rgb: 251 191 36;
   --color-warning-dim: rgba(251, 191, 36, 0.14);
   --color-danger: #f87171;
+  --color-danger-rgb: 248 113 113;
   --color-danger-dim: rgba(248, 113, 113, 0.14);
-  --color-info: #60a5fa;
-  --color-info-dim: rgba(96, 165, 250, 0.14);
+  --color-info: #45586c;
+  --color-info-rgb: 69 88 108;
+  --color-info-dim: rgba(69, 88, 108, 0.18);
 
-  --glass-bg: rgba(18, 18, 32, 0.72);
-  --glass-bg-heavy: rgba(22, 22, 40, 0.92);
-  --glass-border: rgba(255, 255, 255, 0.07);
-  --glass-highlight: rgba(255, 255, 255, 0.04);
-  --glass-blur: 12px;
-  --glass-blur-heavy: 24px;
+  --glass-bg: rgba(17, 27, 35, 0.66);
+  --glass-bg-heavy: rgba(24, 36, 46, 0.82);
+  --glass-border: rgba(176, 206, 226, 0.08);
+  --glass-highlight: rgba(176, 206, 226, 0.08);
+  --glass-blur: 18px;
+  --glass-blur-heavy: 30px;
 
-  --color-sidebar-bg: rgba(12, 12, 22, 0.82);
-  --color-sidebar-border: rgba(255, 255, 255, 0.06);
-  --color-sidebar-item-hover: rgba(255, 255, 255, 0.05);
-  --color-sidebar-item-active: rgba(255, 32, 144, 0.16);
-  --color-sidebar-item-active-text: #ff2090;
-  --color-sidebar-item-active-icon: #ff2090;
+  --color-sidebar-bg: rgba(13, 23, 30, 0.6);
+  --color-sidebar-border: rgba(176, 206, 226, 0.1);
+  --color-sidebar-item-hover: rgba(176, 206, 226, 0.06);
+  --color-sidebar-item-active: rgba(233, 93, 44, 0.18);
+  --color-sidebar-item-active-text: #ff7441;
+  --color-sidebar-item-active-icon: #ff7441;
 
   --gradient-orb-primary: radial-gradient(
     circle,
-    rgba(255, 32, 144, 0.25) 0%,
+    rgba(233, 93, 44, 0.26) 0%,
     transparent 70%
   );
   --gradient-orb-secondary: radial-gradient(
     circle,
-    rgba(0, 204, 255, 0.22) 0%,
+    rgba(176, 206, 226, 0.26) 0%,
     transparent 70%
   );
 
@@ -179,62 +215,80 @@
 }
 
 /* ============================================================
- * MINKOWSKI THEME  (Premium)
- * Warm ivory/cream palette inspired by the Minkowski identity.
- * Background tones: warm cream → blush parchment → sand → caramel.
- * Burgundy (#722f37) is the only chromatic accent — used sparingly
- * for CTAs and high-priority signals. Everything else stays within
- * the warm neutral register. No blues, no teals, no greens.
- * Named after Hermann Minkowski (founder's reference).
+ * PAPER THEME  (Premium)
+ * Warm ivory/cream palette. Background tones range from
+ * warm ivory -> blush parchment -> sand -> caramel.
+ * Burgundy (#722f37) is the only chromatic accent — used
+ * sparingly for CTAs and high-priority signals. Everything
+ * else stays within the warm neutral register.
  * ============================================================ */
+[data-theme="paper"],
 [data-theme="minkowski"] {
   color-scheme: light;
 
-  /* Background stack — lightest → deepest, pulled from the brand palette */
-  --color-bg: #fdf5ec;              /* warm ivory — lightest */
-  --color-bg-offset: #eddfc8;       /* blush parchment */
+  /* Background stack — lightest -> deepest */
+  --color-bg: #fdf5ec;
+  --color-bg-rgb: 253 245 236;
+  --color-bg-offset: #eddfc8;
+  --color-bg-offset-rgb: 237 223 200;
   --color-surface: rgba(253, 245, 236, 0.88);
+  --color-surface-rgb: 253 245 236;
   --color-surface-raised: rgba(237, 223, 200, 0.96);
+  --color-surface-raised-rgb: 237 223 200;
   --color-surface-border: rgba(180, 148, 110, 0.18);
+  --color-surface-border-rgb: 180 148 110;
 
-  /* Text — warm brown register, no grey or blue undertones */
-  --color-text: #3d2b1a;            /* warm dark brown */
-  --color-text-muted: #7a5c42;      /* mid warm brown */
-  --color-text-subtle: #a88c70;     /* warm tan, muted labels */
-  --color-ink: #241508;             /* deepest warm near-black */
+  /* Text — warm brown register */
+  --color-text: #3d2b1a;
+  --color-text-rgb: 61 43 26;
+  --color-text-muted: #7a5c42;
+  --color-text-muted-rgb: 122 92 66;
+  --color-text-subtle: #a88c70;
+  --color-text-subtle-rgb: 168 140 112;
+  --color-ink: #241508;
 
-  /* Primary interactive = warm terracotta-burgundy; keeps things unified */
-  --color-primary: #8c3d2e;         /* deep terracotta */
+  /* Primary interactive — terracotta */
+  --color-primary: #8c3d2e;
+  --color-primary-rgb: 140 61 46;
   --color-primary-dim: rgba(140, 61, 46, 0.12);
   --color-primary-hover: #7a3326;
-  --color-secondary: #c4956a;       /* caramel — the darkest palette swatch */
+  --color-secondary: #c4956a;
+  --color-secondary-rgb: 196 149 106;
   --color-secondary-dim: rgba(196, 149, 106, 0.18);
   --color-secondary-hover: #b08050;
 
-  /* Burgundy — the sole chromatic accent, used sparingly */
-  --color-accent-purple: #722f37;   /* burgundy */
-  --color-accent-gold: #c4956a;     /* caramel */
-  --color-accent-orange: #b86a2e;   /* warm amber */
+  /* Burgundy — the sole chromatic accent */
+  --color-accent-purple: #722f37;
+  --color-accent-gold: #c4956a;
+  --color-accent-orange: #b86a2e;
 
   /* CTA — burgundy marks premium actions */
   --color-cta: #722f37;
+  --color-cta-rgb: 114 47 55;
   --color-cta-text: #fdf5ec;
+  --color-cta-text-rgb: 253 245 236;
   --color-cta-hover: #8b3a43;
 
-  --color-fill-soft: #e4d4ba;       /* warm sand — third palette swatch */
-  --color-fill-subtle: #f5ece0;     /* very light warm tint */
+  --color-fill-soft: #e4d4ba;
+  --color-fill-soft-rgb: 228 212 186;
+  --color-fill-subtle: #f5ece0;
+  --color-fill-subtle-rgb: 245 236 224;
 
-  /* Status colours — kept warm and desaturated to respect the palette */
-  --color-success: #6b7a4e;         /* muted olive */
+  /* Status — warm, desaturated */
+  --color-success: #6b7a4e;
+  --color-success-rgb: 107 122 78;
   --color-success-dim: rgba(107, 122, 78, 0.13);
-  --color-warning: #b87a2e;         /* warm amber */
+  --color-warning: #b87a2e;
+  --color-warning-rgb: 184 122 46;
   --color-warning-dim: rgba(184, 122, 46, 0.13);
-  --color-danger: #a83228;          /* warm brick red */
+  --color-danger: #a83228;
+  --color-danger-rgb: 168 50 40;
   --color-danger-dim: rgba(168, 50, 40, 0.12);
-  --color-info: #7a6858;            /* warm taupe — no blue */
+  --color-info: #7a6858;
+  --color-info-rgb: 122 104 88;
   --color-info-dim: rgba(122, 104, 88, 0.12);
 
-  /* Glass — warm parchment, not cold white */
+  /* Glass — warm parchment */
   --glass-bg: rgba(237, 223, 200, 0.72);
   --glass-bg-heavy: rgba(253, 245, 236, 0.94);
   --glass-border: rgba(180, 148, 110, 0.22);
@@ -260,7 +314,7 @@
     transparent 70%
   );
 
-  /* Serif chat typeface — signature of the Minkowski premium experience */
+  /* Serif typeface — signature of the premium experience */
   --font-chat: var(--font-serif);
 }
 
@@ -278,13 +332,12 @@
     "Roboto",
     sans-serif;
   --font-mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
-  /* Elegant serif for premium/editorial contexts. Loaded in client-app index.html. */
   --font-serif: "Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   /*
-   * --font-chat is the typeface used in the task chat interface.
-   * Defined in each theme block (not here) so theme-specific overrides
-   * are never silently defeated by cascade ordering.
-   * Light + Dark → var(--font-main)  |  Minkowski → var(--font-serif)
+   * --font-chat is the typeface used in conversational/editorial interfaces.
+   * Defined in each theme block so theme-specific overrides are never silently
+   * defeated by cascade ordering.
+   * Light + Dark -> var(--font-main)  |  Paper -> var(--font-serif)
    */
 
   /* --- Font weight scale --- */
@@ -313,9 +366,9 @@
   --shadow-glow-secondary: 0 0 20px var(--color-secondary-dim);
 
   /* --- Animation --- */
-  --transition-fast: 0.15s ease;
-  --transition-base: 0.25s ease;
-  --transition-slow: 0.4s ease;
+  --transition-fast: 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  --transition-base: 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-slow: 0.72s cubic-bezier(0.18, 1, 0.32, 1);
 
   /* --- Layout --- */
   --sidebar-width-collapsed: 60px;
@@ -323,4 +376,11 @@
   --header-height: 56px;
   --pane-agents-width: 288px;
   --pane-interrupts-width: 320px;
+
+  /* --- Compatibility aliases for existing Minkops UI --- */
+  --bg-color: var(--color-bg);
+  --text-main: var(--color-text);
+  --text-muted: var(--color-text-muted);
+  --primary-glow: var(--color-primary);
+  --secondary-glow: var(--color-secondary);
 }

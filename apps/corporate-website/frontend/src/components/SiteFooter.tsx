@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 
 export default function SiteFooter() {
   return (
-    <footer className="main-footer">
+    <footer className="main-footer glass-panel-vibrant soft-enter">
       <div className="footer-content">
         <div className="footer-column brand-col">
           <div className="footer-logo">Minkops</div>
@@ -36,6 +36,11 @@ export default function SiteFooter() {
             HR & Verification: hr@minkowskihome.com
           </a>
           <a href="https://linkedin.com/company/minkops">LinkedIn</a>
+        </div>
+
+        <div className="footer-column">
+          <h4>Related App</h4>
+          <a href="https://app.myndral.com">Myndral</a>
         </div>
       </div>
 

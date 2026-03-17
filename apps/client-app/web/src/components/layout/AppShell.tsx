@@ -38,17 +38,15 @@ export default function AppShell({
       />
 
       <div className="app-shell-main">
-        {/* Top header */}
-        <header className="app-shell-header">
+        <header className="app-shell-header glass-toolbar soft-enter">
           <div className="app-shell-header-left">
             <span className="app-shell-page-title">{pageTitle}</span>
           </div>
 
           <div className="app-shell-header-right">
-            {/* Interrupt notification bell */}
             <div className="header-bell-wrap">
               <button
-                className="header-icon-btn"
+                className="header-icon-btn glass-pill"
                 aria-label={`${interruptCount} items need attention`}
                 title="Human interrupt queue"
               >
@@ -63,19 +61,23 @@ export default function AppShell({
 
             {/* Tenant name chip */}
             {user?.tenantName && (
-              <span className="header-tenant-chip">{user.tenantName}</span>
+              <span className="header-tenant-chip glass-pill">{user.tenantName}</span>
             )}
 
-            {/* Slot for ThemeSelector and other header controls */}
             {headerRight}
           </div>
         </header>
 
-        {/* Three-pane content area */}
         <div className="app-shell-content">
-          <div className="app-pane">{leftPane}</div>
-          <div className="app-pane">{centerPane}</div>
-          <div className="app-pane">{rightPane}</div>
+          <section className="app-pane app-pane-secondary glass-panel-vibrant soft-enter">
+            {leftPane}
+          </section>
+          <section className="app-pane app-pane-primary glass-panel-vibrant soft-enter">
+            {centerPane}
+          </section>
+          <section className="app-pane app-pane-secondary glass-panel-vibrant soft-enter">
+            {rightPane}
+          </section>
         </div>
       </div>
     </div>

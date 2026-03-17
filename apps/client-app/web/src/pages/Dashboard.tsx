@@ -11,12 +11,16 @@ import InterruptPanel from "../components/interrupt/InterruptPanel";
 import ThemeSelector from "../components/theme/ThemeSelector";
 import { MOCK_INTERRUPTS } from "../mock/interrupts";
 
-export default function Dashboard() {
+interface DashboardProps {
+  pageTitle?: string;
+}
+
+export default function Dashboard({ pageTitle = "Dashboard" }: DashboardProps) {
   const pendingInterrupts = MOCK_INTERRUPTS.filter((i) => i.status === "pending").length;
 
   return (
     <AppShell
-      pageTitle="Dashboard"
+      pageTitle={pageTitle}
       interruptCount={pendingInterrupts}
       leftPane={<AgentPanel />}
       centerPane={<TaskPanel />}

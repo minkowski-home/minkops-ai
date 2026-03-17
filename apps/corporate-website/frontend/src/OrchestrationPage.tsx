@@ -1,10 +1,15 @@
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import PageShell from "./components/PageShell";
 import SiteFooter from "./components/SiteFooter";
 import SiteNav from "./components/SiteNav";
+import { getAgentByName } from "./agentDirectory";
 
 export default function OrchestrationPage() {
+  const agentColor = (name: string, fallback: string) =>
+    getAgentByName(name)?.color ?? fallback;
+
   return (
     <PageShell>
       <SiteNav />
@@ -30,9 +35,9 @@ export default function OrchestrationPage() {
             align="left"
           >
             <FlowChart>
-              <Node agent="Floc" agentRole="Copywriter" color="#ff4500" />
+              <Node agent="Floc" agentRole="Copywriter" color={agentColor("Floc", "#d28b76")} />
               <Arrow label="Drafts Copy" />
-              <Node agent="Ora" agentRole="Visual Experience" color="#7000ff" />
+              <Node agent="Ora" agentRole="Visual Experience" color={agentColor("Ora", "#9180bc")} />
               <Arrow label="Generates Assets" />
               <Node type="output" label="Published Campaign" color="#000" />
             </FlowChart>
@@ -44,11 +49,11 @@ export default function OrchestrationPage() {
             align="right"
           >
             <FlowChart>
-              <Node agent="Eko" agentRole="Social Handler" color="#00bfff" />
+              <Node agent="Eko" agentRole="Social Handler" color={agentColor("Eko", "#78a9c8")} />
               <Arrow label="Detects Complaint" />
-              <Node agent="Kall" agentRole="CS Rep" color="#ff0080" />
+              <Node agent="Kall" agentRole="CS Rep" color={agentColor("Kall", "#cf8ea8")} />
               <Arrow label="Resolves Ticket" />
-              <Node agent="Eko" agentRole="Social Handler" color="#00bfff" />
+              <Node agent="Eko" agentRole="Social Handler" color={agentColor("Eko", "#78a9c8")} />
             </FlowChart>
           </WorkflowSection>
 
@@ -58,11 +63,11 @@ export default function OrchestrationPage() {
             align="left"
           >
             <FlowChart>
-              <Node agent="Hosi" agentRole="Front of House" color="#ffd700" />
+              <Node agent="Hosi" agentRole="Front of House" color={agentColor("Hosi", "#c8ae78")} />
               <Arrow label="Order Taken" />
-              <Node agent="Cruz" agentRole="Store Manager" color="#111" />
+              <Node agent="Cruz" agentRole="Store Manager" color={agentColor("Cruz", "#7a7f8f")} />
               <Arrow label="Relays Ticket" />
-              <Node agent="Tony" agentRole="Kitchen Staff" color="#ff4500" />
+              <Node agent="Prex" agentRole="Kitchen Staff" color={agentColor("Prex", "#c98a70")} />
             </FlowChart>
           </WorkflowSection>
 
@@ -136,13 +141,13 @@ function Node({
     <motion.div
       whileHover={{ scale: 1.05, y: -5 }}
       className={["flow-node", type === "output" ? "output" : ""].join(" ")}
-      style={{ borderColor: color }}
+      style={{ "--agent-color": color } as CSSProperties}
     >
       {type === "output" ? (
         <span className="flow-output">{label}</span>
       ) : (
         <>
-          <span className="flow-agent" style={{ color }}>
+          <span className="flow-agent">
             {agent}
           </span>
           <span className="flow-role">{agentRole}</span>

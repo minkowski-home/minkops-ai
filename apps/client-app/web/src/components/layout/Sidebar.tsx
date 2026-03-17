@@ -42,8 +42,10 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     .join("") ?? "?";
 
   return (
-    <nav className={`sidebar${collapsed ? " collapsed" : ""}`} aria-label="Main navigation">
-      {/* Brand + collapse toggle */}
+    <nav
+      className={`sidebar glass-panel-vibrant soft-enter${collapsed ? " collapsed" : ""}`}
+      aria-label="Main navigation"
+    >
       <div className="sidebar-header">
         <div className="sidebar-brand">
           <span className="sidebar-brand-dot" aria-hidden="true" />
@@ -59,7 +61,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </button>
       </div>
 
-      {/* Navigation links */}
       <div className="sidebar-nav">
         {NAV_ITEMS.map(({ to, label, Icon }) => (
           <NavLink
@@ -79,7 +80,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         ))}
       </div>
 
-      {/* Footer: user identity + logout */}
       <div className="sidebar-footer">
         <div className="sidebar-user" title={collapsed ? user?.name : undefined}>
           <div className="sidebar-avatar" aria-hidden="true">{initials}</div>
