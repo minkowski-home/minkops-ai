@@ -1,111 +1,111 @@
 .access-agent-card {
   width: 100%;
+  height: 100%;
   padding: 1.6rem;
   border-radius: 32px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .access-agent-card-header {
-  margin-bottom: 1.25rem;
-}
-
-.access-agent-kicker {
-  margin: 0 0 0.75rem;
-  font-size: 0.72rem;
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--color-text-subtle);
+  margin-bottom: 1rem;
 }
 
 .access-agent-title {
   margin: 0;
-  max-width: 14ch;
-  font-size: clamp(2rem, 3.8vw, 3.1rem);
+  max-width: 12ch;
+  font-size: clamp(2rem, 3.5vw, 2.8rem);
   line-height: 1.02;
   letter-spacing: -0.05em;
   color: var(--color-ink);
 }
 
-.access-agent-copy {
-  margin: 0.9rem 0 0;
-  max-width: 36rem;
-  font-size: 0.95rem;
-  line-height: 1.65;
-  color: var(--color-text-muted);
-}
-
 .access-agent-list {
   display: grid;
   gap: 0.8rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .access-agent-item {
   display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr);
-  gap: 0.9rem;
-  align-items: start;
-  padding: 1rem;
+  gap: 0.35rem;
+  padding: 0.95rem 1rem 0.95rem 1.15rem;
   border-radius: 22px;
+  position: relative;
+  overflow: hidden;
+}
+
+.access-agent-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: color-mix(in srgb, var(--agent-color) 58%, transparent);
+}
+
+.access-agent-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
 }
 
 .access-agent-icon {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.08)),
-    color-mix(in srgb, var(--glass-bg-heavy) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--glass-border) 56%, transparent);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 26%, transparent),
-    0 14px 28px rgba(0, 0, 0, 0.08);
-  color: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--agent-color);
+  flex-shrink: 0;
 }
 
 .access-agent-icon svg {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 100%;
+  height: 100%;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.75;
+  stroke-width: 1.65;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.access-agent-body {
-  min-width: 0;
-}
-
-.access-agent-meta {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.8rem;
-  margin-bottom: 0.3rem;
-}
-
-.access-agent-meta strong {
+.access-agent-heading strong {
   font-size: 0.98rem;
   color: var(--color-ink);
   letter-spacing: -0.03em;
 }
 
-.access-agent-meta span {
+.access-agent-roleline {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  padding-left: 1.8rem;
+}
+
+.access-agent-roleline span {
   font-size: 0.7rem;
   font-weight: var(--fw-semibold);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--color-primary);
+  color: color-mix(in srgb, var(--agent-color) 74%, var(--color-text-subtle));
   white-space: nowrap;
 }
 
-.access-agent-body p {
-  margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.6;
-  color: var(--color-text-muted);
+.access-agent-roleline span + span::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--agent-color) 68%, transparent);
+  vertical-align: middle;
 }
 
 @media (max-width: 640px) {
@@ -114,9 +114,14 @@
     border-radius: 28px;
   }
 
-  .access-agent-meta {
+  .access-agent-roleline {
+    padding-left: 1.8rem;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.25rem;
+    gap: 0.2rem;
+  }
+
+  .access-agent-roleline span + span::before {
+    display: none;
   }
 }

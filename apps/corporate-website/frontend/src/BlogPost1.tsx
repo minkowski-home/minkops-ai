@@ -3,8 +3,11 @@ import { motion } from "framer-motion";
 import PageShell from "./components/PageShell";
 import SiteFooter from "./components/SiteFooter";
 import SiteNav from "./components/SiteNav";
+import { getAgentByName } from "./agentDirectory";
 
 export default function BlogPost1() {
+  const flocColor = getAgentByName("Floc")?.color ?? "#d28b76";
+
   return (
     <PageShell>
       <SiteNav />
@@ -90,13 +93,13 @@ export default function BlogPost1() {
                 textures with warm narrative.
               </p>
 
-              <div className="blog-callout" style={{ borderLeftColor: "#ff4500" }}>
+              <div className="blog-callout" style={{ borderLeftColor: flocColor }}>
                 <strong
                   style={{
                     display: "block",
                     fontSize: "1rem",
                     marginBottom: "0.5rem",
-                    color: "#ff4500",
+                    color: flocColor,
                     textTransform: "uppercase",
                     letterSpacing: "0.05em"
                   }}

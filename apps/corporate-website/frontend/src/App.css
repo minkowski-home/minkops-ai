@@ -459,7 +459,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
   gap: 1rem;
-  align-items: start;
+  align-items: stretch;
+  min-height: clamp(42rem, 72vh, 50rem);
 }
 
 .section-title {
@@ -495,12 +496,14 @@
 }
 
 .access-form-wrap {
+  display: flex;
   width: min(100%, 35rem);
   min-width: 0;
   justify-self: end;
 }
 
 .access-roster-wrap {
+  display: flex;
   min-width: 0;
 }
 
@@ -871,11 +874,14 @@
 }
 
 .flow-node {
+  --agent-color: var(--color-primary);
   width: 152px;
   aspect-ratio: 1 / 1;
   border-radius: 24px;
-  background: color-mix(in srgb, var(--glass-bg-heavy) 92%, transparent);
-  border: 2px solid currentColor;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05)),
+    color-mix(in srgb, var(--agent-color) 10%, var(--glass-bg-heavy));
+  border: 1.5px solid color-mix(in srgb, var(--agent-color) 48%, transparent);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -884,12 +890,14 @@
   text-align: center;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 20%, transparent),
-    0 18px 32px rgba(0, 0, 0, 0.08);
+    0 18px 32px rgba(0, 0, 0, 0.08),
+    0 0 24px color-mix(in srgb, var(--agent-color) 14%, transparent);
 }
 
 .flow-node.output {
   background: color-mix(in srgb, var(--color-ink) 92%, transparent);
   color: var(--color-cta-text);
+  border-color: color-mix(in srgb, var(--color-ink) 18%, transparent);
 }
 
 .flow-output {
@@ -901,11 +909,12 @@
   font-size: 1.35rem;
   font-weight: var(--fw-extrabold);
   margin-bottom: 0.25rem;
+  color: var(--agent-color);
 }
 
 .flow-role {
   font-size: 0.82rem;
-  color: var(--color-text-subtle);
+  color: color-mix(in srgb, var(--agent-color) 54%, var(--color-text-subtle));
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -942,6 +951,10 @@
   .access-form-wrap {
     width: 100%;
     justify-self: stretch;
+  }
+
+  .access-shell {
+    min-height: auto;
   }
 
   .hero-metrics {
