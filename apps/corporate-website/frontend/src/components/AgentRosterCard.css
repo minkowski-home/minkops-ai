@@ -1,6 +1,7 @@
 .access-agent-card {
   width: 100%;
   height: 100%;
+  max-height: 100%;
   padding: 1.6rem;
   border-radius: 32px;
   display: flex;
@@ -24,9 +25,11 @@
 
 .access-agent-list {
   display: grid;
+  align-content: start;
   gap: 0.8rem;
   flex: 1;
   min-height: 0;
+  max-height: 100%;
   overflow-y: auto;
   padding-right: 0.25rem;
 }
