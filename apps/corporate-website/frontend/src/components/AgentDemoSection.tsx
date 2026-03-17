@@ -23,7 +23,7 @@ export default function AgentDemoSection() {
           transition={{ duration: 0.8 }}
         >
           <h2 className="section-title">
-            Agents in <span className="text-neon-pink">Action</span>
+            Agents in <span className="text-accent">Action</span>
           </h2>
           <p className="section-subtitle">Seamlessly integrated into your workflow.</p>
         </motion.div>

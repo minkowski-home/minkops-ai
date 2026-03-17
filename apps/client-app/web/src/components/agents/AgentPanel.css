@@ -2,70 +2,70 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--color-surface);
+  min-height: 0;
+  background: transparent;
   overflow: hidden;
 }
 
-/* ---- Panel header ---- */
 .agent-panel-header {
-  padding: 1rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-surface-border);
+  padding: 1.15rem 1.1rem 0.9rem;
   flex-shrink: 0;
 }
 .agent-panel-title {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.16em;
   color: var(--color-text-subtle);
   margin: 0 0 0.75rem;
 }
 
-/* Browse agents CTA */
 .agent-browse-btn {
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-primary-dim);
+  padding: 0.75rem 0.9rem;
+  background: color-mix(in srgb, var(--glass-bg-heavy) 84%, transparent);
   color: var(--color-primary);
-  border: 1px dashed var(--color-primary);
-  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-radius: 18px;
   font-family: var(--font-main);
-  font-size: 0.82rem;
-  font-weight: var(--fw-medium);
+  font-size: 0.84rem;
+  font-weight: var(--fw-semibold);
   cursor: pointer;
-  transition: background var(--transition-fast), opacity var(--transition-fast);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 30%, transparent),
+    0 12px 24px color-mix(in srgb, var(--color-primary-dim) 52%, transparent);
   text-align: center;
 }
 .agent-browse-btn:hover {
   background: var(--color-primary);
-  color: #fff;
-  opacity: 0.9;
+  color: var(--color-cta-text);
 }
 
-/* ---- Scrollable content ---- */
 .agent-panel-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 0.5rem 0;
+  padding: 0.7rem;
 }
 
-/* Section labels */
 .agent-section-label {
-  padding: 0.65rem 1rem 0.3rem;
+  padding: 0.45rem 0.2rem 0.35rem;
   font-size: 0.72rem;
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   color: var(--color-text-subtle);
 }
 
-/* ---- Agent Team card ---- */
 .agent-team-card {
-  margin: 0.25rem 0.625rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-surface-border);
-  background: var(--color-surface-raised);
+  margin-bottom: 0.6rem;
+  padding: 0.9rem;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--glass-border) 52%, transparent);
+  background: color-mix(in srgb, var(--glass-bg-heavy) 84%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 28%, transparent),
+    0 16px 30px rgba(0, 0, 0, 0.08);
 }
 .agent-team-header {
   display: flex;
@@ -75,44 +75,53 @@
   margin-bottom: 0.3rem;
 }
 .agent-team-name {
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   font-weight: var(--fw-semibold);
-  color: var(--color-text);
+  color: var(--color-ink);
 }
 .agent-team-desc {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--color-text-muted);
   line-height: 1.4;
   margin-bottom: 0.5rem;
 }
 .agent-team-members {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   color: var(--color-text-subtle);
 }
 
-/* ---- Individual Agent row ---- */
 .agent-row {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.55rem 1rem;
-  transition: background var(--transition-fast);
+  margin-bottom: 0.5rem;
+  padding: 0.8rem 0.85rem;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--glass-border) 44%, transparent);
+  background: color-mix(in srgb, var(--glass-bg-heavy) 76%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 22%, transparent),
+    0 12px 26px rgba(0, 0, 0, 0.06);
 }
 .agent-row:hover {
-  background: var(--color-sidebar-item-hover);
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 24%, transparent),
+    0 18px 32px rgba(0, 0, 0, 0.08),
+    var(--shadow-glow-primary);
 }
 
 .agent-row-icon {
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.75rem;
   font-weight: var(--fw-bold);
-  color: #fff;
+  color: var(--color-cta-text);
   background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
 }
 .agent-row-icon.disabled {
@@ -125,9 +134,9 @@
   min-width: 0;
 }
 .agent-row-name {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-weight: var(--fw-medium);
-  color: var(--color-text);
+  color: var(--color-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -139,7 +148,6 @@
   margin-top: 0.15rem;
 }
 
-/* Status dot */
 .agent-status-dot {
   width: 6px;
   height: 6px;
@@ -180,9 +188,8 @@
   width: 32px;
   height: 18px;
   border-radius: var(--radius-full);
-  background: var(--color-fill-soft);
-  border: 1px solid var(--color-surface-border);
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  background: color-mix(in srgb, var(--glass-bg-heavy) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass-border) 68%, transparent);
   cursor: pointer;
   position: relative;
 }

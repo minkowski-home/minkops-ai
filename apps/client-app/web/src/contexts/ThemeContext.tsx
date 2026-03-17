@@ -35,8 +35,9 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function getInitialTheme(): ThemeName {
   try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY) as ThemeName | null;
-    if (stored === "light" || stored === "dark" || stored === "minkowski") return stored;
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "minkowski") return "paper";
+    if (stored === "light" || stored === "dark" || stored === "paper") return stored;
   } catch {
     // localStorage unavailable (e.g. SSR or private-browsing restrictions)
   }
