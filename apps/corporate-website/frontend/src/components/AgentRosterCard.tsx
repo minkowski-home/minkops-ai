@@ -123,16 +123,16 @@ export default function AgentRosterCard() {
             className="access-agent-item glass-panel"
             style={{ "--agent-color": agent.color } as CSSProperties}
           >
+            <span className="access-agent-icon" aria-hidden="true">
+              <AgentRoleIcon kind={agent.illustration} />
+            </span>
+
             <div className="access-agent-heading">
-              <span className="access-agent-icon" aria-hidden="true">
-                <AgentRoleIcon kind={agent.illustration} />
-              </span>
               <strong>{agent.name}</strong>
             </div>
 
             <div className="access-agent-roleline">
               <span>{agent.tool}</span>
-              <span>{agent.persona}</span>
             </div>
           </article>
         ))}

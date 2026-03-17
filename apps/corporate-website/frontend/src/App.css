@@ -460,7 +460,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
   gap: 1rem;
   align-items: stretch;
-  min-height: clamp(42rem, 72vh, 50rem);
+  height: clamp(33rem, 64vh, 37rem);
 }
 
 .section-title {
@@ -954,7 +954,7 @@
   }
 
   .access-shell {
-    min-height: auto;
+    height: auto;
   }
 
   .hero-metrics {

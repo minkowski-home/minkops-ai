@@ -12,7 +12,6 @@ export type AgentIllustration =
   | "email";
 
 export type DirectoryAgent = {
-  persona: string;
   name: string;
   tool: string;
   domain: string;
@@ -22,91 +21,80 @@ export type DirectoryAgent = {
 
 export const AGENT_DIRECTORY: DirectoryAgent[] = [
   {
-    persona: "Bianca",
     name: "Ora",
     tool: "Moodboard Generator",
     domain: "Interior Design",
-    color: "#9180bc",
+    color: "#8e76d8",
     illustration: "designer"
   },
   {
-    persona: "Ryan",
     name: "Eko",
     tool: "Social Media Handler",
     domain: "Generic",
-    color: "#78a9c8",
+    color: "#63abd5",
     illustration: "social"
   },
   {
-    persona: "Ethan",
     name: "Floc",
     tool: "Content Creator",
     domain: "Generic",
-    color: "#d28b76",
+    color: "#df8660",
     illustration: "writer"
   },
   {
-    persona: "Devin",
     name: "Cruz",
     tool: "Manager's Assistant",
     domain: "Fast Food",
-    color: "#7a7f8f",
+    color: "#6a7084",
     illustration: "manager"
   },
   {
-    persona: "Emily",
     name: "Hosi",
     tool: "Front of House",
     domain: "Fast Food",
-    color: "#c8ae78",
+    color: "#d6b366",
     illustration: "host"
   },
   {
-    persona: "Tony",
     name: "Prex",
     tool: "Back of House",
     domain: "Fast Food",
-    color: "#c98a70",
+    color: "#de8b61",
     illustration: "kitchen"
   },
   {
-    persona: "Jaina",
     name: "Kall",
     tool: "Customer Support Rep",
     domain: "Generic",
-    color: "#cf8ea8",
+    color: "#dd7f9e",
     illustration: "support"
   },
   {
-    persona: "Sarah",
     name: "Leed",
     tool: "Lead Generation Caller",
     domain: "Generic",
-    color: "#d39a87",
+    color: "#de916d",
     illustration: "sales"
   },
   {
-    persona: "Kim",
     name: "Kim",
     tool: "Store Manager's Assistant",
     domain: "Generic",
-    color: "#8ea591",
+    color: "#86a889",
     illustration: "retail"
   },
   {
-    persona: "Mark",
     name: "Insi",
     tool: "Business Analyst",
     domain: "Generic",
-    color: "#7ea8a6",
+    color: "#69a9a5",
     illustration: "analyst"
   },
   {
-    persona: "Nathan",
     name: "Imel",
     tool: "Email Handler",
     domain: "Generic",
-    color: "#c8a07d",
+    color: "#cf996e",
     illustration: "email"
   }
 ];

@@ -6,6 +6,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .access-agent-card-header {
@@ -32,7 +33,9 @@
 
 .access-agent-item {
   display: grid;
-  gap: 0.35rem;
+  grid-template-columns: 2.15rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  row-gap: 0.22rem;
   padding: 0.95rem 1rem 0.95rem 1.15rem;
   border-radius: 22px;
   position: relative;
@@ -49,19 +52,20 @@
 
 .access-agent-heading {
   display: flex;
-  align-items: center;
-  gap: 0.55rem;
+  align-items: flex-start;
   min-width: 0;
 }
 
 .access-agent-icon {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 2rem;
+  height: 2.35rem;
   color: var(--agent-color);
   flex-shrink: 0;
+  grid-row: 1 / span 2;
+  align-self: center;
 }
 
 .access-agent-icon svg {
@@ -81,31 +85,17 @@
 }
 
 .access-agent-roleline {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-  padding-left: 1.8rem;
+  min-width: 0;
 }
 
 .access-agent-roleline span {
-  font-size: 0.7rem;
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  display: block;
+  font-size: 0.78rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: color-mix(in srgb, var(--agent-color) 74%, var(--color-text-subtle));
-  white-space: nowrap;
-}
-
-.access-agent-roleline span + span::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 0.55rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--agent-color) 68%, transparent);
-  vertical-align: middle;
+  line-height: 1.45;
 }
 
 @media (max-width: 640px) {
@@ -114,14 +104,11 @@
     border-radius: 28px;
   }
 
-  .access-agent-roleline {
-    padding-left: 1.8rem;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.2rem;
+  .access-agent-item {
+    grid-template-columns: 1.95rem minmax(0, 1fr);
   }
 
-  .access-agent-roleline span + span::before {
-    display: none;
+  .access-agent-roleline {
+    min-width: 0;
   }
 }
