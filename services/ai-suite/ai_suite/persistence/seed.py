@@ -1,10 +1,10 @@
 """Dev database seeding.
 
-This module intentionally shells out to `psql` to apply `db/schema.sql`
+This module intentionally shells out to `psql` to apply `db/01_schema.sql`
 because that file contains `psql`-specific meta-commands and is designed
 to be executed exactly as-is (similar to how Docker init scripts run).
 
-Prerequisites: `db/bootstrap.sql` must have been run once as a superuser to
+Prerequisites: `db/01_bootstrap.sql` must have been run once as a superuser to
 create the `minkops_app` database, install extensions, and configure the
 `minkops` role. `seed_database()` assumes the database already exists and
 connects directly to it.
@@ -30,7 +30,7 @@ def _resolve_path(path: str) -> pathlib.Path:
     """Resolve a path from CWD first, then monorepo root.
 
     The CLI is often executed from `services/ai-suite`, while defaults like
-    `db/schema.sql` and `data/...` are rooted at the repo top level.
+    `db/01_schema.sql` and `data/...` are rooted at the repo top level.
     """
 
     candidate = pathlib.Path(path)

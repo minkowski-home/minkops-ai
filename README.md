@@ -11,7 +11,7 @@ Minkops.ai is a suite of autonomous AI employees that handle customer intake, op
 Creates the `minkops` app role, the `minkops_app` database if it doesn't exist, installs extensions, and sets default privileges. The password is passed at invocation time — never hardcoded. Safe to re-run.
 
 ```bash
-psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/bootstrap.sql
+psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/01_bootstrap.sql
 ```
 
 > If `psql` is not on your PATH, use the full binary path from `PSQL_PATH` in your `.env`.
