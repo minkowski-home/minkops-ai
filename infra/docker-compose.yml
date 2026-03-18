@@ -1,1 +1,34 @@
-# TODO: PostgreSQL (our Warehouse), Airflow (our Orchestrator), and Airbyte (our Data Integration) services to be added here.
+services:
+  minkops_app_db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    networks:
+      - minkops_network
+    volumes:
+      - minkops_app_db:/var/lib/postgresql/data
+      - ../db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
+  minkops_dwh:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${MINKOPS_DWH_USER}
+      POSTGRES_PASSWORD: ${MINKOPS_DWH_PASSWORD}
+      POSTGRES_DB: ${MINKOPS_DWH}
+    volumes:
+      - minkops_dwh:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - minkops_network
+
+volumes:
+  minkops_app_db:
+  minkops_dwh:
+
+networks:
+  minkops_network

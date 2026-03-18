@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     seed = sub.add_parser(
         "seed-db",
-        help="Drop & recreate all tables in minkops_app using db/schema.sql (DANGEROUS). Run db/bootstrap.sql first if the database does not exist.",
+        help="Drop & recreate all tables in minkops_app using db/01_schema.sql (DANGEROUS). Run db/01_bootstrap.sql first if the database does not exist.",
     )
     seed.add_argument(
         "--tenant-id",
@@ -65,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     seed.add_argument(
         "--sql-path",
-        default="db/schema.sql",
-        help="Path to the psql schema SQL file (default: db/schema.sql).",
+        default="db/01_schema.sql",
+        help="Path to the psql schema SQL file (default: db/01_schema.sql).",
     )
 
     run_agent = sub.add_parser("run-agent", help="Run any registered agent using a JSON payload.")

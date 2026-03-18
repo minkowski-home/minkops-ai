@@ -36,5 +36,7 @@ models:
       +schema: bronze
     silver:
       +materialized: view
+      +schema: silver
     gold:
       +materialized: table    # Gold pays the materialisation cost once for fast BI queries
+      +schema: gold

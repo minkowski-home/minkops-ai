@@ -1,12 +1,12 @@
--- db/base_table_enrichment.sql
+-- db/02_base_table_enrichment.sql
 --
 -- Purpose:
---   Populate the actual application tables created by db/schema.sql with a large,
---   realistic interaction dataset without modifying db/bootstrap.sql or db/schema.sql.
+--   Populate the actual application tables created by db/01_schema.sql with a large,
+--   realistic interaction dataset without modifying db/01_bootstrap.sql or db/01_schema.sql.
 --
 -- Notes:
 --   - Re-runnable: inserts deterministic ids and uses conflict-safe inserts
---   - Safe to run after db/schema.sql
+--   - Safe to run after db/01_schema.sql
 --   - Complements db/real_world_enrichment.sql but does not require it
 
 BEGIN;
@@ -19,7 +19,7 @@ BEGIN
         WHERE table_schema = 'public'
           AND table_name = 'tenants'
     ) THEN
-        RAISE EXCEPTION 'Required base table "tenants" not found. Run db/schema.sql first.';
+        RAISE EXCEPTION 'Required base table "tenants" not found. Run db/01_schema.sql first.';
     END IF;
 END $$;
 

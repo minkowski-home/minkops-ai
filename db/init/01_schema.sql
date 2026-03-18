@@ -1,14 +1,18 @@
--- db/schema.sql
+-- db/01_schema.sql
 --
 -- Repeatable schema reset. Run via `seed-db` during development:
 --
---   seed-db [--sql-path db/schema.sql]
+--   seed-db [--sql-path db/01_schema.sql]
 --
--- Assumes `minkops_app` already exists (run db/bootstrap.sql first if starting fresh).
+-- Assumes `minkops_app` already exists (run db/01_bootstrap.sql first if starting fresh).
 -- Connects directly to minkops_app — no CREATE DATABASE or \c here.
 
 -- Production Database Schema (minkops_app)
 -- Optimized for high-concurrency, OLTP, and state management.
+
+-- Extensions (idempotent — safe on every reset)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- ─── Teardown (reverse FK dependency order) ───────────────────────────────────
 DROP TABLE IF EXISTS tenant_kb_chunks;
