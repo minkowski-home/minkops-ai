@@ -1,13 +1,13 @@
 -- bronze/stg__tenants.sql
 --
--- Thin staging wrapper over minkops_app.public.tenants.
+-- Thin staging wrapper over minkops_dwh.public.tenants.
 -- Renames the generic `id` PK and preserves the `enabled` flag intact —
 -- downstream models use it to filter disabled tenants rather than relying
 -- on hard-deletes that never happen in this table.
 
 with source as (
 
-    select * from {{ source('minkops_app', 'tenants') }}
+    select * from {{ source('minkops_dwh', 'tenants') }}
 
 ),
 

@@ -1,14 +1,14 @@
 version: 2
 
 sources:
-  - name: minkops_app
+  - name: minkops_dwh
     description: >
       The Minkops OLTP application database. Every row here was written by the
       live application. These seven tables represent the complete operational
       picture of the platform: tenant identity, agent execution, messaging,
       support cases, audit events, and both directions of the human↔agent work
       queues.
-    database: minkops_app
+    database: minkops_dwh
     schema: public
 
     tables:
@@ -47,8 +47,9 @@ sources:
             tests:
               - not_null
               - relationships:
-                  to: source('minkops_app', 'tenants')
-                  field: id
+                  arguments:
+                    to: source('minkops_dwh', 'tenants')
+                    field: id
           - name: agent_id
             description: Which agent handled this run (e.g. "imel", "kall").
           - name: status

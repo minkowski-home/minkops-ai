@@ -1,34 +1,49 @@
 services:
-  minkops_app_db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    networks:
-      - minkops_network
-    volumes:
-      - minkops_app_db:/var/lib/postgresql/data
-      - ../db/init:/docker-entrypoint-initdb.d
-    ports:
-      - "5432:5432"
+#  minkops_app_db:
+#    image: pgvector/pgvector:pg16
+#    environment:
+#      POSTGRES_USER: ${POSTGRES_USER}
+#      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#      POSTGRES_DB: ${POSTGRES_DB}
+#    volumes:
+#      - minkops_app_db:/var/lib/postgresql/data
+#      - ../db/init:/docker-entrypoint-initdb.d
+#    ports:
+#      - "5432:5432"
+#    networks:
+#      - minkops_net
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 10
 
   minkops_dwh:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${MINKOPS_DWH_USER}
       POSTGRES_PASSWORD: ${MINKOPS_DWH_PASSWORD}
       POSTGRES_DB: ${MINKOPS_DWH}
     volumes:
       - minkops_dwh:/var/lib/postgresql/data
+      - ../db/init/:/docker-entrypoint-initdb.d
     ports:
       - "5433:5432"
-    networks:
-      - minkops_network
+#    networks:
+#      - minkops_net
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U $${MINKOPS_DWH_USER} -d $${MINKOPS_DWH}"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 10
+#    depends_on:
+#      minkops_app_db:
+#        condition: service_healthy
 
 volumes:
-  minkops_app_db:
+#  minkops_app_db:
   minkops_dwh:
 
-networks:
-  minkops_network
+#networks:
+#  minkops_net:
+#    driver: bridge

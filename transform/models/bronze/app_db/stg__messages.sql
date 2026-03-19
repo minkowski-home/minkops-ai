@@ -1,6 +1,6 @@
 -- bronze/stg__messages.sql
 --
--- Thin staging wrapper over minkops_app.public.messages.
+-- Thin staging wrapper over minkops_dwh.public.messages.
 -- Full conversation history keyed to a run.
 -- role ∈ { user, assistant, system, tool }.
 --
@@ -11,7 +11,7 @@
 
 with source as (
 
-    select * from {{ source('minkops_app', 'messages') }}
+    select * from {{ source('minkops_dwh', 'messages') }}
 
 ),
 
