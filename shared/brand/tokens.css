@@ -48,21 +48,21 @@
   --color-text-muted-rgb: 69 88 108;
   --color-text-subtle: #6f8192;
   --color-text-subtle-rgb: 111 129 146;
-  --color-ink: #10171d;
+  --color-ink: #492800;
 
   /* --- Brand accents --- */
   --color-primary: #e95d2c;
   --color-primary-rgb: 233 93 44;
   --color-primary-dim: rgba(233, 93, 44, 0.16);
   --color-primary-hover: #a63e1b;
-  --color-secondary: #b0cee2;
-  --color-secondary-rgb: 176 206 226;
-  --color-secondary-dim: rgba(176, 206, 226, 0.24);
-  --color-secondary-hover: #8cb0c8;
+  --color-secondary: #94a3b8;
+  --color-secondary-rgb: 148 163 184;
+  --color-secondary-dim: rgba(148, 163, 184, 0.24);
+  --color-secondary-hover: #7c8fa5;
 
   /* --- Semantic accents --- */
   --color-accent-purple: #424048;
-  --color-accent-gold: #b0cee2;
+  --color-accent-gold: #94a3b8;
   --color-accent-orange: #a63e1b;
 
   /* --- CTA --- */
@@ -116,11 +116,15 @@
   );
   --gradient-orb-secondary: radial-gradient(
     circle,
-    rgba(176, 206, 226, 0.34) 0%,
+    rgba(148, 163, 184, 0.34) 0%,
     transparent 70%
   );
 
   --font-chat: var(--font-main);
+
+  /* --- Logo --- */
+  --color-navbar-bg: #ffffff;
+  --color-logo-text: #94a3b8;
 }
 
 /* ============================================================
@@ -138,8 +142,8 @@
   --color-surface-rgb: 26 39 48;
   --color-surface-raised: rgba(37, 51, 62, 0.88);
   --color-surface-raised-rgb: 37 51 62;
-  --color-surface-border: rgba(176, 206, 226, 0.07);
-  --color-surface-border-rgb: 176 206 226;
+  --color-surface-border: rgba(148, 163, 184, 0.07);
+  --color-surface-border-rgb: 148 163 184;
 
   --color-text: #e7eef3;
   --color-text-rgb: 231 238 243;
@@ -153,13 +157,13 @@
   --color-primary-rgb: 233 93 44;
   --color-primary-dim: rgba(233, 93, 44, 0.18);
   --color-primary-hover: #ff7441;
-  --color-secondary: #b0cee2;
-  --color-secondary-rgb: 176 206 226;
-  --color-secondary-dim: rgba(176, 206, 226, 0.2);
-  --color-secondary-hover: #d2e4ef;
+  --color-secondary: #94a3b8;
+  --color-secondary-rgb: 148 163 184;
+  --color-secondary-dim: rgba(148, 163, 184, 0.2);
+  --color-secondary-hover: #b8c7d4;
 
   --color-accent-purple: #424048;
-  --color-accent-gold: #b0cee2;
+  --color-accent-gold: #94a3b8;
   --color-accent-orange: #a63e1b;
 
   --color-cta: #e95d2c;
@@ -188,14 +192,14 @@
 
   --glass-bg: rgba(17, 27, 35, 0.66);
   --glass-bg-heavy: rgba(24, 36, 46, 0.82);
-  --glass-border: rgba(176, 206, 226, 0.08);
-  --glass-highlight: rgba(176, 206, 226, 0.08);
+  --glass-border: rgba(148, 163, 184, 0.08);
+  --glass-highlight: rgba(148, 163, 184, 0.08);
   --glass-blur: 18px;
   --glass-blur-heavy: 30px;
 
   --color-sidebar-bg: rgba(13, 23, 30, 0.6);
-  --color-sidebar-border: rgba(176, 206, 226, 0.1);
-  --color-sidebar-item-hover: rgba(176, 206, 226, 0.06);
+  --color-sidebar-border: rgba(148, 163, 184, 0.1);
+  --color-sidebar-item-hover: rgba(148, 163, 184, 0.06);
   --color-sidebar-item-active: rgba(233, 93, 44, 0.18);
   --color-sidebar-item-active-text: #ff7441;
   --color-sidebar-item-active-icon: #ff7441;
@@ -207,11 +211,15 @@
   );
   --gradient-orb-secondary: radial-gradient(
     circle,
-    rgba(176, 206, 226, 0.26) 0%,
+    rgba(148, 163, 184, 0.26) 0%,
     transparent 70%
   );
 
   --font-chat: var(--font-main);
+
+  /* --- Logo --- */
+  --color-navbar-bg: #1a2730;    /* dark bg-offset — deep navy strip */
+  --color-logo-text: #93a2b1;    /* dark text-muted — muted slate, legible on dark */
 }
 
 /* ============================================================
@@ -316,6 +324,10 @@
 
   /* Serif typeface — signature of the premium experience */
   --font-chat: var(--font-serif);
+
+  /* --- Logo --- */
+  --color-navbar-bg: #fdf5ec;    /* warm ivory — matches bg, keeps the parchment feel */
+  --color-logo-text: #7a5c42;    /* paper text-muted — warm mid-brown, quiet and warm */
 }
 
 /* ============================================================
@@ -331,6 +343,8 @@
     "Inter",
     "Roboto",
     sans-serif;
+  /* Readex Pro — used for headings, the brand logo, and display text. */
+  --font-heading: "Readex Pro", var(--font-main);
   --font-mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
   --font-serif: "Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   /*

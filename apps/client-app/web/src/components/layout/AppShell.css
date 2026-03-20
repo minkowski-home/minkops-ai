@@ -106,10 +106,65 @@
 
 .app-shell-content {
   display: grid;
-  grid-template-columns: minmax(240px, var(--pane-agents-width)) minmax(0, 1fr) minmax(260px, var(--pane-interrupts-width));
-  gap: 0.875rem;
+  /*
+   * 5-column grid: [left-pane] [handle] [center-pane] [handle] [right-pane]
+   * Side pane widths are driven by CSS custom properties set via inline style
+   * from the ResizableLayout drag state, so they update on every pointermove
+   * without triggering a CSS recalc on the whole document.
+   */
+  grid-template-columns:
+    var(--pane-left-w,  288px)
+    0.875rem
+    minmax(0, 1fr)
+    0.875rem
+    var(--pane-right-w, 320px);
+  gap: 0;
   min-height: 0;
   overflow: visible;
+}
+
+/* Drag handle strip between panes */
+.pane-resize-handle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  /* Slightly wider than 0.875rem so it's easy to grab */
+  width: 0.875rem;
+  z-index: 10;
+}
+
+/* Subtle visual pill that appears on hover/active */
+.pane-resize-handle::after {
+  content: "";
+  width: 3px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-border);
+  transition:
+    background var(--transition-fast),
+    height var(--transition-fast),
+    opacity var(--transition-fast);
+  opacity: 0;
+}
+
+.pane-resize-handle:hover::after {
+  opacity: 1;
+  height: 48px;
+}
+
+.pane-resize-handle:active::after {
+  opacity: 1;
+  background: var(--color-primary);
+  height: 64px;
+}
+
+/* Suppress text selection and force resize cursor on the whole shell while dragging */
+.app-shell.is-dragging,
+.app-shell.is-dragging * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .app-pane {
@@ -131,11 +186,16 @@
 }
 
 @media (max-width: 1220px) {
+  /* Hide the right pane and its preceding handle (4th child). */
   .app-shell-content {
-    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    grid-template-columns:
+      var(--pane-left-w, 280px)
+      0.875rem
+      minmax(0, 1fr);
   }
 
-  .app-pane:last-child {
+  .app-pane:last-child,
+  .pane-resize-handle:last-of-type {
     display: none;
   }
 }
@@ -148,9 +208,6 @@
 
   .app-shell-header {
     border-radius: 24px;
-  }
-
-  .app-shell-header {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -166,11 +223,13 @@
     justify-content: space-between;
   }
 
+  /* Mobile: single column, hide both side panes and all handles. */
   .app-shell-content {
     grid-template-columns: 1fr;
   }
 
-  .app-pane:first-child {
+  .app-pane:first-child,
+  .pane-resize-handle {
     display: none;
   }
 }

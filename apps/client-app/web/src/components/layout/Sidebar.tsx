@@ -48,8 +48,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       <div className="sidebar-header">
         <div className="sidebar-brand">
-          <span className="sidebar-brand-dot" aria-hidden="true" />
-          <span className="sidebar-brand-name">MinkOps</span>
+          <span className="sidebar-brand-name">minkops</span>
         </div>
         <button
           className="sidebar-toggle"

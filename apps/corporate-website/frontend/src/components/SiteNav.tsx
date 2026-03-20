@@ -19,7 +19,7 @@ export default function SiteNav({ className }: SiteNavProps) {
   return (
     <nav className={["glass-nav", className].filter(Boolean).join(" ")}>
       <Link to="/" className="nav-logo">
-        Minkops
+        minkops
       </Link>
 
       <div className="nav-links desktop-only">
