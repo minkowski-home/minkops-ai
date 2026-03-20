@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 type SiteNavProps = {
   className?: string;
@@ -19,15 +19,25 @@ export default function SiteNav({ className }: SiteNavProps) {
   return (
     <nav className={["glass-nav", className].filter(Boolean).join(" ")}>
       <Link to="/" className="nav-logo">
-        Minkops
+        minkops
       </Link>
 
       <div className="nav-links desktop-only">
-        <Link to="/">Agents</Link>
-        <Link to="/orchestration">Orchestration</Link>
-        <Link to="/about">About</Link>
-        <Link to="/blogs">Blog</Link>
-        <Link to="/careers">Careers</Link>
+        <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`}>
+          Agents
+        </NavLink>
+        <NavLink to="/orchestration" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`}>
+          Orchestration
+        </NavLink>
+        <NavLink to="/about" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`}>
+          About
+        </NavLink>
+        <NavLink to="/blogs" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`}>
+          Blog
+        </NavLink>
+        <NavLink to="/careers" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`}>
+          Careers
+        </NavLink>
         <a href="/#access" className="cta-button">
           Get Access
         </a>
@@ -56,21 +66,21 @@ export default function SiteNav({ className }: SiteNavProps) {
             transition={{ duration: 0.2 }}
           >
             <div className="mobile-nav-links">
-              <Link to="/" onClick={toggleMenu}>
+              <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`} onClick={toggleMenu}>
                 Agents
-              </Link>
-              <Link to="/orchestration" onClick={toggleMenu}>
+              </NavLink>
+              <NavLink to="/orchestration" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`} onClick={toggleMenu}>
                 Orchestration
-              </Link>
-              <Link to="/about" onClick={toggleMenu}>
+              </NavLink>
+              <NavLink to="/about" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`} onClick={toggleMenu}>
                 About
-              </Link>
-              <Link to="/blogs" onClick={toggleMenu}>
+              </NavLink>
+              <NavLink to="/blogs" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`} onClick={toggleMenu}>
                 Blog
-              </Link>
-              <Link to="/careers" onClick={toggleMenu}>
+              </NavLink>
+              <NavLink to="/careers" className={({ isActive }) => `nav-link${isActive ? " nav-link-active" : ""}`} onClick={toggleMenu}>
                 Careers
-              </Link>
+              </NavLink>
               <a href="/#access" className="cta-button" onClick={toggleMenu}>
                 Get Access
               </a>

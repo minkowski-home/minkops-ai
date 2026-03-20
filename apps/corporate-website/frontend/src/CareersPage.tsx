@@ -46,7 +46,7 @@ export default function CareersPage() {
                 <p className="job-desc">
                   We are looking for a passionate individual to join our world-class team.
                 </p>
-                <a href="mailto:hr@minkowskihome.com" className="job-apply">
+                <a href="mailto:hr@minkops.com" className="job-apply">
                   Apply Now →
                 </a>
               </motion.div>
@@ -60,20 +60,20 @@ export default function CareersPage() {
             <p style={{ color: "var(--text-muted)", marginBottom: "2rem" }}>
               We are always looking for exceptional talent. Send your resume to{" "}
               <a
-                href="mailto:hr@minkowskihome.com"
+                href="mailto:hr@minkops.com"
                 style={{ color: "var(--primary-glow)" }}
               >
-                hr@minkowskihome.com
+                hr@minkops.com
               </a>
               .
             </p>
             <p style={{ color: "var(--text-muted)", marginBottom: "0" }}>
               For general business enquiries and collaborations, contact{" "}
               <a
-                href="mailto:info@minkowskihome.com"
+                href="mailto:info@minkops.com"
                 style={{ color: "var(--primary-glow)" }}
               >
-                info@minkowskihome.com
+                info@minkops.com
               </a>
               .
             </p>

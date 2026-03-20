@@ -48,18 +48,18 @@ export default function PrivacyPolicy() {
                   If you have questions about this Privacy Policy or business
                   collaborations, contact{" "}
                   <a
-                    href="mailto:info@minkowskihome.com"
+                    href="mailto:info@minkops.com"
                     style={{ color: "var(--primary-glow)" }}
                   >
-                    info@minkowskihome.com
+                    info@minkops.com
                   </a>
                   . For HR-related requests, employee verification, and job
                   applications, contact{" "}
                   <a
-                    href="mailto:hr@minkowskihome.com"
+                    href="mailto:hr@minkops.com"
                     style={{ color: "var(--primary-glow)" }}
                   >
-                    hr@minkowskihome.com
+                    hr@minkops.com
                   </a>
                   .
                 </p>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import Sidebar from "./Sidebar";
 import { IconBell } from "../icons";
@@ -19,6 +19,23 @@ interface AppShellProps {
   interruptCount?: number;
 }
 
+/** Initial and boundary widths (px) for the resizable side panes. */
+const PANE_LEFT_INIT  = 288;
+const PANE_RIGHT_INIT = 320;
+const PANE_LEFT_MIN   = 180;
+const PANE_LEFT_MAX   = 520;
+const PANE_RIGHT_MIN  = 200;
+const PANE_RIGHT_MAX  = 520;
+
+const clamp = (v: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, v));
+
+type DragState = {
+  handle: "left" | "right";
+  startX: number;
+  startWidth: number;
+};
+
 export default function AppShell({
   leftPane,
   centerPane,
@@ -30,25 +47,69 @@ export default function AppShell({
   const { user } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  const [leftW,  setLeftW]  = useState(PANE_LEFT_INIT);
+  const [rightW, setRightW] = useState(PANE_RIGHT_INIT);
+  const [isDragging, setIsDragging] = useState(false);
+
+  /**
+   * dragRef holds ephemeral drag state that must not trigger re-renders on
+   * every mousemove. We only call setState for the width values.
+   */
+  const dragRef = useRef<DragState | null>(null);
+
+  /**
+   * Initiates a drag on the given handle. Pointer capture ensures that
+   * pointermove / pointerup events are routed to this element even when the
+   * cursor leaves it, giving smooth, uninterrupted resizing.
+   */
+  const startDrag = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, handle: "left" | "right") => {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      dragRef.current = {
+        handle,
+        startX: e.clientX,
+        startWidth: handle === "left" ? leftW : rightW,
+      };
+      setIsDragging(true);
+    },
+    [leftW, rightW]
+  );
+
+  const onDragMove = useCallback((e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const delta = e.clientX - drag.startX;
+    if (drag.handle === "left") {
+      setLeftW(clamp(drag.startWidth + delta, PANE_LEFT_MIN, PANE_LEFT_MAX));
+    } else {
+      // Right handle: dragging right shrinks the right pane.
+      setRightW(clamp(drag.startWidth - delta, PANE_RIGHT_MIN, PANE_RIGHT_MAX));
+    }
+  }, []);
+
+  const endDrag = useCallback(() => {
+    dragRef.current = null;
+    setIsDragging(false);
+  }, []);
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${isDragging ? " is-dragging" : ""}`}>
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((c) => !c)}
       />
 
       <div className="app-shell-main">
-        {/* Top header */}
-        <header className="app-shell-header">
+        <header className="app-shell-header glass-toolbar soft-enter">
           <div className="app-shell-header-left">
             <span className="app-shell-page-title">{pageTitle}</span>
           </div>
 
           <div className="app-shell-header-right">
-            {/* Interrupt notification bell */}
             <div className="header-bell-wrap">
               <button
-                className="header-icon-btn"
+                className="header-icon-btn glass-pill"
                 aria-label={`${interruptCount} items need attention`}
                 title="Human interrupt queue"
               >
@@ -63,19 +124,49 @@ export default function AppShell({
 
             {/* Tenant name chip */}
             {user?.tenantName && (
-              <span className="header-tenant-chip">{user.tenantName}</span>
+              <span className="header-tenant-chip glass-pill">{user.tenantName}</span>
             )}
 
-            {/* Slot for ThemeSelector and other header controls */}
             {headerRight}
           </div>
         </header>
 
-        {/* Three-pane content area */}
-        <div className="app-shell-content">
-          <div className="app-pane">{leftPane}</div>
-          <div className="app-pane">{centerPane}</div>
-          <div className="app-pane">{rightPane}</div>
+        <div
+          className="app-shell-content"
+          style={{
+            "--pane-left-w":  `${leftW}px`,
+            "--pane-right-w": `${rightW}px`,
+          } as React.CSSProperties}
+        >
+          <section className="app-pane app-pane-secondary glass-panel-vibrant soft-enter">
+            {leftPane}
+          </section>
+
+          <div
+            className="pane-resize-handle"
+            onPointerDown={(e) => startDrag(e, "left")}
+            onPointerMove={onDragMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            aria-hidden="true"
+          />
+
+          <section className="app-pane app-pane-primary glass-panel-vibrant soft-enter">
+            {centerPane}
+          </section>
+
+          <div
+            className="pane-resize-handle"
+            onPointerDown={(e) => startDrag(e, "right")}
+            onPointerMove={onDragMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            aria-hidden="true"
+          />
+
+          <section className="app-pane app-pane-secondary glass-panel-vibrant soft-enter">
+            {rightPane}
+          </section>
         </div>
       </div>
     </div>

@@ -28,9 +28,11 @@ export default function InterestForm() {
   };
 
   return (
-    <div className="interest-form-container">
-      <h2 className="form-title">Request Access</h2>
-      <p className="form-subtitle">Join the waiting list for our autonomous workforce.</p>
+    <div className="interest-form-container glass-panel-strong soft-enter">
+      <div className="interest-form-header">
+        <h2 className="form-title">Request Access</h2>
+        <p className="form-subtitle">Join the waiting list for our autonomous workforce.</p>
+      </div>
 
       <form onSubmit={handleSubmit} className="glass-form">
         <div className="form-group">

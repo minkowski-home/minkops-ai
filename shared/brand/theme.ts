@@ -6,7 +6,7 @@
  * are described. The actual CSS tokens live in tokens.css.
  */
 
-export type ThemeName = "light" | "dark" | "minkowski";
+export type ThemeName = "light" | "dark" | "paper";
 
 export interface ThemeConfig {
   /** Machine-readable identifier; maps directly to `data-theme` attribute value. */
@@ -22,15 +22,15 @@ export const THEMES: ThemeConfig[] = [
   {
     name: "light",
     label: "Light",
-    description: "Clean, glassy, luminous"
+    description: "Ice blue daylight with forged orange accents"
   },
   {
     name: "dark",
     label: "Dark",
-    description: "Deep dark with pink/blue palette"
+    description: "Midnight slate with cool steel and ember glow"
   },
   {
-    name: "minkowski",
+    name: "paper",
     label: "Minkowski",
     description: "Warm ivory & parchment, burgundy accents"
   }

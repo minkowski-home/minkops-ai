@@ -23,7 +23,7 @@ export default function AgentDemoSection() {
           transition={{ duration: 0.8 }}
         >
           <h2 className="section-title">
-            Agents in <span className="text-neon-pink">Action</span>
+            Agents in <span className="text-accent">Action</span>
           </h2>
           <p className="section-subtitle">Seamlessly integrated into your workflow.</p>
         </motion.div>
@@ -35,7 +35,7 @@ export default function AgentDemoSection() {
               <div className="play-button">
                 <div className="play-icon"></div>
               </div>
-              <div className="placeholder-text">Demo Reel Loading...</div>
+              <div className="placeholder-text">Demo film releasing soon...</div>
               {/* Animated background to simulate activity */}
               <div className="activity-wave"></div>
             </div>
