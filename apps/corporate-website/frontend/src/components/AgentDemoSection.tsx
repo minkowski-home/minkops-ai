@@ -35,7 +35,7 @@ export default function AgentDemoSection() {
               <div className="play-button">
                 <div className="play-icon"></div>
               </div>
-              <div className="placeholder-text">Demo Reel Loading...</div>
+              <div className="placeholder-text">Demo film releasing soon...</div>
               {/* Animated background to simulate activity */}
               <div className="activity-wave"></div>
             </div>

@@ -1,6 +1,6 @@
 -- bronze/stg__tickets.sql
 --
--- Thin staging wrapper over minkops_app.public.tickets.
+-- Thin staging wrapper over minkops_dwh.public.tickets.
 -- Tickets are support cases created by agents or humans from inbound email.
 -- Status lifecycle: open → in_progress → resolved → closed.
 --
@@ -9,7 +9,7 @@
 
 with source as (
 
-    select * from {{ source('minkops_app', 'tickets') }}
+    select * from {{ source('minkops_dwh', 'tickets') }}
 
 ),
 

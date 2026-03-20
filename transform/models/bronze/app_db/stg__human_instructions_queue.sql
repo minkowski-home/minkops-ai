@@ -1,6 +1,6 @@
 -- bronze/stg__human_instructions_queue.sql
 --
--- Thin staging wrapper over minkops_app.public.human_instructions_queue.
+-- Thin staging wrapper over minkops_dwh.public.human_instructions_queue.
 -- Pull-based work queue: humans post instructions, agents claim and execute.
 -- Implements lease/retry semantics with priority ordering.
 --
@@ -11,7 +11,7 @@
 
 with source as (
 
-    select * from {{ source('minkops_app', 'human_instructions_queue') }}
+    select * from {{ source('minkops_dwh', 'human_instructions_queue') }}
 
 ),
 

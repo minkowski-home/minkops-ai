@@ -1,6 +1,6 @@
 -- bronze/stg__activity_logs.sql
 --
--- Thin staging wrapper over minkops_app.public.activity_logs.
+-- Thin staging wrapper over minkops_dwh.public.activity_logs.
 -- Append-only audit log synced from OLTP via Airbyte incremental on created_at.
 --
 -- Intentionally loosely coupled: tenant_id and agent_id are denormalized
@@ -9,7 +9,7 @@
 
 with source as (
 
-    select * from {{ source('minkops_app', 'activity_logs') }}
+    select * from {{ source('minkops_dwh', 'activity_logs') }}
 
 ),
 

@@ -20,7 +20,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.65rem;
-  padding: 0.2rem 0.15rem 1rem;
+  /* Extend beyond the sidebar's inner padding to fill edge-to-edge */
+  margin: -0.85rem -0.85rem 0.85rem;
+  padding: 0.85rem;
+  background: var(--color-navbar-bg);
+  /* Clip to the sidebar's top-rounded corners */
+  border-radius: 32px 32px 0 0;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -33,20 +38,12 @@
   overflow: hidden;
 }
 
-.sidebar-brand-dot {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--color-primary) 62%, transparent);
-}
-
 .sidebar-brand-name {
-  font-size: 1.02rem;
-  font-weight: var(--fw-extrabold);
-  letter-spacing: -0.05em;
-  color: var(--color-ink);
+  font-family: var(--font-heading);
+  font-size: 2rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.01em;
+  color: var(--color-logo-text);
   transition: opacity var(--transition-fast), width var(--transition-fast);
 }
 

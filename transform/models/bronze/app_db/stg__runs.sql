@@ -1,6 +1,6 @@
 -- bronze/stg__runs.sql
 --
--- Thin staging wrapper over minkops_app.public.runs.
+-- Thin staging wrapper over minkops_dwh.public.runs.
 -- A run is the atomic unit of agent work: one trigger event → one execution.
 -- Status machine: queued → running → completed | failed | sleeping.
 --
@@ -9,7 +9,7 @@
 
 with source as (
 
-    select * from {{ source('minkops_app', 'runs') }}
+    select * from {{ source('minkops_dwh', 'runs') }}
 
 ),
 

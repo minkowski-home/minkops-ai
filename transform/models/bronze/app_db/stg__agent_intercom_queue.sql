@@ -1,6 +1,6 @@
 -- bronze/stg__agent_intercom_queue.sql
 --
--- Thin staging wrapper over minkops_app.public.agent_intercom_queue.
+-- Thin staging wrapper over minkops_dwh.public.agent_intercom_queue.
 -- Internal multi-agent messaging bus — no external side effects.
 -- kind ∈ { message, instruction, question, thought, handoff, signal }
 --
@@ -13,7 +13,7 @@
 
 with source as (
 
-    select * from {{ source('minkops_app', 'agent_intercom_queue') }}
+    select * from {{ source('minkops_dwh', 'agent_intercom_queue') }}
 
 ),
 
