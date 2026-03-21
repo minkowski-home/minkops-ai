@@ -1,9 +1,9 @@
 {{ config(
-    materialized='incremental',
-    unique_key='',
+    materialized='view',
     on_schema_change='fail'
 ) }}
-
+-- This is not incremental, because tickets table doesn't grow fast - a ticket lifecycle
+-- spans days to weeks. We will handle it in SCDs.
 WITH base AS (
     SELECT
         t.ticket_id,

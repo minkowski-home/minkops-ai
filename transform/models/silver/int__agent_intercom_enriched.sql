@@ -13,6 +13,9 @@
 
 with intercom as (
     select * from {{ ref('stg__agent_intercom_queue') }}
+        {%  if is_incremental() %}
+            where intercom_updated_at > ((select max(intercom_updated_at) from {{ this }}) - interval '1 hour')
+        {% endif %}
 ),
 
 tenants as (

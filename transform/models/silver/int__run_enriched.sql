@@ -12,6 +12,9 @@
 
 with runs as (
     select * from {{ ref('stg__runs') }}
+        {% if is_incremental() %}
+            where run_updated_at >= ((select max(run_updated_at) from {{ this }}) - interval '3 hours')
+        {% endif %}
 ),
 
      tenants as (
@@ -27,7 +30,7 @@ with runs as (
              r.tenant_id,
              t.tenant_name,
              t.tenant_config ->> 'region'    as tenant_region,
-            t.tenant_config ->> 'plan'      as tenant_plan,
+             t.tenant_config ->> 'plan'      as tenant_plan,
 
              -- routing
             r.agent_id,
