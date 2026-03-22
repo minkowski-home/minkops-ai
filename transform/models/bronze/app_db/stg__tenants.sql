@@ -24,6 +24,7 @@ renamed as (
 
         -- timestamps
         created_at          as tenant_created_at,
+        updated_at          as tenant_updated_at,
 
         current_timestamp   as _loaded_at
 
