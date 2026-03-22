@@ -33,6 +33,7 @@ enriched as (
         t.tenant_name,
         t.tenant_config ->> 'region'  as tenant_region,
         t.tenant_config ->> 'plan'    as tenant_plan,
+        t.tenant_updated_at,
 
         -- routing
         i.run_id,

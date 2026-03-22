@@ -1,0 +1,207 @@
+version: 2
+
+models:
+
+  - name: int__run_enriched
+    description: >
+      Enriched run model. One row per agent run. Joins tenant context, derives
+      terminal/sleeping state flags, promotes input_payload fields, and computes
+      run duration. Central model of the silver layer.
+    columns:
+      - name: run_sk
+        description: Surrogate key — md5 hash of run_id.
+        tests:
+          - unique
+          - not_null
+      - name: run_id
+        description: Natural primary key from the runs table.
+        tests:
+          - not_null
+      - name: tenant_id
+        tests:
+          - not_null
+      - name: is_terminal
+        description: True when run reached a final state (completed or failed).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: run_duration_seconds
+        description: Elapsed seconds from creation to last update. Null for non-terminal runs.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+              config:
+                where: "run_duration_seconds is not null"
+
+  - name: int__ticket_enriched
+    description: >
+      Enriched ticket model. One row per ticket (current state). Joins tenant
+      context, derives lifecycle booleans, and computes time-open metrics.
+      Not incremental — deferred to SCD chapter for correct history handling.
+    columns:
+      - name: ticket_sk
+        description: Surrogate key — md5 hash of ticket_id.
+        tests:
+          - unique
+          - not_null
+      - name: ticket_id
+        description: Natural primary key from the tickets table.
+        tests:
+          - not_null
+      - name: tenant_id
+        tests:
+          - not_null
+      - name: is_resolved
+        description: True when ticket_status is resolved or closed.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_open
+        description: True when ticket_status is open.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_ticket_overdue
+        description: True when ticket has been open longer than 3 days.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: int__agent_intercom_enriched
+    description: >
+      Enriched intercom message model. One row per message. Classifies escalation
+      and handoff traffic as typed boolean flags. Joins tenant context.
+    columns:
+      - name: intercom_sk
+        description: Surrogate key — md5 hash of intercom_id.
+        tests:
+          - unique
+          - not_null
+      - name: intercom_id
+        description: Natural primary key from the agent_intercom_queue table.
+        tests:
+          - not_null
+      - name: tenant_id
+        tests:
+          - not_null
+      - name: is_human_escalation
+        description: True when channel is human_interrupts and kind is question or signal.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_handoff
+        description: True when message_kind is handoff.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: int__activity_logs_enriched
+    description: >
+      Enriched activity log model. One row per log entry (append-only source).
+      Joins tenant context, classifies events into typed boolean flags.
+      Incremental on logged_at — no lookback buffer needed (no mutations).
+    columns:
+      - name: activity_log_sk
+        description: Surrogate key — md5 hash of log_id.
+        tests:
+          - unique
+          - not_null
+      - name: log_id
+        description: Natural primary key from the activity_logs table.
+        tests:
+          - not_null
+      - name: tenant_id
+        tests:
+          - not_null
+      - name: is_error_event
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_run_event
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_escalation_event
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: int__tenant_history
+    description: >
+      Silver model over snap__tenants. Full SCD Type 2 history of tenant
+      configuration changes. All historical rows exposed — filter is_current = true
+      for present state, or use valid_from / valid_to for point-in-time joins.
+    columns:
+      - name: tenant_history_sk
+        description: Surrogate key — md5 hash of dbt_scd_id (unique per snapshot row).
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: Stable entity identifier across all historical versions.
+        tests:
+          - not_null
+      - name: is_current
+        description: True when this row is the tenant's current live state.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: int__ticket_history
+    description: >
+      Silver model over snap__tickets. Full SCD Type 2 history of ticket lifecycle
+      transitions. All historical rows exposed — filter is_current = true for
+      present state. Duration in each status = valid_to - valid_from per row.
+    columns:
+      - name: ticket_history_sk
+        description: Surrogate key — md5 hash of dbt_scd_id (unique per snapshot row).
+        tests:
+          - unique
+          - not_null
+      - name: ticket_id
+        description: Stable entity identifier across all historical versions.
+        tests:
+          - not_null
+      - name: tenant_id
+        tests:
+          - not_null
+      - name: is_resolved
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_open
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_current
+        description: True when this row is the ticket's current live state.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]

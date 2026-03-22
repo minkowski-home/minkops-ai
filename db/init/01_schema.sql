@@ -28,13 +28,33 @@ DROP TABLE IF EXISTS tenants;
 
 -- ─── 1. TENANTS ───────────────────────────────────────────────────────────────
 -- The "Employers". Every piece of data must link back to this.
+--
+-- updated_at is maintained by the set_updated_at trigger function (defined
+-- below). It serves as the change-detection cursor for dbt snapshots — without
+-- it the snapshot strategy must fall back to column hashing, which is less
+-- precise and more expensive. Any mutable table that is a snapshot candidate
+-- should carry this column for the same reason.
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+    RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE tenants (
-    id TEXT PRIMARY KEY,                       -- e.g. "acme_corp"
-    name TEXT NOT NULL,
-    config JSONB DEFAULT '{}'::jsonb,          -- specific rules, API keys
-    enabled BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                         id          TEXT PRIMARY KEY,
+                         name        TEXT NOT NULL,
+                         config      JSONB DEFAULT '{}'::jsonb,
+                         enabled     BOOLEAN DEFAULT TRUE,
+                         created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                         updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+CREATE TRIGGER trg_tenants_updated_at
+    BEFORE UPDATE ON tenants
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ─── 2. RUNS (The "Session" or "Job") ─────────────────────────────────────────
 -- Tracks a single execution flow (e.g. processing one email).

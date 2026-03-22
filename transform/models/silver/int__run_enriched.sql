@@ -23,6 +23,9 @@ with runs as (
 
      enriched as (
          select
+             -- surrogate key
+             {{ dbt_utils.generate_surrogate_key(['r.run_id']) }} as run_sk,
+
              -- primary key
              r.run_id,
 
@@ -31,6 +34,7 @@ with runs as (
              t.tenant_name,
              t.tenant_config ->> 'region'    as tenant_region,
              t.tenant_config ->> 'plan'      as tenant_plan,
+             t.tenant_updated_at,
 
              -- routing
             r.agent_id,
