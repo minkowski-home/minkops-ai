@@ -1,0 +1,5 @@
+priority,target_resolution_hours
+urgent,4
+high,8
+normal,24
+low,72
