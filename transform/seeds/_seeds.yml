@@ -1,0 +1,45 @@
+version: 2
+
+seeds:
+  - name: agent_type_labels
+    description: >
+      Maps the internal agent_id string (as stored in runs and activity_logs) to a
+      human-readable display name and short description. Gold models that surface
+      agent_id should join here so BI tools show "Email Triage Agent" rather than
+      the raw identifier "imel".
+    columns:
+      - name: agent_id
+        description: Identifier as stored in the runs.agent_id column (e.g. "imel", "kall").
+        tests:
+          - not_null
+          - unique
+      - name: display_name
+        description: Human-readable label intended for BI dashboards and reports.
+        tests:
+          - not_null
+      - name: description
+        description: One-sentence summary of the agent's role in the platform.
+
+  - name: ticket_priority_sla
+    description: >
+      Version-controlled SLA thresholds defined by the product team. Each priority
+      level maps to a target resolution time in hours. Gold models that compute SLA
+      compliance (e.g. whether a ticket breached its target) must join to this seed
+      rather than embedding magic numbers inline.
+    columns:
+      - name: priority
+        description: >
+          Ticket priority level as stored in the tickets.priority column.
+          Valid values: urgent, high, normal, low.
+        tests:
+          - not_null
+          - unique
+          - accepted_values:
+              values: ["urgent", "high", "normal", "low"]
+      - name: target_resolution_hours
+        description: >
+          Maximum hours from ticket creation to resolution before the ticket is
+          considered to have breached its SLA. Defaults: urgent=4, high=8,
+          normal=24, low=72.
+        tests:
+          - not_null

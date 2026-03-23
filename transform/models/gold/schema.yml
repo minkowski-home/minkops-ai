@@ -1,0 +1,293 @@
+version: 2
+
+models:
+
+  - name: dim_tenants
+    description: >
+      Current-state tenant dimension. One row per tenant (active or disabled).
+      Disabled tenants are retained so that fact rows created during their active
+      period are never orphaned. Downstream queries that need only active tenants
+      should apply WHERE is_enabled = true. All three fact tables in the gold layer
+      join to this model on tenant_sk. The unique test on tenant_sk enforces the
+      one-row-per-entity guarantee that prevents fan-out in those joins.
+    columns:
+      - name: tenant_sk
+        description: >
+          Surrogate key for the tenant entity. Stable across snapshots — derived
+          from tenant_id, not from a point-in-time SCD record.
+        tests:
+          - unique
+          - not_null
+      - name: tenant_id
+        description: Natural business key (slug-style, e.g. "acme_corp").
+        tests:
+          - not_null
+      - name: tenant_name
+        description: Human-readable display name for the tenant.
+        tests:
+          - not_null
+      - name: tenant_plan
+        description: Subscription plan tier (e.g. "starter", "pro", "enterprise").
+      - name: tenant_region
+        description: Deployment region for this tenant (e.g. "us-east-1").
+      - name: is_enabled
+        description: >
+          Hard kill-switch state. False means the tenant is disabled at the API
+          layer. Fact rows may still exist for disabled tenants.
+        tests:
+          - not_null
+      - name: tenant_created_at
+        description: Timestamp when the tenant was originally provisioned.
+
+  - name: fct_agent_runs
+    description: >
+      Primary operational fact table. One row per agent run. Carries run lifecycle
+      measures (duration, terminal flag) and trigger context alongside FK links to
+      dim_tenants and the agent_type_labels seed. Materialised as a table for fast
+      BI aggregation.
+    columns:
+      - name: run_sk
+        description: >
+          Surrogate key for the run. Inherited from int__run_enriched (md5 of run_id).
+          Unique and stable across incremental refreshes.
+        tests:
+          - unique
+          - not_null
+      - name: run_id
+        description: Natural primary key from the runs table.
+        tests:
+          - not_null
+      - name: tenant_sk
+        description: FK to dim_tenants.tenant_sk.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_tenants')
+              field: tenant_sk
+      - name: tenant_id
+        description: Readable tenant identifier retained for direct filtering.
+        tests:
+          - not_null
+      - name: agent_id
+        description: Raw agent identifier as stored in the runs table (e.g. "imel", "kall").
+        tests:
+          - not_null
+      - name: agent_display_name
+        description: >
+          Human-readable agent label from agent_type_labels seed. Null when a newly
+          deployed agent has no label yet (left join preserves the run regardless).
+      - name: run_status
+        description: "Terminal or in-progress state: queued | running | completed | failed | sleeping."
+        tests:
+          - not_null
+      - name: is_terminal
+        description: True when the run reached a final state (completed or failed).
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: run_duration_seconds
+        description: >
+          Elapsed seconds from run creation to last update. Null for non-terminal
+          runs (duration is undefined while the run is still in progress).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+              config:
+                where: "run_duration_seconds is not null"
+      - name: trigger_kind
+        description: >
+          Trigger classification promoted from input_payload JSONB in silver.
+          Nullable — payload shape varies by agent and trigger type.
+      - name: trigger_priority
+        description: >
+          Priority of the triggering event promoted from input_payload in silver.
+          Nullable — not all trigger types carry a priority field.
+      - name: run_created_at
+        description: Timestamp when the run was created.
+        tests:
+          - not_null
+      - name: run_updated_at
+        description: Timestamp of the most recent state change on the run.
+        tests:
+          - not_null
+
+  - name: fct_ticket_resolution
+    description: >
+      Support-facing fact table. One row per ticket per lifecycle state transition.
+      A ticket that moved through three statuses (e.g. open → in_progress →
+      resolved) produces three rows. The time_in_status_hours measure captures how
+      long the ticket occupied each state; is_sla_breached indicates whether the
+      total ticket lifetime had exceeded the priority SLA target by the end of that
+      transition. For the current active status (is_current = true), both measures
+      are computed against now(), making in-flight tickets visible to dashboards.
+    columns:
+      - name: ticket_history_sk
+        description: >
+          Surrogate key for this specific ticket lifecycle transition. Inherited from
+          int__ticket_history (md5 of dbt_scd_id). Unique per row.
+        tests:
+          - unique
+          - not_null
+      - name: ticket_id
+        description: Natural ticket identifier (stable across all transition rows for the same ticket).
+        tests:
+          - not_null
+      - name: tenant_sk
+        description: FK to dim_tenants.tenant_sk.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_tenants')
+              field: tenant_sk
+      - name: tenant_id
+        description: Readable tenant identifier retained for direct filtering.
+        tests:
+          - not_null
+      - name: ticket_status
+        description: The status the ticket held during this transition interval.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["open", "in_progress", "resolved", "closed"]
+      - name: priority
+        description: Ticket priority at the time of this transition (may change across transitions).
+      - name: ticket_type
+        description: Classification label (e.g. "cancel_order", "complaint").
+      - name: is_resolved
+        description: True when ticket_status is resolved or closed.
+        tests:
+          - not_null
+      - name: is_open
+        description: True when ticket_status is open.
+        tests:
+          - not_null
+      - name: is_current
+        description: >
+          True when this row represents the ticket's current live state (valid_to is
+          null). Filter to is_current = true for a current-state view of all tickets.
+        tests:
+          - not_null
+      - name: valid_from
+        description: Start of the half-open interval during which this status was active.
+        tests:
+          - not_null
+      - name: valid_to
+        description: >
+          End of the interval. Null for the currently active transition. BI queries
+          should use coalesce(valid_to, now()) rather than filtering out null rows.
+      - name: time_in_status_hours
+        description: >
+          Hours this ticket spent in this specific status. For closed transitions,
+          an exact historical measurement. For the active transition (is_current =
+          true), reflects elapsed hours since valid_from up to the current moment.
+          Never null.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: target_resolution_hours
+        description: >
+          SLA target from the ticket_priority_sla seed for this ticket's priority.
+          Null when the ticket has no priority set.
+      - name: is_sla_breached
+        description: >
+          True when the ticket's total age (from ticket_created_at to the end of
+          this transition, or now() for the active state) exceeds the SLA target.
+          Null when priority is null and no SLA target can be evaluated.
+      - name: ticket_created_at
+        description: Original ticket creation timestamp — anchor for total-lifetime SLA calculations.
+        tests:
+          - not_null
+
+  - name: fct_agent_intercom
+    description: >
+      Inter-agent communication fact table. One row per message on the internal
+      agent coordination bus. Primary model for measuring the imel → kall handoff
+      workflow, human escalation rates, and message delivery latency.
+    columns:
+      - name: intercom_sk
+        description: Surrogate key for this message (inherited from silver, md5 of intercom_id).
+        tests:
+          - unique
+          - not_null
+      - name: intercom_id
+        description: Natural primary key from the agent_intercom_queue table.
+        tests:
+          - not_null
+      - name: tenant_sk
+        description: FK to dim_tenants.tenant_sk.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_tenants')
+              field: tenant_sk
+      - name: tenant_id
+        description: Readable tenant identifier retained for direct filtering.
+        tests:
+          - not_null
+      - name: run_id
+        description: >
+          Back-reference to the run that produced this message. Join to fct_agent_runs
+          on run_id to connect communication events to run outcomes. Nullable —
+          not all coordination messages are tied to an active run.
+      - name: from_agent_id
+        description: Sending agent identifier (e.g. "imel", "kall").
+        tests:
+          - not_null
+      - name: from_agent_display_name
+        description: Human-readable sender label from agent_type_labels seed.
+      - name: to_agent_id
+        description: Receiving agent identifier. Null implies broadcast within the tenant/channel.
+      - name: to_agent_display_name
+        description: Human-readable receiver label from agent_type_labels seed.
+      - name: message_kind
+        description: "Classification of the message: message | instruction | question | thought | handoff | signal."
+        tests:
+          - not_null
+      - name: channel
+        description: Routing key (e.g. "human_interrupts"). Null for unrouted messages.
+      - name: intercom_status
+        description: "Delivery lifecycle: queued | delivered | consumed | archived | failed | expired."
+        tests:
+          - not_null
+      - name: priority
+        description: Message priority at the time of sending.
+      - name: is_handoff
+        description: True when message_kind is handoff — marks the imel → kall transfer point.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: is_human_escalation
+        description: >
+          True when channel is human_interrupts and message_kind is question or signal.
+          Indicates the agent is requesting human intervention.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: delivery_latency_seconds
+        description: >
+          Seconds from message creation to delivery. Null when the message was never
+          delivered (expired, failed, or still queued).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+              config:
+                where: "delivery_latency_seconds is not null"
+      - name: reply_to_id
+        description: Natural key of the parent message when this is a threaded reply. Null for top-level messages.
+      - name: intercom_created_at
+        description: Timestamp when the message was created.
+        tests:
+          - not_null
+      - name: delivered_at
+        description: Timestamp when the message was delivered. Null if not yet delivered.
+      - name: consumed_at
+        description: Timestamp when the receiving agent consumed (acted on) the message.
+      - name: expires_at
+        description: Timestamp after which the message is considered expired and will not be delivered.
