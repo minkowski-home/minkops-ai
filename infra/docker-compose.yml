@@ -26,6 +26,7 @@ services:
       POSTGRES_DB: ${MINKOPS_DWH}
     volumes:
       - minkops_dwh:/var/lib/postgresql/data
+      - ../db/init/:/docker-entrypoint-initdb.d
     ports:
       - "5433:5432"
     networks:
@@ -35,26 +36,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  # dbt transform runner — seeds reference data then builds all models.
-  # Runs once on `docker compose up`; restart: "no" prevents it from looping.
-  minkops_transform:
-    build:
-      context: ../transform
-      dockerfile: Dockerfile
-    restart: "no"
-    environment:
-      MINKOPS_DWH_HOST: minkops_dwh
-      MINKOPS_DWH_PORT: 5432
-      MINKOPS_DWH: ${MINKOPS_DWH}
-      MINKOPS_DWH_USER: ${MINKOPS_DWH_USER}
-      MINKOPS_DWH_PASSWORD: ${MINKOPS_DWH_PASSWORD}
-      MINKOPS_DWH_SCHEMA: public
-    depends_on:
-      minkops_dwh:
-        condition: service_healthy
-    networks:
-      - minkops_net
 
 volumes:
 #  minkops_app_db:
