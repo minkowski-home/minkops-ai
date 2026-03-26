@@ -2,3 +2,5 @@
 target/
 dbt_packages/
 logs/
+# Machine-specific dbt user identity file generated on first run
+.user.yml
