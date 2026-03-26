@@ -29,21 +29,18 @@ services:
       - ../db/init/:/docker-entrypoint-initdb.d
     ports:
       - "5433:5432"
-#    networks:
-#      - minkops_net
-#    healthcheck:
-#      test: ["CMD-SHELL", "pg_isready -U $${MINKOPS_DWH_USER} -d $${MINKOPS_DWH}"]
-#      interval: 5s
-#      timeout: 5s
-#      retries: 10
-#    depends_on:
-#      minkops_app_db:
-#        condition: service_healthy
+    networks:
+      - minkops_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${MINKOPS_DWH_USER} -d $${MINKOPS_DWH}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
 #  minkops_app_db:
   minkops_dwh:
 
-#networks:
-#  minkops_net:
-#    driver: bridge
+networks:
+  minkops_net:
+    driver: bridge
