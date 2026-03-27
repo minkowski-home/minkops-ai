@@ -1,0 +1,3 @@
+agent_id,display_name,description
+imel,Email Triage Agent,Classifies inbound emails and routes them — drafts replies for low-risk inquiries and hands off complex or high-touch work to Kall via ticket creation.
+kall,Ticket Resolution Specialist,Loads ticket context created by Imel or submitted by humans and drives the ticket through to resolution.
