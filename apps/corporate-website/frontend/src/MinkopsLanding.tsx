@@ -5,6 +5,7 @@ import SiteNav from "./components/SiteNav";
 import AgentRosterCard from "./components/AgentRosterCard";
 import InterestForm from "./components/InterestForm";
 import AgentDemoSection from "./components/AgentDemoSection";
+import QuestionnaireFunnel from "./components/QuestionnaireFunnel";
 
 export default function MinkopsLanding() {
   return (
@@ -35,6 +36,8 @@ export default function MinkopsLanding() {
             </div>
           </motion.div>
         </section>
+
+        <QuestionnaireFunnel />
 
         <section id="access" className="access-section">
           <div className="access-shell">

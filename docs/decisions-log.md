@@ -56,3 +56,25 @@ The dashboard layout uses CSS Grid at two levels: AppShell splits the viewport i
 The error is precise and the cause is clear. bootstrap.sql uses psql-specific variable substitution syntax — :'minkops_password' — which is a psql client meta-feature, not standard SQL. When Docker's entrypoint executes init scripts, it runs them directly against the database using its own internal mechanism, not through a psql session with -v flags. The variable is never defined, so the syntax fails immediately.
 This is actually a deeper design conflict: bootstrap.sql was written to be run manually as a one-time setup command with psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/bootstrap.sql. It was never designed to be a Docker init script, and it should not be one. Everything it does — creating a role, creating the database, installing extensions, granting privileges — is already handled by Docker's Postgres entrypoint via the POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB environment variables you have defined.
 The fix is to remove bootstrap.sql from the init scripts entirely and only mount schema.sql. Change your db/init/ directory to contain only schema.sql (or rename the mounted file to 01_schema.sql), and remove 01_bootstrap.sql from it. The Compose environment block already handles everything bootstrap was doing.
+
+### 2026-03-27 — Multi-step questionnaire funnel with dynamic agent recommendation
+
+**Situation:** The corporate website landing page had no mechanism to guide prospective customers toward the right Minkops agent. Visitors could browse the agent roster but had no interactive path to understanding which agents solved their specific problems, and "Request Access" was the only call-to-action regardless of the visitor's context or business scale.
+
+**Task:** Introduce a qualification funnel embedded between the hero banner and the agent roster that collects four signals (revenue band, time-sink areas, biggest bottleneck, and weekly hours), then surfaces a personalised Minkops agent recommendation with a conservative hours-recovered estimate.
+
+**Action:** Built `QuestionnaireFunnel.tsx` as a self-contained, four-step interactive component. Key design decisions:
+
+1. **Priority resolution algorithm**: The "biggest bottleneck" answer (step 3) maps directly to a primary agent key via a static `PRIORITY_MAP`. The multi-select time-sink answers (step 2) power the secondary agent recommendations. If a step-3 answer is absent or ambiguous, the fallback is the first selected time-sink key — this covers edge cases where the user skips or backtracks, without requiring server-side scoring logic.
+
+2. **Theme-token compliance**: Zero hardcoded colour or font values in the component. All styles reference CSS custom properties from `shared/brand/tokens.css` (`--color-primary`, `--font-heading`, `--glass-bg-heavy`, etc.), so the funnel inherits light, dark, and paper themes automatically without a line of JavaScript.
+
+3. **AnimatePresence with mode="wait"**: Framer Motion's `AnimatePresence` wraps each step with `mode="wait"` so the exit animation of the outgoing step completes before the enter animation of the incoming step begins. This prevents layout overlap during fast clicks — a subtle but meaningful production-quality detail.
+
+4. **Accessible ARIA semantics**: Each option button carries `role="radio"` or `role="checkbox"` (determined by `question.type`) and `aria-checked`, making the funnel keyboard-navigable and screen-reader-friendly without a third-party form library.
+
+5. **Minkops agent name fidelity**: Agent recommendations display canonical agent names (Kall, Leed, Imel, Eko, Floc, Insi) from `agentDirectory.ts` rather than generic labels — keeping the funnel results grounded in the actual product rather than hypothetical agent archetypes.
+
+6. **Section-scoped layout**: Rather than a fullscreen takeover (the original reference used a fixed full-viewport layout), the funnel is a `<section>` that respects the existing landing page grid (`width: min(1280px, 100%)`), sits visually between the hero glass panel and the agent roster, and shares the `.glass-panel-vibrant` surface treatment used by the hero — creating visual continuity without new design language.
+
+**Result:** Visitors get a personalised agent recommendation in under two minutes of interaction, with a concrete hours-recovered estimate that quantifies the ROI before they request access. The recommendation CTA scrolls to the existing `#access` section, so the funnel feeds directly into the existing conversion path without a new page route.

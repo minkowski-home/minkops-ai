@@ -1,0 +1,523 @@
+/* ============================================================
+ * QuestionnaireFunnel.css
+ * Styles for the multi-step agent-recommendation funnel
+ * embedded in the landing page between the hero and the
+ * agent roster section.
+ *
+ * All colors, fonts, and shadows reference brand tokens from
+ * tokens.css so the funnel inherits every theme automatically.
+ * ============================================================ */
+
+/* ----------------------------------------------------------
+ * Section shell — mirrors .access-section layout constraints
+ * ---------------------------------------------------------- */
+.funnel-section {
+  width: min(1280px, calc(100% - 0rem));
+  margin: 0 auto;
+  padding-top: 1rem;
+}
+
+.funnel-section-header {
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.funnel-section-title {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.8rem, 3.5vw, 3rem);
+  font-weight: var(--fw-bold);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  color: var(--color-ink);
+}
+
+/* ----------------------------------------------------------
+ * Questionnaire card
+ * ---------------------------------------------------------- */
+.funnel-shell {
+  border-radius: 38px;
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+/* ----------------------------------------------------------
+ * Progress bar
+ * ---------------------------------------------------------- */
+.funnel-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 2.5rem;
+}
+
+.funnel-progress-seg {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--glass-border) 80%, transparent);
+  transition: background var(--transition-base);
+}
+
+.funnel-progress-seg--active {
+  background: var(--color-primary);
+}
+
+/* ----------------------------------------------------------
+ * Step labels & question text
+ * ---------------------------------------------------------- */
+.funnel-kicker {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+.funnel-question {
+  margin: 0 0 0.65rem;
+  font-family: var(--font-heading);
+  font-size: clamp(1.4rem, 3vw, 2.4rem);
+  font-weight: var(--fw-bold);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+  color: var(--color-ink);
+}
+
+.funnel-subtext {
+  margin: 0 0 2rem;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+.funnel-multi-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--color-primary);
+  opacity: 0.75;
+}
+
+/* ----------------------------------------------------------
+ * Option buttons
+ * ---------------------------------------------------------- */
+.funnel-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 2rem;
+}
+
+.funnel-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--glass-bg-heavy) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass-border) 48%, transparent);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.funnel-option:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary-dim) 60%, var(--glass-bg-heavy));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.funnel-option--selected {
+  border-color: var(--color-primary) !important;
+  background: var(--color-primary-dim) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 30%, transparent),
+    0 4px 16px rgba(0, 0, 0, 0.07),
+    var(--shadow-glow-primary) !important;
+}
+
+/* Selection indicator — circle for single, square for multi */
+.funnel-option-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--glass-border) 80%, transparent);
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  color: var(--color-cta-text);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.funnel-option-indicator--square {
+  border-radius: var(--radius-xs);
+}
+
+.funnel-option-indicator--checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* Label + optional meta tag */
+.funnel-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.funnel-option-label {
+  font-family: var(--font-heading);
+  font-size: 0.98rem;
+  font-weight: var(--fw-medium);
+  color: var(--color-text);
+  line-height: 1.3;
+}
+
+.funnel-option--selected .funnel-option-label {
+  color: var(--color-ink);
+}
+
+.funnel-option-meta {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+  transition: color var(--transition-fast);
+}
+
+.funnel-option--selected .funnel-option-meta {
+  color: var(--color-primary);
+}
+
+/* ----------------------------------------------------------
+ * Continue / Back actions
+ * ---------------------------------------------------------- */
+.funnel-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Disabled CTA — override the shared class */
+.funnel-actions .cta-button:disabled {
+  background: color-mix(in srgb, var(--color-fill-soft) 70%, transparent);
+  color: var(--color-text-subtle);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  pointer-events: none;
+}
+
+.funnel-back-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.funnel-back-btn:hover {
+  color: var(--color-text-muted);
+}
+
+/* ----------------------------------------------------------
+ * Results screen
+ * ---------------------------------------------------------- */
+.funnel-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Badge pill */
+.funnel-results-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+/* Pulsing dot inside the badge */
+.funnel-badge-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: funnel-pulse 2s ease-in-out infinite;
+}
+
+@keyframes funnel-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+.funnel-results-heading {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.5rem, 3.5vw, 2.4rem);
+  font-weight: var(--fw-bold);
+  line-height: 1.18;
+  letter-spacing: -0.04em;
+  color: var(--color-ink);
+}
+
+.funnel-results-subtext {
+  margin: 0;
+  max-width: 44rem;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+/* ----------------------------------------------------------
+ * Time recovery bar
+ * ---------------------------------------------------------- */
+.funnel-recovery {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--radius-xl);
+}
+
+.funnel-recovery-stat-label {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.funnel-recovery-value {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.04em;
+  color: var(--color-primary);
+}
+
+.funnel-recovery-track-wrap {
+  flex: 1;
+  min-width: 180px;
+}
+
+.funnel-recovery-track-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.funnel-recovery-track {
+  height: 6px;
+  background: color-mix(in srgb, var(--glass-border) 80%, transparent);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.funnel-recovery-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-hover));
+  border-radius: var(--radius-full);
+}
+
+.funnel-recovery-track-footer {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+/* ----------------------------------------------------------
+ * Agent cards
+ * ---------------------------------------------------------- */
+
+/* Primary agent */
+.funnel-agent-primary {
+  position: relative;
+  padding: 1.5rem;
+  border-radius: var(--radius-xl);
+}
+
+.funnel-agent-badge {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+.funnel-agent-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.funnel-agent-name {
+  /* Agent short-name displayed as a tag-like identifier */
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-dim);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: var(--fw-extrabold);
+  letter-spacing: -0.03em;
+  color: var(--color-primary);
+}
+
+.funnel-agent-role {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.funnel-agent-desc {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: var(--color-text-muted);
+}
+
+.funnel-agent-save {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-primary);
+}
+
+/* Secondary agents grid */
+.funnel-agents-secondary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.funnel-agent-secondary {
+  padding: 1.15rem;
+  border-radius: var(--radius-lg);
+}
+
+.funnel-agent-secondary .funnel-agent-name {
+  font-size: 1rem;
+  padding: 0.2rem 0.55rem;
+  margin-bottom: 6px;
+}
+
+.funnel-agent-secondary .funnel-agent-role {
+  margin-bottom: 4px;
+}
+
+.funnel-agent-secondary .funnel-agent-desc {
+  font-size: 0.82rem;
+  margin-bottom: 0.55rem;
+}
+
+.funnel-agent-secondary .funnel-agent-save {
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
+/* ----------------------------------------------------------
+ * Results CTA row
+ * ---------------------------------------------------------- */
+.funnel-cta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  padding: 1.4rem 1.5rem;
+  border-radius: var(--radius-xl);
+}
+
+.funnel-cta-heading {
+  margin: 0 0 4px;
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: var(--fw-semibold);
+  color: var(--color-ink);
+}
+
+.funnel-cta-sub {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+/* ----------------------------------------------------------
+ * Responsive adjustments
+ * ---------------------------------------------------------- */
+@media (max-width: 640px) {
+  .funnel-section {
+    width: 100%;
+  }
+
+  .funnel-shell {
+    border-radius: 28px;
+    padding: 1.25rem;
+  }
+
+  .funnel-cta-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .funnel-cta-row .cta-button {
+    width: 100%;
+  }
+
+  .funnel-recovery {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .funnel-recovery-track-wrap {
+    width: 100%;
+  }
+}
