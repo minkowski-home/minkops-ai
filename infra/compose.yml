@@ -1,0 +1,155 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Minkops Local Stack
+# Bring up with: docker compose up -d
+# Tear down with: docker compose down -v  (drops volumes too)
+# ──────────────────────────────────────────────────────────────────────────────
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:3.0.0
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_METASTORE_USER}:${AIRFLOW_METASTORE_PASSWORD}@airflow_metastore_db:5432/${AIRFLOW_METASTORE_DB}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Expose DWH credentials so DAGs can reference them via env-based Connections
+    MINKOPS_DWH_USER: ${MINKOPS_DWH_USER}
+    MINKOPS_DWH_PASSWORD: ${MINKOPS_DWH_PASSWORD}
+    MINKOPS_DWH: ${MINKOPS_DWH}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID:-50000}:0"
+  networks:
+    - minkops_net
+  depends_on:
+    airflow_metastore_db:
+      condition: service_healthy
+
+services:
+
+  # ── Data Warehouse ───────────────────────────────────────────────────────────
+  minkops_dwh:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${MINKOPS_DWH_USER}
+      POSTGRES_PASSWORD: ${MINKOPS_DWH_PASSWORD}
+      POSTGRES_DB: ${MINKOPS_DWH}
+    volumes:
+      - minkops_dwh:/var/lib/postgresql/data
+      - ../db/init/:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"
+    networks:
+      - minkops_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${MINKOPS_DWH_USER} -d $${MINKOPS_DWH}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Airflow Metastore (separate from DWH — never share) ─────────────────────
+  airflow_metastore_db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${AIRFLOW_METASTORE_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_METASTORE_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_METASTORE_DB}
+    volumes:
+      - airflow_metastore_db:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"   # host-side only; internal traffic uses service name
+    networks:
+      - minkops_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${AIRFLOW_METASTORE_USER} -d $${AIRFLOW_METASTORE_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Airflow Init (one-shot) ──────────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    restart: "no"
+    depends_on:
+      airflow_metastore_db:
+        condition: service_healthy
+
+# The following was a verbose, slightly less standard way of doing the same
+#  airflow-init:
+#    <<: *airflow-common
+#    command: >
+#      bash -c "
+#        airflow db migrate &&
+#        airflow users create
+#          --username admin
+#          --password ${AIRFLOW_ADMIN_PASSWORD}
+#          --firstname Admin
+#          --lastname User
+#          --role Admin
+#          --email kkartik@minkops.ai
+#      "
+#    restart: "no"
+#    depends_on:
+#      airflow_metastore_db:
+#        condition: service_healthy
+
+  # ── DAG Processor (parses DAG files, writes serialized DAGs to metastore) ───
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Scheduler (reads serialized DAGs, evaluates deps, submits to executor) ──
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── API Server (React UI + REST API v2 + Task Execution Interface) ───────────
+  airflow-api-server:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8080:8080"
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Triggerer (async event loop for deferrable operators/sensors). Not strictly needed rn but safe ────────────
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  minkops_dwh:
+  airflow_metastore_db:
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  minkops_net:
+    driver: bridge
