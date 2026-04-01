@@ -25,6 +25,7 @@ x-airflow-common:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
+    - ../transform:/opt/dbt
   user: "${AIRFLOW_UID:-50000}:0"
   networks:
     - minkops_net
@@ -73,7 +74,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Airflow Init (one-shot) ──────────────────────────────────────────────────
+  # ── Airflow Init (one-shot) - this initializes Airflow by running db migrate and creating admin user ──────────────────────────────────────────────────
   airflow-init:
     <<: *airflow-common
     environment:
@@ -87,24 +88,24 @@ services:
       airflow_metastore_db:
         condition: service_healthy
 
-# The following was a verbose, slightly less standard way of doing the same
-#  airflow-init:
-#    <<: *airflow-common
-#    command: >
-#      bash -c "
-#        airflow db migrate &&
-#        airflow users create
-#          --username admin
-#          --password ${AIRFLOW_ADMIN_PASSWORD}
-#          --firstname Admin
-#          --lastname User
-#          --role Admin
-#          --email kkartik@minkops.ai
-#      "
-#    restart: "no"
-#    depends_on:
-#      airflow_metastore_db:
-#        condition: service_healthy
+# The following is a verbose, slightly less standard way of doing the same as above - using it for now so that dbt commands are also run on startup
+#airflow-init:
+#  <<: *airflow-common
+#  command: >
+#    bash -c "
+#      pip install dbt-core dbt-postgres &&
+#      dbt deps --project-dir /opt/dbt --profiles-dir /tmp/dbt_profiles &&
+#      airflow db migrate &&
+#      airflow users create
+#        --username admin
+#        --password ${AIRFLOW_ADMIN_PASSWORD}
+#        --firstname Admin --lastname User
+#        --role Admin --email admin@minkops.ai
+#    "
+#  restart: "no"
+#  depends_on:
+#    airflow_metastore_db:
+#      condition: service_healthy
 
   # ── DAG Processor (parses DAG files, writes serialized DAGs to metastore) ───
   airflow-dag-processor:
