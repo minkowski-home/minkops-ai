@@ -1,0 +1,14 @@
+.gitignore
+.python-version
+uv.lock
+README.md
+package-lock.yml
+target
+logs
+.venv
+pyproject.toml
+Dockerfile
+# dbt installs packages at build time via `dbt deps` — exclude local cache so that deps are fresh everytime
+dbt_packages/
+# machine-specific dbt user identity file
+.user.yml
