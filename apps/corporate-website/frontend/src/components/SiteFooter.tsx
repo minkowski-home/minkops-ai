@@ -8,7 +8,9 @@ export default function SiteFooter() {
           <div className="footer-logo">Minkops</div>
           <p>Operating system for zero-man companies</p>
           <address className="footer-address">
-            375 University Avenue Suite 3215
+            Minkops AI
+            <br />
+            375 University Avenue Suite 3273
             <br />
             Toronto, ON M5G 2J5
             <br />
