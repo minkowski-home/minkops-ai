@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minkops — Letterhead</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Light theme tokens */
+  :root {
+    --color-bg:           #eef4f8;
+    --color-bg-offset:    #dbe6ef;
+    --color-text:         #1a2730;
+    --color-text-muted:   #45586c;
+    --color-text-subtle:  #6f8192;
+    --color-primary:      #e95d2c;
+    --color-secondary:    #94a3b8;
+    --color-logo-text:    #94a3b8;
+    --color-rule:         rgba(26, 39, 48, 0.13);
+    --color-rule-soft:    rgba(26, 39, 48, 0.07);
+    --color-fill-soft:    #d5dfe8;
+  }
+
+  body {
+    background: var(--color-bg);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 48px 20px;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* ── Paper shell ─────────────────────────────────── */
+  .paper {
+    width: 794px;
+    min-height: 1123px;
+    background: #ffffff;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    box-shadow:
+      0 2px 6px rgba(0,0,0,0.05),
+      0 8px 32px rgba(0,0,0,0.09),
+      0 24px 64px rgba(0,0,0,0.06);
+  }
+
+  /* ── Top colour bar ──────────────────────────────── */
+  .top-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  /* ── Header ──────────────────────────────────────── */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 36px 64px 26px;
+    flex-shrink: 0;
+  }
+
+  /* Logo */
+  .logo {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .logo-name {
+    font-family: 'Readex Pro', sans-serif;
+    font-weight: 600;
+    font-size: 2.4rem;
+    letter-spacing: 0.01em;
+    color: var(--color-primary);
+    line-height: 1;
+  }
+  .logo-sub {
+    font-family: 'Inter', sans-serif;
+    font-weight: 300;
+    font-size: 8px;
+    letter-spacing: 3.5px;
+    text-transform: uppercase;
+    color: var(--color-text-subtle);
+  }
+
+  /* Contact details */
+  .contact {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: right;
+    padding-bottom: 4px;
+  }
+  .contact-row {
+    font-family: 'Inter', sans-serif;
+    font-weight: 300;
+    font-size: 9.5px;
+    color: var(--color-text-muted);
+    letter-spacing: 0.1px;
+    line-height: 1;
+  }
+  .contact-row .lbl {
+    color: var(--color-text-subtle);
+    font-size: 7.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-right: 7px;
+  }
+
+  /* ── Header separator ────────────────────────────── */
+  .rule-header {
+    margin: 0 64px;
+    height: 0.75px;
+    background: var(--color-rule);
+    flex-shrink: 0;
+  }
+
+  /* ── Body ────────────────────────────────────────── */
+  .body {
+    flex: 1;
+    padding: 48px 64px 40px;
+    display: flex;
+    flex-direction: column;
+  }
+
+
+
+  /* Content text lines */
+  .content-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  /* Signature block */
+  .sig-zone {
+    margin-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-top: 8px;
+  }
+  .sig-col {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .sig-line {
+    height: 0.75px;
+    background: var(--color-rule);
+  }
+  .sig-line-main { width: 180px; }
+  .sig-line-date { width: 110px; }
+  .sig-label {
+    font-family: 'Inter', sans-serif;
+    font-weight: 300;
+    font-size: 7.5px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--color-text-subtle);
+  }
+
+  /* ── Footer ──────────────────────────────────────── */
+  .footer {
+    padding: 18px 64px 22px;
+    flex-shrink: 0;
+  }
+  .rule-footer {
+    height: 0.75px;
+    background: var(--color-rule);
+    margin-bottom: 14px;
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footer-legal {
+    font-family: 'Inter', sans-serif;
+    font-weight: 300;
+    font-size: 7.5px;
+    color: var(--color-text-subtle);
+    letter-spacing: 0.1px;
+    line-height: 1.9;
+  }
+  .footer-legal strong {
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+  .footer-page {
+    font-family: 'Readex Pro', sans-serif;
+    font-weight: 300;
+    font-size: 9px;
+    color: var(--color-logo-text);
+    letter-spacing: 1.5px;
+  }
+
+  /* ── Bottom accent ───────────────────────────────── */
+  .bottom-bar {
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(to right, rgba(233,93,44,0.45) 0%, rgba(233,93,44,0.04) 55%, transparent 100%);
+    flex-shrink: 0;
+  }
+
+  /* ── Print ───────────────────────────────────────── */
+  @media print {
+    body { background: none; padding: 0; }
+    .paper { box-shadow: none; width: 100%; min-height: 100vh; }
+    @page { size: A4; margin: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="paper">
+
+  <div class="top-bar"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <div class="logo-name">minkops</div>
+      <div class="logo-sub">For zero-man companies</div>
+    </div>
+    <div class="contact">
+      <div class="contact-row"><span class="lbl">Web</span>minkops.com</div>
+      <div class="contact-row"><span class="lbl">Email</span>info@minkops.com</div>
+      <div class="contact-row"><span class="lbl">Location</span>Toronto, ON</div>
+    </div>
+  </div>
+
+  <div class="rule-header"></div>
+
+  <!-- Body -->
+  <div class="body">
+
+    <div class="content-lines"></div>
+
+    <!-- Signature zone -->
+    <div class="sig-zone">
+      <div class="sig-col">
+        <div class="sig-line sig-line-main"></div>
+        <div class="sig-label">Authorised signature</div>
+      </div>
+      <div class="sig-col" style="align-items:flex-end;">
+        <div class="sig-line sig-line-date"></div>
+        <div class="sig-label">Date</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="rule-footer"></div>
+    <div class="footer-inner">
+      <div class="footer-legal">
+        <strong>Minkops AI</strong> &nbsp;·&nbsp;
+        375 University Avenue, Suite 3273, Toronto, ON M5G 2J5, Canada<br>
+        BIN 1001553238 &nbsp;·&nbsp; info@minkops.com &nbsp;·&nbsp; minkops.com
+      </div>
+      <div class="footer-page">1</div>
+    </div>
+  </div>
+
+  <div class="bottom-bar"></div>
+
+</div>
+
+</body>
+</html>
