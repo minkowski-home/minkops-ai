@@ -22,6 +22,54 @@ export default function BlogsPage() {
             </p>
 
             <div className="blog-list">
+              <Link to="/blogs/what-is-an-ai-employee" className="blog-card-link">
+                <motion.div whileHover={{ y: -5 }} className="blog-card">
+                  <span className="blog-card-tag">Guide</span>
+                  <h2 className="blog-card-title">
+                    What Is an AI Employee? A Practical Guide for Small Business
+                    Owners
+                  </h2>
+                  <p className="blog-card-excerpt">
+                    AI employee, AI agent, AI tool — the terms get used
+                    interchangeably, but they aren&apos;t the same thing. Here&apos;s
+                    the practical difference, and how to evaluate one before you
+                    hire it.
+                  </p>
+                  <div className="blog-card-cta">Read Article →</div>
+                </motion.div>
+              </Link>
+
+              <Link to="/blogs/minkowski-home-day-to-day-operations" className="blog-card-link">
+                <motion.div whileHover={{ y: -5 }} className="blog-card">
+                  <span className="blog-card-tag">Case Study</span>
+                  <h2 className="blog-card-title">
+                    A Week Inside Minkowski Home&apos;s Day-to-Day Operations on
+                    Minkops
+                  </h2>
+                  <p className="blog-card-excerpt">
+                    Not a launch story — the ordinary week. How Minkowski Home runs
+                    inbox triage, support, and lead follow-up on a small fleet of
+                    Minkops agents instead of a growing support team.
+                  </p>
+                  <div className="blog-card-cta">Read Article →</div>
+                </motion.div>
+              </Link>
+
+              <Link to="/blogs/myndral-day-to-day-operations" className="blog-card-link">
+                <motion.div whileHover={{ y: -5 }} className="blog-card">
+                  <span className="blog-card-tag">Case Study</span>
+                  <h2 className="blog-card-title">
+                    How Myndral Runs Listener Support and Catalog Ops on Minkops
+                  </h2>
+                  <p className="blog-card-excerpt">
+                    A curated music label with dozens of artists and no support team
+                    to speak of. Here&apos;s how Myndral keeps up with listener email
+                    and catalog questions using Minkops agents instead.
+                  </p>
+                  <div className="blog-card-cta">Read Article →</div>
+                </motion.div>
+              </Link>
+
               <Link to="/blogs/auto-lead-generation-agent" className="blog-card-link">
                 <motion.div whileHover={{ y: -5 }} className="blog-card">
                   <span className="blog-card-tag">Product</span>
