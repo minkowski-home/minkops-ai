@@ -1,0 +1,27 @@
+/* ============================================================
+   SURFACES — radii, borders, shadows.
+   The system is hairline-first: structure comes from 1px rules, not
+   shadow. Shadow is reserved for things that genuinely float.
+   ============================================================ */
+:root {
+  --radius-0: 0;
+  --radius-1: 2px;
+  --radius-2: 3px;
+  --radius-3: 4px;
+  --radius-4: 6px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  --border-w: 1px; /* @kind other */
+  --border-w-thick: 2px; /* @kind other */
+  --rule: var(--border-w) solid var(--border-hairline); /* @kind other */
+  --rule-default: var(--border-w) solid var(--border-default); /* @kind other */
+  --rule-strong: var(--border-w) solid var(--border-strong); /* @kind other */
+
+  /* Only two elevations, plus a focus ring. */
+  --shadow-none: none;
+  --shadow-pop: 0 1px 2px rgba(23, 23, 27, 0.06), 0 8px 24px rgba(23, 23, 27, 0.08);
+  --shadow-overlay: 0 2px 4px rgba(23, 23, 27, 0.08), 0 24px 64px rgba(23, 23, 27, 0.16);
+  --shadow-focus: 0 0 0 2px var(--n-0), 0 0 0 4px var(--ember-tint-24);
+  --shadow-inset-active: inset 2px 0 0 var(--brand-ember);
+}

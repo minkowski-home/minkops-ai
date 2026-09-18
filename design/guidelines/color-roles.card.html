@@ -1,0 +1,13 @@
+<!-- @dsCard group="Colors" viewport="700x210" name="Ember signals, Rust acts" subtitle="Ember fails 4.5:1 on white, so it never carries text — Rust does." -->
+<link rel="stylesheet" href="../styles.css"><style>body{margin:0;padding:18px;background:var(--surface-page);color:var(--text-primary)}.lbl{font:var(--type-eyebrow);letter-spacing:var(--ls-eyebrow);text-transform:uppercase;color:var(--text-muted)}.hex{font:var(--type-mono);color:var(--text-muted)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.box{border:1px solid var(--border-default);border-radius:var(--radius-3);padding:14px;display:grid;gap:10px}.line{display:flex;align-items:center;gap:8px;font:var(--type-body-sm)}.dot{width:8px;height:8px;border-radius:50%;background:var(--brand-ember)}.btn{display:inline-flex;height:36px;padding:0 14px;align-items:center;border-radius:var(--radius-2);background:var(--brand-rust);color:#fff;font:var(--type-button)}.bad{text-decoration:line-through;color:var(--brand-ember);font:var(--type-body-sm)}</style>
+<div class="grid">
+<div class="box"><span class="lbl">Ember — signal only</span>
+<span class="line"><span class="dot"></span>Agent active</span>
+<span class="line"><span style="width:3px;height:16px;background:var(--brand-ember)"></span>Selected / awaiting a human</span>
+<span class="line"><span style="width:22px;height:12px;border-radius:99px;background:var(--brand-ember)"></span>Switch on · focus ring · progress fill</span>
+<span class="bad">Ember body text on white — 3.1:1, never</span></div>
+<div class="box"><span class="lbl">Rust — action &amp; accent text</span>
+<span class="btn">Request access</span>
+<span class="line" style="color:var(--brand-rust)">Accent text and links — 5.4:1 on white</span>
+<span class="hex">--action-primary-bg · --text-accent · --text-link</span></div>
+</div>

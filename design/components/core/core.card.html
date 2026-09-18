@@ -1,0 +1,73 @@
+<!-- @dsCard group="Components" viewport="700x420" name="Core" subtitle="Buttons, badges, signals, avatars, surfaces" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Core components</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{padding:18px;background:var(--surface-page)}.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.grid{display:grid;gap:10px}.sect{display:grid;gap:8px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--border-hairline)}.sect:last-child{border:0;margin:0;padding:0}</style>
+</head><body><div id="root"></div><script type="text/babel">
+const { Button, IconButton, Icon, Badge, PriorityPill, StatusDot, Toggle, Card, Avatar, Eyebrow, Field, Input, Textarea, Select, OptionRow, ProgressSteps, EmptyState, TypingIndicator, AgentRow, InterruptCard, MessageBubble, AgentTile, FlowNode, FlowArrow } = window.MinkopsDesignSystem_6c27f0;
+
+function Demo(){
+  const [on,setOn]=React.useState(true);
+  return <div className="grid" style={{gap:0}}>
+    <div className="sect"><Eyebrow>Button — variants</Eyebrow>
+      <div className="row">
+        <Button variant="primary">Request access</Button>
+        <Button variant="secondary">Acknowledge</Button>
+        <Button variant="ghost">Back</Button>
+        <Button variant="danger">Dismiss</Button>
+        <Button disabled>Disabled</Button>
+      </div>
+      <div className="row">
+        <Button size="lg" variant="primary" iconRight={<Icon name="chevronRight" size={16}/>}>Show my results</Button>
+        <Button size="md" variant="secondary" iconLeft={<Icon name="send" size={14}/>}>Send</Button>
+        <Button size="sm" variant="primary" iconLeft={<Icon name="check" size={12}/>}>Resolve</Button>
+      </div>
+    </div>
+    <div className="sect"><Eyebrow>IconButton · Badge · PriorityPill · StatusDot · Toggle</Eyebrow>
+      <div className="row">
+        <IconButton label="Notifications"><Icon name="bell"/></IconButton>
+        <IconButton label="Theme" active><Icon name="palette"/></IconButton>
+        <Badge tone="approval">Approval</Badge>
+        <Badge tone="escalation">Escalation</Badge>
+        <Badge tone="review">Review</Badge>
+        <Badge tone="ok">Resolved</Badge>
+        <Badge tone="neutral" mono={false}>Enterprise tier</Badge>
+      </div>
+      <div className="row">
+        <PriorityPill level="critical" count={2}/>
+        <PriorityPill level="high" count={1}/>
+        <PriorityPill level="medium"/>
+        <PriorityPill level="low"/>
+        <StatusDot status="active" pulse label="active"/>
+        <StatusDot status="idle" label="idle"/>
+        <StatusDot status="disabled" label="disabled"/>
+        <Toggle checked={on} onChange={setOn} label="Imel"/>
+      </div>
+    </div>
+    <div className="sect"><Eyebrow>Avatar · Icon</Eyebrow>
+      <div className="row">
+        <Avatar name="Imel"/><Avatar name="Kall"/><Avatar name="Kartik Shah" kind="human"/>
+        <span style={{width:1,height:24,background:'var(--border-hairline)'}}/>
+        <span className="row" style={{gap:14,color:'var(--text-secondary)'}}>
+          {['home','agents','tasks','analytics','settings','send','bell','check','x','logout'].map(n=><Icon key={n} name={n} size={18}/>)}
+        </span>
+        <span className="row" style={{gap:12,color:'var(--brand-rust)'}}>
+          {['email','support','sales','analyst','social'].map(n=><Icon key={n} name={n} size={20}/>)}
+        </span>
+      </div>
+    </div>
+    <div className="sect"><Eyebrow rule>Card — tones</Eyebrow>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+        <Card pad="var(--sp-5)"><span style={{font:'var(--type-body-sm)'}}>Default</span></Card>
+        <Card tone="sunken" pad="var(--sp-5)"><span style={{font:'var(--type-body-sm)'}}>Sunken</span></Card>
+        <Card tone="inverse" pad="var(--sp-5)"><span style={{font:'var(--type-body-sm)'}}>Inverse</span></Card>
+        <Card accentEdge pad="var(--sp-5)"><span style={{font:'var(--type-body-sm)'}}>Accent edge</span></Card>
+      </div>
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script></body></html>

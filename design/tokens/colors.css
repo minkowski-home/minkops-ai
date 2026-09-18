@@ -1,0 +1,95 @@
+/* ============================================================
+   COLORS
+   Four locked brand colors + one cool-neutral ramp derived from
+   Slate. Ember is a SIGNAL color (live state, active marker, focus,
+   data); Rust is the ACTION color (it clears 4.5:1 on white, Ember
+   does not). Nothing else is chromatic except the three statuses.
+   ============================================================ */
+:root {
+  /* --- Brand (locked — do not change) --- */
+  --brand-ember: #e95d2c;
+  --brand-rust: #a63e1b;
+  --brand-slate: #94a3b8;
+  --brand-graphite: #424048;
+
+  /* --- Brand tints/shades (mixes of the four, for fills only) --- */
+  --ember-tint-08: rgba(233, 93, 44, 0.08);
+  --ember-tint-14: rgba(233, 93, 44, 0.14);
+  --ember-tint-24: rgba(233, 93, 44, 0.24);
+  --rust-press: #8a3216;
+  --slate-tint-10: rgba(148, 163, 184, 0.1);
+  --slate-tint-20: rgba(148, 163, 184, 0.2);
+  --graphite-press: #2f2e34;
+
+  /* --- Neutral ramp (Slate-hued) --- */
+  --n-0: #ffffff;
+  --n-25: #f8f9fa;
+  --n-50: #f1f3f5;
+  --n-100: #e5e9ed;
+  --n-200: #d2d8de;
+  --n-300: #b7c0c9;
+  --n-400: #94a3b8;
+  --n-500: #6b7785;
+  --n-600: #4d5661;
+  --n-700: #424048;
+  --n-800: #2b2b31;
+  --n-900: #17171b;
+
+  /* --- Status (desaturated, print-safe) --- */
+  --status-ok: #1f6f45;
+  --status-ok-fill: #eaf3ee;
+  --status-warn: #8a6212;
+  --status-warn-fill: #f7f1e4;
+  --status-alert: #b3261e;
+  --status-alert-fill: #fbecea;
+  --status-info: #4d5661;
+  --status-info-fill: #f1f3f5;
+
+  /* --- Semantic: text --- */
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-500);
+  --text-faint: var(--n-400);
+  --text-inverse: var(--n-0);
+  --text-inverse-muted: rgba(255, 255, 255, 0.66);
+  --text-accent: var(--brand-rust);
+  --text-link: var(--brand-rust);
+  --text-link-hover: var(--rust-press);
+
+  /* --- Semantic: surfaces --- */
+  --surface-page: var(--n-0);
+  --surface-sunken: var(--n-25);
+  --surface-raised: var(--n-0);
+  --surface-inset: var(--n-50);
+  --surface-inverse: var(--n-700);
+  --surface-inverse-deep: var(--n-900);
+  --surface-accent-soft: var(--ember-tint-08);
+  --surface-selected: var(--ember-tint-14);
+
+  /* --- Semantic: borders --- */
+  --border-hairline: var(--n-100);
+  --border-default: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-inverse: rgba(255, 255, 255, 0.14);
+  --border-accent: var(--brand-ember);
+
+  /* --- Semantic: actions --- */
+  --action-primary-bg: var(--brand-rust);
+  --action-primary-bg-hover: var(--rust-press);
+  --action-primary-fg: var(--n-0);
+  --action-secondary-bg: var(--n-0);
+  --action-secondary-bg-hover: var(--n-50);
+  --action-secondary-fg: var(--n-900);
+  --action-secondary-border: var(--n-200);
+  --action-ghost-fg: var(--n-600);
+  --action-ghost-bg-hover: var(--n-50);
+  --action-danger-fg: var(--status-alert);
+  --action-disabled-bg: var(--n-50);
+  --action-disabled-fg: var(--n-400);
+
+  /* --- Semantic: signal --- */
+  --signal-live: var(--brand-ember);
+  --signal-idle: var(--n-400);
+  --signal-off: var(--n-300);
+  --focus-ring: var(--brand-ember);
+}
