@@ -15,10 +15,8 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@minkops/brand": ["../../../shared/brand/index"],
-      "@minkops/brand/*": ["../../../shared/brand/*"]
+      "@/*": ["src/*"]
     }
   },
-  "include": ["src", "../../../shared/brand"]
+  "include": ["src"]
 }

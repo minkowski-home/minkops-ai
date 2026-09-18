@@ -1,0 +1,630 @@
+/* ============================================================
+   DESIGN-SYSTEM PRIMITIVES
+   Class-based rendering of design/components/*. Interaction is colour
+   only: no lift, no scale, no shadow bloom. Hover steps a surface one
+   level; press deepens it over 80ms.
+   ============================================================ */
+
+.mk-icon {
+  display: block;
+  flex: none;
+}
+
+/* ---- Button ---------------------------------------------------- */
+
+.mk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+  letter-spacing: var(--ls-tight);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-btn--sm {
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  font: var(--fw-semibold) var(--fs-xs) / 1 var(--font-text);
+}
+
+.mk-btn--md {
+  height: 36px;
+  padding: 0 14px;
+  gap: 8px;
+  font: var(--type-button);
+}
+
+.mk-btn--lg {
+  height: 46px;
+  padding: 0 22px;
+  gap: 10px;
+  font: var(--fw-semibold) var(--fs-base) / 1 var(--font-text);
+}
+
+.mk-btn--full {
+  width: 100%;
+}
+
+.mk-btn--primary,
+a.mk-btn--primary {
+  background: var(--action-primary-bg);
+  border-color: var(--action-primary-bg);
+  color: var(--action-primary-fg);
+}
+
+.mk-btn--primary:hover,
+a.mk-btn--primary:hover {
+  background: var(--action-primary-bg-hover);
+  border-color: var(--action-primary-bg-hover);
+  color: var(--action-primary-fg);
+}
+
+.mk-btn--primary:active {
+  background: var(--rust-press);
+  transition-duration: var(--dur-instant);
+}
+
+.mk-btn--secondary,
+a.mk-btn--secondary {
+  background: var(--action-secondary-bg);
+  border-color: var(--action-secondary-border);
+  color: var(--action-secondary-fg);
+}
+
+.mk-btn--secondary:hover,
+a.mk-btn--secondary:hover {
+  background: var(--action-secondary-bg-hover);
+  border-color: var(--border-strong);
+  color: var(--action-secondary-fg);
+}
+
+.mk-btn--ghost,
+a.mk-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--action-ghost-fg);
+}
+
+.mk-btn--ghost:hover,
+a.mk-btn--ghost:hover {
+  background: var(--action-ghost-bg-hover);
+  border-color: transparent;
+  color: var(--text-primary);
+}
+
+.mk-btn--inverse,
+a.mk-btn--inverse {
+  background: var(--n-0);
+  border-color: var(--n-0);
+  color: var(--n-900);
+}
+
+.mk-btn--inverse:hover,
+a.mk-btn--inverse:hover {
+  background: var(--n-100);
+  border-color: var(--n-100);
+  color: var(--n-900);
+}
+
+.mk-btn:disabled {
+  background: var(--action-disabled-bg);
+  border-color: var(--border-hairline);
+  color: var(--action-disabled-fg);
+  cursor: not-allowed;
+}
+
+/* ---- Eyebrow --------------------------------------------------- */
+
+.mk-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mk-eyebrow--inverse {
+  color: var(--text-inverse-muted);
+}
+
+.mk-eyebrow__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-hairline);
+}
+
+/* ---- Badge ----------------------------------------------------- */
+
+.mk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-1);
+  font: var(--fw-medium) var(--fs-micro) / 1 var(--font-mono);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: var(--surface-inset);
+}
+
+.mk-badge--approval {
+  color: var(--brand-rust);
+  background: var(--ember-tint-08);
+  border-color: var(--ember-tint-24);
+}
+
+.mk-badge--ok {
+  color: var(--status-ok);
+  background: var(--status-ok-fill);
+  border-color: rgba(31, 111, 69, 0.2);
+}
+
+.mk-badge--warn {
+  color: var(--status-warn);
+  background: var(--status-warn-fill);
+  border-color: rgba(138, 98, 18, 0.22);
+}
+
+.mk-badge--review {
+  color: var(--status-info);
+  background: var(--status-info-fill);
+}
+
+/* ---- Card ------------------------------------------------------ */
+
+.mk-card {
+  padding: var(--pad-card);
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border-default);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.mk-card--sunken {
+  background: var(--surface-sunken);
+  border-color: var(--border-hairline);
+}
+
+.mk-card--inverse {
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+.mk-card--accent-edge {
+  border-left: 2px solid var(--brand-ember);
+}
+
+/* ---- Status dot ------------------------------------------------ */
+
+.mk-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mk-status__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-circle);
+  background: var(--signal-idle);
+}
+
+.mk-status__dot--active {
+  background: var(--signal-live);
+}
+
+.mk-status__dot--ok {
+  background: var(--status-ok);
+}
+
+.mk-status__dot--active.is-halo {
+  box-shadow: 0 0 0 3px var(--ember-tint-14);
+}
+
+.mk-status__dot--idle.is-halo {
+  box-shadow: 0 0 0 3px var(--slate-tint-20);
+}
+
+.mk-status__label {
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---- Avatar ---------------------------------------------------- */
+
+.mk-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-2);
+  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.mk-avatar--agent {
+  background: var(--surface-inverse);
+  border: 1px solid var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+.mk-avatar--human {
+  border-radius: var(--radius-circle);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+/* ---- Glyph tile (agent icon inset) ------------------------------ */
+
+.mk-glyph-tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-2);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-hairline);
+  color: var(--brand-rust);
+}
+
+/* ---- Forms ----------------------------------------------------- */
+
+.mk-field {
+  display: grid;
+  gap: 6px;
+}
+
+.mk-field__label {
+  font: var(--fw-medium) var(--fs-xs) / 1.2 var(--font-text);
+  color: var(--text-secondary);
+}
+
+.mk-field__required {
+  color: var(--brand-ember);
+}
+
+.mk-field__hint {
+  font: var(--fw-regular) var(--fs-xs) / 1.45 var(--font-text);
+  color: var(--text-muted);
+}
+
+.mk-field__error {
+  font: var(--type-body-sm);
+  color: var(--status-alert);
+}
+
+.mk-control {
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: var(--type-body);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  outline: none;
+  transition: var(--transition-color);
+}
+
+.mk-control::placeholder {
+  color: var(--text-faint);
+}
+
+.mk-control:hover {
+  border-color: var(--border-strong);
+}
+
+.mk-control:focus,
+.mk-control:focus-visible {
+  border-color: var(--brand-ember);
+  border-radius: var(--radius-2);
+  box-shadow: 0 0 0 3px var(--ember-tint-14);
+}
+
+.mk-control.is-invalid {
+  border-color: var(--status-alert);
+  box-shadow: none;
+}
+
+.mk-control--textarea {
+  height: auto;
+  min-height: 96px;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.mk-select {
+  position: relative;
+}
+
+.mk-control--select {
+  padding-right: 32px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.mk-select__chevron {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* ---- Option row (questionnaire answers) ------------------------ */
+
+.mk-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  transition: var(--transition-color);
+}
+
+.mk-option:hover {
+  background: var(--surface-sunken);
+  border-color: var(--border-strong);
+}
+
+.mk-option.is-selected {
+  background: var(--surface-accent-soft);
+  border-color: var(--brand-ember);
+}
+
+.mk-option__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-strong);
+  color: var(--n-0);
+  transition: var(--transition-color);
+}
+
+.mk-option__mark--round {
+  border-radius: var(--radius-circle);
+}
+
+.mk-option__mark--square {
+  border-radius: var(--radius-1);
+}
+
+.mk-option.is-selected .mk-option__mark {
+  background: var(--brand-ember);
+  border-color: var(--brand-ember);
+}
+
+.mk-option__text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mk-option__label {
+  font: var(--fw-medium) var(--fs-base) / var(--lh-snug) var(--font-text);
+  color: var(--text-primary);
+}
+
+.mk-option__meta {
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---- Progress steps -------------------------------------------- */
+
+.mk-steps {
+  display: flex;
+  gap: 4px;
+}
+
+.mk-steps__seg {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--radius-1);
+  background: var(--n-100);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+
+.mk-steps__seg.is-done {
+  background: var(--brand-ember);
+}
+
+/* ---- Agent tile ------------------------------------------------ */
+
+.mk-agent-tile {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: var(--sp-6);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-3);
+}
+
+.mk-agent-tile.is-selected {
+  border-color: var(--brand-ember);
+  box-shadow: inset 0 2px 0 var(--brand-ember);
+}
+
+.mk-agent-tile__action {
+  margin-top: 2px;
+}
+
+.mk-agent-tile__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mk-agent-tile__department {
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mk-agent-tile__id {
+  display: grid;
+  gap: 3px;
+}
+
+.mk-agent-tile__name {
+  font: var(--fw-semibold) var(--fs-lg) / 1.1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-agent-tile__role {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+/* What the agent is doing right now: Ember dot, mono, under a hairline. */
+.mk-agent-tile__now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: var(--rule);
+  font: var(--type-mono);
+  color: var(--text-secondary);
+}
+
+.mk-agent-tile__now-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--signal-live);
+  box-shadow: 0 0 0 3px var(--ember-tint-14);
+}
+
+/* ---- Flow diagram ---------------------------------------------- */
+
+.mk-flow-node {
+  display: grid;
+  gap: 4px;
+  min-width: 148px;
+  padding: 14px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-top: 2px solid var(--brand-ember);
+  border-radius: var(--radius-3);
+}
+
+.mk-flow-node--output {
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
+  border-top-width: 1px;
+  color: var(--text-inverse);
+}
+
+.mk-flow-node__agent {
+  font: var(--fw-semibold) var(--fs-md) / 1.1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-flow-node__role {
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mk-flow-node__output {
+  font: var(--fw-medium) var(--fs-sm) / 1.2 var(--font-text);
+}
+
+.mk-flow-arrow {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 96px;
+  color: var(--border-strong);
+}
+
+.mk-flow-arrow__label {
+  font: var(--type-mono);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ---- Typing indicator ------------------------------------------ */
+
+@keyframes mk-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.mk-typing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mk-typing__dots {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  background: var(--surface-sunken);
+}
+
+.mk-typing__dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-circle);
+  background: var(--brand-ember);
+  animation: mk-typing 1.2s var(--ease-in-out) infinite;
+}
+
+.mk-typing__dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.mk-typing__dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.mk-typing__label {
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}

@@ -1,31 +1,62 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import AboutPage from "./AboutPage";
-import MinkopsLanding from "./MinkopsLanding";
-import TermsOfService from "./TermsOfService";
-import PrivacyPolicy from "./PrivacyPolicy";
-import CareersPage from "./CareersPage";
-import BlogsPage from "./BlogsPage";
-import BlogPost1 from "./BlogPost1";
-import BlogPost2 from "./BlogPost2";
-import OrchestrationPage from "./OrchestrationPage";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { POSTS } from "./content/posts";
+import SiteLayout from "./layout/SiteLayout";
+import AboutPage from "./pages/AboutPage";
+import BlogIndexPage from "./pages/BlogIndexPage";
+import CareersPage from "./pages/CareersPage";
+import LandingPage from "./pages/LandingPage";
+import { PrivacyPolicyPage, TermsOfServicePage } from "./pages/LegalPages";
+import NotFoundPage from "./pages/NotFoundPage";
+import OrchestrationPage from "./pages/OrchestrationPage";
+import AutoLeadGeneration from "./pages/blog/AutoLeadGeneration";
+import MinkowskiHomeWeek from "./pages/blog/MinkowskiHomeWeek";
+import MyndralOperations from "./pages/blog/MyndralOperations";
+import WhatIsAnAiEmployee from "./pages/blog/WhatIsAnAiEmployee";
 
-function App() {
+/**
+ * Posts that were unpublished. Their URLs may still be linked or indexed, so
+ * they redirect to the blog index rather than falling through to the 404.
+ */
+const RETIRED_POST_SLUGS = ["minkowski-case-study"] as const;
+
+export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<MinkopsLanding />} />
-        <Route path="/about" element={<AboutPage />} />
-        <Route path="/terms" element={<TermsOfService />} />
-        <Route path="/privacy" element={<PrivacyPolicy />} />
-        <Route path="/careers" element={<CareersPage />} />
-        <Route path="/blogs" element={<BlogsPage />} />
-        <Route path="/blogs/minkowski-case-study" element={<BlogPost1 />} />
-        <Route path="/blogs/auto-lead-generation-agent" element={<BlogPost2 />} />
-        <Route path="/orchestration" element={<OrchestrationPage />} />
-        <Route path="*" element={<MinkopsLanding />} />
+        <Route element={<SiteLayout />}>
+          <Route index element={<LandingPage />} />
+          <Route path="orchestration" element={<OrchestrationPage />} />
+          <Route path="about" element={<AboutPage />} />
+          <Route path="careers" element={<CareersPage />} />
+          <Route path="blogs" element={<BlogIndexPage />} />
+          <Route
+            path={`blogs/${POSTS.whatIsAnAiEmployee.slug}`}
+            element={<WhatIsAnAiEmployee />}
+          />
+          <Route
+            path={`blogs/${POSTS.minkowskiHomeWeek.slug}`}
+            element={<MinkowskiHomeWeek />}
+          />
+          <Route
+            path={`blogs/${POSTS.myndralOperations.slug}`}
+            element={<MyndralOperations />}
+          />
+          <Route
+            path={`blogs/${POSTS.autoLeadGeneration.slug}`}
+            element={<AutoLeadGeneration />}
+          />
+          {RETIRED_POST_SLUGS.map((slug) => (
+            <Route
+              key={slug}
+              path={`blogs/${slug}`}
+              element={<Navigate to="/blogs" replace />}
+            />
+          ))}
+          <Route path="terms" element={<TermsOfServicePage />} />
+          <Route path="privacy" element={<PrivacyPolicyPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );
 }
-
-export default App;

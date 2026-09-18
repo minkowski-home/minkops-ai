@@ -1,19 +1,46 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
-    <title>MinkOps</title>
+    <meta name="theme-color" content="#ffffff" />
+
+    <!-- Defaults for crawlers that don't run JavaScript. Each route overwrites these via SeoHead. -->
+    <title>Minkops · The operating system for zero-man companies</title>
+    <meta
+      name="description"
+      content="AI employees that each take a whole role, share one memory of your business and hand work to each other. You set the rules once and make only the calls that should be yours."
+    />
+    <meta property="og:site_name" content="Minkops" />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="Minkops · The operating system for zero-man companies"
+    />
+    <meta
+      property="og:description"
+      content="AI employees that each take a whole role and share one memory of your business."
+    />
+    <meta property="og:url" content="https://minkops.com/" />
+    <link rel="canonical" href="https://minkops.com/" />
+
+    <!-- The brand has no logo artwork; the favicon is the Ember dot from the wordmark lockup. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Readex Pro (display + wordmark), Libre Franklin (text), IBM Plex Mono (machine values). -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Readex Pro — heading/display/logo font -->
-    <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- Cormorant Garamond — elegant serif used by the Paper premium theme -->
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&display=swap" rel="stylesheet" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Libre+Franklin:ital,wght@0,300..800;1,400..600&family=Readex+Pro:wght@500;600;700&display=swap"
+    />
   </head>
 
   <body>
+    <noscript>
+      Minkops builds AI employees for small teams. This site needs JavaScript to run; you
+      can reach us any time at info@minkops.com.
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

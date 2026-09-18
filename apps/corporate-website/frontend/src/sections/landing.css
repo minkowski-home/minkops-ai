@@ -1,0 +1,1560 @@
+/* ============================================================
+   LANDING PAGE SECTIONS — hero, funnel, roster, console preview,
+   access. Everything here composes tokens and ui.css primitives.
+   ============================================================ */
+
+/* ---- Hero ------------------------------------------------------ */
+
+.mk-hero {
+  padding: var(--sp-14) var(--sp-9) var(--sp-13);
+}
+
+.mk-hero__inner {
+  display: grid;
+  gap: var(--sp-9);
+}
+
+.mk-hero__title {
+  max-width: 20ch;
+  font: var(--fw-semibold) var(--fs-5xl) / 1.04 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+/* The accent clause always takes its own line, so the headline reads as a turn. */
+.mk-hero__title .mk-accent {
+  display: block;
+}
+
+.mk-hero__lead {
+  display: grid;
+  gap: var(--sp-5);
+  max-width: var(--measure);
+  font: var(--type-body-lg);
+  color: var(--text-secondary);
+}
+
+.mk-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5);
+}
+
+.mk-hero__actions .mk-status {
+  margin-left: var(--sp-4);
+}
+
+.mk-hero__facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: var(--sp-6) 0 0;
+  border-top: var(--rule);
+}
+
+.mk-hero__fact {
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+  padding: var(--sp-7) var(--sp-8) 0 0;
+}
+
+.mk-hero__fact + .mk-hero__fact {
+  padding-left: var(--sp-8);
+  border-left: var(--rule);
+}
+
+.mk-hero__fact dt {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.mk-hero__figure {
+  font: var(--fw-semibold) var(--fs-3xl) / 1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-hero__fact-label {
+  font: var(--type-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mk-hero__fact dd {
+  margin: 0;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+/* ---- Funnel ---------------------------------------------------- */
+
+.mk-funnel {
+  max-width: 720px;
+  padding: 28px;
+  background: var(--surface-page);
+  border: var(--rule-default);
+  border-radius: var(--radius-3);
+}
+
+.mk-funnel__step {
+  display: grid;
+  gap: 18px;
+  animation: mk-fade-up var(--dur-slow) var(--ease-out) both;
+}
+
+.mk-funnel__question {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.mk-funnel__question-title {
+  font: var(--fw-medium) var(--fs-xl) / var(--lh-snug) var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-funnel__subtext {
+  font: var(--type-body-sm);
+  color: var(--text-muted);
+}
+
+.mk-funnel__options {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.mk-funnel__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.mk-funnel__count {
+  margin-left: auto;
+  font: var(--type-mono);
+  color: var(--text-faint);
+}
+
+.mk-funnel__results {
+  display: grid;
+  gap: var(--sp-7);
+}
+
+.mk-funnel__results-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mk-funnel__stage {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-funnel__results-title {
+  max-width: 24ch;
+  font: var(--type-h2);
+}
+
+.mk-funnel__recovery {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.mk-funnel__recovery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.mk-funnel__recovery-figure {
+  margin-left: auto;
+  font: var(--fw-semibold) var(--fs-xl) / 1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+/* The one gradient-free progress fill the system allows: flat Ember. */
+.mk-funnel__bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-1);
+  background: var(--n-100);
+}
+
+.mk-funnel__bar span {
+  display: block;
+  height: 100%;
+  background: var(--brand-ember);
+  animation: mk-fill var(--dur-slow) var(--ease-out) both;
+  transform-origin: left center;
+}
+
+@keyframes mk-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.mk-funnel__basis {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-funnel__primary {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.mk-funnel__agent-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+}
+
+.mk-funnel__agent-id {
+  display: grid;
+  gap: 3px;
+}
+
+.mk-funnel__agent-name {
+  font: var(--fw-semibold) var(--fs-lg) / 1.1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-funnel__agent-role {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+.mk-funnel__agent-status {
+  margin-left: auto;
+  align-self: start;
+}
+
+.mk-funnel__pitch {
+  max-width: var(--measure);
+  color: var(--text-secondary);
+}
+
+.mk-funnel__saving {
+  font: var(--type-mono);
+  color: var(--brand-rust);
+}
+
+.mk-funnel__honest {
+  padding-top: var(--sp-5);
+  border-top: var(--rule);
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+.mk-funnel__supporting {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.mk-funnel__supporting-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-funnel__support-card {
+  display: grid;
+  gap: var(--sp-3);
+  height: 100%;
+}
+
+.mk-funnel__support-name {
+  font: var(--fw-medium) var(--fs-md) / 1.1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-funnel__support-meta {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-funnel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5);
+  padding-top: var(--sp-2);
+}
+
+.mk-funnel__note {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+/* ---- Roster ---------------------------------------------------- */
+
+.mk-roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: var(--sp-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-roster > li {
+  display: grid;
+}
+
+/* ---- Two ways to hire: segmented tabs ---- */
+
+.mk-mode {
+  display: inline-flex;
+  justify-self: start;
+  gap: var(--sp-1);
+  padding: 3px;
+  background: var(--surface-inset);
+  border: var(--rule);
+  border-radius: var(--radius-3);
+}
+
+.mk-mode__tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  min-height: 40px;
+  padding: 0 var(--sp-6);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+  font: var(--fw-semibold) var(--fs-sm) / 40px var(--font-text);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-mode__tab:hover {
+  color: var(--text-primary);
+}
+
+.mk-mode__tab.is-selected {
+  background: var(--surface-raised);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+  box-shadow: inset 0 -2px 0 var(--brand-ember);
+}
+
+.mk-mode__hint {
+  font: var(--type-mono);
+  color: var(--text-faint);
+}
+
+.mk-mode__panel,
+.mk-roster-view {
+  display: grid;
+  gap: 28px;
+}
+
+/* ---- Crews ---- */
+
+.mk-crews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sp-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-crews > li {
+  display: grid;
+}
+
+.mk-crew {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  gap: var(--sp-6);
+  padding: var(--sp-8);
+  background: var(--surface-raised);
+  border: var(--rule-default);
+  border-radius: var(--radius-3);
+  transition: var(--transition-color);
+}
+
+.mk-crew:hover {
+  border-color: var(--border-strong);
+}
+
+.mk-crew.is-hired {
+  border-color: var(--brand-ember);
+  box-shadow: inset 0 2px 0 var(--brand-ember);
+}
+
+.mk-crew__head {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.mk-crew__name {
+  font: var(--fw-semibold) var(--fs-xl) / 1.15 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-crew__replaces {
+  font: var(--fw-medium) var(--fs-sm) / 1.4 var(--font-text);
+  color: var(--text-accent);
+}
+
+.mk-crew__replaces span {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-crew__pitch {
+  color: var(--text-secondary);
+}
+
+.mk-crew__members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-crew__member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 3px;
+  border: var(--rule-default);
+  border-radius: var(--radius-2);
+  font: var(--fw-medium) var(--fs-xs) / 1 var(--font-mono);
+  color: var(--text-primary);
+}
+
+.mk-crew__member-glyph {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-1);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+.mk-crew__covers {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-5) 0 0;
+  list-style: none;
+  border-top: var(--rule);
+}
+
+.mk-crew__covers li {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: var(--sp-4);
+  align-items: baseline;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+.mk-crew__covers .mk-icon {
+  color: var(--status-ok);
+  transform: translateY(1px);
+}
+
+/* ---- Your team tray: sticks to the viewport bottom while the roster is on screen ---- */
+
+.mk-tray {
+  position: sticky;
+  bottom: var(--sp-6);
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5) var(--sp-8);
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  border-radius: var(--radius-4);
+  box-shadow: var(--shadow-overlay);
+}
+
+.mk-tray.is-empty {
+  position: static;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border: 1px dashed var(--border-strong);
+  box-shadow: none;
+}
+
+.mk-tray__summary {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-6);
+  min-width: 0;
+}
+
+.mk-tray__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font: var(--fw-semibold) var(--fs-base) / 1 var(--font-display);
+  letter-spacing: var(--ls-tight);
+}
+
+.mk-tray__count {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-ember);
+  color: var(--n-0);
+  font: var(--fw-semibold) var(--fs-micro) / 1 var(--font-mono);
+}
+
+.mk-tray.is-empty .mk-tray__count {
+  background: var(--surface-inset);
+  color: var(--text-muted);
+}
+
+.mk-tray__hint {
+  font: var(--type-body-sm);
+  color: var(--text-muted);
+}
+
+.mk-tray__members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-tray__member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 3px 3px 3px;
+  border: 1px solid var(--border-inverse);
+  border-radius: var(--radius-2);
+  font: var(--fw-medium) var(--fs-xs) / 1 var(--font-mono);
+  animation: mk-fade-up var(--dur-base) var(--ease-out) both;
+}
+
+.mk-tray__glyph {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-1);
+  background: var(--n-800);
+}
+
+.mk-tray__remove {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-1);
+  color: var(--text-inverse-muted);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-tray__remove:hover {
+  background: var(--graphite-press);
+  color: var(--text-inverse);
+}
+
+.mk-tray__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-left: auto;
+}
+
+.mk-tray__actions .mk-btn--ghost {
+  color: var(--text-inverse-muted);
+}
+
+.mk-tray__actions .mk-btn--ghost:hover {
+  background: var(--graphite-press);
+  color: var(--text-inverse);
+}
+
+/* ---- The team block inside the access form ---- */
+
+.mk-interest__team {
+  display: grid;
+  gap: 6px;
+  padding: var(--sp-5);
+  background: var(--surface-accent-soft);
+  border: 1px solid var(--ember-tint-24);
+  border-radius: var(--radius-2);
+}
+
+.mk-interest__team-list {
+  font: var(--fw-medium) var(--fs-sm) / 1.4 var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* Revealed batches fade up in sequence: 280ms each, 40ms apart. */
+.mk-roster__item.is-revealed {
+  animation: mk-fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: calc(var(--mk-stagger, 0) * 40ms);
+}
+
+/* Shift strip: the whole team as one row of glyph tiles, at any roster size. */
+.mk-shift {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.mk-shift__label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-shift__label strong {
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+}
+
+.mk-shift__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-circle);
+  background: var(--signal-live);
+  box-shadow: 0 0 0 3px var(--ember-tint-14);
+}
+
+.mk-shift__team {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-shift__agent {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--surface-inverse);
+  border-radius: var(--radius-2);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-shift__agent:hover {
+  background: var(--graphite-press);
+  border-color: var(--brand-ember);
+}
+
+/* Department filters. Active state uses the nav's Ember underline marker. */
+.mk-roster-filters {
+  display: flex;
+  gap: var(--sp-2);
+  margin: 0 calc(var(--sp-2) * -1);
+  padding: 0 var(--sp-2) var(--sp-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: var(--rule);
+}
+
+.mk-roster-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.mk-roster-filter {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--hit-min);
+  padding: 0 11px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-2);
+  font: var(--fw-medium) var(--fs-sm) / 1 var(--font-text);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-roster-filter:hover {
+  background: var(--n-50);
+  color: var(--text-primary);
+}
+
+.mk-roster-filter.is-active {
+  color: var(--text-primary);
+  border-radius: 0;
+  box-shadow: inset 0 -2px 0 var(--brand-ember);
+}
+
+.mk-roster-filter__count {
+  font: var(--type-mono);
+  color: var(--text-faint);
+}
+
+.mk-roster-filter.is-active .mk-roster-filter__count {
+  color: var(--brand-rust);
+}
+
+/* Reveal control: a count, plus a peek at who's next. */
+.mk-roster-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.mk-roster-more__count {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-roster-more__button {
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.mk-roster-more__faces {
+  display: inline-flex;
+}
+
+/* Overlapping role glyphs on graphite, each ringed in the button's surface colour. */
+.mk-roster-more__face {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-2);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  box-shadow: 0 0 0 2px var(--surface-raised);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.mk-roster-more__button:hover .mk-roster-more__face {
+  box-shadow: 0 0 0 2px var(--action-secondary-bg-hover);
+}
+
+.mk-roster-more__face + .mk-roster-more__face {
+  margin-left: -6px;
+}
+
+.mk-roster-more__chevron {
+  transform: rotate(90deg);
+}
+
+/* ---- Console preview -------------------------------------------
+   Framed as an app window so it reads as product, not page: a graphite
+   title bar, a 6px frame that floats on the one permitted pop shadow,
+   and a sunken sidebar. Everything inside uses the console's own
+   denser type sizes. */
+
+.mk-app {
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-4);
+  background: var(--surface-page);
+  box-shadow: var(--shadow-pop);
+}
+
+.mk-app__titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: 44px;
+  padding: 0 var(--sp-6);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+.mk-app__titlebar .mk-wordmark__text {
+  font-size: var(--fs-md);
+}
+
+.mk-app__crumb {
+  padding-left: var(--sp-6);
+  border-left: 1px solid var(--border-inverse);
+  font: var(--type-mono);
+  color: var(--text-inverse-muted);
+}
+
+.mk-app__titlebar-status {
+  margin-left: auto;
+}
+
+.mk-app__titlebar .mk-status__label {
+  color: var(--text-inverse-muted);
+}
+
+.mk-app__body {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 620px;
+}
+
+/* ---- Sidebar: workflow switcher ---- */
+
+.mk-app__sidebar {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-5);
+  padding: var(--sp-6) var(--sp-4);
+  background: var(--surface-sunken);
+  border-right: var(--rule);
+}
+
+.mk-app__sidebar-title {
+  padding: 0 var(--sp-4);
+}
+
+.mk-app__tabs {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.mk-app-tab {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-3) var(--sp-4);
+  align-items: center;
+  width: 100%;
+  padding: 10px var(--sp-4);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-app-tab:hover {
+  background: var(--n-50);
+}
+
+/* Selection per the system: Ember inset edge plus a 14% wash, never a solid fill. */
+.mk-app-tab.is-selected {
+  background: var(--surface-selected);
+  box-shadow: var(--shadow-inset-active);
+  border-radius: 0 var(--radius-2) var(--radius-2) 0;
+}
+
+.mk-app-tab__glyphs {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 3px;
+}
+
+.mk-app-tab__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mk-app-tab__name {
+  font: var(--fw-semibold) var(--fs-sm) / 1.25 var(--font-text);
+  color: var(--text-primary);
+}
+
+.mk-app-tab__business {
+  overflow: hidden;
+  font: var(--type-mono);
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mk-app-tab__count,
+.mk-app-tab__clear {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  font: var(--fw-semibold) var(--fs-micro) / 1 var(--font-mono);
+}
+
+.mk-app-tab__count {
+  background: var(--brand-ember);
+  color: var(--n-0);
+}
+
+.mk-app-tab__clear {
+  background: var(--status-ok-fill);
+  color: var(--status-ok);
+}
+
+/* ---- Glyph tiles (graphite, like agent avatars in the real console) ---- */
+
+.mk-app-glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-2);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+.mk-app-glyph--sm {
+  width: 22px;
+  height: 22px;
+}
+
+.mk-app-glyph--md {
+  width: 30px;
+  height: 30px;
+}
+
+/* ---- Main pane ---- */
+
+.mk-app__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  animation: mk-fade-up var(--dur-slow) var(--ease-out) both;
+}
+
+.mk-app__head {
+  display: grid;
+  gap: var(--sp-5);
+  padding: var(--sp-7) var(--sp-7) var(--sp-6);
+  border-bottom: var(--rule);
+}
+
+.mk-app__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-3) var(--sp-5);
+}
+
+.mk-app__business {
+  font: var(--fw-semibold) var(--fs-xl) / 1.1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-app__descriptor {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+/* "How work moves": sources and destinations as outlined chips, agents in graphite. */
+.mk-pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-pipeline__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--radius-2);
+  font: var(--fw-medium) var(--fs-xs) / 1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.mk-pipeline__step--source {
+  border: 1px dashed var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.mk-pipeline__step--agent {
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+.mk-pipeline__step--destination {
+  background: var(--surface-accent-soft);
+  border: 1px solid var(--ember-tint-24);
+  color: var(--brand-rust);
+}
+
+.mk-pipeline__arrow {
+  color: var(--text-faint);
+}
+
+.mk-app__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: var(--rule);
+}
+
+.mk-app__metric {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-7);
+}
+
+.mk-app__metric + .mk-app__metric {
+  border-left: var(--rule);
+}
+
+.mk-app__metric strong {
+  font: var(--fw-semibold) var(--fs-2xl) / 1 var(--font-display);
+  letter-spacing: var(--ls-display);
+}
+
+.mk-app__metric > span:not(.mk-app__metric-bar) {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+.mk-app__metric.is-waiting {
+  box-shadow: var(--shadow-inset-active);
+  background: var(--surface-accent-soft);
+}
+
+.mk-app__metric.is-waiting strong {
+  color: var(--brand-rust);
+}
+
+.mk-app__metric-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-1);
+  background: var(--n-100);
+}
+
+.mk-app__metric-bar span {
+  display: block;
+  height: 100%;
+  background: var(--brand-ember);
+  transform-origin: left center;
+  animation: mk-fill var(--dur-slow) var(--ease-out) both;
+}
+
+.mk-app__panes {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.mk-app__log,
+.mk-app__attention {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mk-app__attention {
+  background: var(--surface-sunken);
+  border-left: var(--rule);
+}
+
+.mk-app__pane-head {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--pad-panel);
+  border-bottom: var(--rule);
+}
+
+/* Activity log: finished work, in plain sentences. */
+.mk-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-log__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--sp-5);
+  align-items: start;
+  padding: var(--sp-6) var(--sp-7);
+  border-bottom: var(--rule);
+}
+
+.mk-log__row.is-fresh {
+  animation: mk-fade-up var(--dur-slow) var(--ease-out) both;
+  background: var(--status-ok-fill);
+}
+
+.mk-log__body {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.mk-log__text {
+  font: var(--type-body-sm);
+  color: var(--text-primary);
+}
+
+.mk-log__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-log__files li {
+  padding: 2px 6px;
+  border: var(--rule-default);
+  border-radius: var(--radius-1);
+  background: var(--surface-inset);
+  font: var(--fw-regular) var(--fs-micro) / 1.4 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.mk-log__meta {
+  font: var(--type-mono);
+  color: var(--text-faint);
+}
+
+.mk-log__outcome {
+  margin-top: 2px;
+}
+
+/* Decisions: one question, the answers already worked out. */
+.mk-app__attention-body {
+  display: grid;
+  gap: var(--sp-6);
+  align-content: start;
+  padding: var(--sp-6);
+}
+
+.mk-decision {
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+  background: var(--surface-raised);
+  border: var(--rule-default);
+  border-left: 2px solid var(--brand-ember);
+  border-radius: var(--radius-3);
+  animation: mk-fade-up var(--dur-slow) var(--ease-out) both;
+}
+
+.mk-decision.is-chosen {
+  border-left-color: var(--border-strong);
+}
+
+.mk-decision__meta {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+.mk-decision__meta strong {
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+.mk-decision__question {
+  font: var(--fw-semibold) var(--fs-md) / var(--lh-snug) var(--font-display);
+  letter-spacing: var(--ls-tight);
+}
+
+.mk-decision__why {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+.mk-decision__choices {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.mk-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  text-align: left;
+  background: var(--surface-raised);
+  border: var(--rule-default);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+
+.mk-choice:hover {
+  border-color: var(--brand-ember);
+  background: var(--surface-accent-soft);
+}
+
+.mk-choice:active {
+  background: var(--surface-selected);
+  transition-duration: var(--dur-instant);
+}
+
+.mk-choice__label {
+  font: var(--fw-medium) var(--fs-sm) / 1.3 var(--font-text);
+  color: var(--text-primary);
+}
+
+.mk-decision__handoff {
+  display: grid;
+  gap: var(--sp-5);
+  margin-top: var(--sp-2);
+}
+
+.mk-decision__chosen {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font: var(--type-label);
+  color: var(--status-ok);
+}
+
+.mk-app__clear {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-10) var(--sp-6);
+  text-align: center;
+}
+
+.mk-app__clear-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-2);
+  background: var(--status-ok-fill);
+  border: 1px solid rgba(31, 111, 69, 0.2);
+  color: var(--status-ok);
+}
+
+.mk-app__clear-title {
+  font: var(--type-h4);
+}
+
+.mk-app__clear-body {
+  max-width: 30ch;
+  font: var(--type-body-sm);
+  color: var(--text-muted);
+}
+
+.mk-app__disclaimer {
+  font: var(--type-mono);
+  color: var(--text-muted);
+}
+
+/* ---- Access ---------------------------------------------------- */
+
+.mk-access {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: var(--sp-9);
+  align-items: start;
+}
+
+.mk-access__promises {
+  display: grid;
+  gap: var(--sp-7);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A hairline rule, not Ember: the Ember left edge is reserved for "a human is needed here". */
+.mk-access__promise {
+  display: grid;
+  gap: var(--sp-3);
+  padding-left: 14px;
+  border-left: 2px solid var(--border-strong);
+}
+
+.mk-access__promise-title {
+  font: var(--type-h4);
+  letter-spacing: var(--ls-tight);
+}
+
+.mk-access__promise-body {
+  max-width: var(--measure);
+  color: var(--text-secondary);
+}
+
+.mk-interest {
+  display: grid;
+  gap: var(--sp-7);
+  align-content: start;
+  padding: var(--sp-8);
+}
+
+.mk-interest--sent {
+  gap: var(--sp-5);
+  justify-items: start;
+}
+
+.mk-interest__head {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.mk-interest__title {
+  font: var(--type-h3);
+  font-size: var(--fs-xl);
+}
+
+.mk-interest__body {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+
+.mk-interest__form {
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.mk-interest__error {
+  font: var(--type-body-sm);
+  color: var(--status-alert);
+}
+
+/* ---- Responsive ------------------------------------------------ */
+
+@media (max-width: 960px) {
+  .mk-access {
+    grid-template-columns: 1fr;
+  }
+
+  /* Sidebar becomes a horizontal strip of workflow tabs above the main pane. */
+  .mk-app__body {
+    grid-template-columns: 1fr;
+  }
+
+  .mk-app__sidebar {
+    padding: var(--sp-5) var(--sp-5) var(--sp-3);
+    border-right: 0;
+    border-bottom: var(--rule);
+  }
+
+  .mk-app__tabs {
+    display: flex;
+    gap: var(--sp-3);
+    overflow-x: auto;
+    padding-bottom: var(--sp-3);
+    scrollbar-width: thin;
+  }
+
+  .mk-app-tab {
+    flex: none;
+    width: 220px;
+    border: var(--rule-default);
+    background: var(--surface-raised);
+  }
+
+  .mk-app-tab.is-selected {
+    border-color: var(--brand-ember);
+    border-radius: var(--radius-2);
+    box-shadow: none;
+  }
+
+  .mk-app__panes {
+    grid-template-columns: 1fr;
+  }
+
+  /* Stacked, the decisions come first: they're the only part that needs you. */
+  .mk-app__attention {
+    order: -1;
+    border-left: 0;
+    border-bottom: var(--rule);
+  }
+}
+
+@media (max-width: 720px) {
+  .mk-hero {
+    padding: var(--sp-12) var(--sp-6) var(--sp-11);
+  }
+
+  .mk-hero__title {
+    font-size: var(--fs-3xl);
+  }
+
+  .mk-hero__actions .mk-btn {
+    width: 100%;
+  }
+
+  .mk-hero__actions .mk-status {
+    margin-left: 0;
+  }
+
+  .mk-hero__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .mk-hero__fact,
+  .mk-hero__fact + .mk-hero__fact {
+    padding: var(--sp-6) 0;
+    border-left: 0;
+    border-bottom: var(--rule);
+  }
+
+  .mk-funnel {
+    padding: var(--sp-6);
+  }
+
+  .mk-roster-more__button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .mk-mode {
+    display: flex;
+  }
+
+  .mk-mode__tab {
+    flex: 1;
+    justify-content: center;
+    padding: 0 var(--sp-4);
+  }
+
+  .mk-mode__hint {
+    display: none;
+  }
+
+  .mk-crews {
+    grid-template-columns: 1fr;
+  }
+
+  .mk-crew {
+    padding: var(--sp-6);
+  }
+
+  .mk-tray {
+    bottom: var(--sp-4);
+  }
+
+  /* One scrolling row of names, so a big team never covers half the screen. */
+  .mk-tray__members {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mk-tray__members::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mk-tray__member {
+    flex: none;
+  }
+
+  /* Every level needs min-width: 0, or the one-line chip row's width propagates
+     up through the flex and grid parents and widens the mobile viewport. */
+  .mk-tray,
+  .mk-tray__summary,
+  .mk-tray__members {
+    min-width: 0;
+  }
+
+  .mk-tray__summary {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .mk-tray__members {
+    width: 100%;
+  }
+
+  .mk-tray__actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .mk-tray__actions .mk-btn--primary {
+    flex: 1;
+  }
+
+  .mk-funnel__results-title {
+    font-size: var(--fs-xl);
+  }
+
+  .mk-funnel__agent-head {
+    flex-wrap: wrap;
+  }
+
+  .mk-interest {
+    padding: var(--sp-6);
+  }
+
+  .mk-app__titlebar {
+    padding: 0 var(--sp-5);
+  }
+
+  .mk-app__crumb {
+    display: none;
+  }
+
+  .mk-app__head {
+    padding: var(--sp-6) var(--sp-5);
+  }
+
+  .mk-app__metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .mk-app__metric {
+    padding: var(--sp-5);
+  }
+
+  .mk-app__metric:nth-child(3) {
+    border-left: 0;
+  }
+
+  .mk-app__metric:nth-child(n + 3) {
+    border-top: var(--rule);
+  }
+
+  .mk-log__row {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: var(--sp-5);
+  }
+
+  .mk-app__attention-body {
+    padding: var(--sp-5);
+  }
+
+  .mk-log__outcome {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

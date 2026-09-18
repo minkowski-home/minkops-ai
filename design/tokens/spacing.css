@@ -1,0 +1,33 @@
+/* ============================================================
+   SPACING — 4px base, with 2px and 6px available for dense console UI.
+   ============================================================ */
+:root {
+  --sp-0: 0; /* @kind spacing */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 20px;
+  --sp-8: 24px;
+  --sp-9: 32px;
+  --sp-10: 40px;
+  --sp-11: 48px;
+  --sp-12: 64px;
+  --sp-13: 80px;
+  --sp-14: 96px;
+  --sp-15: 128px;
+
+  /* --- Component padding presets --- */
+  --pad-cell: var(--sp-4) var(--sp-5);
+  --pad-card: var(--sp-6);
+  --pad-panel: var(--sp-5) var(--sp-6);
+  --pad-section: var(--sp-14) var(--sp-9);
+
+  /* --- Gaps --- */
+  --gap-tight: var(--sp-2);
+  --gap-inline: var(--sp-4);
+  --gap-stack: var(--sp-6);
+  --gap-block: var(--sp-9);
+}

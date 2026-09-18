@@ -1,0 +1,18 @@
+/* ============================================================
+   LAYOUT — fixed chrome dimensions shared by the console and the site.
+   ============================================================ */
+:root {
+  --sidebar-w: 216px;
+  --sidebar-w-collapsed: 56px;
+  --header-h: 52px;
+  --pane-agents-w: 288px;
+  --pane-attention-w: 340px;
+  --composer-max-h: 168px;
+  --site-nav-h: 64px;
+  --measure: 68ch; /* @kind other */
+  --measure-narrow: 54ch; /* @kind other */
+  --container-w: 1200px;
+  --container-w-narrow: 760px;
+  --hit-min: 36px;
+  --hit-touch: 44px;
+}

@@ -1,0 +1,25 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Feedback" subtitle="Progress, empty states, agent working indicator" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Feedback components</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{padding:18px;background:var(--surface-page)}.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.grid{display:grid;gap:10px}.sect{display:grid;gap:8px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--border-hairline)}.sect:last-child{border:0;margin:0;padding:0}</style>
+</head><body><div id="root"></div><script type="text/babel">
+const { Button, IconButton, Icon, Badge, PriorityPill, StatusDot, Toggle, Card, Avatar, Eyebrow, Field, Input, Textarea, Select, OptionRow, ProgressSteps, EmptyState, TypingIndicator, AgentRow, InterruptCard, MessageBubble, AgentTile, FlowNode, FlowArrow } = window.MinkopsDesignSystem_6c27f0;
+
+function Demo(){
+  return <div className="grid" style={{gap:0}}>
+    <div className="sect"><Eyebrow>Step 02 / Time audit</Eyebrow><ProgressSteps total={4} current={1}/></div>
+    <div className="sect"><TypingIndicator name="Synapse"/></div>
+    <div className="sect" style={{border:0}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+        <Card tone="sunken" pad="0"><EmptyState icon={<Icon name="agents" size={20}/>} headline="No tasks yet" hint="Type a task below and your agents will get to work immediately."/></Card>
+        <Card tone="sunken" pad="0"><EmptyState headline="All clear" hint="No items need your attention right now. Agents are running smoothly."/></Card>
+      </div>
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script></body></html>

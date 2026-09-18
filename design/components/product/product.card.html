@@ -1,0 +1,44 @@
+<!-- @dsCard group="Components" viewport="700x440" name="Product" subtitle="Agent rows, interrupt cards, task turns, roster tiles, flow nodes" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Product components</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{padding:18px;background:var(--surface-page)}.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.grid{display:grid;gap:10px}.sect{display:grid;gap:8px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--border-hairline)}.sect:last-child{border:0;margin:0;padding:0}</style>
+</head><body><div id="root"></div><script type="text/babel">
+const { Button, IconButton, Icon, Badge, PriorityPill, StatusDot, Toggle, Card, Avatar, Eyebrow, Field, Input, Textarea, Select, OptionRow, ProgressSteps, EmptyState, TypingIndicator, AgentRow, InterruptCard, MessageBubble, AgentTile, FlowNode, FlowArrow } = window.MinkopsDesignSystem_6c27f0;
+
+function Demo(){
+  const [on,setOn]=React.useState({Imel:true,Kall:true,Aria:false});
+  return <div className="grid" style={{gap:0}}>
+    <div className="sect" style={{display:'grid',gridTemplateColumns:'296px 1fr',gap:14,alignItems:'start'}}>
+      <div className="grid" style={{gap:2}}>
+        <Eyebrow>Your agents</Eyebrow>
+        <AgentRow name="Imel" role="Email handler" status="active" lastActive="4m ago" enabled={on.Imel} selected onToggle={v=>setOn({...on,Imel:v})}/>
+        <AgentRow name="Kall" role="Support rep" status="idle" lastActive="22m ago" enabled={on.Kall} onToggle={v=>setOn({...on,Kall:v})}/>
+        <AgentRow name="Aria" role="Scheduling" status="disabled" lastActive="never" enabled={on.Aria} onToggle={v=>setOn({...on,Aria:v})}/>
+      </div>
+      <InterruptCard type="approval" priority="high" title="Approve refund: Acme Corp — $3,200"
+        description="Imel drafted a refund approval for ticket #2847. The amount exceeds the $1,000 auto-approval threshold."
+        agentName="Imel" taskTitle="Acme Corp refund #2847" time="8m ago"
+        suggestedAction="Review the drafted email and approve or modify the refund amount."/>
+    </div>
+    <div className="sect grid" style={{gap:10}}>
+      <MessageBubble role="human" sender="You" content="Draft a reply to the Acme refund email." time="14:32"/>
+      <MessageBubble role="agent" sender="Imel" content="Drafted. Waiting on your approval — the amount is over threshold." time="14:32"/>
+    </div>
+    <div className="sect" style={{border:0,display:'grid',gridTemplateColumns:'200px 1fr',gap:14,alignItems:'center'}}>
+      <AgentTile name="Imel" tool="Email handler" domain="Generic" glyph="email" status="Live"/>
+      <div className="row" style={{gap:4}}>
+        <FlowNode agent="Floc" role="Copywriter"/>
+        <FlowArrow label="Drafts copy"/>
+        <FlowNode agent="Ora" role="Visual experience"/>
+        <FlowArrow label="Generates assets"/>
+        <FlowNode output label="Published campaign"/>
+      </div>
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script></body></html>

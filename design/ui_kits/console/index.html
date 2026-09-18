@@ -1,0 +1,73 @@
+<!-- @dsCard group="Operator Console" viewport="1280x800" name="Operator console" subtitle="Sign in, hand work to agents, clear the attention queue" -->
+<!-- @startingPoint section="Console" subtitle="Full three-pane operator console" viewport="1280x800" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Minkops Console</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body{height:100%}body{margin:0;overflow:hidden}#root{height:100vh}</style>
+</head><body><div id="root"></div>
+<script type="text/babel" src="ConsoleData.jsx"></script>
+<script type="text/babel" src="ConsoleShell.jsx"></script>
+<script type="text/babel" src="AgentsPane.jsx"></script>
+<script type="text/babel" src="TaskThread.jsx"></script>
+<script type="text/babel" src="AttentionQueue.jsx"></script>
+<script type="text/babel" src="AgentsScreen.jsx"></script>
+<script type="text/babel" src="PlaceholderScreen.jsx"></script>
+<script type="text/babel" src="LoginScreen.jsx"></script>
+<script type="text/babel">
+const TITLES = { dashboard: "Dashboard", agents: "Agents", tasks: "Tasks", analytics: "Analytics", settings: "Settings" };
+
+function ConsoleApp() {
+  const [signedIn, setSignedIn] = React.useState(false);
+  const [route, setRoute] = React.useState("dashboard");
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [agents, setAgents] = React.useState(window.AGENTS);
+  const [team, setTeam] = React.useState(window.TEAM);
+  const [selected, setSelected] = React.useState("agent-imel");
+  const [messages, setMessages] = React.useState(window.MESSAGES);
+  const [interrupts, setInterrupts] = React.useState(window.INTERRUPTS);
+
+  const toggleAgent = (id, enabled) => setAgents((prev) => prev.map((a) => a.id === id ? { ...a, enabled, status: enabled ? "idle" : "disabled" } : a));
+  const toggleTeam = (enabled) => {
+    setTeam((t) => ({ ...t, enabled }));
+    setAgents((prev) => prev.map((a) => a.team === team.name ? { ...a, enabled, status: enabled ? "idle" : "disabled" } : a));
+  };
+  const send = (content) => {
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setMessages((prev) => [...prev, { id: "m" + Date.now(), role: "human", sender: "You", content, time: now }]);
+    setTimeout(() => setMessages((prev) => [...prev, {
+      id: "a" + Date.now(), role: "agent", sender: "Imel",
+      content: "Picked it up. I'll work it end to end and queue anything that needs your sign-off.", time: now
+    }]), 1600);
+  };
+  const drop = (id) => setInterrupts((prev) => prev.filter((i) => i.id !== id));
+  const ack = (id) => setInterrupts((prev) => prev.map((i) => i.id === id ? { ...i, status: "acknowledged" } : i));
+
+  if (!signedIn) return <LoginScreen onSignIn={() => setSignedIn(true)} />;
+
+  const pending = interrupts.filter((i) => i.status === "pending").length;
+  const activeCount = agents.filter((a) => a.enabled && a.status === "active").length;
+
+  return (
+    <div style={{ display: "flex", height: "100%", background: "var(--surface-page)" }}>
+      <ConsoleSidebar route={route} onRoute={setRoute} collapsed={collapsed}
+        onCollapse={() => setCollapsed((c) => !c)} onSignOut={() => setSignedIn(false)} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <ConsoleHeader title={TITLES[route]} interruptCount={pending} />
+        {route === "dashboard" || route === "tasks" ? (
+          <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+            <AgentsPane agents={agents} team={team} selectedId={selected} onSelect={setSelected}
+              onToggleAgent={toggleAgent} onToggleTeam={toggleTeam} />
+            <TaskThread messages={messages} activeCount={activeCount} onSend={send} />
+            <AttentionQueue interrupts={interrupts} onResolve={drop} onDismiss={drop} onAcknowledge={ack} />
+          </div>
+        ) : route === "agents" ? <AgentsScreen /> : <PlaceholderScreen route={route} />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ConsoleApp />);
+</script></body></html>
