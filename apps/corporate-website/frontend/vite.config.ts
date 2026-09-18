@@ -8,9 +8,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@/*": path.resolve(__dirname, "src"),
-      // Monorepo shared brand tokens — edit shared/brand/ to affect all apps
-      "@minkops/brand": path.resolve(__dirname, "../../../shared/brand")
+      "@": path.resolve(__dirname, "src")
     }
   },
   server: {

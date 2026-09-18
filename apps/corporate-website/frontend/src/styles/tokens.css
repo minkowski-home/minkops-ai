@@ -1,0 +1,270 @@
+/* ============================================================
+   MINKOPS DESIGN TOKENS
+   Vendored verbatim from the monorepo design system (design/tokens/*.css).
+   That directory is the source of truth: when a token changes there,
+   copy it here. Webfonts are loaded from index.html (with preconnect)
+   rather than a CSS @import, so they don't block on this stylesheet.
+   ============================================================ */
+
+/* ============================================================
+   COLORS
+   Four locked brand colors + one cool-neutral ramp derived from
+   Slate. Ember is a SIGNAL color (live state, active marker, focus,
+   data); Rust is the ACTION color (it clears 4.5:1 on white, Ember
+   does not). Nothing else is chromatic except the three statuses.
+   ============================================================ */
+:root {
+  /* --- Brand (locked — do not change) --- */
+  --brand-ember: #e95d2c;
+  --brand-rust: #a63e1b;
+  --brand-slate: #94a3b8;
+  --brand-graphite: #424048;
+
+  /* --- Brand tints/shades (mixes of the four, for fills only) --- */
+  --ember-tint-08: rgba(233, 93, 44, 0.08);
+  --ember-tint-14: rgba(233, 93, 44, 0.14);
+  --ember-tint-24: rgba(233, 93, 44, 0.24);
+  --rust-press: #8a3216;
+  --slate-tint-10: rgba(148, 163, 184, 0.1);
+  --slate-tint-20: rgba(148, 163, 184, 0.2);
+  --graphite-press: #2f2e34;
+
+  /* --- Neutral ramp (Slate-hued) --- */
+  --n-0: #ffffff;
+  --n-25: #f8f9fa;
+  --n-50: #f1f3f5;
+  --n-100: #e5e9ed;
+  --n-200: #d2d8de;
+  --n-300: #b7c0c9;
+  --n-400: #94a3b8;
+  --n-500: #6b7785;
+  --n-600: #4d5661;
+  --n-700: #424048;
+  --n-800: #2b2b31;
+  --n-900: #17171b;
+
+  /* --- Status (desaturated, print-safe) --- */
+  --status-ok: #1f6f45;
+  --status-ok-fill: #eaf3ee;
+  --status-warn: #8a6212;
+  --status-warn-fill: #f7f1e4;
+  --status-alert: #b3261e;
+  --status-alert-fill: #fbecea;
+  --status-info: #4d5661;
+  --status-info-fill: #f1f3f5;
+
+  /* --- Semantic: text --- */
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-500);
+  --text-faint: var(--n-400);
+  --text-inverse: var(--n-0);
+  --text-inverse-muted: rgba(255, 255, 255, 0.66);
+  --text-accent: var(--brand-rust);
+  --text-link: var(--brand-rust);
+  --text-link-hover: var(--rust-press);
+
+  /* --- Semantic: surfaces --- */
+  --surface-page: var(--n-0);
+  --surface-sunken: var(--n-25);
+  --surface-raised: var(--n-0);
+  --surface-inset: var(--n-50);
+  --surface-inverse: var(--n-700);
+  --surface-inverse-deep: var(--n-900);
+  --surface-accent-soft: var(--ember-tint-08);
+  --surface-selected: var(--ember-tint-14);
+
+  /* --- Semantic: borders --- */
+  --border-hairline: var(--n-100);
+  --border-default: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-inverse: rgba(255, 255, 255, 0.14);
+  --border-accent: var(--brand-ember);
+
+  /* --- Semantic: actions --- */
+  --action-primary-bg: var(--brand-rust);
+  --action-primary-bg-hover: var(--rust-press);
+  --action-primary-fg: var(--n-0);
+  --action-secondary-bg: var(--n-0);
+  --action-secondary-bg-hover: var(--n-50);
+  --action-secondary-fg: var(--n-900);
+  --action-secondary-border: var(--n-200);
+  --action-ghost-fg: var(--n-600);
+  --action-ghost-bg-hover: var(--n-50);
+  --action-danger-fg: var(--status-alert);
+  --action-disabled-bg: var(--n-50);
+  --action-disabled-fg: var(--n-400);
+
+  /* --- Semantic: signal --- */
+  --signal-live: var(--brand-ember);
+  --signal-idle: var(--n-400);
+  --signal-off: var(--n-300);
+  --focus-ring: var(--brand-ember);
+}
+
+/* ============================================================
+   TYPOGRAPHY
+   Readex Pro  — wordmark, display, headings, agent names
+   Libre Franklin — all running text and UI labels
+   IBM Plex Mono — machine data: ids, timestamps, statuses, eyebrows
+   ============================================================ */
+:root {
+  --font-display: "Readex Pro", "Trebuchet MS", sans-serif;
+  --font-text: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-wordmark: var(--font-display);
+
+  /* --- Weights --- */
+  --fw-light: 300; /* @kind font */
+  --fw-regular: 400; /* @kind font */
+  --fw-medium: 500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold: 700; /* @kind font */
+  --fw-wordmark: 700; /* @kind font */
+
+  /* --- Size scale --- */
+  --fs-micro: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 15px;
+  --fs-md: 17px;
+  --fs-lg: 20px;
+  --fs-xl: 24px;
+  --fs-2xl: 30px;
+  --fs-3xl: 38px;
+  --fs-4xl: 48px;
+  --fs-5xl: 64px;
+  --fs-6xl: 80px;
+
+  /* --- Line heights --- */
+  --lh-flush: 1; /* @kind font */
+  --lh-tight: 1.08; /* @kind font */
+  --lh-snug: 1.22; /* @kind font */
+  --lh-normal: 1.5; /* @kind font */
+  --lh-relaxed: 1.65; /* @kind font */
+
+  /* --- Letter spacing --- */
+  --ls-wordmark: -0.05em; /* @kind font */
+  --ls-display: -0.03em; /* @kind font */
+  --ls-tight: -0.012em; /* @kind font */
+  --ls-normal: 0; /* @kind font */
+  --ls-wide: 0.06em; /* @kind font */
+  --ls-eyebrow: 0.14em; /* @kind font */
+
+  /* --- Composed roles --- */
+  --type-wordmark: var(--fw-wordmark) var(--fs-lg) / var(--lh-flush) var(--font-wordmark);
+  --type-display-xl: var(--fw-semibold) var(--fs-6xl) / var(--lh-tight)
+    var(--font-display);
+  --type-display: var(--fw-semibold) var(--fs-4xl) / var(--lh-tight) var(--font-display);
+  --type-h1: var(--fw-semibold) var(--fs-3xl) / var(--lh-snug) var(--font-display);
+  --type-h2: var(--fw-semibold) var(--fs-2xl) / var(--lh-snug) var(--font-display);
+  --type-h3: var(--fw-medium) var(--fs-lg) / var(--lh-snug) var(--font-display);
+  --type-h4: var(--fw-semibold) var(--fs-md) / var(--lh-snug) var(--font-text);
+  --type-body-lg: var(--fw-regular) var(--fs-md) / var(--lh-relaxed) var(--font-text);
+  --type-body: var(--fw-regular) var(--fs-base) / var(--lh-normal) var(--font-text);
+  --type-body-sm: var(--fw-regular) var(--fs-sm) / var(--lh-normal) var(--font-text);
+  --type-label: var(--fw-semibold) var(--fs-sm) / var(--lh-snug) var(--font-text);
+  --type-button: var(--fw-semibold) var(--fs-sm) / var(--lh-flush) var(--font-text);
+  --type-mono: var(--fw-regular) var(--fs-xs) / var(--lh-normal) var(--font-mono);
+  --type-eyebrow: var(--fw-medium) var(--fs-micro) / var(--lh-flush) var(--font-mono);
+}
+
+/* ============================================================
+   SPACING — 4px base, with 2px and 6px available for dense console UI.
+   ============================================================ */
+:root {
+  --sp-0: 0; /* @kind spacing */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 20px;
+  --sp-8: 24px;
+  --sp-9: 32px;
+  --sp-10: 40px;
+  --sp-11: 48px;
+  --sp-12: 64px;
+  --sp-13: 80px;
+  --sp-14: 96px;
+  --sp-15: 128px;
+
+  /* --- Component padding presets --- */
+  --pad-cell: var(--sp-4) var(--sp-5);
+  --pad-card: var(--sp-6);
+  --pad-panel: var(--sp-5) var(--sp-6);
+  --pad-section: var(--sp-14) var(--sp-9);
+
+  /* --- Gaps --- */
+  --gap-tight: var(--sp-2);
+  --gap-inline: var(--sp-4);
+  --gap-stack: var(--sp-6);
+  --gap-block: var(--sp-9);
+}
+
+/* ============================================================
+   SURFACES — radii, borders, shadows.
+   The system is hairline-first: structure comes from 1px rules, not
+   shadow. Shadow is reserved for things that genuinely float.
+   ============================================================ */
+:root {
+  --radius-0: 0;
+  --radius-1: 2px;
+  --radius-2: 3px;
+  --radius-3: 4px;
+  --radius-4: 6px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  --border-w: 1px; /* @kind other */
+  --border-w-thick: 2px; /* @kind other */
+  --rule: var(--border-w) solid var(--border-hairline); /* @kind other */
+  --rule-default: var(--border-w) solid var(--border-default); /* @kind other */
+  --rule-strong: var(--border-w) solid var(--border-strong); /* @kind other */
+
+  /* Only two elevations, plus a focus ring. */
+  --shadow-none: none;
+  --shadow-pop: 0 1px 2px rgba(23, 23, 27, 0.06), 0 8px 24px rgba(23, 23, 27, 0.08);
+  --shadow-overlay: 0 2px 4px rgba(23, 23, 27, 0.08), 0 24px 64px rgba(23, 23, 27, 0.16);
+  --shadow-focus: 0 0 0 2px var(--n-0), 0 0 0 4px var(--ember-tint-24);
+  --shadow-inset-active: inset 2px 0 0 var(--brand-ember);
+}
+
+/* ============================================================
+   MOTION — short, linear-feeling, no bounce, no scale-up on hover.
+   ============================================================ */
+:root {
+  --ease-out: cubic-bezier(0.2, 0, 0, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --dur-instant: 80ms; /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-base: 180ms; /* @kind other */
+  --dur-slow: 280ms; /* @kind other */
+  --transition-color:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out); /* @kind other */
+  --transition-transform: transform var(--dur-base) var(--ease-out); /* @kind other */
+  --transition-panel:
+    opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out); /* @kind other */
+}
+
+/* ============================================================
+   LAYOUT — fixed chrome dimensions shared by the console and the site.
+   ============================================================ */
+:root {
+  --sidebar-w: 216px;
+  --sidebar-w-collapsed: 56px;
+  --header-h: 52px;
+  --pane-agents-w: 288px;
+  --pane-attention-w: 340px;
+  --composer-max-h: 168px;
+  --site-nav-h: 64px;
+  --measure: 68ch; /* @kind other */
+  --measure-narrow: 54ch; /* @kind other */
+  --container-w: 1200px;
+  --container-w-narrow: 760px;
+  --hit-min: 36px;
+  --hit-touch: 44px;
+}
