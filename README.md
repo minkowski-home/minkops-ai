@@ -58,19 +58,19 @@ This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, b
 
 
 ### Planned Agents
-| Persona (at MH) | Agent Name | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
-| -------------- | ---------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- | --------- |
-| Bianca         | Ora        | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
-| Ryan           | Eko        | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Moderate  |
-| Ethan          | Floc       | Content Creator (Ad/Email copies)| Generates marketing content based on brand kit and company knowledge              | Generic         | High      |
-| Devin          | Cruz       | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
-| Emily          | Hosi       | Front of the House              |                                                                                    | Fast Food       | Very Low  |
-| Tony           | Prex       | Back of the House               |                                                                                    | Fast Food       | Very Low  |
-| Jaina          | Kall       | Phone Call/Customer Support Rep |                                                                                    | Generic         | High      |
-| Sarah          | Leed       | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
-| Kim            | Kim        | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
-| Mark           | Insi       | Business Analyst                |                                                                                    | Generic         | Low       |
-| Nathan         | Imel       | Email Handler                   |                                                                                    | Generic         | Immediate |
+| Persona (at MH, not exposed anywhere else) | Agent Name | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
+|--------------------------------------------| ---------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- |-----------|
+| Bianca                                     | Ora        | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
+| Ryan                                       | Eko        | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Very High |
+| Ethan                                      | Floc       | Content Creator (Ad/Email copies)| Generates marketing content based on brand kit and company knowledge              | Generic         | Very High |
+| Devin                                      | Cruz       | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
+| Emily                                      | Hosi       | Front of the House              |                                                                                    | Fast Food       | Very Low  |
+| Tony                                       | Prex       | Back of the House               |                                                                                    | Fast Food       | Very Low  |
+| Jaina                                      | Kall       | Phone Call/Customer Support Rep |                                                                                    | Generic         | High      |
+| Sarah                                      | Leed       | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
+| Kim                                        | Kim        | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
+| Mark                                       | Insi       | Business Analyst                |                                                                                    | Generic         | Low       |
+| Nathan                                     | Imel       | Email Handler                   |                                                                                    | Generic         | Immediate |
 
 ### Corporate website (apps/corporate-website)
 

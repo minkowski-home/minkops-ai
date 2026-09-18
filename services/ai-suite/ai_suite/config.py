@@ -37,6 +37,11 @@ def load_settings() -> Settings:
     """
 
     database_url = os.getenv("AGENTS_DB_URL") or os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError(
+            "DATABASE_URL is required but not set",
+            "Ensure the .env file is loaded and properly set."
+        )
     admin_db_url = os.getenv("ADMIN_DB_URL") or database_url
     psql_path = os.getenv("PSQL_PATH") or "psql"
     log_level = os.getenv("LOG_LEVEL") or "INFO"

@@ -25,7 +25,7 @@ frontend/
     sections/             Landing page sections (hero, funnel, roster, console
                           preview, access form)
     pages/                One file per route; blog posts live in pages/blog/
-api/backend/              FastAPI service (health check)
+api/                      FastAPI service (health check)
 ```
 
 ## Rules that keep the site consistent
@@ -65,8 +65,8 @@ api/backend/              FastAPI service (health check)
 
 ## Backend service (Python + FastAPI)
 
-1. `cd apps/corporate-website/api/backend`
+1. `cd apps/corporate-website/api`
 2. `uv sync`
-3. `uv run src/main.py` to start the API on `http://127.0.0.1:5000`
+3. `uv run main.py` to start the API on `http://127.0.0.1:5000`
 
 The dev server proxies `/api` to that address (override with `VITE_API_TARGET`).

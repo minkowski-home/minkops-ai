@@ -6,7 +6,12 @@ export const SITE = {
     general: "info@minkops.com",
     hr: "hr@minkops.com"
   },
-  address: ["375 University Avenue Suite 3215", "Toronto, ON M5G 2J5", "Canada"],
+  address: [
+    "Minkops AI",
+    "375 University Avenue Suite 3273",
+    "Toronto, ON M5G 2J5",
+    "Canada"
+  ],
   links: {
     linkedin: "https://linkedin.com/company/minkops",
     myndral: "https://app.myndral.com",

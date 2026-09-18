@@ -1,0 +1,12 @@
+minkops_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('MINKOPS_DWH_HOST') }}"
+      port: "{{ env_var('MINKOPS_DWH_PORT', '5432') | int }}"
+      dbname: "{{ env_var('MINKOPS_DWH') }}"
+      user: "{{ env_var('MINKOPS_DWH_USER') }}"
+      password: "{{ env_var('MINKOPS_DWH_PASSWORD') }}"
+      schema: "{{ env_var('MINKOPS_DWH_SCHEMA', 'public') }}"
+      threads: 4
