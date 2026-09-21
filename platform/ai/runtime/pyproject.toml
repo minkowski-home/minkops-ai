@@ -1,0 +1,32 @@
+[project]
+name = "ai-suite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agents",
+    "dotenv>=0.9.9",
+    "ipykernel>=7.1.0",
+    "jupyter>=1.1.1",
+    "langchain>=1.2.0",
+    "langchain-ollama>=1.0.1",
+    "langchain-openai>=1.1.6",
+    "langgraph>=1.0.5",
+    "numpy>=2.4.0",
+    "ollama>=0.6.1",
+    "pandas>=2.3.3",
+    "psycopg2>=2.9.11",
+    "pydantic>=2.12.5",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ai_suite*"]
+
+[tool.uv.sources]
+agents = { path = "../agents", editable = true }

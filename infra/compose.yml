@@ -25,7 +25,7 @@ x-airflow-common:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
-    - ../transform:/opt/dbt
+    - ../modules/reporting/warehouse:/opt/dbt
   user: "${AIRFLOW_UID:-50000}:0"
   networks:
     - minkops_net

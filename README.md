@@ -4,7 +4,7 @@ Minkops.ai is a suite of autonomous AI employees that handle customer intake, op
 
 ### Test one run (Updated 2026-02-26)
 
-**Prerequisites:** copy `services/ai-suite/.env.example` to `services/ai-suite/.env` and fill in `ADMIN_DB_URL`, `DATABASE_URL`, `MINKOPS_DB_PASSWORD`, and `PSQL_PATH` for your machine.
+**Prerequisites:** copy `platform/ai/runtime/.env.example` to `platform/ai/runtime/.env` and fill in `ADMIN_DB_URL`, `DATABASE_URL`, `MINKOPS_DB_PASSWORD`, and `PSQL_PATH` for your machine.
 
 **Step 1 — Bootstrap** *(first time only, or after a fresh Postgres install)*
 
@@ -18,10 +18,10 @@ psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/01_bootstrap.sql
 
 **Step 2 — Seed the schema**
 
-Drops all tables and recreates them. Run from the repo root or `services/ai-suite`.
+Drops all tables and recreates them. Run from the repo root or `platform/ai/runtime`.
 
 ```bash
-cd services/ai-suite
+cd platform/ai/runtime
 seed-db
 ```
 
@@ -49,12 +49,19 @@ Initially, the graphs will be slightly more deterministic to ensure predictabili
 
 ## Layout
 
-- `apps/` — user-facing experiences; currently `apps/corporate-website` hosts the Minkops marketing site.
-- `services/` — production and prototype services; `services/ai-suite` is the conversational/operational agent platform plus legacy notebooks and tooling.
-- `infra/` — infrastructure plans and automation (currently contains a README placeholder but can grow Terraform, Kubernetes, or GH Actions artifacts).
-- `docs/` — cross-cutting playbooks, architecture notes, or governance policies shared across modules.
+- `apps/` — shared deployable surfaces: `solution-web`, `solution-api`, and the corporate website.
+- `platform/` — customer-independent infrastructure. The AI decision library and runtime live in `platform/ai/`.
+- `modules/` — reusable business capabilities. The existing dbt project is `modules/reporting/warehouse`.
+- `connectors/` — concrete external-system integrations; add an integration here only when it exists.
+- `solutions/` — customer-specific composition: configuration, workflows, rules, prompts, and UI choices. See `solutions/README.md`.
+- `packages/` — deliberately shared code packages, including the brand tokens and solution composition contract.
+- `db/` — operational schema bootstrap. `db/init/` is not a migration history yet.
+- `infra/` and `docs/` — deployment assets and cross-cutting documentation.
 
-This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, backend/data work in `services/` or `infra/`, and shared knowledge in `docs/`, preventing the drift that results from ad-hoc “modules” and making it easy for contributors to find the right home for new work.
+The same solution web/API applications are composed with a selected solution at
+build time. For local console work, run `VITE_SOLUTION=example npm run dev` from
+`apps/solution-web`. Do not fork the applications for a customer-specific UI or
+connector selection.
 
 
 ### Planned Agents

@@ -2,6 +2,14 @@
 
 ## 1) Purpose and audience
 
+> **Current layout note (2026-09-21):** This document retains historical
+> implementation detail, but its old paths have moved: `agents/` is now
+> `platform/ai/agents/`, `services/ai-suite/` is `platform/ai/runtime/`,
+> `apps/client-app/` is split into `apps/solution-web/` and
+> `apps/solution-api/`, and `transform/` is
+> `modules/reporting/warehouse/`. Customer-specific work belongs under
+> `solutions/<id>/`; do not duplicate the solution applications.
+
 This document is for a new software engineer onboarding to this monorepo with primary responsibility for:
 
 - building and extending agent logic in `agents/`

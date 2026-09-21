@@ -1,5 +1,15 @@
 # Decision Logs
 
+### 2026-09-21 — Solution composition boundary for multi-client delivery
+
+**Situation:** The repository grouped active code by implementation category (`agents`, `services`, `shared`, and `transform`), while a single customer console was beginning to receive a substantial UI redesign. Extending that shape for different customer interfaces, connectors, and workflows would invite copied applications and customer rules scattered through shared code.
+
+**Task:** Preserve the working product while making the customer boundary explicit without prematurely inventing empty services or a migration system that does not exist.
+
+**Action:** We moved the deployable console/API to `apps/solution-web` and `apps/solution-api`; the reusable AI decision library and runtime to `platform/ai`; and the dbt reporting project to `modules/reporting/warehouse`. Brand code moved to the intentional `packages/brand` package. We retained `db/init` because it is mounted by Docker as first-boot DDL, not an incremental migration mechanism. Most importantly, `packages/solution-contracts` defines the compact, typed composition contract and `solutions/example/ui.ts` provides a non-customer fixture. The console selects a solution from `VITE_SOLUTION`, letting a solution control its product label, navigation, enabled connector declarations, and UI options while retaining one shared application binary.
+
+**Result:** Future customer work has an unambiguous home (`solutions/<id>`), integration code stays isolated in `connectors/`, and shared capability work is visible as platform or module work. The refactor keeps current imports and local compose paths valid while preventing customer-specific copies of the web and API apps.
+
 ### 03-02-2026
 We created `docs/decisions-log.md` as the canonical place to store product briefs (new launches), onboarding playbooks, system design decisions, problems found and how they were fixed, architecture notes, and governance policies. When new cross-cutting decisions are made — for example, conventions for knowledge graphs, audit trails, or policy enforcement, or any major improvement/trade-off — we capture them in `docs/` so every module (apps, services, infra) can reference the same playbook, similar to a monorepo “engineering handbook”. There isn’t a strict schema beyond including the date; entries should be explanatory paragraphs that a junior engineer can use to understand senior trade-offs.
 

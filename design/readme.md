@@ -24,9 +24,9 @@ Garamond, Apple SD Gothic Neo — is retired.
 
 - **Codebase:** `minkops-ai/` (mounted locally, read-only). Read in full:
   - `docs/brand-guidelines.md` — the previous brand system (superseded by this one).
-  - `shared/brand/tokens.css`, `shared/brand/theme.ts` — the previous token set; the four brand colors were lifted from its "Brand accents" block.
+  - `packages/brand/tokens.css`, `packages/brand/theme.ts` — the previous token set; the four brand colors were lifted from its "Brand accents" block.
   - `apps/corporate-website/frontend/` — the marketing site (React + Vite + framer-motion + react-router).
-  - `apps/client-app/web/` — the operator console (React + Vite).
+  - `apps/solution-web/` — the operator console (React + Vite).
   - `README.md` — product description and the planned-agent roster.
   - `Claude outputs/minkops_linkedin_posts.md` — the most reliable sample of the brand's written voice.
 - **Not used:** `minkops-ai/design/` — a separate warm-paper/Fraunces exploration the user asked to ignore.
@@ -37,7 +37,7 @@ Garamond, Apple SD Gothic Neo — is retired.
 | Surface | Where it lives | Recreated in |
 | --- | --- | --- |
 | Marketing site | `apps/corporate-website` (Vercel, minkops.com) | `ui_kits/website/` |
-| Operator console | `apps/client-app/web` | `ui_kits/console/` |
+| Operator console | `apps/solution-web` | `ui_kits/console/` |
 
 Both are recreations of the shipped code, not redesigns of the product's
 information architecture.

@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "allowJs": false,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@minkops/brand": ["../../packages/brand/index"],
+      "@minkops/brand/*": ["../../packages/brand/*"],
+      "@minkops/solution-contracts": ["../../packages/solution-contracts/src"]
+    }
+  },
+  "include": ["src", "../../packages/brand", "../../packages/solution-contracts", "../../solutions"]
+}
