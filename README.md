@@ -1,51 +1,7 @@
-# MinkOps.ai
+# Minkops.ai
 
 Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. A typical customer can "hire" any set of agents, which work together (fully-intercommunicating and accessing company knowledge as real human employees would) perfoming actual job duties - each agent tends to replace one real human employee with disjoint skills. Each fleet of agents (for an organization) runs continuously 24x7 instead of one-time jobs.
 
-### Test one run (Updated 2026-02-26)
-
-**Prerequisites:** copy `platform/ai/runtime/.env.example` to `platform/ai/runtime/.env` and fill in `ADMIN_DB_URL`, `DATABASE_URL`, `MINKOPS_DB_PASSWORD`, and `PSQL_PATH` for your machine.
-
-**Step 1 — Bootstrap** *(first time only, or after a fresh Postgres install)*
-
-Creates the `minkops` app role, the `minkops_app` database if it doesn't exist, installs extensions, and sets default privileges. The password is passed at invocation time — never hardcoded. Safe to re-run.
-
-```bash
-psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/01_bootstrap.sql
-```
-
-> If `psql` is not on your PATH, use the full binary path from `PSQL_PATH` in your `.env`.
-
-**Step 2 — Seed the schema**
-
-Drops all tables and recreates them. Run from the repo root or `platform/ai/runtime`.
-
-```bash
-cd platform/ai/runtime
-seed-db
-```
-
-**Step 3 — Run an agent**
-
-```bash
-run-imel --email "Hi, I placed an order last week and haven't received a confirmation. Can you help?"
-```
-
-Or with the LLM:
-
-```bash
-run-imel --use-llm --email "Hi, I placed an order last week and haven't received a confirmation. Can you help?"
-```
-
-**What to watch for:**
-
-- Step 1 → `NOTICE: Role minkops created.` (or "already exists" on repeat runs)
-- Step 2 → `psql` prints all `CREATE TABLE` / `CREATE INDEX` lines cleanly, then Python logs `Seed complete for tenant_id=tenant_001`
-- Step 3 auth error → bootstrap hasn't run yet, or `MINKOPS_DB_PASSWORD` doesn't match the password in `DATABASE_URL` — fix `.env` and re-run Step 1
-
-**Important**
-
-Initially, the graphs will be slightly more deterministic to ensure predictability and easier debugging. There will be more interrupts and agents will wait for human feedback before taking a final action. The database, DWH and systems must be designed in a way to use this human interaction data to train agents using RLHF to take decisions and learn from mistakes, leading to fully autonomous agents.
 
 ## Layout
 
@@ -63,8 +19,12 @@ build time. For local console work, run `VITE_SOLUTION=mock-client npm run dev` 
 `apps/solution-web`. Do not fork the applications for a customer-specific UI or
 connector selection.
 
+**Agentic Stuff**: We shall utilize OpenAI/Anthropic APIs aggressively. As of Sep 2026, both provide a comprehensive set of APIs for almost everything that Codex/Claude Code does, our product can be thought of as Codex-like app, but for low tech maturity teams avoiding prompting hell and providing with preset one-click workflows to automate their everyday routine.
 
-### Planned Agents
+### Legacy Agents
+Not sure whether we shall continue with the individual agent style product anymore. To be decided. Current focus is on
+preset workflows instead - use these named agents only where it really makes sense.
+
 | Persona (at MH, not exposed anywhere else) | Agent Name | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
 |--------------------------------------------| ---------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- |-----------|
 | Bianca                                     | Ora        | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
@@ -79,9 +39,27 @@ connector selection.
 | Mark                                       | Insi       | Business Analyst                |                                                                                    | Generic         | Low       |
 | Nathan                                     | Imel       | Email Handler                   |                                                                                    | Generic         | Immediate |
 
-### Corporate website (apps/corporate-website)
+### Brief Repo Structure
 
-1. `cd apps/corporate-website`  
-2. Serve the folder with your favorite static server (for example `npm install --global http-server` followed by `http-server . -c-1`).  
-3. Update the HTML, CSS, or assets to tell pluseleven’s story, then redeploy that folder to your CDN/hosting platform.  
-4. Keep this site static so it can be deployed anywhere without additional compute. Currently hosted on Vercel at minkops.com
+- `apps/` — deployable entry points: shared web host, shared API, and corporate site.
+- `solutions/` — one folder per client/use case; composes UI configuration, workflows, rules, and connector declarations. `mock-client` is a fixture; `pr-infra` is the first real solution.
+- `platform/` — client-agnostic infrastructure. Today: AI decision graphs and their runtime; later auth, tenancy, audit, jobs, etc.
+- `modules/` — reusable business capabilities, such as reconciliation, reporting, document extraction, or scheduling.
+- `connectors/` — protocol/vendor integrations: WhatsApp, banks, Excel, OpenAI/Anthropic, and so on. They contain authentication/client mapping, not client policy.
+- `packages/` — small reusable code packages/contracts, such as the solution manifest types and brand primitives. If there's conflict in `design/` and brand-kit in `packages/`, `design/` takes precedence.
+- `db/` — database bootstrap setup. It is intentionally not migrations yet: it creates a fresh local database.
+- `design/` — the shared visual system the starter workspace and client-specific UIs build upon.
+- `infra/` - deployment (docker-compose, cloud related, etc) and all.
+
+#### `solutions/` sub-directories
+They are PR Infra’s client-specific layer, currently empty by design:
+
+- `schemas/` — structured record shape extracted from images.
+- `prompts/` — PR Infra-specific extraction/review instructions for models.
+- `rules/` — validation, exception, and human-approval policies.
+- `mappings/` — mapping approved fields to Excel columns.
+- `workflows/` — orchestration wiring reusable modules and connectors into the WhatsApp → review → Excel flow.
+- `solution.ts` — the manifest: identity and enabled connector declarations.
+- `README.md` — boundary guidance.
+
+There is no `web/` folder yet because PR Infra currently uses the shared starter workspace. Add `web/` only if it needs UI beyond that default console.
