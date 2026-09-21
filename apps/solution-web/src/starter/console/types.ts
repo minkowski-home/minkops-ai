@@ -17,6 +17,7 @@ export interface PresetWorkflow {
   label: string;
   detail: string;
   outcome: string;
+  availability: "planned" | "ready";
 }
 
 export interface ConsoleState {

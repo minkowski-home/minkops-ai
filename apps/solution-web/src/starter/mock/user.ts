@@ -7,10 +7,10 @@ import type { User } from "../types/user";
 
 export const MOCK_USER: User = {
   id: "user-001",
-  name: "Alex Reyes",
-  email: "alex@acmecorp.com",
+  name: "Workspace Operator",
+  email: "operator@example.com",
   avatarUrl: null,
-  tenantId: "tenant-acme",
-  tenantName: "Acme Corp",
+  tenantId: "tenant-starter",
+  tenantName: "Starter workspace",
   role: "admin"
 };

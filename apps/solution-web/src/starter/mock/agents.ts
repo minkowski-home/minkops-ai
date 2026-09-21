@@ -9,8 +9,8 @@ import type { Agent, AgentTeam } from "../types/agent";
 export const MOCK_AGENTS: Agent[] = [
   {
     id: "agent-imel",
-    name: "Imel",
-    description: "Handles inbound email triage, drafts responses, and routes tickets.",
+    name: "Intake",
+    description: "Normalises incoming work and prepares it for a configured workflow.",
     category: "communication",
     status: "active",
     lastActiveAt: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
@@ -19,8 +19,8 @@ export const MOCK_AGENTS: Agent[] = [
   },
   {
     id: "agent-kall",
-    name: "Kall",
-    description: "Resolves support tickets by querying the knowledge base.",
+    name: "Reviewer",
+    description: "Routes exceptions and approval decisions to the right operator.",
     category: "research",
     status: "idle",
     lastActiveAt: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
@@ -29,8 +29,8 @@ export const MOCK_AGENTS: Agent[] = [
   },
   {
     id: "agent-scout",
-    name: "Scout",
-    description: "Researches leads, summarises web content, and populates CRM fields.",
+    name: "Sources",
+    description: "Connects approved external sources and records their sync state.",
     category: "research",
     status: "active",
     lastActiveAt: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
@@ -39,8 +39,8 @@ export const MOCK_AGENTS: Agent[] = [
   },
   {
     id: "agent-synapse",
-    name: "Synapse",
-    description: "Aggregates data from multiple sources and produces structured reports.",
+    name: "Ledger",
+    description: "Reconciles structured records and prepares durable exports.",
     category: "data",
     status: "idle",
     lastActiveAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
@@ -49,8 +49,8 @@ export const MOCK_AGENTS: Agent[] = [
   },
   {
     id: "agent-aria",
-    name: "Aria",
-    description: "Manages calendar scheduling, sends invites, and handles rescheduling.",
+    name: "Scheduler",
+    description: "Runs approved workflows on their configured cadence.",
     category: "scheduling",
     status: "disabled",
     lastActiveAt: null,
@@ -62,8 +62,8 @@ export const MOCK_AGENTS: Agent[] = [
 export const MOCK_AGENT_TEAMS: AgentTeam[] = [
   {
     id: "team-cx",
-    name: "CX Response Team",
-    description: "Handles end-to-end customer communication and support ticket resolution.",
+    name: "Operations workflow",
+    description: "Prepares work and routes material decisions to a human operator.",
     agentIds: ["agent-imel", "agent-kall"],
     enabled: true
   }

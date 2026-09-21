@@ -142,18 +142,18 @@ function StartWork({ agents, onStart }: { agents: Agent[]; onStart: (workflow: P
     <button className="button button-primary" onClick={() => setOpen(true)}>Start task</button>
     {open ? <div className="workflow-overlay" role="dialog" aria-modal="true" aria-label="Start a task">
       <div className="workflow-drawer">
-        <header><div><p className="eyebrow">Start a task</p><h2>Pick a workflow</h2><p>Give an employee a job they already know how to do.</p></div><button className="icon-button" onClick={() => setOpen(false)} aria-label="Close"><Icon name="x" size={17} /></button></header>
+        <header><div><p className="eyebrow">Start a task</p><h2>Pick a workflow</h2><p>Planned workflows stay visible here before their connectors and runtime are ready.</p></div><button className="icon-button" onClick={() => setOpen(false)} aria-label="Close"><Icon name="x" size={17} /></button></header>
         <div className="workflow-list">
           {available.map((workflow) => {
             const agent = agents.find((candidate) => candidate.id === workflow.agentId);
-            return <button key={workflow.id} className="workflow-card" onClick={() => { onStart(workflow); setOpen(false); }}>
-              {glyphForAgent(agent?.name ?? "Agent")}<span><strong>{workflow.label}</strong><small>{workflow.detail}</small><em>{agent?.name}</em></span><Icon name="chevronRight" size={16} />
+            return <button key={workflow.id} className="workflow-card" disabled={workflow.availability === "planned"} onClick={() => { onStart(workflow); setOpen(false); }}>
+              {glyphForAgent(agent?.name ?? "Agent")}<span><strong>{workflow.label}</strong><small>{workflow.detail}</small><em>{workflow.availability === "planned" ? "Planned — implementation pending" : agent?.name}</em></span><Icon name="chevronRight" size={16} />
             </button>;
           })}
         </div>
         <div className="custom-task">
           <button className="button button-ghost" onClick={() => setCustomOpen((current) => !current)}>{customOpen ? "Hide custom task" : "Write a custom task"}</button>
-          {customOpen ? <form onSubmit={(event) => { event.preventDefault(); if (!draft.trim()) return; onStart({ id: `custom-${Date.now()}`, agentId: "agent-imel", label: "Custom task", detail: draft.trim(), outcome: "I’ve received the task and will return with the next decision, if there is one." }); setDraft(""); setOpen(false); }}>
+          {customOpen ? <form onSubmit={(event) => { event.preventDefault(); if (!draft.trim()) return; onStart({ id: `custom-${Date.now()}`, agentId: "agent-imel", label: "Custom task", detail: draft.trim(), outcome: "I’ve received the task and will return with the next decision, if there is one.", availability: "ready" }); setDraft(""); setOpen(false); }}>
             <label htmlFor="custom-task">Describe the work</label><textarea id="custom-task" value={draft} onChange={(event) => setDraft(event.target.value)} rows={3} placeholder="Use this only when none of the workflows fit." />
             <button className="button button-primary" type="submit" disabled={!draft.trim()}>Hand to Imel</button>
           </form> : null}

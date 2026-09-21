@@ -9,7 +9,7 @@ import type { Task } from "../types/task";
 export const MOCK_TASKS: Task[] = [
   {
     id: "task-001",
-    title: "Summarise Q1 support tickets from Acme Corp",
+    title: "Starter workspace orientation",
     status: "completed",
     assignedAgentId: "agent-synapse",
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
@@ -18,7 +18,7 @@ export const MOCK_TASKS: Task[] = [
       {
         id: "msg-001-1",
         role: "human",
-        content: "Can you pull all support tickets from Acme Corp for Q1 and give me a summary by category?",
+        content: "Show the default operator workspace and the planned workflows.",
         timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
         agentId: null,
         agentName: null
@@ -26,18 +26,18 @@ export const MOCK_TASKS: Task[] = [
       {
         id: "msg-001-2",
         role: "agent",
-        content: "On it. I found 47 tickets from Acme Corp in Q1. Pulling categories now...",
+        content: "The workspace is ready. The work list and action queue will receive live records once a workflow is connected.",
         timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2 + 5000).toISOString(),
         agentId: "agent-synapse",
-        agentName: "Synapse"
+        agentName: "Ledger"
       },
       {
         id: "msg-001-3",
         role: "agent",
-        content: "Done. Here's the breakdown:\n\n• **Billing** — 18 tickets (38%)\n• **Integration** — 14 tickets (30%)\n• **Performance** — 9 tickets (19%)\n• **Feature requests** — 6 tickets (13%)\n\nBilling dominates. Most stem from invoice date mismatches after their Feb plan change. I can draft a proactive comms email if you'd like.",
+        content: "The two planned workflows are WhatsApp images → Excel and transaction reconciliation → warehouse. Both remain disabled until their connectors and runtime are implemented.",
         timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
         agentId: "agent-synapse",
-        agentName: "Synapse"
+        agentName: "Ledger"
       }
     ]
   }

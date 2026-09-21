@@ -1,5 +1,17 @@
 # Decision Logs
 
+### 2026-09-21 — Starter workspace before client-specific UI
+
+`apps/solution-web/src/starter` owns the default operator workspace: the
+activity list, action queue, and agent context are useful core anatomy before a
+solution has bespoke screens. A solution may optionally supply
+`solutions/<solution-id>/web/src/App.tsx` when its reviewed workflow requires a
+different interaction model. PR Infra inherits the starter workspace while its
+WhatsApp-to-Excel workflow, rules, schemas, and connector implementations are
+still being developed; mock-client demonstrates manifest configuration without
+claiming ownership of the shared console. Shared elements remain explicitly
+owned by `apps/`, `platform/`, `modules/`, `connectors/`, or `packages/`.
+
 ### 2026-09-21 — Solution composition boundary for multi-client delivery
 
 **Situation:** The repository grouped active code by implementation category (`agents`, `services`, `shared`, and `transform`), while a single customer console was beginning to receive a substantial UI redesign. Extending that shape for different customer interfaces, connectors, and workflows would invite copied applications and customer rules scattered through shared code.

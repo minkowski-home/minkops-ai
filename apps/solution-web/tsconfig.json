@@ -18,7 +18,14 @@
       "@/*": ["src/*"],
       "@minkops/brand": ["../../packages/brand/index"],
       "@minkops/brand/*": ["../../packages/brand/*"],
-      "@minkops/solution-contracts": ["../../packages/solution-contracts/src"]
+      "@minkops/solution-contracts": ["../../packages/solution-contracts/src"],
+      "@minkops/solution-entry": ["src/starter/App.tsx"],
+      "@minkops/solution-manifest": ["../../solutions/mock-client/solution.ts"],
+      "react": ["node_modules/@types/react"],
+      "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"],
+      "react-dom": ["node_modules/@types/react-dom"],
+      "react-dom/*": ["node_modules/@types/react-dom/*"],
+      "react-router-dom": ["node_modules/react-router-dom"]
     }
   },
   "include": ["src", "../../packages/brand", "../../packages/solution-contracts", "../../solutions"]

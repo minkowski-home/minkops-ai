@@ -59,7 +59,7 @@ Initially, the graphs will be slightly more deterministic to ensure predictabili
 - `infra/` and `docs/` — deployment assets and cross-cutting documentation.
 
 The same solution web/API applications are composed with a selected solution at
-build time. For local console work, run `VITE_SOLUTION=example npm run dev` from
+build time. For local console work, run `VITE_SOLUTION=mock-client npm run dev` from
 `apps/solution-web`. Do not fork the applications for a customer-specific UI or
 connector selection.
 

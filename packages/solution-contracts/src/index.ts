@@ -25,12 +25,18 @@ export interface SolutionManifest {
   id: string;
   displayName: string;
   enabledConnectors: readonly ConnectorId[];
-  ui: {
-    productName: string;
-    navigation: readonly SolutionNavigationItem[];
-    options: {
-      showAnalytics: boolean;
-      showTeamControls: boolean;
-    };
+  ui?: SolutionUiConfig;
+}
+
+/**
+ * A solution owns this only when it has a bespoke web experience. Keeping it
+ * optional lets a new solution start without inheriting another client's UI.
+ */
+export interface SolutionUiConfig {
+  productName: string;
+  navigation: readonly SolutionNavigationItem[];
+  options: {
+    showAnalytics: boolean;
+    showTeamControls: boolean;
   };
 }

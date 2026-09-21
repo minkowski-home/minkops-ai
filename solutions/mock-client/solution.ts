@@ -1,12 +1,12 @@
 import type { SolutionManifest } from "../../packages/solution-contracts/src";
 
 /**
- * Safe local solution used for development. Create a new sibling directory for
- * each customer; do not fork the web or API applications to change its UI.
+ * Development fixture for client-level configuration. It inherits the shared
+ * starter workspace rather than owning the product's default operator UI.
  */
 export const solution: SolutionManifest = {
-  id: "example",
-  displayName: "Example Operations",
+  id: "mock-client",
+  displayName: "Mock Client Operations",
   enabledConnectors: ["email", "excel"],
   ui: {
     productName: "minkops",
