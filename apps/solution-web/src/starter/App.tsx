@@ -1,88 +1,100 @@
 import { useMemo, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import "./index.css";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ConsoleShell } from "./console/ConsoleShell";
-import { AgentsScreen, DashboardScreen, PlaceholderScreen, TasksScreen } from "./console/screens";
-import type { ActivityItem, ConsoleRoute, PresetWorkflow } from "./console/types";
-import { MOCK_AGENTS, MOCK_AGENT_TEAMS } from "./mock/agents";
-import { MOCK_INTERRUPTS } from "./mock/interrupts";
-import { MOCK_TASKS } from "./mock/tasks";
+import { AgentsScreen, DashboardScreen, WorkflowsScreen } from "./console/screens";
+import type { ConsoleRoute } from "./console/types";
+import { ACTIVATED_WORKFLOWS, HIRED_TEAMS, type ActiveTask, type AttentionItem, type WorkflowInstance } from "./workspace/initialState";
 import Login from "./pages/Login";
-import { solution } from "@minkops/solution-manifest";
 import { resolveStarterUi } from "./config";
+import { DEFAULT_SOLUTION_ID, getSolution } from "./solutions/registry";
+import type { SolutionManifest } from "@minkops/solution-contracts";
 
 const routeTitles: Record<ConsoleRoute, string> = {
-  dashboard: "Dashboard", agents: "Agents", tasks: "Work", analytics: "Analytics", settings: "Settings"
+  dashboard: "Dashboard",
+  agents: "Agents",
+  workflows: "Workflows"
 };
 
-function initialActivity(): ActivityItem[] {
-  const messages = MOCK_TASKS.flatMap((task) => task.messages).map((message) => ({
-    id: message.id,
-    agentName: message.agentName ?? "You",
-    summary: message.content.replace(/\*\*/g, "").split("\n")[0],
-    time: new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    outcome: (message.role === "agent" ? "done" : "working") as ActivityItem["outcome"]
-  }));
-  return [
-    { id: "activity-image-to-excel", agentName: "Intake", summary: "WhatsApp images → Excel is planned. Connect a source and define the extraction schema to begin.", time: "Next", outcome: "waiting" },
-    { id: "activity-transactions", agentName: "Ledger", summary: "Transaction reconciliation → warehouse is planned. Connect accounts and set a run interval to begin.", time: "Next", outcome: "waiting" },
-    ...messages.reverse()
-  ];
-}
-
-function ProtectedConsole() {
+function ProtectedConsole({ solution }: { solution: SolutionManifest }) {
   const { user, isLoading } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const [agents, setAgents] = useState(MOCK_AGENTS);
-  const [team, setTeam] = useState(MOCK_AGENT_TEAMS[0]);
-  const [interrupts, setInterrupts] = useState(MOCK_INTERRUPTS);
-  const [activity, setActivity] = useState(initialActivity);
-  const pendingCount = useMemo(() => interrupts.filter((item) => item.status === "pending").length, [interrupts]);
+  const [workflows, setWorkflows] = useState<WorkflowInstance[]>(ACTIVATED_WORKFLOWS);
+  const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([]);
+  const [attention, setAttention] = useState<AttentionItem[]>([]);
+  const [history, setHistory] = useState<string[]>([]);
+  const pendingCount = useMemo(() => attention.length, [attention]);
+  const solutionUi = resolveStarterUi(solution);
 
   if (isLoading) return null;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to={`/${solution.id}/login`} replace />;
 
-  const toggleAgent = (id: string) => setAgents((current) => current.map((agent) => {
-    if (agent.id !== id) return agent;
-    const enabled = !agent.enabled;
-    return { ...agent, enabled, status: enabled ? "idle" : "disabled" };
-  }));
-  const toggleTeam = () => {
-    const enabled = !team.enabled;
-    setTeam((current) => ({ ...current, enabled }));
-    setAgents((current) => current.map((agent) => agent.teamId === team.id ? { ...agent, enabled, status: enabled ? "idle" : "disabled" } : agent));
+  const start = (workflow: WorkflowInstance) => {
+    if (activeTasks.some((task) => task.workflowId === workflow.id)) return;
+    setActiveTasks((current) => [...current, {
+      id: `task-${Date.now()}`,
+      workflowId: workflow.id,
+      title: workflow.title,
+      state: "running"
+    }]);
   };
-  const resolve = (id: string, choice: string) => {
-    const item = interrupts.find((candidate) => candidate.id === id);
-    setInterrupts((current) => current.filter((candidate) => candidate.id !== id));
-    if (item) setActivity((current) => [{ id: `resolved-${id}`, agentName: item.agentName, summary: `${choice}: ${item.title}`, time: "now", outcome: "working" }, ...current]);
+  const updateWorkflow = (id: string, configuration: Record<string, string>) => {
+    setWorkflows((current) => current.map((workflow) => workflow.id === id ? { ...workflow, configuration } : workflow));
   };
-  const start = (workflow: PresetWorkflow) => {
-    const agent = agents.find((candidate) => candidate.id === workflow.agentId);
-    setActivity((current) => [{ id: `workflow-${Date.now()}`, agentName: agent?.name ?? "Imel", summary: workflow.outcome, time: "now", outcome: "working" }, ...current]);
+  const addInstance = (workflow: WorkflowInstance) => {
+    const number = workflows.filter((candidate) => candidate.presetId === workflow.presetId).length + 1;
+    setWorkflows((current) => [...current, {
+      ...workflow,
+      id: `${workflow.presetId}-${number}`,
+      title: `${workflow.title} ${number}`,
+      configuration: { ...workflow.configuration }
+    }]);
+  };
+  const resolve = (id: string, decision: string) => {
+    const item = attention.find((candidate) => candidate.id === id);
+    setAttention((current) => current.filter((candidate) => candidate.id !== id));
+    if (item) setHistory((current) => [`${decision}: ${item.title}`, ...current]);
   };
   const screen = (route: ConsoleRoute) => {
-    if (route === "dashboard") return <DashboardScreen agents={agents} team={team} activity={activity} interrupts={interrupts} onToggleAgent={toggleAgent} onToggleTeam={toggleTeam} onResolve={resolve} onStart={start} />;
-    if (route === "agents") return <AgentsScreen agents={agents} onToggleAgent={toggleAgent} />;
-    if (route === "tasks") return <TasksScreen activity={activity} agents={agents} onStart={start} />;
-    return <PlaceholderScreen name={routeTitles[route]} icon={route === "analytics" ? "analytics" : "settings"} />;
+    if (route === "dashboard") {
+      return <DashboardScreen workflows={workflows} activeTasks={activeTasks} attention={attention} history={history} onStart={start} onResolve={resolve} onUpdate={updateWorkflow} onAddInstance={addInstance} />;
+    }
+    if (route === "agents") return <AgentsScreen teams={HIRED_TEAMS} />;
+    return <WorkflowsScreen workflows={workflows} onUpdate={updateWorkflow} onAddInstance={addInstance} onStart={start} />;
   };
-
-  const solutionUi = resolveStarterUi(solution);
 
   return <Routes>
     {solutionUi.navigation.map((item) => (
-      <Route key={item.route} path={`/${item.route}`} element={<ConsoleShell title={item.label} productName={solutionUi.productName} navigation={solutionUi.navigation.map((navigationItem) => ({ ...navigationItem }))} pendingCount={pendingCount} collapsed={collapsed} onToggleSidebar={() => setCollapsed((value) => !value)}>{screen(item.route)}</ConsoleShell>} />
+      <Route key={item.route} path={`/${item.route}`} element={
+        <ConsoleShell
+          title={routeTitles[item.route]}
+          productName={solutionUi.productName}
+          navigation={solutionUi.navigation.map((navigationItem) => ({ ...navigationItem }))}
+          pendingCount={pendingCount}
+          collapsed={collapsed}
+          onToggleSidebar={() => setCollapsed((value) => !value)}
+        >{screen(item.route)}</ConsoleShell>
+      } />
     ))}
-    <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    <Route path="*" element={<Navigate to={`/${solution.id}/dashboard`} replace />} />
   </Routes>;
 }
 
 function AppRoutes() {
-  return <Routes><Route path="/login" element={<Login />} /><Route path="/*" element={<ProtectedConsole />} /></Routes>;
+  const { solutionId } = useParams();
+  const solution = solutionId ? getSolution(solutionId) : undefined;
+  if (!solution) return <Navigate to={`/${DEFAULT_SOLUTION_ID}/dashboard`} replace />;
+
+  return <Routes>
+    <Route path="login" element={<Login solution={solution} />} />
+    <Route path="*" element={<ProtectedConsole solution={solution} />} />
+  </Routes>;
 }
 
 export default function App() {
-  return <AuthProvider><BrowserRouter><AppRoutes /></BrowserRouter></AuthProvider>;
+  return <AuthProvider><BrowserRouter><Routes>
+    <Route path="/:solutionId/*" element={<AppRoutes />} />
+    <Route path="*" element={<Navigate to={`/${DEFAULT_SOLUTION_ID}/dashboard`} replace />} />
+  </Routes></BrowserRouter></AuthProvider>;
 }

@@ -1,5 +1,6 @@
 @import "@minkops/design/styles.css";
 @import "./console.css";
+@import "./login.css";
 
 html,
 body,

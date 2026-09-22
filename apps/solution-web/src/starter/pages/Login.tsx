@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { solution } from "@minkops/solution-manifest";
 import { resolveStarterUi } from "../config";
+import type { SolutionManifest } from "@minkops/solution-contracts";
 
-export default function Login() {
+export default function Login({ solution }: { solution: SolutionManifest }) {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("operator@acmecorp.com");
@@ -16,7 +16,7 @@ export default function Login() {
     event.preventDefault();
     setIsSubmitting(true);
     await login(email, password);
-    navigate("/dashboard", { replace: true });
+    navigate(`/${solution.id}/dashboard`, { replace: true });
   }
 
   return <main className="login-screen">

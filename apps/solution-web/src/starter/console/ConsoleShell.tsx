@@ -1,4 +1,4 @@
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Icon, type ConsoleIconName } from "./Icon";
 import type { ConsoleRoute } from "./types";
@@ -29,12 +29,14 @@ export function ConsoleShell({
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { solutionId } = useParams();
+  const solutionPath = `/${solutionId}`;
 
   return (
     <div className={`console-shell${collapsed ? " is-collapsed" : ""}`}>
       <aside className="console-sidebar" aria-label="Main navigation">
         <div className="console-brand-row">
-          <button className="console-wordmark" onClick={() => navigate("/dashboard")} aria-label={`${productName} dashboard`}>
+          <button className="console-wordmark" onClick={() => navigate(`${solutionPath}/dashboard`)} aria-label={`${productName} dashboard`}>
             <span className="wordmark-dot" />
             <span>{productName}</span>
           </button>
@@ -47,7 +49,7 @@ export function ConsoleShell({
           {navigation.map((item) => (
             <NavLink
               key={item.route}
-              to={`/${item.route}`}
+              to={`${solutionPath}/${item.route}`}
               className={({ isActive }) => `console-nav-item${isActive ? " is-active" : ""}`}
               title={collapsed ? item.label : undefined}
             >
@@ -62,7 +64,7 @@ export function ConsoleShell({
           <div className="human-avatar" aria-hidden="true">{user ? initials(user.name) : "?"}</div>
           <div className="console-account-copy">
             <strong>{user?.name ?? "Operator"}</strong>
-            <span>{user?.role ?? ""}</span>
+            <span>{user?.role ?? "operator"}</span>
           </div>
           <button className="icon-button account-logout" onClick={logout} aria-label="Sign out" title="Sign out">
             <Icon name="logout" size={17} />
@@ -75,14 +77,6 @@ export function ConsoleShell({
           <h1>{title}</h1>
           <div className="console-header-tools">
             <span className="tenant-label">{user?.tenantName}</span>
-            <button
-              className={`icon-button notification-button${pendingCount ? " has-items" : ""}`}
-              aria-label={`${pendingCount} items need attention`}
-              onClick={() => navigate("/dashboard#attention")}
-            >
-              <Icon name="bell" size={18} />
-              {pendingCount ? <b>{pendingCount}</b> : null}
-            </button>
           </div>
         </header>
         <div key={location.pathname} className="console-view">{children}</div>

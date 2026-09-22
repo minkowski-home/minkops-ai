@@ -15,9 +15,11 @@ Minkops.ai is a suite of autonomous AI employees that handle customer intake, op
 - `infra/` and `docs/` — deployment assets and cross-cutting documentation.
 
 The same solution web/API applications are composed with a selected solution at
-build time. For local console work, run `VITE_SOLUTION=mock-client npm run dev` from
-`apps/solution-web`. Do not fork the applications for a customer-specific UI or
-connector selection.
+runtime. `app.minkops.com` is one shared console: solution scope is part of the
+path (`/<solution-id>/...`) and will later be resolved from authenticated tenant
+membership. For local console work, run `npm run dev` from `apps/solution-web`
+and open `/pr-infra/dashboard`. Do not fork the applications for a
+customer-specific UI or connector selection.
 
 **Agentic Stuff**: We shall utilize OpenAI/Anthropic APIs aggressively. As of Sep 2026, both provide a comprehensive set of APIs for almost everything that Codex/Claude Code does, our product can be thought of as Codex-like app, but for low tech maturity teams avoiding prompting hell and providing with preset one-click workflows to automate their everyday routine.
 

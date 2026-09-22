@@ -1,8 +1,8 @@
 /**
  * AuthContext — authentication state management.
  *
- * Currently uses mock data. When the backend auth endpoints are ready,
- * replace the mock login/logout logic with real API calls to
+ * Uses a local session fallback until the backend auth endpoints are ready.
+ * Replace the fallback with real API calls to
  * POST /api/auth/login and POST /api/auth/logout.
  *
  * The context exposes:
@@ -14,7 +14,7 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import type { User } from "../types/user";
-import { MOCK_USER } from "../mock/user";
+import { DEFAULT_OPERATOR } from "../session/defaultOperator";
 
 interface AuthContextValue {
   user: User | null;
@@ -30,16 +30,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading] = useState(false);
 
   const login = useCallback(async (email: string, password: string) => {
-    // TODO: replace with POST /api/auth/login
     void email;
     void password;
-    // Simulate network latency
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    setUser(MOCK_USER);
+    setUser(DEFAULT_OPERATOR);
   }, []);
 
   const logout = useCallback(() => {
-    // TODO: replace with POST /api/auth/logout
     setUser(null);
   }, []);
 

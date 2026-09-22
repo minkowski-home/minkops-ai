@@ -10,13 +10,11 @@ const DEFAULT_UI: SolutionUiConfig = {
   navigation: [
     { route: "dashboard", label: "Dashboard", icon: "home" },
     { route: "agents", label: "Agents", icon: "agents" },
-    { route: "tasks", label: "Work", icon: "tasks" },
-    { route: "analytics", label: "Analytics", icon: "analytics" },
-    { route: "settings", label: "Settings", icon: "settings" }
+    { route: "workflows", label: "Workflows", icon: "tasks" }
   ],
   options: {
-    showAnalytics: true,
-    showTeamControls: true
+    showAnalytics: false,
+    showTeamControls: false
   }
 };
 

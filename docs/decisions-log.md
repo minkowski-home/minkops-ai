@@ -12,6 +12,17 @@ still being developed; mock-client demonstrates manifest configuration without
 claiming ownership of the shared console. Shared elements remain explicitly
 owned by `apps/`, `platform/`, `modules/`, `connectors/`, or `packages/`.
 
+### 2026-09-22 — One public console for every solution
+
+`app.minkops.com` is a shared Minkops host, so choosing a solution at Vite build
+time would require a deployment per client and would make client routing depend
+on infrastructure. The console now includes a small runtime manifest registry
+and scopes every screen under `/<solution-id>/...`; both `pr-infra` and the
+`mock-client` fixture use the same built app. Authentication will replace this
+explicit URL selection with tenant membership before production use. The Vercel
+SPA rewrite is co-located with `apps/solution-web`, while project creation and
+domain attachment remain a deployment operation rather than solution code.
+
 ### 2026-09-21 — Solution composition boundary for multi-client delivery
 
 **Situation:** The repository grouped active code by implementation category (`agents`, `services`, `shared`, and `transform`), while a single customer console was beginning to receive a substantial UI redesign. Extending that shape for different customer interfaces, connectors, and workflows would invite copied applications and customer rules scattered through shared code.

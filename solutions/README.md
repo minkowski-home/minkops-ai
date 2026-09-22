@@ -12,7 +12,9 @@ prompts, and UI configuration. It must not copy `apps/solution-web` or
    starter workspace; add a `web/src/App.tsx` only when it needs a bespoke UI.
 3. Add customer-only workflows, rules, and prompts beneath that solution as
    they are implemented.
-4. Run the shared host with `VITE_SOLUTION=<identifier>`.
+4. The shared host resolves a solution at runtime through `/<solution-id>/...`.
+   Local development defaults to `pr-infra`; use, for example,
+   `/mock-client/dashboard` to inspect the fixture.
 
 `mock-client` is a local development fixture, not a customer deployment. Its
 manifest demonstrates configuration overrides without owning the starter UI.
