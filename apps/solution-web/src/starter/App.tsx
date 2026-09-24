@@ -30,15 +30,94 @@ function ProtectedConsole({ solution }: { solution: SolutionManifest }) {
   if (isLoading) return null;
   if (!user) return <Navigate to={`/${solution.id}/login`} replace />;
 
-  const start = (workflow: WorkflowInstance) => {
-    if (activeTasks.some((task) => task.workflowId === workflow.id)) return;
-    setActiveTasks((current) => [...current, {
-      id: `task-${Date.now()}`,
-      workflowId: workflow.id,
-      title: workflow.title,
-      state: "running"
-    }]);
+const start = (workflow: WorkflowInstance) => {
+  if (activeTasks.some((task) => task.workflowId === workflow.id)) return;
+
+  // Keep normal behaviour for other workflows
+  if (workflow.presetId !== "whatsapp-image-to-excel") {
+    setActiveTasks((current) => [
+      ...current,
+      {
+        id: `task-${Date.now()}`,
+        workflowId: workflow.id,
+        title: workflow.title,
+        state: "running"
+      }
+    ]);
+
+    return;
+  }
+
+  // Open image picker for WhatsApp Image to Excel
+  const input = document.createElement("input");
+
+  input.type = "file";
+  input.accept = "image/*";
+
+  input.onchange = async () => {
+    const file = input.files?.[0];
+
+    if (!file) return;
+
+    const taskId = `task-${Date.now()}`;
+
+    setActiveTasks((current) => [
+      ...current,
+      {
+        id: taskId,
+        workflowId: workflow.id,
+        title: workflow.title,
+        state: "running"
+      }
+    ]);
+
+    try {
+      const formData = new FormData();
+
+      formData.append("file", file);
+
+      const response = await fetch(
+        "http://localhost:8000/extract_image",
+        {
+          method: "POST",
+          body: formData
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Image processing failed");
+      }
+
+      const result = await response.json();
+
+      console.log("Image processing result:", result);
+
+      setActiveTasks((current) =>
+        current.filter((task) => task.id !== taskId)
+      );
+
+      setHistory((current) => [
+        `Completed: ${file.name}`,
+        ...current
+      ]);
+
+    } catch (error) {
+      console.error("Image processing error:", error);
+
+      setActiveTasks((current) =>
+        current.filter((task) => task.id !== taskId)
+      );
+
+      setHistory((current) => [
+        `Failed: ${file.name}`,
+        ...current
+      ]);
+    }
   };
+
+  input.click();
+};
+
   const updateWorkflow = (id: string, configuration: Record<string, string>) => {
     setWorkflows((current) => current.map((workflow) => workflow.id === id ? { ...workflow, configuration } : workflow));
   };
