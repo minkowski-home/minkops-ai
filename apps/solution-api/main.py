@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 
 load_dotenv()
-client = OpenAI()
 
 app = FastAPI()
 app.add_middleware(
@@ -25,7 +24,7 @@ app.add_middleware(
 
 @app.get("/")
 def home():
-    return {"message:" "Image to Excel API is running"}
+    return {"message": "Image to Excel API is running"}
 
 @app.get("/check-config")
 def check_config():
@@ -47,6 +46,15 @@ async def upload_image(file: UploadFile = File(...)):
 
 @app.post("/extract_image")
 async def extract_image(file: UploadFile = File(...)):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail="Image extraction is unavailable: set OPENAI_API_KEY in apps/solution-api/.env and restart the API.",
+        )
+
     image_bytes = await file.read()
 
     encoded_image = base64.b64encode(image_bytes).decode("utf-8")
@@ -55,7 +63,7 @@ async def extract_image(file: UploadFile = File(...)):
         f"data:{file.content_type};base64,{encoded_image}"
     )
 
-    response = client.responses.create(
+    response = OpenAI(api_key=api_key).responses.create(
         model = "gpt-5.6-luna",
         input = [
             {

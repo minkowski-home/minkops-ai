@@ -24,6 +24,7 @@ function ProtectedConsole({ solution }: { solution: SolutionManifest }) {
   const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([]);
   const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [history, setHistory] = useState<string[]>([]);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
   const pendingCount = useMemo(() => attention.length, [attention]);
   const solutionUi = resolveStarterUi(solution);
 
@@ -32,6 +33,7 @@ function ProtectedConsole({ solution }: { solution: SolutionManifest }) {
 
 const start = (workflow: WorkflowInstance) => {
   if (activeTasks.some((task) => task.workflowId === workflow.id)) return;
+  setWorkflowError(null);
 
   // Keep normal behaviour for other workflows
   if (workflow.presetId !== "whatsapp-image-to-excel") {
@@ -85,7 +87,8 @@ const start = (workflow: WorkflowInstance) => {
       );
 
       if (!response.ok) {
-        throw new Error("Image processing failed");
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || `Image processing failed (HTTP ${response.status}).`);
       }
 
       const result = await response.json();
@@ -108,10 +111,9 @@ const start = (workflow: WorkflowInstance) => {
         current.filter((task) => task.id !== taskId)
       );
 
-      setHistory((current) => [
-        `Failed: ${file.name}`,
-        ...current
-      ]);
+      const message = error instanceof Error ? error.message : "Image processing failed. Check that the API is running.";
+      setWorkflowError(message);
+      setHistory((current) => [`Failed: ${file.name}`, ...current]);
     }
   };
 
@@ -137,7 +139,7 @@ const start = (workflow: WorkflowInstance) => {
   };
   const screen = (route: ConsoleRoute) => {
     if (route === "dashboard") {
-      return <DashboardScreen workflows={workflows} activeTasks={activeTasks} attention={attention} history={history} onStart={start} onResolve={resolve} onUpdate={updateWorkflow} onAddInstance={addInstance} />;
+      return <DashboardScreen workflows={workflows} activeTasks={activeTasks} attention={attention} history={history} workflowError={workflowError} onStart={start} onResolve={resolve} onUpdate={updateWorkflow} onAddInstance={addInstance} />;
     }
     if (route === "agents") return <AgentsScreen teams={HIRED_TEAMS} />;
     return <WorkflowsScreen workflows={workflows} onUpdate={updateWorkflow} onAddInstance={addInstance} onStart={start} />;
