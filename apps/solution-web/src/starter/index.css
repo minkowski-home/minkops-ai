@@ -1,0 +1,13 @@
+@import "@minkops/design/styles.css";
+@import "./console.css";
+@import "./login.css";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}

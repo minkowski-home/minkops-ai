@@ -1,80 +1,49 @@
-# MinkOps.ai
+# Minkops.ai
 
-Minkops.ai is a suite of autonomous AI employees that handle customer intake, operational monitoring, administration, analytics, and communication through a unified knowledge graph, policy model, and orchestration layer. A typical customer can "hire" any set of agents, which work together (fully-intercommunicating and accessing company knowledge as real human employees would) perfoming actual job duties - each agent tends to replace one real human employee with disjoint skills. Each fleet of agents (for an organization) runs continuously 24x7 instead of one-time jobs.
+Minkops automates practical business work through preset workflows that fit a
+customer's existing tools and processes.
 
-### Test one run (Updated 2026-02-26)
+## Architecture
 
-**Prerequisites:** copy `services/ai-suite/.env.example` to `services/ai-suite/.env` and fill in `ADMIN_DB_URL`, `DATABASE_URL`, `MINKOPS_DB_PASSWORD`, and `PSQL_PATH` for your machine.
+- `apps/` — deployable web and API entry points.
+- `workflows/` — shared Python business workflows, added when a workflow is
+  reusable across applications or solutions.
+- `solutions/` — client-specific workflow composition, mappings, policies,
+  prompts, connector selection, and UI configuration.
+- `connectors/` — concrete integrations with external systems. Add one when
+  there is an implementation, not just a planned provider.
+- `platform/` — shared, customer-independent runtime infrastructure.
+- `warehouse/` — the dbt reporting warehouse.
+- `packages/` — small shared contracts and product assets.
+- `db/`, `infra/`, and `docs/` — database bootstrap, deployment configuration,
+  and current engineering guidance.
 
-**Step 1 — Bootstrap** *(first time only, or after a fresh Postgres install)*
+## Product and execution model
 
-Creates the `minkops` app role, the `minkops_app` database if it doesn't exist, installs extensions, and sets default privileges. The password is passed at invocation time — never hardcoded. Safe to re-run.
+An AI Employee is a product abstraction that groups workflows for customers.
+It owns catalog and presentation metadata; it does not own business execution.
 
-```bash
-psql postgres -v minkops_password=$MINKOPS_DB_PASSWORD -f db/01_bootstrap.sql
-```
+A workflow is the durable business execution unit. It defines the process,
+validates inputs and outputs, and invokes concrete operations. Client-specific
+workflow behavior belongs in that client's solution. A workflow that only
+serves one application may live with that application until reuse justifies
+moving it into `workflows/`.
 
-> If `psql` is not on your PATH, use the full binary path from `PSQL_PATH` in your `.env`.
+Tools are bounded operations. Connectors provide the concrete external-system
+integration; keep a tool beside its connector when it is only useful through
+that integration. Skills are reusable procedural knowledge for model calls;
+keep one-off instructions with their workflow. Agents are reserved for
+autonomous reasoning loops used inside a workflow. Do not add a separate
+capabilities layer unless provider substitution or dynamic tool resolution
+requires it.
 
-**Step 2 — Seed the schema**
+## Repository boundaries
 
-Drops all tables and recreates them. Run from the repo root or `services/ai-suite`.
+Keep the Python execution architecture independent from the product's
+TypeScript UI. Do not create one backend package or directory per AI Employee.
+The dbt warehouse is a distinct subsystem at `warehouse/`. Do not create a
+catch-all directory for small Python functions.
 
-```bash
-cd services/ai-suite
-seed-db
-```
-
-**Step 3 — Run an agent**
-
-```bash
-run-imel --email "Hi, I placed an order last week and haven't received a confirmation. Can you help?"
-```
-
-Or with the LLM:
-
-```bash
-run-imel --use-llm --email "Hi, I placed an order last week and haven't received a confirmation. Can you help?"
-```
-
-**What to watch for:**
-
-- Step 1 → `NOTICE: Role minkops created.` (or "already exists" on repeat runs)
-- Step 2 → `psql` prints all `CREATE TABLE` / `CREATE INDEX` lines cleanly, then Python logs `Seed complete for tenant_id=tenant_001`
-- Step 3 auth error → bootstrap hasn't run yet, or `MINKOPS_DB_PASSWORD` doesn't match the password in `DATABASE_URL` — fix `.env` and re-run Step 1
-
-**Important**
-
-Initially, the graphs will be slightly more deterministic to ensure predictability and easier debugging. There will be more interrupts and agents will wait for human feedback before taking a final action. The database, DWH and systems must be designed in a way to use this human interaction data to train agents using RLHF to take decisions and learn from mistakes, leading to fully autonomous agents.
-
-## Layout
-
-- `apps/` — user-facing experiences; currently `apps/corporate-website` hosts the Minkops marketing site.
-- `services/` — production and prototype services; `services/ai-suite` is the conversational/operational agent platform plus legacy notebooks and tooling.
-- `infra/` — infrastructure plans and automation (currently contains a README placeholder but can grow Terraform, Kubernetes, or GH Actions artifacts).
-- `docs/` — cross-cutting playbooks, architecture notes, or governance policies shared across modules.
-
-This structure mirrors Minkowski’s approach by keeping frontends in `apps/`, backend/data work in `services/` or `infra/`, and shared knowledge in `docs/`, preventing the drift that results from ad-hoc “modules” and making it easy for contributors to find the right home for new work.
-
-
-### Planned Agents
-| Persona (at MH, not exposed anywhere else) | Agent Name | Agent / Tool                    | Description                                                                        | Domain          | Priority  |
-|--------------------------------------------| ---------- | ------------------------------- | ---------------------------------------------------------------------------------- | --------------- |-----------|
-| Bianca                                     | Ora        | Moodboard Generator             | Generates moodboards based on user defined aesthetics, products, style, theme etc. | Interior Design | Moderate  |
-| Ryan                                       | Eko        | Social Media Handler            | Posts, engages, and manages the social media handle of the company                 | Generic         | Very High |
-| Ethan                                      | Floc       | Content Creator (Ad/Email copies)| Generates marketing content based on brand kit and company knowledge              | Generic         | Very High |
-| Devin                                      | Cruz       | Manager's Assistant             |                                                                                    | Fast Food       | Very Low  |
-| Emily                                      | Hosi       | Front of the House              |                                                                                    | Fast Food       | Very Low  |
-| Tony                                       | Prex       | Back of the House               |                                                                                    | Fast Food       | Very Low  |
-| Jaina                                      | Kall       | Phone Call/Customer Support Rep |                                                                                    | Generic         | High      |
-| Sarah                                      | Leed       | Lead Generation Caller          |                                                                                    | Generic         | Immediate |
-| Kim                                        | Kim        | Store Manager's Assistant       |                                                                                    | Generic         | Low       |
-| Mark                                       | Insi       | Business Analyst                |                                                                                    | Generic         | Low       |
-| Nathan                                     | Imel       | Email Handler                   |                                                                                    | Generic         | Immediate |
-
-### Corporate website (apps/corporate-website)
-
-1. `cd apps/corporate-website`  
-2. Serve the folder with your favorite static server (for example `npm install --global http-server` followed by `http-server . -c-1`).  
-3. Update the HTML, CSS, or assets to tell pluseleven’s story, then redeploy that folder to your CDN/hosting platform.  
-4. Keep this site static so it can be deployed anywhere without additional compute. Currently hosted on Vercel at minkops.com
+The shared solution web/API applications serve multiple solutions. Client
+specific UI and configuration should compose through `solutions/<id>/` rather
+than copying an application.

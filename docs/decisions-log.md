@@ -1,5 +1,66 @@
 # Decision Logs
 
+Entries below preserve historical decisions and may describe structures that
+have since changed. See `engineering-architecture.md` for the current model.
+
+### 2026-09-28 — Workflow-first Python architecture and lean repository layout
+
+**Situation:** The repository's backend architecture centered named agents, a
+generic agent runtime, and a capability layer, while the product direction
+centers preset business workflows. The dbt warehouse also lived under an
+ambiguous catch-all `modules/` directory.
+
+**Decision:** Treat workflows as the primary execution unit. AI Employees are
+product catalog groupings only. Keep one-off model instructions with their
+workflow; extract reusable skills only after another workflow needs them. Use
+agents only for autonomous reasoning loops inside workflows. Tools are
+concrete operations, and connectors provide external-system implementations.
+Do not add a capabilities layer without a concrete substitution, discovery,
+or permission need.
+
+**Action:** Remove the obsolete `platform/ai/` agent and runtime trees. Move
+the dbt project to the root-level `warehouse/` directory, update its compose mount, and refresh
+current architecture guidance. Shared reusable Python workflows belong under
+`workflows/`; one-caller workflow code can remain with its application or
+solution until reuse justifies extraction.
+
+**Result:** Current repository guidance follows the workflow-first model and
+does not present the retired agent runtime as Minkops' Python execution
+architecture. Earlier entries below record historical decisions.
+
+### 2026-09-21 — Starter workspace before client-specific UI
+
+`apps/solution-web/src/starter` owns the default operator workspace: the
+activity list, action queue, and agent context are useful core anatomy before a
+solution has bespoke screens. A solution may optionally supply
+`solutions/<solution-id>/web/src/App.tsx` when its reviewed workflow requires a
+different interaction model. PR Infra inherits the starter workspace while its
+WhatsApp-to-Excel workflow, rules, schemas, and connector implementations are
+still being developed; mock-client demonstrates manifest configuration without
+claiming ownership of the shared console. Shared elements remain explicitly
+owned by `apps/`, `platform/`, `modules/`, `connectors/`, or `packages/`.
+
+### 2026-09-22 — One public console for every solution
+
+`app.minkops.com` is a shared Minkops host, so choosing a solution at Vite build
+time would require a deployment per client and would make client routing depend
+on infrastructure. The console now includes a small runtime manifest registry
+and scopes every screen under `/<solution-id>/...`; both `pr-infra` and the
+`mock-client` fixture use the same built app. Authentication will replace this
+explicit URL selection with tenant membership before production use. The Vercel
+SPA rewrite is co-located with `apps/solution-web`, while project creation and
+domain attachment remain a deployment operation rather than solution code.
+
+### 2026-09-21 — Solution composition boundary for multi-client delivery
+
+**Situation:** The repository grouped active code by implementation category (`agents`, `services`, `shared`, and `transform`), while a single customer console was beginning to receive a substantial UI redesign. Extending that shape for different customer interfaces, connectors, and workflows would invite copied applications and customer rules scattered through shared code.
+
+**Task:** Preserve the working product while making the customer boundary explicit without prematurely inventing empty services or a migration system that does not exist.
+
+**Action:** We moved the deployable console/API to `apps/solution-web` and `apps/solution-api`; the reusable AI decision library and runtime to `platform/ai`; and the dbt reporting project to `modules/reporting/warehouse`. Brand code moved to the intentional `packages/brand` package. We retained `db/init` because it is mounted by Docker as first-boot DDL, not an incremental migration mechanism. Most importantly, `packages/solution-contracts` defines the compact, typed composition contract and `solutions/example/ui.ts` provides a non-customer fixture. The console selects a solution from `VITE_SOLUTION`, letting a solution control its product label, navigation, enabled connector declarations, and UI options while retaining one shared application binary.
+
+**Result:** Future customer work has an unambiguous home (`solutions/<id>`), integration code stays isolated in `connectors/`, and shared capability work is visible as platform or module work. The refactor keeps current imports and local compose paths valid while preventing customer-specific copies of the web and API apps.
+
 ### 03-02-2026
 We created `docs/decisions-log.md` as the canonical place to store product briefs (new launches), onboarding playbooks, system design decisions, problems found and how they were fixed, architecture notes, and governance policies. When new cross-cutting decisions are made — for example, conventions for knowledge graphs, audit trails, or policy enforcement, or any major improvement/trade-off — we capture them in `docs/` so every module (apps, services, infra) can reference the same playbook, similar to a monorepo “engineering handbook”. There isn’t a strict schema beyond including the date; entries should be explanatory paragraphs that a junior engineer can use to understand senior trade-offs.
 

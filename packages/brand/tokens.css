@@ -1,0 +1,400 @@
+/**
+ * Minkops Brand Design Tokens
+ * ============================================================
+ * Central source of truth for all design tokens across every app
+ * in the monorepo. Editing variables here propagates changes to
+ * apps/corporate-website, apps/solution-web, and any future app.
+ *
+ * Usage:
+ *   In each app's index.css: @import "@minkops/brand/tokens.css";
+ *   Apply a theme via the `data-theme` attribute on <html>:
+ *     <html data-theme="light"> | "dark" | "paper"
+ *
+ * Token namespacing:
+ *   --color-*        Color primitives and semantic aliases
+ *   --glass-*        Glassmorphism surface values
+ *   --font-*         Typeface stacks
+ *   --fw-*           Font weight scale
+ *   --radius-*       Border radius scale
+ *   --shadow-*       Box shadow scale
+ *   --transition-*   Animation timing
+ * ============================================================
+ */
+
+/* ============================================================
+ * LIGHT THEME (default)
+ * Ice-blue daylight with forged orange accents.
+ * ============================================================ */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* --- Backgrounds --- */
+  --color-bg: #eef4f8;
+  --color-bg-rgb: 238 244 248;
+  --color-bg-offset: #dbe6ef;
+  --color-bg-offset-rgb: 219 230 239;
+  --color-surface: rgba(248, 251, 253, 0.58);
+  --color-surface-rgb: 248 251 253;
+  --color-surface-raised: rgba(252, 253, 255, 0.76);
+  --color-surface-raised-rgb: 252 253 255;
+  --color-surface-border: rgba(26, 39, 48, 0.1);
+  --color-surface-border-rgb: 26 39 48;
+
+  /* --- Typography --- */
+  --color-text: #1a2730;
+  --color-text-rgb: 26 39 48;
+  --color-text-muted: #45586c;
+  --color-text-muted-rgb: 69 88 108;
+  --color-text-subtle: #6f8192;
+  --color-text-subtle-rgb: 111 129 146;
+  --color-ink: #492800;
+
+  /* --- Brand accents --- */
+  --color-primary: #e95d2c;
+  --color-primary-rgb: 233 93 44;
+  --color-primary-dim: rgba(233, 93, 44, 0.16);
+  --color-primary-hover: #a63e1b;
+  --color-secondary: #94a3b8;
+  --color-secondary-rgb: 148 163 184;
+  --color-secondary-dim: rgba(148, 163, 184, 0.24);
+  --color-secondary-hover: #7c8fa5;
+
+  /* --- Semantic accents --- */
+  --color-accent-purple: #424048;
+  --color-accent-gold: #94a3b8;
+  --color-accent-orange: #a63e1b;
+
+  /* --- CTA --- */
+  --color-cta: #e95d2c;
+  --color-cta-rgb: 233 93 44;
+  --color-cta-text: #ffffff;
+  --color-cta-text-rgb: 255 255 255;
+  --color-cta-hover: #a63e1b;
+
+  /* --- Utility fills --- */
+  --color-fill-soft: #d5dfe8;
+  --color-fill-soft-rgb: 213 223 232;
+  --color-fill-subtle: #edf3f7;
+  --color-fill-subtle-rgb: 237 243 247;
+
+  /* --- Semantic status --- */
+  --color-success: #22c55e;
+  --color-success-rgb: 34 197 94;
+  --color-success-dim: rgba(34, 197, 94, 0.12);
+  --color-warning: #f59e0b;
+  --color-warning-rgb: 245 158 11;
+  --color-warning-dim: rgba(245, 158, 11, 0.12);
+  --color-danger: #ef4444;
+  --color-danger-rgb: 239 68 68;
+  --color-danger-dim: rgba(239, 68, 68, 0.12);
+  --color-info: #45586c;
+  --color-info-rgb: 69 88 108;
+  --color-info-dim: rgba(69, 88, 108, 0.14);
+
+  /* --- Glassmorphism --- */
+  --glass-bg: rgba(244, 249, 252, 0.48);
+  --glass-bg-heavy: rgba(252, 253, 255, 0.68);
+  --glass-border: rgba(26, 39, 48, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.82);
+  --glass-blur: 18px;
+  --glass-blur-heavy: 30px;
+
+  /* --- Sidebar / navigation --- */
+  --color-sidebar-bg: rgba(238, 244, 248, 0.5);
+  --color-sidebar-border: rgba(26, 39, 48, 0.08);
+  --color-sidebar-item-hover: rgba(26, 39, 48, 0.05);
+  --color-sidebar-item-active: rgba(233, 93, 44, 0.14);
+  --color-sidebar-item-active-text: #a63e1b;
+  --color-sidebar-item-active-icon: #a63e1b;
+
+  /* --- Atmospheric gradients (decorative orbs) --- */
+  --gradient-orb-primary: radial-gradient(
+    circle,
+    rgba(233, 93, 44, 0.22) 0%,
+    transparent 70%
+  );
+  --gradient-orb-secondary: radial-gradient(
+    circle,
+    rgba(148, 163, 184, 0.34) 0%,
+    transparent 70%
+  );
+
+  --font-chat: var(--font-main);
+
+  /* --- Logo --- */
+  --color-navbar-bg: #ffffff;
+  --color-logo-text: #94a3b8;
+}
+
+/* ============================================================
+ * DARK THEME
+ * Midnight slate with ember-orange glow and steel-blue contrast.
+ * ============================================================ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0d171e;
+  --color-bg-rgb: 13 23 30;
+  --color-bg-offset: #1a2730;
+  --color-bg-offset-rgb: 26 39 48;
+  --color-surface: rgba(26, 39, 48, 0.72);
+  --color-surface-rgb: 26 39 48;
+  --color-surface-raised: rgba(37, 51, 62, 0.88);
+  --color-surface-raised-rgb: 37 51 62;
+  --color-surface-border: rgba(148, 163, 184, 0.07);
+  --color-surface-border-rgb: 148 163 184;
+
+  --color-text: #e7eef3;
+  --color-text-rgb: 231 238 243;
+  --color-text-muted: #93a2b1;
+  --color-text-muted-rgb: 147 162 177;
+  --color-text-subtle: #627180;
+  --color-text-subtle-rgb: 98 113 128;
+  --color-ink: #f3f8fb;
+
+  --color-primary: #e95d2c;
+  --color-primary-rgb: 233 93 44;
+  --color-primary-dim: rgba(233, 93, 44, 0.18);
+  --color-primary-hover: #ff7441;
+  --color-secondary: #94a3b8;
+  --color-secondary-rgb: 148 163 184;
+  --color-secondary-dim: rgba(148, 163, 184, 0.2);
+  --color-secondary-hover: #b8c7d4;
+
+  --color-accent-purple: #424048;
+  --color-accent-gold: #94a3b8;
+  --color-accent-orange: #a63e1b;
+
+  --color-cta: #e95d2c;
+  --color-cta-rgb: 233 93 44;
+  --color-cta-text: #ffffff;
+  --color-cta-text-rgb: 255 255 255;
+  --color-cta-hover: #ff7441;
+
+  --color-fill-soft: #16232b;
+  --color-fill-soft-rgb: 22 35 43;
+  --color-fill-subtle: #121d25;
+  --color-fill-subtle-rgb: 18 29 37;
+
+  --color-success: #34d86b;
+  --color-success-rgb: 52 216 107;
+  --color-success-dim: rgba(52, 216, 107, 0.14);
+  --color-warning: #fbbf24;
+  --color-warning-rgb: 251 191 36;
+  --color-warning-dim: rgba(251, 191, 36, 0.14);
+  --color-danger: #f87171;
+  --color-danger-rgb: 248 113 113;
+  --color-danger-dim: rgba(248, 113, 113, 0.14);
+  --color-info: #45586c;
+  --color-info-rgb: 69 88 108;
+  --color-info-dim: rgba(69, 88, 108, 0.18);
+
+  --glass-bg: rgba(17, 27, 35, 0.66);
+  --glass-bg-heavy: rgba(24, 36, 46, 0.82);
+  --glass-border: rgba(148, 163, 184, 0.08);
+  --glass-highlight: rgba(148, 163, 184, 0.08);
+  --glass-blur: 18px;
+  --glass-blur-heavy: 30px;
+
+  --color-sidebar-bg: rgba(13, 23, 30, 0.6);
+  --color-sidebar-border: rgba(148, 163, 184, 0.1);
+  --color-sidebar-item-hover: rgba(148, 163, 184, 0.06);
+  --color-sidebar-item-active: rgba(233, 93, 44, 0.18);
+  --color-sidebar-item-active-text: #ff7441;
+  --color-sidebar-item-active-icon: #ff7441;
+
+  --gradient-orb-primary: radial-gradient(
+    circle,
+    rgba(233, 93, 44, 0.26) 0%,
+    transparent 70%
+  );
+  --gradient-orb-secondary: radial-gradient(
+    circle,
+    rgba(148, 163, 184, 0.26) 0%,
+    transparent 70%
+  );
+
+  --font-chat: var(--font-main);
+
+  /* --- Logo --- */
+  --color-navbar-bg: #1a2730;    /* dark bg-offset — deep navy strip */
+  --color-logo-text: #93a2b1;    /* dark text-muted — muted slate, legible on dark */
+}
+
+/* ============================================================
+ * PAPER THEME  (Premium)
+ * Warm ivory/cream palette. Background tones range from
+ * warm ivory -> blush parchment -> sand -> caramel.
+ * Burgundy (#722f37) is the only chromatic accent — used
+ * sparingly for CTAs and high-priority signals. Everything
+ * else stays within the warm neutral register.
+ * ============================================================ */
+[data-theme="paper"],
+[data-theme="minkowski"] {
+  color-scheme: light;
+
+  /* Background stack — lightest -> deepest */
+  --color-bg: #fdf5ec;
+  --color-bg-rgb: 253 245 236;
+  --color-bg-offset: #eddfc8;
+  --color-bg-offset-rgb: 237 223 200;
+  --color-surface: rgba(253, 245, 236, 0.88);
+  --color-surface-rgb: 253 245 236;
+  --color-surface-raised: rgba(237, 223, 200, 0.96);
+  --color-surface-raised-rgb: 237 223 200;
+  --color-surface-border: rgba(180, 148, 110, 0.18);
+  --color-surface-border-rgb: 180 148 110;
+
+  /* Text — warm brown register */
+  --color-text: #3d2b1a;
+  --color-text-rgb: 61 43 26;
+  --color-text-muted: #7a5c42;
+  --color-text-muted-rgb: 122 92 66;
+  --color-text-subtle: #a88c70;
+  --color-text-subtle-rgb: 168 140 112;
+  --color-ink: #241508;
+
+  /* Primary interactive — terracotta */
+  --color-primary: #8c3d2e;
+  --color-primary-rgb: 140 61 46;
+  --color-primary-dim: rgba(140, 61, 46, 0.12);
+  --color-primary-hover: #7a3326;
+  --color-secondary: #c4956a;
+  --color-secondary-rgb: 196 149 106;
+  --color-secondary-dim: rgba(196, 149, 106, 0.18);
+  --color-secondary-hover: #b08050;
+
+  /* Burgundy — the sole chromatic accent */
+  --color-accent-purple: #722f37;
+  --color-accent-gold: #c4956a;
+  --color-accent-orange: #b86a2e;
+
+  /* CTA — burgundy marks premium actions */
+  --color-cta: #722f37;
+  --color-cta-rgb: 114 47 55;
+  --color-cta-text: #fdf5ec;
+  --color-cta-text-rgb: 253 245 236;
+  --color-cta-hover: #8b3a43;
+
+  --color-fill-soft: #e4d4ba;
+  --color-fill-soft-rgb: 228 212 186;
+  --color-fill-subtle: #f5ece0;
+  --color-fill-subtle-rgb: 245 236 224;
+
+  /* Status — warm, desaturated */
+  --color-success: #6b7a4e;
+  --color-success-rgb: 107 122 78;
+  --color-success-dim: rgba(107, 122, 78, 0.13);
+  --color-warning: #b87a2e;
+  --color-warning-rgb: 184 122 46;
+  --color-warning-dim: rgba(184, 122, 46, 0.13);
+  --color-danger: #a83228;
+  --color-danger-rgb: 168 50 40;
+  --color-danger-dim: rgba(168, 50, 40, 0.12);
+  --color-info: #7a6858;
+  --color-info-rgb: 122 104 88;
+  --color-info-dim: rgba(122, 104, 88, 0.12);
+
+  /* Glass — warm parchment */
+  --glass-bg: rgba(237, 223, 200, 0.72);
+  --glass-bg-heavy: rgba(253, 245, 236, 0.94);
+  --glass-border: rgba(180, 148, 110, 0.22);
+  --glass-highlight: rgba(255, 252, 248, 0.94);
+  --glass-blur: 12px;
+  --glass-blur-heavy: 24px;
+
+  --color-sidebar-bg: rgba(237, 223, 200, 0.7);
+  --color-sidebar-border: rgba(180, 148, 110, 0.2);
+  --color-sidebar-item-hover: rgba(180, 148, 110, 0.1);
+  --color-sidebar-item-active: rgba(114, 47, 55, 0.1);
+  --color-sidebar-item-active-text: #722f37;
+  --color-sidebar-item-active-icon: #722f37;
+
+  --gradient-orb-primary: radial-gradient(
+    circle,
+    rgba(114, 47, 55, 0.14) 0%,
+    transparent 70%
+  );
+  --gradient-orb-secondary: radial-gradient(
+    circle,
+    rgba(196, 149, 106, 0.2) 0%,
+    transparent 70%
+  );
+
+  /* Serif typeface — signature of the premium experience */
+  --font-chat: var(--font-serif);
+
+  /* --- Logo --- */
+  --color-navbar-bg: #fdf5ec;    /* warm ivory — matches bg, keeps the parchment feel */
+  --color-logo-text: #7a5c42;    /* paper text-muted — warm mid-brown, quiet and warm */
+}
+
+/* ============================================================
+ * THEME-INVARIANT TOKENS
+ * These don't change between themes.
+ * ============================================================ */
+:root {
+  /* --- Typography --- */
+  --font-main:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Apple SD Gothic Neo",
+    "Inter",
+    "Roboto",
+    sans-serif;
+  /* Readex Pro — used for headings, the brand logo, and display text. */
+  --font-heading: "Readex Pro", var(--font-main);
+  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  --font-serif: "Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  /*
+   * --font-chat is the typeface used in conversational/editorial interfaces.
+   * Defined in each theme block so theme-specific overrides are never silently
+   * defeated by cascade ordering.
+   * Light + Dark -> var(--font-main)  |  Paper -> var(--font-serif)
+   */
+
+  /* --- Font weight scale --- */
+  --fw-light: 300;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extrabold: 800;
+
+  /* --- Border radius scale --- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-pill: 30px;
+  --radius-full: 9999px;
+
+  /* --- Box shadow scale --- */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-glow-primary: 0 0 20px var(--color-primary-dim);
+  --shadow-glow-secondary: 0 0 20px var(--color-secondary-dim);
+
+  /* --- Animation --- */
+  --transition-fast: 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  --transition-base: 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-slow: 0.72s cubic-bezier(0.18, 1, 0.32, 1);
+
+  /* --- Layout --- */
+  --sidebar-width-collapsed: 60px;
+  --sidebar-width-expanded: 240px;
+  --header-height: 56px;
+  --pane-agents-width: 288px;
+  --pane-interrupts-width: 320px;
+
+  /* --- Compatibility aliases for existing Minkops UI --- */
+  --bg-color: var(--color-bg);
+  --text-main: var(--color-text);
+  --text-muted: var(--color-text-muted);
+  --primary-glow: var(--color-primary);
+  --secondary-glow: var(--color-secondary);
+}

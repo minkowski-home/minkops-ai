@@ -1,6 +1,6 @@
 # Operator Console — UI kit
 
-A recreation of the Minkops client app (`apps/client-app/web` in the `minkops-ai`
+A recreation of the Minkops solution web app (`apps/solution-web` in the `minkops-ai`
 repo), rebuilt on this design system. The console is where a tenant's operator
 watches their fleet, hands work to agents, and clears the human-interrupt queue.
 
