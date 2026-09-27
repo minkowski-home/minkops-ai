@@ -1,22 +1,17 @@
 # Solutions
 
-A solution composes the shared Minkops platform, reusable modules, and external
-connectors for one customer. It may declare customer-specific workflows, rules,
-prompts, and UI configuration. It must not copy `apps/solution-web` or
-`apps/solution-api`.
+A solution composes reusable workflows, implemented connectors, and client
+configuration for one customer or use case. The shared applications provide the
+product surfaces; solutions do not copy them.
 
-## Start a solution
+Keep client-specific workflow composition, mappings, policies, prompts, and
+available AI Employee catalog entries under `solutions/<id>/`. Put shared
+workflow implementations under the root `workflows/` only when more than one
+solution needs them. Keep small one-off instructions beside their workflow.
 
-1. Create a new, lowercase solution identifier with `solution.ts`.
-2. Declare the connector contracts there. Every solution receives the shared
-   starter workspace; add a `web/src/App.tsx` only when it needs a bespoke UI.
-3. Add customer-only workflows, rules, and prompts beneath that solution as
-   they are implemented.
-4. The shared host resolves a solution at runtime through `/<solution-id>/...`.
-   Local development defaults to `pr-infra`; use, for example,
-   `/mock-client/dashboard` to inspect the fixture.
+Connector declarations in a solution are configuration only. Enable a
+connector for real execution only after its implementation exists under
+`connectors/`.
 
-`mock-client` is a local development fixture, not a customer deployment. Its
-manifest demonstrates configuration overrides without owning the starter UI.
-Connector entries are declarations only: each must be implemented under
-`connectors/` before it can be enabled in a deployed solution.
+`mock-client` is a local UI fixture. `pr-infra` is the first client solution;
+its current manifest selects the shared console and declares connector intent.

@@ -1,5 +1,33 @@
 # Decision Logs
 
+Entries below preserve historical decisions and may describe structures that
+have since changed. See `engineering-architecture.md` for the current model.
+
+### 2026-09-28 — Workflow-first Python architecture and lean repository layout
+
+**Situation:** The repository's backend architecture centered named agents, a
+generic agent runtime, and a capability layer, while the product direction
+centers preset business workflows. The dbt warehouse also lived under an
+ambiguous catch-all `modules/` directory.
+
+**Decision:** Treat workflows as the primary execution unit. AI Employees are
+product catalog groupings only. Keep one-off model instructions with their
+workflow; extract reusable skills only after another workflow needs them. Use
+agents only for autonomous reasoning loops inside workflows. Tools are
+concrete operations, and connectors provide external-system implementations.
+Do not add a capabilities layer without a concrete substitution, discovery,
+or permission need.
+
+**Action:** Remove the obsolete `platform/ai/` agent and runtime trees. Move
+the dbt project to the root-level `warehouse/` directory, update its compose mount, and refresh
+current architecture guidance. Shared reusable Python workflows belong under
+`workflows/`; one-caller workflow code can remain with its application or
+solution until reuse justifies extraction.
+
+**Result:** Current repository guidance follows the workflow-first model and
+does not present the retired agent runtime as Minkops' Python execution
+architecture. Earlier entries below record historical decisions.
+
 ### 2026-09-21 — Starter workspace before client-specific UI
 
 `apps/solution-web/src/starter` owns the default operator workspace: the

@@ -1,10 +1,11 @@
 # Platform
 
-Customer-independent infrastructure belongs here. The current AI decisioning
-library and runtime are intentionally separated beneath `platform/ai/`:
+Shared, customer-independent runtime infrastructure belongs here. Add a
+component when more than one application or workflow needs it; keep workflow
+specific business logic with the workflow until reuse justifies extraction.
 
-- `agents/` contains decision graphs and side-effect-free contracts.
-- `runtime/` executes graphs and owns persistence and external effects.
-
-Future cross-solution capabilities such as auth, tenancy, audit, approvals,
-files, jobs, and notifications should be added here when they become concrete.
+AI Employees are product catalog entries that group workflows. A workflow owns
+the business process and calls concrete tools or connectors. Keep reusable
+procedural model guidance beside its first workflow; extract a skill only when
+another workflow needs it. Add an agent only for a real autonomous reasoning
+loop inside a workflow.

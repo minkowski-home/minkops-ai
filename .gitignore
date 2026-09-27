@@ -5,7 +5,7 @@ node_modules/
 .DS_Store
 dist/
 deprecated/
-data/
+/apps/solution-api/data/
 .vscode/
 .idea/
 **/*/__pycache__
