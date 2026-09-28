@@ -1,56 +1,69 @@
 # Engineering architecture
 
-## Core model
+## Product model
 
-Minkops is organized around business workflows. A workflow is the unit that
-defines and executes a process from input through verified outcome. It can use
-ordinary Python, a model call, and concrete tools as needed.
+An **AI Employee** is a customer-facing collection of business workflows.
+`employees/<employee-id>/` is the canonical home for that collection. A
+**workflow** defines a business goal, valid inputs, expected outputs, and
+completion checks. Place it under its owning employee at
+`employees/<employee-id>/workflows/<workflow-id>/`.
 
-An **AI Employee** is a product catalog abstraction. It groups workflows and
-provides customer-facing name, description, and availability. It has no
-independent runtime, prompt, tool implementation, or business logic.
+The workflow does not prescribe every reasoning step. The Agents API's Codex
+harness may perform most of the work: reason, choose tools, use skills, search
+the web when appropriate, and delegate subtasks. Keep a deterministic check
+for a result that must be correct before it is accepted. Share a workflow
+across employees only when there is a real second owner; avoid copied versions.
 
-An **agent** is a bounded autonomous reasoning loop inside a workflow. Use one
-only when the workflow needs iterative reasoning and tool selection. A fixed
-sequence of steps is a workflow, not an agent.
+`solutions/<client-id>/employees/<employee-id>/` holds customer-specific
+enablement and configuration. It references the canonical employee workflows
+and can supply mappings, instructions, policy, permissions, and approval rules.
+It does not copy the workflow or create another application.
 
-A **skill** is reusable procedural knowledge supplied to model calls. Keep
-instructions beside the first workflow that needs them. Extract a skill when
-multiple workflows reuse the same knowledge.
+## Execution boundary
 
-A **tool** is a bounded callable operation. A **connector** implements access
-to an external system and can expose its tools. A separate capabilities layer
-is unnecessary until workflows need provider substitution, discovery, or
-permission grouping.
+OpenAI runs the **harness**, including agent sessions, model/tool loop,
+compaction, and recovery. Minkops plans to run the **environment** on
+Minkops-controlled infrastructure through the Agents API's `self_hosted`
+option. An executor (`codex exec-server`) in each isolated environment connects
+to its corresponding session. The particular GCP service or other provider has
+not been selected. Self-hosting the environment is not self-hosting the model
+or harness.
 
-## Where things live
+Use built-in Agents API capabilities and available OpenAI tools, skills,
+plugins, web search, and MCP connections where suitable. A plugin packages
+skills and/or MCP configuration; it is not a requirement for every workflow.
+Use a custom connector, MCP server, or application function only when the
+business system or access rules need one. A service-origin MCP connection can
+run without local executor code; an environment-origin MCP connection runs
+from the executor's environment. Tool availability is configured and scoped
+for the session, not implied by a directory or a console manifest.
 
-- `workflows/` — reusable Python workflow implementations. Keep a workflow
-  local to its application or solution until a second caller makes reuse real.
-- `solutions/<id>/` — client-specific workflow composition and configuration:
-  mappings, policies, prompts, employee catalog choices, and connector
-  declarations.
-- `connectors/` — implemented provider integrations and their concrete tools.
-- `platform/` — shared runtime infrastructure such as persistence, tenancy,
-  approvals, and job execution when those needs become concrete.
-- `apps/` — deployable product entry points; keep HTTP and UI concerns here.
-- `warehouse/` — the dbt warehouse and its own project lifecycle.
-- `packages/` — small shared contracts or assets that have multiple callers.
+The Minkops application owns the product boundary: authentication, tenant and
+workflow selection, authorized tools, approvals, progress shown to customers,
+run-to-session correlation, verified outcomes, and audit records. It also owns
+self-hosted environment provisioning and cleanup, plus durable retrieval of
+output files. Those concerns belong in `apps/`, `platform/`, and `infra/` as
+implementation requires. `connectors/` holds integrations Minkops implements.
+The root `warehouse/` remains a separate dbt reporting subsystem.
 
-Do not create directories for concepts without a concrete implementation or
-reuse need. In particular, AI Employees do not need backend folders; skills
-and agents are selective patterns rather than mandatory layers; and a handful
-of Python functions do not make a reusable module.
+## Current state and first implementation
 
-## Example target: PDF bill to Excel
+This is a scaffold decision. There is no implemented employee workflow,
+Agents API session manager, self-hosted executor deployment, or approved GCP
+target in this repository. The existing image-to-Excel API uses a direct
+Responses API call and remains in place. PR Infra's manifest declares console
+identity and connector intent, not deployed tool access.
 
-The workflow receives a bill, extracts structured fields, validates them,
-checks for duplicates, applies the client's purchase-register mapping, obtains
-approval when policy requires it, writes the row through the Excel connector,
-and verifies the result. PR Infra's workbook columns and supplier rules live in
-`solutions/pr-infra/`. Invoice extraction instructions remain beside the
-workflow until another workflow reuses them. Supplier resolution becomes an
-agent only if it needs iterative evidence gathering.
+For the first real workflow, specify its employee, business contract, client
+configuration, allowed tools, result check, and evaluation examples. Then
+integrate the Agents API and one isolated executor environment. Validate a
+real session, tool behavior, output, and cleanup before generalizing the
+runtime or adding more provider infrastructure.
 
-The AI Employee shown in the console merely exposes this workflow alongside
-other available workflows.
+## References
+
+- [Agents API overview](https://developers.openai.com/api/docs/guides/agents-api/overview)
+- [Agents API architecture](https://developers.openai.com/api/docs/guides/agents-api/architecture)
+- [Self-hosted environments](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
+- [MCP connections](https://developers.openai.com/api/docs/guides/agents-api/tools/mcp)
+- [Plugins](https://developers.openai.com/api/docs/guides/agents-api/tools/plugins)

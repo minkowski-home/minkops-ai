@@ -1,10 +1,13 @@
 # PR Infra
 
-This directory is the client composition boundary. Its manifest currently
-declares the PR Infra identity and connector intent; it does not yet implement
-the supplier-bill workflow.
+This is the PR Infra client composition boundary. Its `solution.ts` currently
+declares identity and connector intent for the shared console. It does not
+implement a supplier-bill workflow or grant an agent access to WhatsApp or
+Excel.
 
-As that workflow is built, place PR Infra-specific purchase-register mappings,
-supplier rules, approval policy, and prompt overrides here. Keep generic
-workflow execution and external-system clients outside this directory. The
-shared console and API remain under `apps/`.
+When an employee and workflow are agreed, add their shared definition under
+`employees/<employee-id>/workflows/<workflow-id>/`. Put PR Infra's enabled
+workflow references, purchase-register mapping, supplier rules, approval
+policy, and any customer instructions under `employees/<employee-id>/` here.
+Keep shared workflow definitions, runtime services, and external-system clients
+outside this solution directory.

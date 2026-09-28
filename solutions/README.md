@@ -1,17 +1,19 @@
 # Solutions
 
-A solution composes reusable workflows, implemented connectors, and client
-configuration for one customer or use case. The shared applications provide the
-product surfaces; solutions do not copy them.
+A solution configures the shared Minkops product for one customer. Keep the
+existing top-level `solution.ts` manifest for the current shared console.
 
-Keep client-specific workflow composition, mappings, policies, prompts, and
-available AI Employee catalog entries under `solutions/<id>/`. Put shared
-workflow implementations under the root `workflows/` only when more than one
-solution needs them. Keep small one-off instructions beside their workflow.
+Put employee-specific customer composition under
+`solutions/<client-id>/employees/<employee-id>/` when that employee is enabled
+for the customer. This is the place for enabled workflow references,
+customer-specific instructions and mappings, tool access, approval policy, and
+output destinations. Reference the canonical workflow under `employees/`;
+do not copy its implementation or create a customer-specific app.
 
-Connector declarations in a solution are configuration only. Enable a
-connector for real execution only after its implementation exists under
-`connectors/`.
+Connector declarations in the current solution manifests are intent for the
+console, not proof that a connector is implemented or authorized for an agent
+session. Bind real tool access per customer and per session. Keep secrets out
+of repository configuration, instructions, and plugin archives.
 
 `mock-client` is a local UI fixture. `pr-infra` is the first client solution;
-its current manifest selects the shared console and declares connector intent.
+neither currently has an implemented Agents API employee workflow.

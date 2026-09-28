@@ -1,52 +1,24 @@
 # Infrastructure
 
-This folder will hold Terraform, Docker Compose, Kubernetes overlays, and GitHub automation that deploys the AI suite and other apps. Infrastructure manifests should reference the same shared policies described elsewhere in the repo and expose environment-specific overlays (dev/stage/prod) similar to the `env/` directory from Minkowski’s layout.
+`compose.yml` is the existing local Airflow, Postgres, and dbt stack for data
+warehouse development. It does not deploy the Agents API integration or an
+agent executor.
 
-### Current
-The `docker-compose.yml` is for local/dev. It launches infra + one gateway/orchestrator:
-- `ai-suite/` (FastAPI)
-- Vector DBs
-- Relational DBs
-- Message Broker (optional)
-- etc.
+## Self-hosted Agents API environments
 
-### For multiple orgs
-This is handled inside the app. Each request carries `org_id`. Shared KB client always filters/uses `org_id`. Agent availability is config/DB rule, not a separate service.
+Minkops intends to run its own isolated execution environments, potentially
+on GCP, while OpenAI runs the Codex harness. Each Agents API session created
+with `environment.type: "self_hosted"` gets an environment ID and requires its
+own connected `codex exec-server`. The executor runs commands and accesses
+workspace files and local MCP servers inside Minkops-controlled compute. It
+connects outbound to OpenAI; Minkops owns provisioning, dependencies, access,
+reconnection, file retention, and cleanup. See the
+[self-hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted).
 
-#### Different orgs use different agent sets
-- Keep a per-org config table `org_agents` (with keys like `org_id`, `agent_id`, `enabled`, `config_json`)
-- The gateway checks `org_id` and only routes to enabled agents
-
-#### Per-org Knowleddge Base
-Per‑org KB is set up at org onboarding and then enforced on every ingest/query.
-
-Minimal, practical setup:
-
-Org signup creates a KB scope
-Create an org record in SQL: org_id, name, kb_namespace, plan
-Create a vector namespace/collection for that org
-Example: kb_namespace = "org_<org_id>"
-Ingestion always writes into that scope
-Ingest pipeline takes org_id
-It stores raw docs in object storage under orgs/<org_id>/...
-It writes embeddings into the vector DB namespace for that org
-Every chunk has metadata: {org_id, source, doc_type, doc_id}
-Retrieval always reads from that scope
-All queries require org_id
-The KB client resolves org_id -> namespace
-Query is run only against that namespace or with org_id filter
-That’s the core. The “how” depends on which vector store you pick:
-
-Option A: Single index, per‑org namespaces (common early)
-
-Vector DB supports namespaces/collections
-Namespace name = org_<org_id>
-Query = namespace=org_<org_id>
-Option B: One collection per org
-
-Create a collection per org
-Query hits only that collection
-Option C: Separate DB per org (strong isolation)
-
-Separate DB instance per org
-Most costly; used for enterprise compliance
+The deployment target, isolation boundary, image, and lifecycle controller
+remain design decisions. Do not treat the present Compose services as an agent
+runtime or deploy a shared executor for all customers by default. Keep API
+credentials and customer system credentials outside repository files and
+agent-readable workspace content. Register skills and plugins supported by
+the Agents API in the session environment when needed; use service-origin MCP
+connections for reachable remote servers when that is the simpler path.

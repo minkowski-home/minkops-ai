@@ -3,6 +3,28 @@
 Entries below preserve historical decisions and may describe structures that
 have since changed. See `engineering-architecture.md` for the current model.
 
+### 2026-09-29 — Employee-owned workflows and a self-hosted Agents API environment
+
+**Situation:** The workflow-first layout did not mirror the customer-facing
+Employee → Workflows model. It also assumed Minkops would implement much of
+the agent execution logic, while the product direction is to use the Agents
+API's managed Codex harness and available tools, skills, plugins, web search,
+and MCP connections as much as practical. Minkops wants to run its own
+execution environments, potentially on GCP.
+
+**Decision:** Put canonical workflow definitions under
+`employees/<employee-id>/workflows/<workflow-id>/` and customer-specific
+composition under `solutions/<client-id>/employees/<employee-id>/`. OpenAI
+manages the harness and session orchestration; Minkops manages isolated
+self-hosted executor environments, product policy, and verified outcomes.
+Write custom connectors or functions only for concrete integration gaps.
+
+**Action:** Replace the empty top-level `workflows/` scaffold with `employees/`
+guidance and update current architecture, solution, platform, connector, and
+infrastructure guidance. Retain the working apps, warehouse, and solution
+manifests. No Agents API integration or cloud deployment is claimed by this
+directory change.
+
 ### 2026-09-28 — Workflow-first Python architecture and lean repository layout
 
 **Situation:** The repository's backend architecture centered named agents, a

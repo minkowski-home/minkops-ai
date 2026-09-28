@@ -1,7 +1,10 @@
 # Connectors
 
-External-system implementations live here. A connector owns protocol-specific
-authentication, clients, and data mapping; it does not contain customer rules
-or workflow orchestration. Customer selection belongs in `solutions/<id>/`.
+Use OpenAI-provided tools or an existing MCP integration when it can meet the
+workflow's needs and customer access policy. Add code here only for an external
+system Minkops must implement or mediate itself.
 
-Create a directory only when there is a concrete integration to implement.
+A connector owns protocol-specific access and data mapping. Expose narrow,
+permissioned actions through MCP or application function tools as appropriate;
+keep workflow instructions in `employees/` and customer selection and policy
+in `solutions/`. Do not place credentials in employee or solution files.
