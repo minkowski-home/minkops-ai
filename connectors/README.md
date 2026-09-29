@@ -8,3 +8,6 @@ A connector owns protocol-specific access and data mapping. Expose narrow,
 permissioned actions through MCP or application function tools as appropriate;
 keep workflow instructions in `employees/` and customer selection and policy
 in `solutions/`. Do not place credentials in employee or solution files.
+
+The installable `minkops_connectors` package lives in `src/`. Add adapters
+there as their concrete integrations are implemented.

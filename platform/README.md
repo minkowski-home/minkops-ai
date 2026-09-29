@@ -13,5 +13,6 @@ provisioning, connection, reconnection, shutdown, and durable retrieval of files
 and results. Put provider deployment definitions in `infra/`.
 
 Keep employee workflow definitions in `employees/`, customer configuration in
-`solutions/`, and custom external-system adapters in `connectors/`. Add a
-platform module only when implementation and callers make its boundary clear.
+`solutions/`, and custom external-system adapters in `connectors/`. The
+installable `minkops_platform` package lives in `src/`; add modules there when
+implementation and callers make their boundaries clear.

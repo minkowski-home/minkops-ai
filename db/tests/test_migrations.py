@@ -20,7 +20,7 @@ URL = os.environ.get("TEST_DATABASE_URL")
 class MigrationTests(unittest.TestCase):
     def test_baseline_is_repeatable_and_scoped(self):
         for _ in range(2):
-            subprocess.run([sys.executable, "-m", "minkops_db.migrate"], cwd=ROOT,
+            subprocess.run([sys.executable, str(ROOT / "db" / "migrate.py")], cwd=ROOT,
                            env={**os.environ, "DATABASE_URL": URL}, check=True)
 
         with psycopg.connect(URL) as connection:
@@ -33,7 +33,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0], 1)
 
     def test_cross_tenant_workflow_employee_link_is_rejected(self):
-        subprocess.run([sys.executable, "-m", "minkops_db.migrate"], cwd=ROOT,
+        subprocess.run([sys.executable, str(ROOT / "db" / "migrate.py")], cwd=ROOT,
                        env={**os.environ, "DATABASE_URL": URL}, check=True)
         with psycopg.connect(URL) as connection:
             with connection.transaction():

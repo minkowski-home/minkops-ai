@@ -7,7 +7,7 @@ from pathlib import Path
 import psycopg
 
 
-MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
+MIGRATIONS = Path(__file__).resolve().with_name("migrations")
 
 
 def migrate(url: str) -> None:

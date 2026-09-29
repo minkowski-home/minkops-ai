@@ -2,7 +2,7 @@
 
 From the repository root, install all workspace projects into the shared
 `.venv` with `uv sync --all-packages`. Set `DATABASE_URL` to the OLTP
-PostgreSQL URL and run `uv run --all-packages python -m minkops_db.migrate`
+PostgreSQL URL and run `uv run --all-packages python db/migrate.py`
 before starting the API with
 `uv run --all-packages uvicorn minkops_api.main:app --host 127.0.0.1 --port 8000`.
 

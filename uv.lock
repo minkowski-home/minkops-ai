@@ -9,7 +9,9 @@ resolution-markers = [
 [manifest]
 members = [
     "corporate-website-api",
-    "minkops-db",
+    "minkops-connectors",
+    "minkops-db-tools",
+    "minkops-platform",
     "minkops-solution-api",
 ]
 
@@ -481,9 +483,14 @@ wheels = [
 ]
 
 [[package]]
-name = "minkops-db"
+name = "minkops-connectors"
 version = "0.1.0"
-source = { editable = "db" }
+source = { editable = "connectors" }
+
+[[package]]
+name = "minkops-db-tools"
+version = "0.1.0"
+source = { virtual = "db" }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pwdlib", extra = ["argon2"] },
@@ -494,6 +501,11 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.0" },
 ]
+
+[[package]]
+name = "minkops-platform"
+version = "0.1.0"
+source = { editable = "platform" }
 
 [[package]]
 name = "minkops-solution-api"
@@ -513,11 +525,6 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "minkops-db" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "email-validator", specifier = ">=2.2.0" },
@@ -532,9 +539,6 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", specifier = ">=0.53.0" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "minkops-db", editable = "db" }]
 
 [[package]]
 name = "openai"

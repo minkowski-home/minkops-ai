@@ -1,15 +1,18 @@
 import os
+import subprocess
+import sys
 import unittest
 import uuid
+from pathlib import Path
 
 import psycopg
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("AUTH_DEV_MODE", "1")
 from minkops_api.main import app
-from minkops_db.seed_demo import seed_demo
 
 
+ROOT = Path(__file__).resolve().parents[3]
 URL = os.environ.get("TEST_DATABASE_URL")
 PASSWORD = "long test password 123!"
 
@@ -19,7 +22,11 @@ class WorkspaceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["DATABASE_URL"] = URL
-        seed_demo(URL, PASSWORD)
+        subprocess.run(
+            [sys.executable, str(ROOT / "db" / "seed_demo.py")],
+            env={**os.environ, "DATABASE_URL": URL, "DEMO_PASSWORD": PASSWORD},
+            check=True, capture_output=True, text=True,
+        )
 
     def setUp(self):
         self.client = TestClient(app)

@@ -1,11 +1,14 @@
 import os
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from minkops_api.main import app
-from minkops_db.seed_demo import seed_demo
 
+ROOT = Path(__file__).resolve().parents[3]
 URL = os.environ.get("TEST_DATABASE_URL")
 
 
@@ -14,7 +17,12 @@ class TestWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["DATABASE_URL"] = URL
-        seed_demo(URL, "long test password 123!")
+        subprocess.run(
+            [sys.executable, str(ROOT / "db" / "seed_demo.py")],
+            env={**os.environ, "DATABASE_URL": URL,
+                 "DEMO_PASSWORD": "long test password 123!"},
+            check=True, capture_output=True, text=True,
+        )
 
     def test_image_extraction_is_mock_tenant_only(self):
         client = TestClient(app)
