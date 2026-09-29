@@ -13,11 +13,10 @@ customer's existing tools and processes.
 - `platform/` — Minkops-owned concerns around Agents API sessions, access,
   approvals, outcomes, and audit records as implementations are added.
 - `connectors/` — integrations Minkops must implement or mediate itself.
-- `infra/` — deployment and self-hosted executor guidance; the current Compose
-  stack serves local warehouse development.
-- `warehouse/` — the separate dbt reporting project.
+- `infra/` — local OLTP Compose and self-hosted executor guidance.
+- `warehouse/` — reserved for a separately designed warehouse; currently empty.
 - `packages/`, `db/`, `design/`, and `docs/` — shared contracts and assets,
-  database bootstrap, design sources, and engineering guidance.
+  versioned OLTP migrations, design sources, and engineering guidance.
 
 ## Execution model
 
