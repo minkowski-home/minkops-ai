@@ -1,69 +1,44 @@
 # Engineering architecture
 
-## Product model
+## Current product boundary
 
-An **AI Employee** is a customer-facing collection of business workflows.
-`employees/<employee-id>/` is the canonical home for that collection. A
-**workflow** defines a business goal, valid inputs, expected outputs, and
-completion checks. Place it under its owning employee at
-`employees/<employee-id>/workflows/<workflow-id>/`.
+`apps/solution-web` and `apps/solution-api` serve one shared application for
+every tenant. A signed-in user belongs to a tenant as an admin or member.
+Platform admins can manage any tenant; tenant admins manage their own. Other
+members can view settings. Work email domains provide a verified discovery
+hint, never automatic access. Invitations and approved join requests establish
+membership, including for personal email addresses.
 
-The workflow does not prescribe every reasoning step. The Agents API's Codex
-harness may perform most of the work: reason, choose tools, use skills, search
-the web when appropriate, and delegate subtasks. Keep a deterministic check
-for a result that must be correct before it is accepted. Share a workflow
-across employees only when there is a real second owner; avoid copied versions.
+Each tenant owns employees, workflows, tasks, and its settings. A workflow can
+reference multiple employees through `workflow_employees`; there is no agent
+team entity. Employees and workflows have small declarative JSON Schema
+contracts plus validated JSONB values. This supports different controls per
+client without adding a database column or handwritten form for every setting.
+The API authorizes each read and write against the requested tenant. Composite
+foreign keys prevent links across tenants.
 
-`solutions/<client-id>/employees/<employee-id>/` holds customer-specific
-enablement and configuration. It references the canonical employee workflows
-and can supply mappings, instructions, policy, permissions, and approval rules.
-It does not copy the workflow or create another application.
+The dashboard displays the signed-in user's name and observable work. The
+activity pane owns active tasks, attention requests, handoffs, and recent
+outcomes. Each task has a status, progress, short summary, and event timeline.
+The pane is adjustable on desktop. The four app themes use the locked brand
+palette in `design/tokens/` and a per-browser preference.
 
-## Execution boundary
+## Persistence and events
 
-OpenAI runs the **harness**, including agent sessions, model/tool loop,
-compaction, and recovery. Minkops plans to run the **environment** on
-Minkops-controlled infrastructure through the Agents API's `self_hosted`
-option. An executor (`codex exec-server`) in each isolated environment connects
-to its corresponding session. The particular GCP service or other provider has
-not been selected. Self-hosting the environment is not self-hosting the model
-or harness.
+`db/migrations/` is the versioned OLTP source of truth. Migrations are applied
+transactionally with a checksum, and changed migrations are rejected. The
+initial PostgreSQL schema starts clean: identity, membership, employees,
+workflows, task observations, and an event outbox. Writes to observable task
+state and settings insert outbox records in the same transaction. No event
+publisher, message broker, agent runtime, or workflow orchestration has been
+built yet. The outbox is the narrow handoff for those later components.
 
-Use built-in Agents API capabilities and available OpenAI tools, skills,
-plugins, web search, and MCP connections where suitable. A plugin packages
-skills and/or MCP configuration; it is not a requirement for every workflow.
-Use a custom connector, MCP server, or application function only when the
-business system or access rules need one. A service-origin MCP connection can
-run without local executor code; an environment-origin MCP connection runs
-from the executor's environment. Tool availability is configured and scoped
-for the session, not implied by a directory or a console manifest.
+`warehouse/` is intentionally empty. It has no schema, dbt project, or
+pipeline; its design is reserved for separate work.
 
-The Minkops application owns the product boundary: authentication, tenant and
-workflow selection, authorized tools, approvals, progress shown to customers,
-run-to-session correlation, verified outcomes, and audit records. It also owns
-self-hosted environment provisioning and cleanup, plus durable retrieval of
-output files. Those concerns belong in `apps/`, `platform/`, and `infra/` as
-implementation requires. `connectors/` holds integrations Minkops implements.
-The root `warehouse/` remains a separate dbt reporting subsystem.
+## Test fixture
 
-## Current state and first implementation
-
-This is a scaffold decision. There is no implemented employee workflow,
-Agents API session manager, self-hosted executor deployment, or approved GCP
-target in this repository. The existing image-to-Excel API uses a direct
-Responses API call and remains in place. PR Infra's manifest declares console
-identity and connector intent, not deployed tool access.
-
-For the first real workflow, specify its employee, business contract, client
-configuration, allowed tools, result check, and evaluation examples. Then
-integrate the Agents API and one isolated executor environment. Validate a
-real session, tool behavior, output, and cleanup before generalizing the
-runtime or adding more provider infrastructure.
-
-## References
-
-- [Agents API overview](https://developers.openai.com/api/docs/guides/agents-api/overview)
-- [Agents API architecture](https://developers.openai.com/api/docs/guides/agents-api/architecture)
-- [Self-hosted environments](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
-- [MCP connections](https://developers.openai.com/api/docs/guides/agents-api/tools/mcp)
-- [Plugins](https://developers.openai.com/api/docs/guides/agents-api/tools/plugins)
+`db/seed_demo.py` creates `mock-tenant` with sample employees, workflows, and
+tasks for manual testing. Its image-to-Excel route is a mock-tenant-only test
+workflow. PR Infra starts with zero employees and zero workflows. Neither the
+fixture nor the test route defines a production agent flow.

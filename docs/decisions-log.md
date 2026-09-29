@@ -3,6 +3,23 @@
 Entries below preserve historical decisions and may describe structures that
 have since changed. See `engineering-architecture.md` for the current model.
 
+### 2026-09-29 — Shared tenant app and clean OLTP baseline
+
+**Situation:** The old first-boot schema, dbt warehouse, and Airflow stack no
+longer fit the approved product model. The customer console still used mock
+agents and teams.
+
+**Decision:** Start a new versioned PostgreSQL OLTP schema for verified users,
+tenant membership, employees, workflows, task observations, and an event
+outbox. Keep the warehouse empty for separate design. Use declarative JSON
+Schema settings and tenant-admin or platform-admin editing. Leave agent
+execution and event publishing for later work.
+
+**Action:** Remove the old database and warehouse implementation, add a clean
+migration and mock-tenant fixture, confine image-to-Excel to that fixture,
+and move the shared console to real tenant data. PR Infra starts empty. Four
+brand themes are available in the same app for every tenant.
+
 ### 2026-09-29 — Employee-owned workflows and a self-hosted Agents API environment
 
 **Situation:** The workflow-first layout did not mirror the customer-facing
