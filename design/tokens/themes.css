@@ -1,4 +1,8 @@
 /* Theme variants reuse the locked brand colors and neutral ramp. */
+:root[data-theme="minkops-light"] {
+  color-scheme: light;
+}
+
 :root[data-theme="minkops-dark"],
 :root[data-theme="slate-dark"] {
   color-scheme: dark;

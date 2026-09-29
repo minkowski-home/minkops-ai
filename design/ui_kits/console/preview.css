@@ -1,0 +1,27 @@
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { overflow: hidden; }
+#workspace, #auth { min-height: 100dvh; }
+.preview-link { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; color: var(--text-link); font: var(--type-label); }
+.preview-link:hover { color: var(--text-link-hover); }
+.console-header-tools { display: flex; align-items: center; gap: 14px; }
+.console-nav-item { width: 100%; text-align: left; background: transparent; }
+.employee-card, .workflow-row, .pane-task { width: 100%; text-align: left; cursor: pointer; }
+.employee-card, .workflow-row { background: transparent; }
+.preview-nav-icon, .preview-icon { display: inline-block; width: 18px; height: 18px; flex: none; background: currentColor; mask-repeat: no-repeat; mask-position: center; mask-size: contain; }
+.preview-nav-icon { mask-image: url("../../assets/icons/ui/home.svg"); }
+[data-route="employees"] .preview-nav-icon, .preview-employees { mask-image: url("../../assets/icons/ui/agents.svg"); }
+[data-route="workflows"] .preview-nav-icon, .preview-tasks { mask-image: url("../../assets/icons/ui/tasks.svg"); }
+[data-route="access"] .preview-nav-icon { mask-image: url("../../assets/icons/ui/settings.svg"); }
+.preview-chevron-left { mask-image: url("../../assets/icons/ui/chevron-left.svg"); }
+.preview-chevron-right, .preview-chevron { mask-image: url("../../assets/icons/ui/chevron-right.svg"); width: 14px; height: 14px; }
+.preview-logout { mask-image: url("../../assets/icons/ui/logout.svg"); }
+.workflow-launch-card__mark .preview-icon, .employee-mark .preview-icon { width: 22px; height: 22px; }
+.workflow-row .preview-chevron { display: inline-block; background: currentColor; mask: url("../../assets/icons/ui/chevron-right.svg") center / contain no-repeat; }
+#auth .login-wordmark { border: 0; }
+#auth .login-form-panel form > p { margin-top: 4px; }
+#auth .login-form-panel .preview-link { display: inline; font: inherit; }
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  .console-header-tools .tenant-label, .console-header-tools .theme-picker span { display: none; }
+}
