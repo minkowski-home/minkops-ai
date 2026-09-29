@@ -326,12 +326,3 @@ def accept_invite(body: TokenInput, request: Request, user: User, connection: Db
     )
     connection.execute("UPDATE invitations SET accepted_at = now() WHERE id = %s", (row["id"],))
     return {"message": "Workspace joined."}
-
-
-@router.get("/tenants/{slug}/employees")
-def list_employees(slug: str, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
-    return connection.execute(
-        "SELECT id, key, name, description, status FROM employees WHERE tenant_id = %s ORDER BY name",
-        (tenant["id"],),
-    ).fetchall()

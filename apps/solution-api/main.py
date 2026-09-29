@@ -8,11 +8,13 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from auth import router as core_router
+from workspace import router as workspace_router
 
 load_dotenv()
 
 app = FastAPI()
 app.include_router(core_router)
+app.include_router(workspace_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

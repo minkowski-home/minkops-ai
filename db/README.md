@@ -7,3 +7,9 @@ and run `uv run --project apps/solution-api python db/migrate.py`.
 SQL files in `migrations/` are ordered and applied transactionally. Never edit an
 applied migration; add the next numbered file. The runner checks file hashes.
 The warehouse is intentionally empty and does not share this database.
+
+For local manual testing, run `uv run --project apps/solution-api python
+db/seed_demo.py` with the same `DATABASE_URL`. It creates an empty PR Infra
+tenant and a mock tenant with sample employees, workflows, and task timelines.
+The generated demo password is printed once. Do not run the demo seed against
+a deployed database.
