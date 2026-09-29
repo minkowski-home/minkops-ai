@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 import psycopg
@@ -91,14 +92,15 @@ class WorkspaceTests(unittest.TestCase):
                 "SELECT id FROM users WHERE email = 'workspace-viewer@minkops.test'"
             ).fetchone()[0]
             from auth import digest
+            session_token = f"member-test-session-{uuid.uuid4()}"
             connection.execute(
                 """INSERT INTO sessions (user_id, token_hash, expires_at)
                    VALUES (%s, %s, now() + interval '1 hour')
                    ON CONFLICT (token_hash) DO NOTHING""",
-                (member_id, digest("member-test-session")),
+                (member_id, digest(session_token)),
             )
         viewer = TestClient(app)
-        viewer.cookies.set("minkops_session", "member-test-session")
+        viewer.cookies.set("minkops_session", session_token)
         self.assertEqual(viewer.get("/api/tenants/mock-tenant/workspace").status_code, 200)
         csrf = viewer.get("/api/auth/me").json()["csrf_token"]
         self.assertEqual(viewer.patch(

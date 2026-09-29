@@ -34,7 +34,6 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
   const [status, setStatus] = useState(item.status);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setValues(item.config_values); setStatus(item.status); setMessage(""); }, [item.id]);
   const fields = Object.entries(item.config_schema.properties);
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -115,7 +114,7 @@ export function EmployeeDetail({ workspace, routeSlug, id, onSaved }: {
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/employees`}>← Employees</Link>
     <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
-    <div className="detail-grid"><ConfigPanel item={item} kind="employees" tenantSlug={workspace.tenant.slug}
+    <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="employees" tenantSlug={workspace.tenant.slug}
       canEdit={workspace.can_edit} onSaved={onSaved} />
       <aside className="related-panel"><h2>Workflows</h2>
         {linked.length ? linked.map((workflow) => <Link key={workflow.id}
@@ -171,7 +170,7 @@ export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
     <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
-    <div className="detail-grid"><ConfigPanel item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
+    <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
       canEdit={workspace.can_edit} onSaved={onSaved} />
       <aside className="related-panel"><h2>Employees</h2>
         {linked.map((employee) => <Link key={employee.id} to={`/${routeSlug}/employees/${employee.id}`}
@@ -230,6 +229,8 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
           : <EmptyState title="Your workspace starts here" detail="Activated workflows will appear when your team is ready." />}
       </section>
     </main>
+    {/* An adjustable ARIA separator is interactive even though this lint version treats it as static. */}
+    {/* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
     <div className="pane-resizer" role="separator" aria-label="Resize activity pane"
       aria-orientation="vertical" aria-valuemin={260} aria-valuemax={500} aria-valuenow={paneWidth}
       tabIndex={0} onPointerDown={resize}
@@ -237,6 +238,7 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
         if (event.key === "ArrowLeft") setPaneWidth((value) => Math.min(500, value + 20));
         if (event.key === "ArrowRight") setPaneWidth((value) => Math.max(260, value - 20));
       }} />
+    {/* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
     <aside className="attention-pane" aria-label="Activity">
       <div className="activity-heading"><h3>Activity</h3><p>What is happening now</p></div>
       <TaskLinks title="Active tasks" tasks={tasks.filter((task) => task.status === "running")} routeSlug={routeSlug} />

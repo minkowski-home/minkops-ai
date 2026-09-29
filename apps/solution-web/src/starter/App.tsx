@@ -42,7 +42,7 @@ function Console() {
 
   useEffect(() => {
     if (user) void refreshWorkspace();
-  }, [user?.id, slug, refreshWorkspace]);
+  }, [user, refreshWorkspace]);
 
   if (isLoading) return <main className="loading-state">Opening Minkops…</main>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
