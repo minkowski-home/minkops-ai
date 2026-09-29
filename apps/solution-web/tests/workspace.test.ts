@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { groupWorkflows, greetingFor, sortWorkflows } from "../src/starter/workspace/presentation.ts";
+import { taskSnapshot } from "../src/starter/workspace/taskDetail.ts";
 
 const employees = [
   { id: "e1", name: "Image desk" },
@@ -29,4 +30,15 @@ test("workflows sort by name and group by every associated employee", () => {
 test("workflows group by lifecycle status", () => {
   const groups = groupWorkflows(workflows, employees, "status");
   assert.deepEqual(groups.map((group) => group.label), ["Active", "Paused", "Planned"]);
+});
+
+test("task detail can render from the dashboard snapshot while events load", () => {
+  const tasks = [{
+    id: "t1", workflow_id: "w1", title: "Check receipt", status: "running" as const,
+    progress: 65, summary: "Fields are being checked.",
+    created_at: "2026-09-29T04:59:18Z", updated_at: "2026-09-29T04:59:18Z",
+  }];
+
+  assert.deepEqual(taskSnapshot(tasks, "t1"), { ...tasks[0], events: [] });
+  assert.equal(taskSnapshot(tasks, "missing"), null);
 });

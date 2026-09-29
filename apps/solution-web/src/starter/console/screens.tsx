@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { api, type Employee, type SettingSpec, type Task, type TaskEvent,
+import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
   type WorkflowSort } from "../workspace/presentation";
+import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
 import { Icon } from "./Icon";
 
 const statusText: Record<string, string> = {
@@ -252,16 +253,28 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
 export function TaskDetail({ workspace, routeSlug, id }: {
   workspace: Workspace; routeSlug: string; id: string;
 }) {
-  const [detail, setDetail] = useState<(Task & { events: TaskEvent[] }) | null>(null);
+  const snapshot = useMemo(() => taskSnapshot(workspace.tasks, id), [workspace.tasks, id]);
+  const [detail, setDetail] = useState<TaskDetails | null>(() => snapshot);
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     let active = true;
-    void api<Task & { events: TaskEvent[] }>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`)
+    setDetail((current) => current?.id === id ? current : snapshot);
+    setError("");
+    setLoading(true);
+    void api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`)
       .then((result) => { if (active) setDetail(result); })
-      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Could not load task."); });
+      .catch((caught) => {
+        if (active) setError(caught instanceof Error ? caught.message : "Could not load task.");
+      })
+      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [workspace.tenant.slug, id]);
-  if (error) return <section className="route-screen"><p role="alert">{error}</p></section>;
+  }, [workspace.tenant.slug, id, snapshot, attempt]);
+  if (error && !detail) return <section className="route-screen">
+    <h2>Task unavailable</h2><p role="alert">{error}</p>
+    <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
+  </section>;
   if (!detail) return <section className="route-screen"><p>Loading task…</p></section>;
   return <section className="route-screen detail-screen task-detail">
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
@@ -276,6 +289,10 @@ export function TaskDetail({ workspace, routeSlug, id }: {
       </div>
     </div>
     <section className="timeline"><h3>What happened</h3>
+      {error && <p role="alert" className="form-message">The latest timeline could not load. {error} <button
+        className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
+      {loading && detail.events.length === 0 && <p className="quiet-state">Loading timeline…</p>}
+      {!loading && !error && detail.events.length === 0 && <p className="quiet-state">No activity recorded yet.</p>}
       <ol>{detail.events.map((event) => <li key={event.id}>
         <span className="timeline-point" /><div><strong>{event.summary}</strong>
           <small>{event.progress ?? detail.progress}% · {new Date(event.created_at).toLocaleString()}</small>

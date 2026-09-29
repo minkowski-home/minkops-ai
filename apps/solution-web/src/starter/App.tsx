@@ -117,7 +117,7 @@ function WorkflowRoute({ workspace, routeSlug, onSaved }: {
 
 function TaskRoute({ workspace, routeSlug }: { workspace: Workspace; routeSlug: string }) {
   const { id = "" } = useParams();
-  return <TaskDetail workspace={workspace} routeSlug={routeSlug} id={id} />;
+  return <TaskDetail key={id} workspace={workspace} routeSlug={routeSlug} id={id} />;
 }
 
 export default function App() {
