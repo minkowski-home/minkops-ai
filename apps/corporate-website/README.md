@@ -65,8 +65,7 @@ api/                      FastAPI service (health check)
 
 ## Backend service (Python + FastAPI)
 
-1. `cd apps/corporate-website/api`
-2. `uv sync`
-3. `uv run main.py` to start the API on `http://127.0.0.1:5000`
+1. From the repository root, run `uv sync --all-packages` to install the Python workspace into its shared environment.
+2. Run `uv run --all-packages uvicorn minkops_corporate_website_api.main:app --reload --host 127.0.0.1 --port 5000` to start the API on `http://127.0.0.1:5000`.
 
 The dev server proxies `/api` to that address (override with `VITE_API_TARGET`).

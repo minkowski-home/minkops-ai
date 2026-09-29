@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("AUTH_DEV_MODE", "1")
 
-from main import app  # noqa: E402
+from minkops_api.main import app
 
 
 URL = os.environ.get("TEST_DATABASE_URL")

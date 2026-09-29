@@ -7,7 +7,7 @@ from jsonschema import Draft202012Validator
 from pydantic import BaseModel
 from psycopg.types.json import Jsonb
 
-from auth import Db, User, require_csrf, tenant_access
+from minkops_api.auth import Db, User, require_csrf, tenant_access
 
 
 router = APIRouter(prefix="/api/tenants/{slug}")

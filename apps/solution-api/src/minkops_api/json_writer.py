@@ -3,8 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-BASE_DIR = Path(__file__).resolve().parent
-JSON_DIR = BASE_DIR / "data" / "json"
+APP_DIR = Path(__file__).resolve().parents[2]
+JSON_DIR = APP_DIR / "data" / "json"
 
 def save_extracted_json(source_filename, extracted_data):
     JSON_DIR.mkdir(parents=True, exist_ok=True)

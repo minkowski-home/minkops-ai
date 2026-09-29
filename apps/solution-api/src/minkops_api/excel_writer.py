@@ -1,8 +1,8 @@
 from pathlib import Path
 from openpyxl import Workbook, load_workbook
 
-BASE_DIR = Path(__file__).resolve().parent
-EXCEL_DIR = BASE_DIR / "data" / "excel"
+APP_DIR = Path(__file__).resolve().parents[2]
+EXCEL_DIR = APP_DIR / "data" / "excel"
 EXCEL_FILE = EXCEL_DIR / "watermark_data.xlsx"
 
 

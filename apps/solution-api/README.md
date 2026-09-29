@@ -1,7 +1,10 @@
 # Shared solution API
 
-Set `DATABASE_URL` to the OLTP PostgreSQL URL and run the database migrations
-before starting `uv run uvicorn main:app --host 127.0.0.1 --port 8000`.
+From the repository root, install all workspace projects into the shared
+`.venv` with `uv sync --all-packages`. Set `DATABASE_URL` to the OLTP
+PostgreSQL URL and run `uv run --all-packages python -m minkops_db.migrate`
+before starting the API with
+`uv run --all-packages uvicorn minkops_api.main:app --host 127.0.0.1 --port 8000`.
 
 Sign-up, email verification, sign-in, tenant memberships, join requests, and
 invitations are served under `/api`. Configure `PUBLIC_APP_URL`, `SMTP_HOST`,

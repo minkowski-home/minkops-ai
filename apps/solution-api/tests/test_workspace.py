@@ -1,18 +1,13 @@
 import os
-import sys
 import unittest
 import uuid
-from pathlib import Path
 
 import psycopg
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("AUTH_DEV_MODE", "1")
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "db"))
-
-from seed_demo import seed_demo  # noqa: E402
-from main import app  # noqa: E402
+from minkops_api.main import app
+from minkops_db.seed_demo import seed_demo
 
 
 URL = os.environ.get("TEST_DATABASE_URL")
@@ -91,7 +86,7 @@ class WorkspaceTests(unittest.TestCase):
             member_id = connection.execute(
                 "SELECT id FROM users WHERE email = 'workspace-viewer@minkops.test'"
             ).fetchone()[0]
-            from auth import digest
+            from minkops_api.auth import digest
             session_token = f"member-test-session-{uuid.uuid4()}"
             connection.execute(
                 """INSERT INTO sessions (user_id, token_hash, expires_at)

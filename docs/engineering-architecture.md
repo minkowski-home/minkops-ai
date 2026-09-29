@@ -38,7 +38,7 @@ pipeline; its design is reserved for separate work.
 
 ## Test fixture
 
-`db/seed_demo.py` creates `mock-tenant` with sample employees, workflows, and
+`minkops_db.seed_demo` creates `mock-tenant` with sample employees, workflows, and
 tasks for manual testing. Its image-to-Excel route is a mock-tenant-only test
 workflow. PR Infra starts with zero employees and zero workflows. Neither the
 fixture nor the test route defines a production agent flow.

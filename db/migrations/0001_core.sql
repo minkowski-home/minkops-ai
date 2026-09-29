@@ -7,6 +7,8 @@ CREATE TABLE tenants (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- a separate tenant_domains table instead of domain field in the tenants table
+-- because a tenant might own multiple domains
 CREATE TABLE tenant_domains (
     domain text PRIMARY KEY,
     tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -28,6 +30,9 @@ CREATE UNIQUE INDEX users_email_unique ON users (lower(email));
 CREATE TABLE memberships (
     tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- role has a CHECK constraint and not ENUM ('admin', 'member'), because an ENUM would have its
+    -- own lifecycle and migration semantics. Changing its values is more coupled to the database type system.
+    -- A text column + CHECK constraint is easy to understand, migrate, query, and serialize through FastAPI.
     role text NOT NULL CHECK (role IN ('admin', 'member')),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, user_id)
@@ -89,6 +94,11 @@ CREATE TABLE employees (
     CHECK (jsonb_typeof(config_schema) = 'object'),
     CHECK (jsonb_typeof(config_values) = 'object')
 );
+-- employee row cannot exist without a tenant and one particular employee row belongs to exactly one tenant.
+-- This table basically represents an employee's customer-specific variant. In the repo, under employees/,
+-- we define the employee's product template, but this table only contains a particular client's version
+-- of that employee.
+
 
 CREATE TABLE workflows (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -116,6 +126,8 @@ CREATE TABLE workflow_employees (
     FOREIGN KEY (tenant_id, workflow_id) REFERENCES workflows (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id) ON DELETE CASCADE
 );
+-- because one workflow can be part of multiple employees and vice versa
+
 CREATE INDEX workflow_employees_employee_idx ON workflow_employees (tenant_id, employee_id);
 
 CREATE TABLE tasks (
@@ -133,6 +145,9 @@ CREATE TABLE tasks (
 );
 CREATE INDEX tasks_tenant_status_idx ON tasks (tenant_id, status, updated_at DESC);
 
+
+-- task_events is the human/audit timeline for observability - a frontend might use these rows
+-- to render task progress, etc.
 CREATE TABLE task_events (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id uuid NOT NULL,
@@ -145,6 +160,8 @@ CREATE TABLE task_events (
 );
 CREATE INDEX task_events_task_idx ON task_events (tenant_id, task_id, id);
 
+-- event_outbox is infrastructure for reliable asynchronous propagation - to make sure
+-- some external or downstream process eventually hears about an important database change
 CREATE TABLE event_outbox (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -155,3 +172,7 @@ CREATE TABLE event_outbox (
     published_at timestamptz
 );
 CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE published_at IS NULL;
+
+-- there must be a separate publisher/relay that scans or consumes unprocessed outbox rows.
+-- In our current repo, this is explicitly not built yet. The schema creates the handoff point,
+-- but there is no publisher process, broker integration, or Agents API runtime consuming these rows yet.

@@ -1,14 +1,10 @@
 import os
-import sys
 import unittest
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "db"))
-from seed_demo import seed_demo  # noqa: E402
-from main import app  # noqa: E402
+from minkops_api.main import app
+from minkops_db.seed_demo import seed_demo
 
 URL = os.environ.get("TEST_DATABASE_URL")
 

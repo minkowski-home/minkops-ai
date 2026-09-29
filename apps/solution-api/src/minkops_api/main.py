@@ -1,19 +1,20 @@
-from excel_writer import save_watermarks_to_excel
+from minkops_api.excel_writer import save_watermarks_to_excel
 from fastapi.middleware.cors import CORSMiddleware
-from json_writer import save_extracted_json
+from minkops_api.json_writer import save_extracted_json
 import base64
 import json
 from openai import OpenAI
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException, Request
 from psycopg.types.json import Jsonb
-from auth import Db, User, require_csrf, tenant_access
-from auth import router as core_router
-from workspace import router as workspace_router
+from minkops_api.auth import Db, User, require_csrf, tenant_access
+from minkops_api.auth import router as core_router
+from minkops_api.workspace import router as workspace_router
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI()
 app.include_router(core_router)
