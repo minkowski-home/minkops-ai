@@ -1,0 +1,25 @@
+.login-screen { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 100dvh; }
+.login-story { display: flex; flex-direction: column; justify-content: space-between; gap: 50px; padding: 40px 48px; background: var(--surface-inverse); color: var(--text-inverse); }
+.login-story-top { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.login-story .theme-picker { color: var(--text-inverse-muted); }
+.login-story .theme-picker select { color: var(--text-primary); }
+.login-story h1 { max-width: 14ch; color: var(--text-inverse); font: var(--type-h1); }
+.login-story p { max-width: 32ch; margin-top: 12px; color: var(--text-inverse-muted); }
+.login-story small { color: var(--text-inverse-muted); font: var(--type-mono); }
+.login-wordmark { display: inline-flex; align-items: center; align-self: start; gap: 9px; color: var(--text-inverse); border: 0; font: var(--type-wordmark); letter-spacing: var(--ls-wordmark); }
+.login-wordmark:hover { color: var(--text-inverse); }
+.login-form-panel { display: grid; place-items: center; padding: 42px; background: var(--surface-page); }
+.login-form-panel form, .auth-result { display: grid; width: min(370px, 100%); gap: 18px; }
+.login-form-panel h2 { margin-bottom: 6px; font: var(--type-h3); }
+.login-form-panel label { display: grid; gap: 7px; color: var(--text-secondary); font: var(--type-label); }
+.login-form-panel input { width: 100%; height: 41px; padding: 0 11px; border: var(--rule-default); border-radius: var(--radius-2); color: var(--text-primary); background: var(--surface-raised); font: var(--type-body-sm); }
+.login-form-panel input:focus { border-color: var(--border-accent); outline: none; box-shadow: var(--shadow-focus); }
+.login-form-panel form > .button, .auth-result > .button { justify-self: start; }
+.login-form-panel form > p, .auth-result p { color: var(--text-secondary); font: var(--type-body-sm); }
+.login-form-panel .optional { color: var(--text-muted); font-weight: var(--fw-regular); }
+.login-form-panel .form-error { color: var(--status-alert); }
+@media (max-width: 700px) {
+  .login-screen { grid-template-columns: 1fr; }
+  .login-story { min-height: 260px; padding: 26px; }
+  .login-form-panel { padding: 36px 24px 56px; }
+}

@@ -1,54 +1,52 @@
-/**
- * AuthContext — authentication state management.
- *
- * Uses a local session fallback until the backend auth endpoints are ready.
- * Replace the fallback with real API calls to
- * POST /api/auth/login and POST /api/auth/logout.
- *
- * The context exposes:
- *   user       — the logged-in User object, or null if unauthenticated
- *   isLoading  — true while checking session on initial mount
- *   login()    — accepts credentials, sets user state
- *   logout()   — clears user state and redirects to /login
- */
-
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import type { User } from "../types/user";
-import { DEFAULT_OPERATOR } from "../session/defaultOperator";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { api, type SessionUser } from "../api";
 
 interface AuthContextValue {
-  user: User | null;
+  user: SessionUser | null;
   isLoading: boolean;
+  refresh: () => Promise<SessionUser | null>;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading] = useState(false);
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [isLoading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const current = await api<SessionUser | null>("/api/auth/session");
+      setUser(current);
+      return current;
+    } catch {
+      setUser(null);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const login = useCallback(async (email: string, password: string) => {
-    void email;
-    void password;
-    setUser(DEFAULT_OPERATOR);
-  }, []);
+    await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+    await refresh();
+  }, [refresh]);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    if (user) await api("/api/auth/logout", { method: "POST" }, user.csrf_token);
     setUser(null);
-  }, []);
+  }, [user]);
 
-  return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, isLoading, refresh, login, logout }}>
+    {children}
+  </AuthContext.Provider>;
 }
 
-/** Throws if used outside <AuthProvider>. */
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
+  return context;
 }

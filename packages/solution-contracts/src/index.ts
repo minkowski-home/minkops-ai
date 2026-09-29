@@ -4,7 +4,7 @@
  * package: a solution only declares which reusable capabilities it composes.
  */
 
-export type ConsoleRoute = "dashboard" | "agents" | "workflows";
+export type ConsoleRoute = "dashboard" | "employees" | "workflows";
 
 export type ConnectorId = "email" | "tally" | "excel" | "ukg" | "whatsapp";
 

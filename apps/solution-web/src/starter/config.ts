@@ -9,7 +9,7 @@ const DEFAULT_UI: SolutionUiConfig = {
   productName: "minkops",
   navigation: [
     { route: "dashboard", label: "Dashboard", icon: "home" },
-    { route: "agents", label: "Agents", icon: "agents" },
+    { route: "employees", label: "Employees", icon: "agents" },
     { route: "workflows", label: "Workflows", icon: "tasks" }
   ],
   options: {

@@ -1,5 +1,6 @@
 node_modules/
 **/node_modules/
+apps/solution-web/node_modules
 .venv/
 .env
 .DS_Store

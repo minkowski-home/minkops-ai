@@ -7,10 +7,17 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
+from fastapi import HTTPException, Request
+from psycopg.types.json import Jsonb
+from auth import Db, User, require_csrf, tenant_access
+from auth import router as core_router
+from workspace import router as workspace_router
 
 load_dotenv()
 
 app = FastAPI()
+app.include_router(core_router)
+app.include_router(workspace_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -24,27 +31,8 @@ app.add_middleware(
 
 @app.get("/")
 def home():
-    return {"message": "Image to Excel API is running"}
+    return {"message": "Minkops API is running"}
 
-@app.get("/check-config")
-def check_config():
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    return{
-        "openai_key_loaded": api_key is not None
-    }
-
-@app.post("/upload-image")
-async def upload_image(file: UploadFile = File(...)):
-    image_bytes = await file.read()
-
-    return {
-        "filename": file.filename,
-        "content_type": file.content_type,
-        "size_bytes": len(image_bytes)
-    }
-
-@app.post("/extract_image")
 async def extract_image(file: UploadFile = File(...)):
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -130,3 +118,46 @@ Do not guess values. If a requested field is not visible, use null.
         "excel_file": str(excel_path),
         "extracted_fields": extracted_data,
     }
+
+
+@app.post("/api/tenants/{slug}/test/image-to-excel")
+async def run_image_to_excel_test(slug: str, request: Request, user: User, connection: Db,
+                                  file: UploadFile = File(...)):
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    if slug != "mock-tenant":
+        raise HTTPException(404, "Test workflow not found.")
+    workflow = connection.execute(
+        """SELECT id FROM workflows WHERE tenant_id = %s
+           AND key = 'image-to-excel-test' AND status = 'active'""",
+        (tenant["id"],),
+    ).fetchone()
+    if not workflow:
+        raise HTTPException(404, "Test workflow not active.")
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(422, "Choose an image file.")
+    result = await extract_image(file)
+    task = connection.execute(
+        """INSERT INTO tasks (tenant_id, workflow_id, title, status, progress, summary)
+           VALUES (%s, %s, %s, 'completed', 100, 'Image extracted and spreadsheet saved.')
+           RETURNING id""",
+        (tenant["id"], workflow["id"], f"Extract {file.filename or 'image'}"),
+    ).fetchone()
+    for event_type, summary, progress in [
+        ("received", "Image received", 20),
+        ("extracted", "Fields extracted", 75),
+        ("completed", "Spreadsheet saved", 100),
+    ]:
+        connection.execute(
+            """INSERT INTO task_events (tenant_id, task_id, event_type, summary, progress)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (tenant["id"], task["id"], event_type, summary, progress),
+        )
+    connection.execute(
+        """INSERT INTO event_outbox (tenant_id, event_type, aggregate_id, payload)
+           VALUES (%s, 'task.completed', %s, %s)""",
+        (tenant["id"], task["id"],
+         Jsonb({"workflow_id": str(workflow["id"]), "filename": file.filename,
+                "actor_id": str(user["id"])})),
+    )
+    return {"task_id": str(task["id"]), **result}

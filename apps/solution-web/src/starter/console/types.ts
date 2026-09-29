@@ -1,1 +1,1 @@
-export type ConsoleRoute = "dashboard" | "agents" | "workflows";
+export type ConsoleRoute = "dashboard" | "employees" | "workflows";

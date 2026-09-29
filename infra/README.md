@@ -1,8 +1,8 @@
 # Infrastructure
 
-`compose.yml` is the existing local Airflow, Postgres, and dbt stack for data
-warehouse development. It does not deploy the Agents API integration or an
-agent executor.
+`compose.yml` runs only the local OLTP PostgreSQL database. The old Airflow
+and warehouse stack was removed as part of the clean database reset. It does
+not deploy an agent executor.
 
 ## Self-hosted Agents API environments
 
