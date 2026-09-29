@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { ThemePicker } from "../theme/ThemeContext";
 import { Icon } from "./Icon";
 import type { ConsoleRoute } from "./types";
 
@@ -61,7 +62,7 @@ export function ConsoleShell({ children, title, tenantName, routeSlug, pendingCo
     </aside>
     <main className="console-main">
       <header className="console-header"><h1>{title}</h1><div className="console-header-tools">
-        <span className="tenant-label">{tenantName}</span>
+        <span className="tenant-label">{tenantName}</span><ThemePicker />
       </div></header>
       <div className="console-view">{children}</div>
     </main>

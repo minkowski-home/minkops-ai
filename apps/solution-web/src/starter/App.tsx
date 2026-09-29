@@ -7,6 +7,7 @@ import { ConsoleShell } from "./console/ConsoleShell";
 import { AccessScreen, DashboardScreen, EmployeeDetail, EmployeesScreen, TaskDetail,
   WorkflowDetail, WorkflowsScreen } from "./console/screens";
 import Login, { InvitePage, JoinPage, SignupPage, VerifyPage } from "./pages/Login";
+import { ThemeProvider } from "./theme/ThemeContext";
 
 function HomeRedirect() {
   const { user, isLoading } = useAuth();
@@ -120,7 +121,7 @@ function TaskRoute({ workspace, routeSlug }: { workspace: Workspace; routeSlug: 
 }
 
 export default function App() {
-  return <AuthProvider><BrowserRouter><Routes>
+  return <ThemeProvider><AuthProvider><BrowserRouter><Routes>
     <Route path="/" element={<HomeRedirect />} />
     <Route path="/login" element={<Login />} />
     <Route path="/signup" element={<SignupPage />} />
@@ -129,5 +130,5 @@ export default function App() {
     <Route path="/join" element={<JoinPage />} />
     <Route path="/:workspaceId/*" element={<Console />} />
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes></BrowserRouter></AuthProvider>;
+  </Routes></BrowserRouter></AuthProvider></ThemeProvider>;
 }

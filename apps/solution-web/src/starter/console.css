@@ -1,4 +1,4 @@
-:root { color-scheme: light; }
+:root:not([data-theme$="-dark"]) { color-scheme: light; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 15px; border: var(--rule-default); border-radius: var(--radius-2); font: var(--type-button); text-decoration: none; white-space: nowrap; transition: var(--transition-color); }
@@ -9,6 +9,8 @@ button { cursor: pointer; }
 .button:disabled { opacity: .5; cursor: not-allowed; }
 .icon-button { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid transparent; border-radius: var(--radius-2); background: transparent; color: var(--text-muted); }
 .icon-button:hover { color: var(--text-primary); background: var(--surface-inset); }
+.theme-picker { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font: var(--type-eyebrow); }
+.theme-picker select { max-width: 150px; min-height: 30px; padding: 0 8px; border: var(--rule-default); border-radius: var(--radius-2); color: var(--text-primary); background: var(--surface-raised); font: var(--type-label); }
 
 .console-shell { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100dvh; height: 100dvh; background: var(--surface-page); }
 .console-sidebar { display: flex; flex-direction: column; min-width: 0; background: var(--surface-sunken); border-right: var(--rule); }
@@ -20,7 +22,7 @@ button { cursor: pointer; }
 .console-nav-item { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px; border: 0; border-radius: 0 var(--radius-2) var(--radius-2) 0; color: var(--text-secondary); font: var(--type-label); }
 .console-nav-item:hover { color: var(--text-primary); background: var(--surface-inset); }
 .console-nav-item.is-active { color: var(--text-accent); background: var(--surface-selected); box-shadow: var(--shadow-inset-active); }
-.console-nav-item b { display: grid; place-items: center; min-width: 18px; height: 18px; margin-left: auto; border-radius: 50%; color: var(--text-inverse); background: var(--signal-live); font: var(--type-mono); }
+.console-nav-item b { display: grid; place-items: center; min-width: 18px; height: 18px; margin-left: auto; border-radius: 50%; color: var(--action-primary-fg); background: var(--action-primary-bg); font: var(--type-mono); }
 .console-account { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: auto; padding: 14px 12px; border-top: var(--rule); }
 .human-avatar { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border: var(--rule-default); border-radius: 50%; background: var(--surface-inset); font: var(--type-mono); }
 .console-account-copy { display: grid; gap: 2px; min-width: 0; overflow: hidden; }
@@ -66,7 +68,7 @@ button { cursor: pointer; }
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--status-info); font: var(--type-mono); white-space: nowrap; }
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status--active, .status--completed { color: var(--status-ok); }
-.status--running { color: var(--signal-live); }
+.status--running { color: var(--text-accent); }
 .status--attention, .status--failed { color: var(--status-alert); }
 .status--paused, .status--handoff { color: var(--status-warn); }
 .empty-state { display: grid; justify-items: start; gap: 10px; min-height: 210px; padding: 38px; border: var(--rule-default); background: var(--surface-sunken); }
@@ -164,6 +166,9 @@ button { cursor: pointer; }
   .console-main { min-height: calc(100dvh - 52px); }
   .console-view { overflow: visible; }
   .console-header { padding: 0 18px; }
+  .console-header-tools { display: flex; align-items: center; gap: 8px; }
+  .console-header .theme-picker span, .tenant-label { display: none; }
+  .console-header .theme-picker select { max-width: 125px; }
   .dashboard-workspace { display: block; height: auto; }
   .dashboard-main, .attention-pane { overflow: visible; }
   .attention-pane { border-top: var(--rule-default); border-left: 0; }

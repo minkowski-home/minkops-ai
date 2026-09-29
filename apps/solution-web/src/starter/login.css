@@ -1,5 +1,8 @@
 .login-screen { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 100dvh; }
 .login-story { display: flex; flex-direction: column; justify-content: space-between; gap: 50px; padding: 40px 48px; background: var(--surface-inverse); color: var(--text-inverse); }
+.login-story-top { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.login-story .theme-picker { color: var(--text-inverse-muted); }
+.login-story .theme-picker select { color: var(--text-primary); }
 .login-story h1 { max-width: 14ch; color: var(--text-inverse); font: var(--type-h1); }
 .login-story p { max-width: 32ch; margin-top: 12px; color: var(--text-inverse-muted); }
 .login-story small { color: var(--text-inverse-muted); font: var(--type-mono); }

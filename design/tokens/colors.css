@@ -36,11 +36,14 @@
   --n-900: #17171b;
 
   /* --- Status (desaturated, print-safe) --- */
-  --status-ok: #1f6f45;
+  --status-ok-base: #1f6f45;
+  --status-ok: var(--status-ok-base);
   --status-ok-fill: #eaf3ee;
-  --status-warn: #8a6212;
+  --status-warn-base: #8a6212;
+  --status-warn: var(--status-warn-base);
   --status-warn-fill: #f7f1e4;
-  --status-alert: #b3261e;
+  --status-alert-base: #b3261e;
+  --status-alert: var(--status-alert-base);
   --status-alert-fill: #fbecea;
   --status-info: #4d5661;
   --status-info-fill: #f1f3f5;

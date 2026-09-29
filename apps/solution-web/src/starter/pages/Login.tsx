@@ -2,13 +2,14 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
+import { ThemePicker } from "../theme/ThemeContext";
 
 function AuthLayout({ title, intro, children }: {
   title: string; intro: string; children: React.ReactNode;
 }) {
   return <main className="login-screen">
     <section className="login-story">
-      <Link to="/" className="login-wordmark"><span className="wordmark-dot" />minkops</Link>
+      <div className="login-story-top"><Link to="/" className="login-wordmark"><span className="wordmark-dot" />minkops</Link><ThemePicker /></div>
       <div><h1>{title}</h1><p>{intro}</p></div>
       <small>Useful work, clearly in view.</small>
     </section>
