@@ -41,6 +41,7 @@ class AuthTests(unittest.TestCase):
         })
 
     def test_signup_requires_verified_email_and_creates_tenant_admin(self):
+        self.assertEqual(self.client.get("/api/auth/session").json(), None)
         email = f"casey-{self.suffix}@example.com"
         response = self.register(email, organization_name=f"Studio {self.suffix}")
         self.assertEqual(response.status_code, 201, response.text)
@@ -50,6 +51,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200, login.text)
         self.assertIn("httponly", login.headers["set-cookie"].lower())
         self.assertEqual(self.client.get("/api/auth/me").json()["memberships"][0]["role"], "admin")
+        self.assertEqual(self.client.get("/api/auth/session").json()["name"], "Casey Morgan")
 
     def test_verified_domain_suggests_tenant_without_granting_access(self):
         slug = f"known-{self.suffix}"

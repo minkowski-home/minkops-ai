@@ -200,8 +200,7 @@ def login(body: Credentials, response: Response, request: Request, connection: D
     return {"message": "Signed in."}
 
 
-@router.get("/auth/me")
-def me(request: Request, user: User, connection: Db):
+def session_profile(request: Request, user: dict, connection: psycopg.Connection):
     memberships = connection.execute(
         """SELECT tenants.slug, tenants.name, memberships.role
            FROM memberships JOIN tenants ON tenants.id = memberships.tenant_id
@@ -214,6 +213,22 @@ def me(request: Request, user: User, connection: Db):
         "memberships": memberships,
         "csrf_token": digest(f"{request.cookies[SESSION_COOKIE]}:csrf"),
     }
+
+
+@router.get("/auth/me")
+def me(request: Request, user: User, connection: Db):
+    return session_profile(request, user, connection)
+
+
+@router.get("/auth/session")
+def session(request: Request, connection: Db):
+    try:
+        user = session_user(request, connection)
+    except HTTPException as error:
+        if error.status_code == 401:
+            return None
+        raise
+    return session_profile(request, user, connection)
 
 
 @router.post("/auth/logout")
