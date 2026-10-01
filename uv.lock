@@ -492,12 +492,14 @@ name = "minkops-db-tools"
 version = "0.1.0"
 source = { virtual = "db" }
 dependencies = [
+    { name = "minkops-platform" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pwdlib", extra = ["argon2"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "minkops-platform", editable = "platform" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.0" },
 ]
@@ -506,6 +508,16 @@ requires-dist = [
 name = "minkops-platform"
 version = "0.1.0"
 source = { editable = "platform" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.25.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
+]
 
 [[package]]
 name = "minkops-solution-api"

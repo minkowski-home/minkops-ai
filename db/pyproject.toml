@@ -5,9 +5,13 @@ description = "Minkops database migration and local fixture utilities"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "minkops-platform",
     "psycopg[binary]>=3.3.3",
     "pwdlib[argon2]>=0.3.0",
 ]
+
+[tool.uv.sources]
+minkops-platform = { workspace = true }
 
 [tool.uv]
 package = false

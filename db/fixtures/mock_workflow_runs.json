@@ -1,0 +1,24 @@
+{
+  "source-discovery": {
+    "source_ids": [
+      "mock-reference"
+    ],
+    "scope_paths": [
+      "."
+    ],
+    "exclusions": [],
+    "refresh_mode": "initial"
+  },
+  "bill-entry": {
+    "source_ids": [
+      "mock-bills"
+    ],
+    "file_ids": [
+      "rajtrack-01"
+    ],
+    "catalog_version": "mock-catalog-v1",
+    "destination_id": "mock-excel-draft",
+    "schema_id": "mock-ap-entry",
+    "schema_version": "1"
+  }
+}

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Reusable Minkops application services"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["jsonschema>=4.25.0", "psycopg[binary]>=3.3.3"]
 
 [build-system]
 requires = ["hatchling"]

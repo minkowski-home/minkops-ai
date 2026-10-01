@@ -1,0 +1,24 @@
+{
+  "key": "bill-entry",
+  "version": "0.2.0",
+  "name": "Bill entry",
+  "description": "Prepare bill records, reconcile against available reference data, and export reviewed Excel drafts.",
+  "owner": "accounts-desk",
+  "tenant_config_schema": "tenant-config.schema.json",
+  "run_config_schema": "run-config.schema.json",
+  "output_schema": "output.schema.json",
+  "instructions": "SKILL.md",
+  "tenant_defaults": {
+    "review_mode": "all_outputs",
+    "output_mode": "draft_excel"
+  },
+  "run_defaults": {
+    "input_format": "pdf",
+    "checks": [
+      "vendor_match",
+      "duplicate",
+      "totals",
+      "cost_codes"
+    ]
+  }
+}

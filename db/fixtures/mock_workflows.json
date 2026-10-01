@@ -1,0 +1,10 @@
+{
+  "source-discovery": {
+    "discovery_depth": "reference_data",
+    "max_files": 100
+  },
+  "bill-entry": {
+    "review_mode": "all_outputs",
+    "output_mode": "draft_excel"
+  }
+}
