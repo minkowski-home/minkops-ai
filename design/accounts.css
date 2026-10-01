@@ -1,0 +1,28 @@
+/* Accounts desk uses the shared theme tokens and progressive disclosure so
+   large catalogs remain readable without placing every field on one screen. */
+.accounts-panel { padding: 24px; margin-bottom: 24px; border: 1px solid var(--border-default); border-radius: 14px; background: var(--surface-raised); }
+.accounts-panel h3 { margin: 0 0 12px; }
+.accounts-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
+.accounts-toolbar input[type=file] { max-width: 190px; margin-left: 10px; font-size: 12px; }
+.accounts-panel details { border-bottom: 1px solid var(--border-default); padding: 14px 0; }
+.accounts-panel summary { cursor: pointer; font-weight: 600; padding: 5px 0; }
+.accounts-file-list { max-height: 280px; overflow: auto; display: grid; gap: 10px; padding: 12px 0; }
+.accounts-file-list label, .accounts-check { display: flex; align-items: center; gap: 10px; overflow-wrap: anywhere; }
+.accounts-config { margin: 16px 0; }
+.accounts-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; padding: 16px 0; }
+.accounts-field-grid label { display: grid; gap: 8px; font-size: 13px; }
+.accounts-field-grid input, .accounts-field-grid select, .accounts-table input:not([type=checkbox]), .accounts-table select { width: 100%; padding: 9px; border: 1px solid var(--border-default); border-radius: 6px; color: inherit; background: var(--surface-raised); }
+.accounts-field-grid fieldset { border: 1px solid var(--border-default); border-radius: 8px; }
+.accounts-field-grid fieldset label { display: flex; padding: 5px 0; }
+.accounts-field-grid fieldset input { width: auto; }
+.accounts-table { overflow: auto; margin: 12px 0; }
+.accounts-table table { border-collapse: collapse; width: 100%; min-width: 660px; }
+.accounts-table th, .accounts-table td { padding: 10px 6px; text-align: left; border-bottom: 1px solid var(--border-default); font-size: 12px; }
+.accounts-table th { font-weight: 600; }
+.accounts-bill { padding: 16px 0; border-bottom: 1px solid var(--border-default); }
+.accounts-bill h4 { margin-top: 0; }
+.accounts-findings { border-left: 3px solid var(--text-accent); padding-left: 14px; font-size: 13px; }
+.accounts-check { margin: 20px 0; font-size: 13px; }
+.accounts-panel dl div { padding: 8px 0; }
+.accounts-panel dt { font-weight: 600; font-size: 13px; }
+.accounts-panel dd { margin: 6px 0; font-size: 13px; }
