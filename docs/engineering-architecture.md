@@ -29,9 +29,9 @@ palette in `design/tokens/` and a per-browser preference.
 transactionally with a checksum, and changed migrations are rejected. The
 initial PostgreSQL schema starts clean: identity, membership, employees,
 workflows, task observations, and an event outbox. Writes to observable task
-state and settings insert outbox records in the same transaction. No event
-publisher, message broker, agent runtime, or workflow orchestration has been
-built yet. The outbox is the narrow handoff for those later components.
+state and settings insert outbox records in the same transaction. Accounts desk now has a durable database worker and OpenAI-hosted runtime.
+The app polls task state; there is no production outbox publisher or message
+broker yet. See [Accounts desk](accounts-desk.md) for run and write ownership.
 
 `warehouse/` is intentionally empty. It has no schema, dbt project, or
 pipeline; its design is reserved for separate work.
@@ -40,5 +40,5 @@ pipeline; its design is reserved for separate work.
 
 `db/seed_demo.py` creates `mock-tenant` with sample employees, workflows, and
 tasks for manual testing. Its image-to-Excel route is a mock-tenant-only test
-workflow. PR Infra starts with zero employees and zero workflows. Neither the
-fixture nor the test route defines a production agent flow.
+workflow. PR Infra starts with zero employees and zero workflows. The two Accounts desk workflows are active for the mock tenant and execute
+against explicit folder grants. Local fixtures do not imply a production release.

@@ -1,11 +1,12 @@
 # Workflow registration and run configuration
 
-## Step 2 boundary
+## Definition and execution boundary
 
 Shared workflow definitions are Git-versioned under `employees/`. Tenant
 defaults are PostgreSQL `workflows.config_values`, validated against
 `tenant-config.schema.json`. Per-run choices have a separate schema and are
-not stored as tenant defaults. The UI currently edits only tenant defaults.
+not stored as tenant defaults. The UI edits tenant defaults and per-run selections. See [Accounts desk](accounts-desk.md)
+for the implemented runtime and its separate agent proposal schema.
 
 Bill entry's output contract has two layers. The Git-versioned output schema
 describes the result envelope, evidence, findings, and review state. Discovery
@@ -17,7 +18,7 @@ mismatched versions and external schema references. This does not validate
 arithmetic, evidence truth, approval, or artifact existence.
 
 The mock seed installs Source discovery and Bill entry for `mock-tenant`,
-owned by Accounts desk and initially `planned`. The existing frontend maps the
+owned by Accounts desk and active only for the mock tenant. The existing frontend maps the
 `mock-client` URL to this tenant. Registration preserves existing settings and
 status, rejects incompatible schema updates, and increments config_version
 only when the tenant configuration schema changes. This counter is not the
@@ -44,21 +45,20 @@ chosen local password. Never run the demo seed against a deployed database.
 tenant defaults, then run selections. Schema validation rejects unknown
 settings and unsupported formats. Trusted callers supply authorized source
 and destination IDs and any mandatory review policy; requests cannot grant
-themselves permissions. File IDs, catalog versions, relative paths, symlinks,
-and resource ownership still need validation by the future execution service.
+themselves permissions. The Accounts API validates tenant-scoped file IDs, confirmed catalog versions,
+relative paths and source capabilities. The browser resolves children through
+its granted directory handles; absolute paths and parent traversal are rejected.
 
 `db/fixtures/mock_workflow_runs.json` contains example selections, not actual
 registered files, catalogs, connections, or destinations.
 The example business schema ID/version is also a placeholder; no confirmed
-business schema has been created and no discovery run is implied. Future source
-bindings resolve mock-reference to the three reference workbooks and mock-bills
-to the synthetic PDF directory. Ground truth and PR Infra files are excluded.
+business schema has been created and no discovery run is implied. Browser folder grants bind the synthetic sources explicitly. Ground truth and PR Infra files are excluded.
 No connections or source permissions are provisioned by this seed.
 
 Before execution, persist the resolved configuration, definition version,
-catalog version, actor, and authorized resource bindings with the run. This
-Step 2 adds the contracts and resolver; durable run storage and launch endpoints
-belong to the execution stage. Recording definition versions there avoids
+catalog version, actor, and authorized resource bindings with the run. The
+Accounts API persists these alongside agent output schema and instructions before
+launch. Recording definition versions there avoids
 confusing Git releases with editable tenant settings.
 
 ## Verification

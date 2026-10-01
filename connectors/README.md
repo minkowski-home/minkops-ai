@@ -11,3 +11,7 @@ in `solutions/`. Do not place credentials in employee or solution files.
 
 The installable `minkops_connectors` package lives in `src/`. Add adapters
 there as their concrete integrations are implemented.
+
+`minkops_connectors.excel` inspects workbooks and applies mapped row changes,
+preserving unrelated cells and workbook structure. Application services supply
+record validation; this adapter does not own tenant policy or workflow prompts.

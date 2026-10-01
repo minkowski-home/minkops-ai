@@ -15,7 +15,7 @@ The generated demo password is printed once. Do not run the demo seed against
 a deployed database.
 
 The seed also registers the shared Source discovery and Bill entry definitions
-as planned workflows owned by Accounts desk. Their initial database defaults
+as active workflows owned by Accounts desk for the mock tenant only. Their initial database defaults
 come from `fixtures/mock_workflows.json`; rerunning registration preserves
 operator settings. See `docs/workflow-registration.md` for the separate per-run
 contracts and the boundary between registration and execution.
