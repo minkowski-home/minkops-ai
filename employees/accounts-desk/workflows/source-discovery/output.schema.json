@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "catalog_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "catalog_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+          },
+          "files_scanned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "datasets_found": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "source_id",
+          "files_scanned",
+          "datasets_found"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "review",
+              "error"
+            ]
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "severity",
+          "field"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "mapping_confirmation_required": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "catalog_id",
+    "catalog_version",
+    "sources",
+    "findings",
+    "mapping_confirmation_required"
+  ],
+  "additionalProperties": false
+}

@@ -42,7 +42,15 @@ function Console() {
 
   useEffect(() => {
     if (user) void refreshWorkspace();
-  }, [user, refreshWorkspace]);
+  }, [user, refreshWorkspace, location.pathname]);
+
+  useEffect(() => {
+    if (!user || !location.pathname.endsWith('/dashboard')) return;
+    // Durable workflow state changes independently of this browser. Refresh
+    // the activity queue while it is visible, including after returning from review.
+    const timer = setInterval(() => void refreshWorkspace(), 4000);
+    return () => clearInterval(timer);
+  }, [user, refreshWorkspace, location.pathname]);
 
   if (isLoading) return <main className="loading-state">Opening Minkops…</main>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;

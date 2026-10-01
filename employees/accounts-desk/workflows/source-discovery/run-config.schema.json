@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "discovery_depth": {
+      "type": "string",
+      "enum": [
+        "structure",
+        "reference_data",
+        "business_mappings"
+      ],
+      "title": "Default discovery depth"
+    },
+    "max_files": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "title": "Default file limit"
+    },
+    "source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "scope_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\x00]+$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\x00]+$"
+      },
+      "uniqueItems": true
+    },
+    "refresh_mode": {
+      "type": "string",
+      "enum": [
+        "initial",
+        "refresh"
+      ]
+    }
+  },
+  "required": [
+    "source_ids",
+    "scope_paths",
+    "exclusions",
+    "discovery_depth",
+    "max_files",
+    "refresh_mode"
+  ],
+  "additionalProperties": false
+}

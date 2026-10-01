@@ -17,3 +17,14 @@ Verified email domains are discovery hints. Membership is granted through an
 invitation or an approved request. Platform administrators are designated
 manually in the database during onboarding; public sign-up cannot grant this
 role.
+
+Accounts desk launch, review and local-write receipt routes are under
+`/api/tenants/{slug}/accounts`. Run the separate durable worker with
+`uv run --all-packages python -m minkops_api.accounts_worker`. Both processes
+need the same DATABASE_URL; the worker reuses the configured OpenAI key.
+See [workflow setup and recovery](../../docs/accounts-desk.md).
+
+Accounts routes own HTTP validation, authentication, CSRF and response mapping.
+Application commands and worker execution live in `minkops_platform.accounts`;
+workbook mechanics live in `minkops_connectors.excel`. The former Accounts helper
+modules remain compatibility imports, and the worker command above is unchanged.

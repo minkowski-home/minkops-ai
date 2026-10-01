@@ -7,3 +7,9 @@ The preview includes sign-in/sign-up, Dashboard and resizable Activity pane, Emp
 The sample belongs to a mock tenant. It illustrates two employees, three workflows in active/paused/planned states, and three task states. It is not a production seed or a claim that these workflows execute. The real app enforces tenant access and saves settings through the API. A new PR Infra tenant has no employees or workflows.
 
 Use this kit for visual review, and use the running app for end-to-end testing.
+
+`accounts.html` adds the Accounts desk launch, editable run configuration,
+searchable discovery mapping, bill evidence/review and verified local-save
+states. It imports the same `design/accounts.css` used by the app and supports
+Minkops Light, Minkops Dark, Slate Light and Slate Dark. Its buttons are disabled
+because execution belongs to the authenticated running app, not this specimen.

@@ -486,18 +486,26 @@ wheels = [
 name = "minkops-connectors"
 version = "0.1.0"
 source = { editable = "connectors" }
+dependencies = [
+    { name = "openpyxl" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "openpyxl", specifier = ">=3.1.5" }]
 
 [[package]]
 name = "minkops-db-tools"
 version = "0.1.0"
 source = { virtual = "db" }
 dependencies = [
+    { name = "minkops-platform" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pwdlib", extra = ["argon2"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "minkops-platform", editable = "platform" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.0" },
 ]
@@ -506,6 +514,20 @@ requires-dist = [
 name = "minkops-platform"
 version = "0.1.0"
 source = { editable = "platform" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "minkops-connectors" },
+    { name = "openai" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.25.0" },
+    { name = "minkops-connectors", editable = "connectors" },
+    { name = "openai", specifier = ">=3.19.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
+]
 
 [[package]]
 name = "minkops-solution-api"
@@ -516,8 +538,9 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
+    { name = "minkops-connectors" },
+    { name = "minkops-platform" },
     { name = "openai" },
-    { name = "openpyxl" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pwdlib", extra = ["argon2"] },
     { name = "python-dotenv" },
@@ -531,8 +554,9 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.25.0" },
+    { name = "minkops-connectors", editable = "connectors" },
+    { name = "minkops-platform", editable = "platform" },
     { name = "openai", specifier = ">=3.19.0" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.0" },
     { name = "python-dotenv", specifier = ">=1.2.3" },

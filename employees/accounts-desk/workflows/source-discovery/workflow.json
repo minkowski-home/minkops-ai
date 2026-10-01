@@ -1,0 +1,23 @@
+{
+  "key": "source-discovery",
+  "version": "0.2.0",
+  "name": "Source discovery",
+  "description": "Discover approved source structures and reference data, with evidenced business mapping proposals.",
+  "owner": "accounts-desk",
+  "tenant_config_schema": "tenant-config.schema.json",
+  "run_config_schema": "run-config.schema.json",
+  "output_schema": "output.schema.json",
+  "instructions": "SKILL.md",
+  "tenant_defaults": {
+    "discovery_depth": "reference_data",
+    "max_files": 100
+  },
+  "run_defaults": {
+    "scope_paths": [
+      "."
+    ],
+    "exclusions": [],
+    "refresh_mode": "initial"
+  },
+  "agent_output_schema": "agent-output.schema.json"
+}

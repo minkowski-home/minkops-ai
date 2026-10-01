@@ -199,3 +199,61 @@ Two design reviews reshaped the landing page. First, the console illustration ha
 Second, the roster was a flat grid of 11 cards, and at 100 agents that becomes a wall. It now has three layers: a status bar that summarises any roster size in one line; department filters, the grouping that stays meaningful as the roster grows; and a windowed grid showing two rows at a time. The column count is measured from the live CSS grid with a `ResizeObserver` rather than assumed from breakpoints, so a "batch" is always exactly two full rows at any viewport, with a four-card floor on phones. Newly revealed cards fade in with a 40ms stagger, and live agents always sort first. Items are keyed by filter plus name so that switching departments replays the entrance; keying the whole list instead would have remounted the `<ul>` and left the observer watching a detached node.
 
 **Follow-up: one roster, four businesses, no status tiers.** Per product direction the site no longer splits agents into live / next / in-build. The status field, its sort order and every derived badge were removed. The roster now carries a department and a present-tense "right now" line per agent, plus a shift strip that stays compact at any team size. Three roles were added for new verticals (Sito, site coordinator; Tali, bookkeeper; Rota, staffing coordinator), with glyphs drawn on the existing head-and-shoulders motif. The console illustration became a framed app window with four switchable workflows: Shopify store ops, construction site-to-books (WhatsApp messages and photos to Tally/Excel to dashboards and invoices), staffing (sick calls, cover, UKG), and social content. The data lives in `content/consoleWorkflows.ts`. State is kept per workflow and decision timers are keyed by workflow plus decision, so a decision started on one tab still completes after you switch away, and switching back shows it resolved. The tab list follows the WAI-ARIA tabs pattern (roving tabindex, arrow/Home/End keys). On mobile it becomes a horizontal strip that keeps the active tab in view by adjusting the strip's own `scrollLeft`, because `scrollIntoView` would also scroll the page.
+
+### 2026-10-01 — Agent-selected Excel destinations with a verified local commit boundary
+
+**Situation:** Clients have different workbook layouts, header positions and
+business schemas. A fixed invoice template would constrain the product; a
+hosted agent overwriting local files would bypass user authority and invite
+stale writes or duplicate entries after a lost connection.
+
+**Task:** Ship discover → confirm → extract → review → in-place save while using
+the OpenAI-managed Codex harness and keeping multi-tenant controls maintainable.
+
+**Action:** Moved execution to per-run OpenAI-hosted environments with gpt-6-luna.
+Codex recognizes actual files, sheets and named tables; user-confirmed mappings
+create the business contract. Ambiguous destination recognition blocks commits.
+Pinned instructions, result schema, input hashes and catalogs make runs auditable.
+A database worker saves session IDs incrementally and reconciles existing turns
+without blind replay. Composite tenant keys, request idempotency and workbook
+reservations guard concurrent operations. The deterministic adapter preserves
+unrelated cells and rejects table expansion into occupied content. The browser
+retains granted directory handles, checks source hashes, writes approved bytes,
+reads them back and submits a verified receipt. Already-applied bytes resume
+without another append; cancelled saves retain their audit and accept honest
+late receipts. Hosted environments are cleaned after durable results.
+
+**Result:** The real mock-client journey discovered row-4 headers and processed
+three PDFs plus a scanned image. Four reviewed records appended to the existing
+local register (16 → 20 rows), with prior rows and reference workbooks preserved.
+The task completed only after the browser's matching receipt. Regression tests
+also cover schema/routing ambiguity, adjacent tables, formula preservation,
+duplicate rejection, tenant isolation and interrupted write recovery. A real
+sample exposed optional workbook protection metadata being absent; a failing
+regression test led to handling that valid Excel case without weakening protected
+workbook checks. This is local verification, not a production deployment claim.
+
+
+### 2026-10-01 — Restore application and connector boundaries without changing workflow behaviour
+
+**Situation:** Accounts workflow commands, hosted session calls, workbook mechanics
+and HTTP routes had accumulated in the solution API. The worker even imported
+write preparation from the web layer, making reuse depend on the deployment app.
+
+**Task:** Restore the repository's intended ownership while preserving the
+existing workflow, public API, worker command and local-write safeguards.
+
+**Action:** Extracted Accounts services, persistence, checks and worker execution
+into `platform/`, Excel mechanics into `connectors/`, and model turn instructions
+into the employee workflow assets. HTTP authentication, CSRF, multipart parsing
+and error responses remain in the API. Small compatibility imports preserve old
+callers; workspace dependencies declare the direction explicitly. No new service,
+queue, plugin framework or deployment boundary was introduced. Added a one-line
+ownership rule to `AGENTS.md` and regression tests for boundaries and legacy storage.
+
+**Result:** All 32 API and 19 platform tests pass. The Accounts OpenAPI contract
+matches the pre-refactor snapshot exactly, and extracted model instructions match
+the original hashes. Shared services import with both the API package and FastAPI
+blocked. Excel tests retain destination selection, edits, formula preservation,
+duplicate checks and write receipts. Running workflow processes were left alone;
+this verifies the code refactor rather than claiming a new deployment.

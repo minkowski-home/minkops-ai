@@ -1,0 +1,11 @@
+- Keep the Product Vision in README.md in mind while building any feature.
+- Important: Always keep the bigger system picture in mind. Prioritize long-term codebase sanity over shipping speed. Follow industry standard best practices to keep the codebase and repo maintainable as it grows.
+- Follow test-driven development, avoid massive commits and keep commit sizes maintainable, and test your work before calling it done.
+- Only create/merge PRs when explicitly asked to do so, and only always merge into `staging` branch, never `main`.
+- Never mentioned "Co-authored by Claude" or any references to Claude/Codex in commit/PR messages.
+- Always design systems like a senior engineer, avoiding shallow practices and entry-level mistakes, or creative shortcuts.
+- Code should be well documented with meaningful comments without causing clutter.
+- Always stick to the existing tech stack used in the repo, unless explicitly asked to deviate.
+- Any major architectural decision, system design change, or important interview-worthy concept introduced, any major bugs fixed or intermediate errors solved while writing code should be logged in `docs/decisions-log.md` per repo such that this files incrementally emerges as a collection of winning STAR format interview stories gradually. Remember, this is not the place for just EVERY change - only senior interview-worthy concepts go here.
+- New branch naming examples: `solution-web/login-page`, `platform-ai/new-ui`, `reporting/silver-layer`, `<scope>/<feature-name>`.
+- Keep apps/ focused on transport and bootstrap, reusable application/execution logic in platform/, and file/external-system adapters in connectors/; dependencies flow apps → platform → connectors.

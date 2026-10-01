@@ -1,24 +1,22 @@
 # Infrastructure
 
-`compose.yml` runs only the local OLTP PostgreSQL database. The old Airflow
-and warehouse stack was removed as part of the clean database reset. It does
-not deploy an agent executor.
+`compose.yml` runs the local OLTP PostgreSQL database. The API and durable
+Accounts worker are separate processes sharing that database. OpenAI provisions
+the agent execution environment; Compose does not run a Codex executor.
 
-## Self-hosted Agents API environments
+Accounts desk creates per-run `openai_hosted` Agents API sessions with
+`gpt-6-luna`, network access disabled, and required Python packages. Selected
+files are supplied as tenant-scoped immutable snapshots. API credentials stay
+outside agent-readable content. Results are persisted before hosted environment
+cleanup; workers retry pending cleanup and retain session IDs for audit.
 
-Minkops intends to run its own isolated execution environments, potentially
-on GCP, while OpenAI runs the Codex harness. Each Agents API session created
-with `environment.type: "self_hosted"` gets an environment ID and requires its
-own connected `codex exec-server`. The executor runs commands and accesses
-workspace files and local MCP servers inside Minkops-controlled compute. It
-connects outbound to OpenAI; Minkops owns provisioning, dependencies, access,
-reconnection, file retention, and cleanup. See the
-[self-hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted).
+The browser applies approved Excel writes through a granted local folder. This
+is a web adapter with synchronized snapshots, not fully local desktop execution.
+The future desktop adapter can replace the file-access seam while retaining
+approvals and verification. Self-hosted execution is no longer the selected
+architecture for these workflows.
 
-The deployment target, isolation boundary, image, and lifecycle controller
-remain design decisions. Do not treat the present Compose services as an agent
-runtime or deploy a shared executor for all customers by default. Keep API
-credentials and customer system credentials outside repository files and
-agent-readable workspace content. Register skills and plugins supported by
-the Agents API in the session environment when needed; use service-origin MCP
-connections for reachable remote servers when that is the simpler path.
+See [Accounts desk setup and limits](../docs/accounts-desk.md) and OpenAI's
+[hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted).
+Production deployment, worker supervision and database retention policy remain
+operational release work; local processes do not establish deployment health.

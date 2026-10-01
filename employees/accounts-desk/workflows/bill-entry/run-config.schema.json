@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "review_mode": {
+      "type": "string",
+      "enum": [
+        "all_outputs",
+        "only_exceptions"
+      ],
+      "title": "Default review mode"
+    },
+    "output_mode": {
+      "type": "string",
+      "enum": [
+        "excel_in_place",
+        "draft_excel"
+      ],
+      "title": "Output platform and write mode"
+    },
+    "source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "file_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "catalog_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "destination_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "input_format": {
+      "type": "string",
+      "enum": [
+        "pdf",
+        "image",
+        "mixed"
+      ],
+      "title": "Bill inputs"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "vendor_match",
+          "duplicate",
+          "totals",
+          "cost_codes"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "schema_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "source_ids",
+    "file_ids",
+    "catalog_version",
+    "destination_id",
+    "input_format",
+    "checks",
+    "review_mode",
+    "output_mode",
+    "schema_id",
+    "schema_version"
+  ],
+  "additionalProperties": false
+}

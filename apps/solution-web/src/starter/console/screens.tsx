@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
 import { useAuth } from "../contexts/AuthContext";
+import { AccountsLaunch, AccountsQuickRun } from "../accounts/AccountsLaunch";
+import { AccountsReview } from "../accounts/AccountsReview";
 import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
   type WorkflowSort } from "../workspace/presentation";
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
@@ -171,6 +173,8 @@ export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
     <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
+    {["source-discovery", "bill-entry"].includes(item.key) && <AccountsLaunch key={item.id}
+      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={item} />}
     <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
       canEdit={workspace.can_edit} onSaved={onSaved} />
       <aside className="related-panel"><h2>Employees</h2>
@@ -225,6 +229,8 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
             <footer><Link className="button button-ghost" to={`/${routeSlug}/workflows/${workflow.id}`}>View details</Link>
               {workspace.tenant.slug === "mock-tenant" && workflow.key === "image-to-excel-test"
                 && <button className="button button-primary" onClick={() => onRunTest(workflow)}>Run test</button>}
+              {["source-discovery", "bill-entry"].includes(workflow.key) && <AccountsQuickRun
+                tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={workflow} />}
             </footer>
           </article>)}</div>
           : <EmptyState title="Your workspace starts here" detail="Activated workflows will appear when your team is ready." />}
@@ -260,16 +266,22 @@ export function TaskDetail({ workspace, routeSlug, id }: {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout>;
     setDetail((current) => current?.id === id ? current : snapshot);
     setError("");
     setLoading(true);
-    void api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`)
-      .then((result) => { if (active) setDetail(result); })
-      .catch((caught) => {
+    const poll = async () => {
+      try {
+        const result = await api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`);
+        if (!active) return;
+        setDetail(result); setError("");
+        if (!["completed", "failed"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
+      } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : "Could not load task.");
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      } finally { if (active) setLoading(false); }
+    };
+    void poll();
+    return () => { active = false; clearTimeout(timer); };
   }, [workspace.tenant.slug, id, snapshot, attempt]);
   if (error && !detail) return <section className="route-screen">
     <h2>Task unavailable</h2><p role="alert">{error}</p>
@@ -280,6 +292,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
     <header className="detail-heading"><div><h2>{detail.title}</h2><p>{detail.summary}</p></div>
       <Status value={detail.status} /></header>
+    <AccountsReview key={id} tenant={workspace.tenant.slug} taskId={id} />
     <div className="task-progress">
       <div className="progress-ring" style={{ "--progress": `${detail.progress}%` } as CSSProperties}>
         <strong>{detail.progress}%</strong><span>progress</span>

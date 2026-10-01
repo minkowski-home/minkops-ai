@@ -1,11 +1,16 @@
 """Explicit local fixture: empty PR Infra and a populated mock tenant."""
 
+import json
 import os
 import secrets
+from pathlib import Path
 
 import psycopg
+from minkops_platform.workflows import load_definition, register_workflow
 from psycopg.types.json import Jsonb
 from pwdlib import PasswordHash
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def seed_demo(url: str, password: str | None = None) -> str:
@@ -99,6 +104,13 @@ def seed_demo(url: str, password: str | None = None) -> str:
                        VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
                     (mock, workflow_ids[key], employee_ids[owner]),
                 )
+
+        registrations = json.loads((ROOT / "db/fixtures/mock_workflows.json").read_text())
+        for key, defaults in registrations.items():
+            definition = load_definition(ROOT / "employees/accounts-desk/workflows" / key)
+            workflow_ids[key] = register_workflow(connection, mock, definition, defaults)
+            connection.execute("""UPDATE workflows SET status='active'
+                WHERE tenant_id=%s AND id=%s AND status='planned'""", (mock,workflow_ids[key]))
 
         samples = [
             ("Extract the latest receipt", "running", 65,

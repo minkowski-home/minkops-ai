@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "review_mode": {
+      "type": "string",
+      "enum": [
+        "all_outputs",
+        "only_exceptions"
+      ],
+      "title": "Default review mode"
+    },
+    "output_mode": {
+      "type": "string",
+      "enum": [
+        "excel_in_place",
+        "draft_excel"
+      ],
+      "title": "Output platform and write mode"
+    },
+    "input_format": {
+      "type": "string",
+      "enum": [
+        "pdf",
+        "image",
+        "mixed"
+      ],
+      "title": "Bill inputs"
+    }
+  },
+  "required": [
+    "review_mode",
+    "output_mode"
+  ],
+  "additionalProperties": false
+}
