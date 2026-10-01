@@ -46,6 +46,7 @@ DESCRIPTOR_SCHEMA = {
         },
         "tenant_defaults": {"type": "object"},
         "run_defaults": {"type": "object"},
+        "agent_output_schema": {"type": "string", "minLength": 1},
     },
     "additionalProperties": False,
 }
@@ -62,6 +63,7 @@ class WorkflowDefinition:
     run_schema: dict[str, Any]
     output_schema: dict[str, Any]
     instructions: str
+    agent_output_schema: dict[str, Any] | None = None
 
 
 def load_definition(directory: Path) -> WorkflowDefinition:
@@ -90,7 +92,10 @@ def load_definition(directory: Path) -> WorkflowDefinition:
     validate(schemas[0], metadata["tenant_defaults"])
     partial_run_schema = {**schemas[1], "required": []}
     validate(partial_run_schema, metadata["run_defaults"])
-    return WorkflowDefinition(metadata, *schemas, instructions)
+    agent_schema = json.loads(read_local('agent_output_schema')) if 'agent_output_schema' in metadata else None
+    if agent_schema is not None:
+        Draft202012Validator.check_schema(agent_schema)
+    return WorkflowDefinition(metadata, *schemas, instructions, agent_schema)
 
 
 def resolve_run_config(

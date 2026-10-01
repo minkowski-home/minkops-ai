@@ -62,7 +62,7 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_unknown_settings_unsupported_formats_and_traversal_rejected(self):
         for key, changes in [
-            ("bill-entry", {"input_format": "image"}),
+            ("bill-entry", {"input_format": "video"}),
             ("bill-entry", {"output_mode": "tally"}),
             ("bill-entry", {"allowed_source_ids": ["other-tenant"]}),
             ("source-discovery", {"max_files": 0}),
