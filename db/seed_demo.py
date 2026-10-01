@@ -109,6 +109,8 @@ def seed_demo(url: str, password: str | None = None) -> str:
         for key, defaults in registrations.items():
             definition = load_definition(ROOT / "employees/accounts-desk/workflows" / key)
             workflow_ids[key] = register_workflow(connection, mock, definition, defaults)
+            connection.execute("""UPDATE workflows SET status='active'
+                WHERE tenant_id=%s AND id=%s AND status='planned'""", (mock,workflow_ids[key]))
 
         samples = [
             ("Extract the latest receipt", "running", 65,

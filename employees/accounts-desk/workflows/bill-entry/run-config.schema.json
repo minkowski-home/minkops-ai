@@ -13,9 +13,10 @@
     "output_mode": {
       "type": "string",
       "enum": [
+        "excel_in_place",
         "draft_excel"
       ],
-      "title": "Default output mode"
+      "title": "Output platform and write mode"
     },
     "source_ids": {
       "type": "array",
@@ -46,8 +47,11 @@
     "input_format": {
       "type": "string",
       "enum": [
-        "pdf"
-      ]
+        "pdf",
+        "image",
+        "mixed"
+      ],
+      "title": "Bill inputs"
     },
     "checks": {
       "type": "array",

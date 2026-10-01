@@ -13,9 +13,19 @@
     "output_mode": {
       "type": "string",
       "enum": [
+        "excel_in_place",
         "draft_excel"
       ],
-      "title": "Default output mode"
+      "title": "Output platform and write mode"
+    },
+    "input_format": {
+      "type": "string",
+      "enum": [
+        "pdf",
+        "image",
+        "mixed"
+      ],
+      "title": "Bill inputs"
     }
   },
   "required": [

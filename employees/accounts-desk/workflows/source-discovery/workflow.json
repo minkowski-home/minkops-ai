@@ -1,6 +1,6 @@
 {
   "key": "source-discovery",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "name": "Source discovery",
   "description": "Discover approved source structures and reference data, with evidenced business mapping proposals.",
   "owner": "accounts-desk",
@@ -18,5 +18,6 @@
     ],
     "exclusions": [],
     "refresh_mode": "initial"
-  }
+  },
+  "agent_output_schema": "agent-output.schema.json"
 }

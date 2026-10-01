@@ -5,6 +5,7 @@
   },
   "bill-entry": {
     "review_mode": "all_outputs",
-    "output_mode": "draft_excel"
+    "output_mode": "excel_in_place",
+    "input_format": "mixed"
   }
 }
