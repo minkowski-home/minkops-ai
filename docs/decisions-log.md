@@ -22,6 +22,11 @@ brand themes are available in the same app for every tenant.
 
 ### 2026-09-29 — Employee-owned workflows and a self-hosted Agents API environment
 
+**Status:** The self-hosted environment choice was superseded by the
+2026-10-01 OpenAI-hosted Accounts implementation. The 2026-10-02 clarification
+below confirms hosted execution for the current refactor. Employee/workflow
+ownership and the managed-harness boundary remain applicable.
+
 **Situation:** The workflow-first layout did not mirror the customer-facing
 Employee → Workflows model. It also assumed Minkops would implement much of
 the agent execution logic, while the product direction is to use the Agents
@@ -257,3 +262,29 @@ the original hashes. Shared services import with both the API package and FastAP
 blocked. Excel tests retain destination selection, edits, formula preservation,
 duplicate checks and write receipts. Running workflow processes were left alone;
 this verifies the code refactor rather than claiming a new deployment.
+
+### 2026-10-02 — Hosted execution and skill-first refactor scope
+
+**Situation:** An architecture review proposed self-hosted execution and broad
+Accounts generalization, despite the selected OpenAI-hosted implementation.
+This mixed a future local execution method with the current hosting decision.
+
+**Task:** Clarify the architectural boundary before implementation so the
+refactor maximizes managed Codex capabilities without rebuilding available
+execution features or introducing an unrequested customer-device runtime.
+
+**Decision:** Retain OpenAI-hosted Agents API environments. Keep all four
+README workflow methods in mind, prioritizing adequate REST/MCP integrations
+and skill-driven execution. Customer-machine terminal execution and computer
+use remain outside the current refactor. Most product development belongs in
+apps; employee skills own procedures, and platform remains a thin shared layer
+for concrete permissions, lifecycle, approvals, recovery, and verification.
+Add deterministic code only for demonstrated gaps or enforceable guarantees.
+
+**Action:** Reconcile the README, architecture, infrastructure, and historical
+decision status. Separate current behavior from planned evaluation/lifecycle
+refactoring and a later hosted working-copy pilot.
+
+**Result:** Documentation now states the selected hosting decision and each
+method's scope explicitly. No runtime implementation or deployment change is
+claimed; improvements to workflow economics remain to be evaluated.

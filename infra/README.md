@@ -12,9 +12,10 @@ cleanup; workers retry pending cleanup and retain session IDs for audit.
 
 The browser applies approved Excel writes through a granted local folder. This
 is a web adapter with synchronized snapshots, not fully local desktop execution.
-The future desktop adapter can replace the file-access seam while retaining
-approvals and verification. Self-hosted execution is no longer the selected
-architecture for these workflows.
+A desktop file-access adapter is a possible future integration, not part of the
+current refactor or a decision to replace OpenAI-hosted execution. Self-hosted
+execution is no longer the selected architecture for these workflows; no
+customer-machine Codex executor is planned in the current refactor.
 
 See [Accounts desk setup and limits](../docs/accounts-desk.md) and OpenAI's
 [hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted).

@@ -10,6 +10,45 @@ The application should involve a well-designed combination/selection of the foll
 - Chat-mode like Upload->Modified->Download process: We want to avoid this as much as possible. Always prefer the above two methods unless the workflow genuinely calls for this.
 - Computer Use: Minkops controlling the app's interface. This is not in scope currently, may be introduced later.
 
+Keep these four methods in mind when designing every workflow. Choose the
+available method that fits the customer's tools and permissions; a workflow
+may combine methods. First check what skill-driven Codex, OpenAI-provided tools,
+and existing MCP/REST integrations can already do. Add custom code only for a
+demonstrated access, correctness, or product gap.
+
+### Workflow methods and current scope
+
+Execution method and environment hosting are separate choices. Minkops uses
+**OpenAI-hosted Agents API environments**. Python and terminal commands inside
+that hosted sandbox are not execution on the customer's machine. Self-hosted
+Codex executors are not part of the current refactor.
+
+| Method | Current implementation | Current refactor direction | Not introduced yet |
+| --- | --- | --- | --- |
+| REST/MCP | Preferred product direction; Accounts does not currently bind business-system MCPs to its sessions. | Let skills compose existing authorized tools; keep access and consequential-write policy enforceable. Add a binding only for a concrete workflow need. | New SaaS/Tally integrations or a general connector catalogue. |
+| Local execution | The browser saves approved Excel bytes to a granted folder; Codex runs Python in an OpenAI-hosted sandbox. | Preserve the browser write adapter and its verified in-place saves. Keep file access separate from skill instructions. | Customer-machine Python/terminal execution, a desktop executor, or self-hosted Agents API environments. |
+| Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
+| Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
+
+The refactor direction above is a plan, not implemented behavior. Its immediate
+scope is evaluation baselines, reusable lifecycle boundaries, and complete
+versioned workflow skill bundles. Skill-generated workbook editing is a later
+evaluated pilot. New execution methods are separate work.
+
+### Where development belongs
+
+Most product development belongs in `apps/`: workflow launch/configuration,
+resource connection, review, progress, and customer-facing outcomes. Workflow
+procedures belong in `employees/` as skills, prompts, schemas, examples, and
+supporting scripts, with customer bindings in `solutions/`.
+
+Keep `platform/` a thin shared control layer for the requirements a workflow
+actually has: authorized resources, durable runs, approvals, recovery, and
+verification. OpenAI owns the AI execution loop. Keep reusable application
+logic out of app transport code, and external-system/file adapters in
+`connectors/`. A skill is guidance; it does not enforce permissions or prove
+that a consequential write is correct.
+
 ## Repository map
 
 - `employees/` — shared employee definitions and the workflows they offer.

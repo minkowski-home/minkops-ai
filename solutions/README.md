@@ -15,5 +15,7 @@ console, not proof that a connector is implemented or authorized for an agent
 session. Bind real tool access per customer and per session. Keep secrets out
 of repository configuration, instructions, and plugin archives.
 
-`mock-client` is a local UI fixture. `pr-infra` is the first client solution;
-neither currently has an implemented Agents API employee workflow.
+`mock-client` supplies the local mock-tenant composition, whose Source discovery
+and Bill entry workflows use OpenAI-hosted Agents API execution. `pr-infra` is
+the first client solution and has no implemented Agents API employee workflow.
+Local mock-client execution does not imply a production deployment.

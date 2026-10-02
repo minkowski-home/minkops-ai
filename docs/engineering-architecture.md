@@ -2,6 +2,19 @@
 
 ## Current product boundary
 
+OpenAI-hosted Agents API environments are the selected execution architecture.
+Self-hosted Codex executors are outside the current refactor. Hosted sandbox
+Python execution and browser-granted local file saves do not imply an agent
+running on the customer's machine. The four workflow methods and their current
+scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
+
+Product development centers on `apps/`; workflow execution should maximize
+employee skills, prompts, OpenAI-provided capabilities, and adequate existing
+MCP/REST integrations. `platform/` supplies only shared control requirements
+that are justified by actual workflows. Preserve the dependency direction
+apps → platform → connectors, without recreating the managed harness or
+prebuilding a general workflow engine.
+
 `apps/solution-web` and `apps/solution-api` serve one shared application for
 every tenant. A signed-in user belongs to a tenant as an admin or member.
 Platform admins can manage any tenant; tenant admins manage their own. Other
