@@ -15,6 +15,7 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
 from minkops_platform.resources import REPOSITORY_ROOT as ROOT
+from minkops_platform.run_controls import resolve_request
 from minkops_platform.workflows import load_definition, resolve_run_config
 
 from .catalog import apply_records, validate_catalog
@@ -34,21 +35,14 @@ SUPPORTED = {".xlsx", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 def launch_run(connection, tenant, user, body):
-    raw_hash = digest_bytes(json.dumps(body, sort_keys=True).encode())
-    # Serialize the same request key, including initial inserts.
-    connection.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
-        (f"{tenant['id']}:{body['request_key']}",),
+    raw_hash, previous = resolve_request(
+        connection, tenant["id"], body["request_key"], body,
+        lambda c, tenant_id, request_key: c.execute(
+            "SELECT * FROM account_runs WHERE tenant_id=%s AND request_key=%s",
+            (tenant_id, request_key),
+        ).fetchone(),
     )
-    previous = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s AND request_key=%s",
-        (tenant["id"], body["request_key"]),
-    ).fetchone()
     if previous:
-        if previous["request_hash"] != raw_hash:
-            raise ServiceError(
-                "conflict", "This request key was already used for different selections."
-            )
         return public_run(connection, previous)
     workflow = connection.execute(
         """SELECT * FROM workflows WHERE tenant_id=%s AND key=%s

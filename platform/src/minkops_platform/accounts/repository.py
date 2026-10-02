@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 
-from psycopg.types.json import Jsonb
+from minkops_platform.run_controls import observe_task
 
 from minkops_platform.errors import ServiceError
 
@@ -53,38 +53,13 @@ def run_for(connection, tenant_id, run_id, lock=False):
 
 
 def observe(connection, run, state, summary, progress):
-    task_status = {
-        "queued": "running",
-        "executing": "running",
-        "review": "attention",
-        "approved": "running",
-        "writing": "handoff",
-        "completed": "completed",
-        "failed": "failed",
-    }[state]
     connection.execute(
         "UPDATE account_runs SET state=%s, updated_at=now() WHERE tenant_id=%s AND id=%s",
         (state, run["tenant_id"], run["id"]),
     )
-    connection.execute(
-        """UPDATE tasks SET status=%s, summary=%s, progress=%s, updated_at=now()
-                          WHERE tenant_id=%s AND id=%s""",
-        (task_status, summary, progress, run["tenant_id"], run["task_id"]),
-    )
-    connection.execute(
-        """INSERT INTO task_events (tenant_id,task_id,event_type,summary,progress)
-                          VALUES (%s,%s,%s,%s,%s)""",
-        (run["tenant_id"], run["task_id"], state, summary, progress),
-    )
-    connection.execute(
-        """INSERT INTO event_outbox (tenant_id,event_type,aggregate_id,payload)
-                          VALUES (%s,%s,%s,%s)""",
-        (
-            run["tenant_id"],
-            f"account_run.{state}",
-            run["id"],
-            Jsonb({"task_id": str(run["task_id"]), "summary": summary, "progress": progress}),
-        ),
+    observe_task(
+        connection, tenant_id=run["tenant_id"], task_id=run["task_id"], run_id=run["id"],
+        state=state, summary=summary, progress=progress, event_prefix="account_run",
     )
 
 
