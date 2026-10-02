@@ -18,6 +18,10 @@ class PackageBoundaryTests(TestCase):
             "minkops_platform.artifacts",
             "minkops_platform.accounts.worker",
             "minkops_platform.runtime.openai_hosted",
+            "minkops_platform.runtime.workflow",
+            "minkops_platform.runtime.bundles",
+            "minkops_platform.runtime.lifecycle",
+            "minkops_platform.accounts.run_store",
             "minkops_connectors.excel",
         ):
             module = importlib.import_module(name)

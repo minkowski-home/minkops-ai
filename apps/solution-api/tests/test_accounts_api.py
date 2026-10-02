@@ -4,6 +4,7 @@ import json
 import os
 import unittest
 import uuid
+from unittest.mock import MagicMock, patch
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -16,6 +17,66 @@ URL = os.environ.get("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class AccountsTests(unittest.TestCase):
+    def test_launch_pins_complete_definition_and_replay_keeps_the_original_bundle(self):
+        from minkops_platform.runtime.bundles import validate_snapshot
+
+        run, body = self.launch()
+        snapshot = run["config"]["execution_snapshot"]
+        validate_snapshot(snapshot)
+        self.assertEqual(snapshot["definition_version"], run["definition_version"])
+        self.assertEqual(snapshot["files"]["SKILL.md"], run["config"]["instructions_snapshot"])
+        self.assertEqual(
+            json.loads(snapshot["files"]["agent-output.schema.json"]), run["config"]["agent_output_schema"]
+        )
+        with patch("minkops_platform.accounts.service.load_definition", side_effect=AssertionError("new checkout")):
+            replay = self.client.post(self.base + "/runs", headers=self.csrf, json=body)
+        self.assertEqual(replay.status_code, 202, replay.text)
+        self.assertEqual(replay.json()["config"]["execution_snapshot"], snapshot)
+
+    def test_worker_respects_an_existing_database_run_lock(self):
+        from minkops_platform.accounts.worker import STORE, work_once
+
+        run, _ = self.launch()
+        executor = MagicMock()
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (run["id"],))
+            row = c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+            with patch.object(STORE, "candidates", return_value=[row]):
+                self.assertFalse(work_once(URL, executor=executor))
+            c.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (run["id"],))
+        executor.assert_not_called()
+
+    def test_invalid_agent_proposal_remains_durable_for_diagnostics(self):
+        from jsonschema import ValidationError
+        from minkops_platform.accounts.worker import process
+
+        run, _ = self.launch()
+        received = {"unexpected": "raw proposal"}
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            row = c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+            with self.assertRaises(ValidationError):
+                process(c, row, executor=lambda *a, **k: received)
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            saved = c.execute("SELECT result FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+            self.assertEqual(saved["result"], received)
+
+    def test_legacy_unpinned_queued_run_fails_without_calling_the_agent(self):
+        from minkops_platform.accounts.worker import STORE, work_once
+
+        run, _ = self.launch()
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute("UPDATE account_runs SET config=config-'execution_snapshot' WHERE id=%s", (run["id"],))
+            c.commit()
+            row = c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+        executor = MagicMock()
+        with patch.object(STORE, "candidates", return_value=[row]):
+            self.assertTrue(work_once(URL, executor=executor))
+        executor.assert_not_called()
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            row = c.execute("SELECT state,error FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("execution bundle", row["error"])
+
     def test_two_destinations_can_share_a_relative_filename(self):
         second = self.client.post(
             self.base + "/sources",
