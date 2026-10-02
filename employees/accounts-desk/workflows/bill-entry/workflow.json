@@ -1,6 +1,6 @@
 {
   "key": "bill-entry",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "name": "Bill entry",
   "description": "Enter reviewed PDF and image bills into existing Excel workbooks.",
   "owner": "accounts-desk",
@@ -22,5 +22,16 @@
       "cost_codes"
     ]
   },
-  "agent_output_schema": "agent-output.schema.json"
+  "agent_output_schema": "agent-output.schema.json",
+  "execution": {
+    "environment": "openai_hosted",
+    "model": "gpt-6-luna",
+    "python_packages": [
+      "openpyxl",
+      "pymupdf"
+    ],
+    "instructions": "execution-instructions.md",
+    "resources": [],
+    "result_path": "/workspace/outputs/result.json"
+  }
 }

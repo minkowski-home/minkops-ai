@@ -36,7 +36,9 @@ class HostedAdapterTests(TestCase):
         self.assertIn("openpyxl", env["packages"]["python"])
         skill = env["skills"][0]
         with ZipFile(BytesIO(base64.b64decode(skill["source"]["data"]))) as archive:
-            self.assertEqual(archive.namelist(), ["source-discovery/SKILL.md"])
+            self.assertIn("source-discovery/SKILL.md", archive.namelist())
+            self.assertIn("source-discovery/execution-instructions.md", archive.namelist())
+            self.assertIn("source-discovery/agent-output.schema.json", archive.namelist())
         self.assertTrue(callbacks)
 
     def test_only_exact_completed_turn_output_is_accepted(self):

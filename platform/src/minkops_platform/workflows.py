@@ -14,6 +14,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
+from minkops_platform.runtime.bundles import EXECUTION_SCHEMA, build_snapshot
+
 DESCRIPTOR_SCHEMA = {
     "type": "object",
     "required": [
@@ -47,6 +49,7 @@ DESCRIPTOR_SCHEMA = {
         "tenant_defaults": {"type": "object"},
         "run_defaults": {"type": "object"},
         "agent_output_schema": {"type": "string", "minLength": 1},
+        "execution": EXECUTION_SCHEMA,
     },
     "additionalProperties": False,
 }
@@ -64,6 +67,7 @@ class WorkflowDefinition:
     output_schema: dict[str, Any]
     instructions: str
     agent_output_schema: dict[str, Any] | None = None
+    execution_snapshot: dict[str, Any] | None = None
 
 
 def load_definition(directory: Path) -> WorkflowDefinition:
@@ -95,7 +99,8 @@ def load_definition(directory: Path) -> WorkflowDefinition:
     agent_schema = json.loads(read_local('agent_output_schema')) if 'agent_output_schema' in metadata else None
     if agent_schema is not None:
         Draft202012Validator.check_schema(agent_schema)
-    return WorkflowDefinition(metadata, *schemas, instructions, agent_schema)
+    snapshot = build_snapshot(directory, metadata) if "execution" in metadata else None
+    return WorkflowDefinition(metadata, *schemas, instructions, agent_schema, snapshot)
 
 
 def resolve_run_config(

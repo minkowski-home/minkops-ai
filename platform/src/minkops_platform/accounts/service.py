@@ -132,6 +132,9 @@ def launch_run(connection, tenant, user, body):
             raise ServiceError("invalid", "This workflow currently supports in-place Excel output.")
     config["instructions_snapshot"] = definition.instructions
     config["agent_output_schema"] = definition.agent_output_schema
+    if definition.execution_snapshot is None:
+        raise ServiceError("invalid", "This workflow has no hosted execution definition.")
+    config["execution_snapshot"] = definition.execution_snapshot
     config["file_provenance"] = [
         {"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files
     ]
