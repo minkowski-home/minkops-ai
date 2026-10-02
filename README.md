@@ -30,10 +30,11 @@ Codex executors are not part of the current refactor.
 | Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
 | Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
 
-The refactor direction above is a plan, not implemented behavior. Its immediate
-scope is evaluation baselines, reusable lifecycle boundaries, and complete
-versioned workflow skill bundles. Skill-generated workbook editing is a later
-evaluated pilot. New execution methods are separate work.
+The current refactor implements reusable run controls and lifecycle boundaries,
+complete versioned workflow skill bundles, and a regression baseline against the
+preserved Accounts implementation. Skill-generated workbook editing is a later
+evaluated pilot. New execution methods are separate work. See
+[the refactor scope and evaluation guide](docs/workflow-refactor.md).
 
 ### Where development belongs
 

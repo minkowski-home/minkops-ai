@@ -288,3 +288,36 @@ refactoring and a later hosted working-copy pilot.
 **Result:** Documentation now states the selected hosting decision and each
 method's scope explicitly. No runtime implementation or deployment change is
 claimed; improvements to workflow economics remain to be evaluated.
+
+### 2026-10-02 — Pin complete skill revisions behind reusable hosted run controls
+
+**Situation:** Accounts pinned SKILL.md and its proposal schema at launch, but
+loaded turn instructions from the current checkout during execution. A queued
+run could therefore execute a different revision from its recorded definition.
+Worker locking, session persistence, cleanup, launch identity, and task/outbox
+observations were also coupled to the first employee's implementation.
+
+**Task:** Make hosted workflow execution reproducible and reusable without
+rebuilding the managed harness, changing customer-facing writes, or introducing
+a self-hosted executor or speculative database framework.
+
+**Action:** Add an explicit hosted execution descriptor to each workflow. Pin a
+digest-checked bundle containing instructions, schemas, declared resources,
+model, packages, and output path before queueing. Package the complete skill
+from that snapshot and support additional helpers without directory scans.
+Extract shared request/observation controls and worker lifecycle behavior behind
+a small Accounts persistence adapter. Retain domain checks, approvals, and
+verified browser writes. Reject unpinned legacy queued runs explicitly while
+reconciling saved sessions without replay. A live provider call rejected product
+copy used as skill metadata; a failing regression test led to deriving name and
+description from the pinned YAML manifest using a standard parser.
+
+**Result:** The benchmark branch remains at 6cad769. The refactor passes all 35
+platform and 36 API tests with no skips, plus 10 frontend tests, TypeScript/Vite
+build, lint, and an unchanged OpenAPI contract. Source prompt hashes match the
+benchmark. A bounded real hosted API journey discovered row-2 headers, extracted
+a ₹24 invoice, preserved an existing formula and unrelated worksheet, and
+completed after a temporary local file was reread and its receipt submitted.
+Both hosted sessions were released. This verifies the API/runtime/file-receipt
+path locally; it does not claim a new browser directory-grant check, production
+deployment, improved workflow economics, or the later workbook-editing pilot.

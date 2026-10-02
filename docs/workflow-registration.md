@@ -61,6 +61,29 @@ Accounts API persists these alongside agent output schema and instructions befor
 launch. Recording definition versions there avoids
 confusing Git releases with editable tenant settings.
 
+Executable definitions now declare an `execution` object in `workflow.json`:
+`environment: openai_hosted`, `model`, `python_packages`, a relative
+`instructions` path, explicit relative `resources`, and an absolute
+`result_path` inside `/workspace/outputs/`. Network access remains disabled for
+the current file workflows. An execution descriptor does not grant tool access;
+no business-system MCP binding is introduced by this refactor.
+
+Launch persists `config.execution_snapshot`: format version, workflow and
+definition identity, execution settings, skill manifest name/description,
+UTF-8 resource contents, and a SHA-256 digest. The skill entrypoint, turn
+instructions, workflow descriptor, configuration/output schemas, and declared
+helpers are bundled together. Supporting scripts and references must be listed
+explicitly; directory scans would risk including credentials or evaluation
+answers. Both the uploaded skill archive and execution instructions use the
+snapshot, never newer checkout files. Provider skill metadata comes from the
+pinned SKILL.md YAML frontmatter, not the product's workflow description.
+
+Definition-only registration remains supported without an execution descriptor;
+launching an Accounts run requires one. Existing active sessions can be
+reconciled without resubmitting input. Legacy queued runs without a complete
+execution snapshot fail with an explicit relaunch message rather than silently
+adopting new instructions. Drain legacy queues before changing worker versions.
+
 ## Verification
 
 ```sh

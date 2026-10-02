@@ -44,6 +44,16 @@ describe structure, not business field names. The older `output.schema.json`
 and platform `validate_output` describe a separate final-report envelope; they
 are not substituted for the agent proposal contract used by this runtime.
 
+New runs additionally pin the complete hosted execution bundle: SKILL.md,
+execution-instructions.md, workflow/configuration/output contracts, declared
+supporting scripts/references, model, packages, artifact path, and content
+digest. Runtime execution uses the pinned bundle even if checkout files change.
+Launch idempotency, worker recovery, raw-proposal persistence, and cleanup are
+shared platform controls; Accounts retains catalog, evidence, business, approval,
+and Excel-write semantics. No new executor or workbook-editing mode is enabled.
+Legacy queued runs without a complete bundle require explicit relaunch; saved
+active sessions can still be reconciled without replaying input.
+
 The worker stores session/turn IDs as events arrive, holds an advisory lock and
 reconciles the existing session after a restart. An ambiguous creation without
 a persisted ID fails visibly rather than blindly replaying a charged request.
