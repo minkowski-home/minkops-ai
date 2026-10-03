@@ -5,14 +5,11 @@ import { SITE } from "../content/site";
 import { Field, Input, Select, Textarea } from "../ui/forms";
 import { Badge, Button, Card } from "../ui/primitives";
 
+const INTEREST_API_URL = import.meta.env.VITE_INTEREST_API_URL || "/api/interest";
+
 /*
- * Waitlist form.
- *
- * KNOWN LIMITATION: submissions are not persisted or sent anywhere yet. There
- * is no form backend for the marketing site (see apps/corporate-website/README.md,
- * "Known limitations"). The form validates, then shows its confirmation state.
- * When a backend lands, replace `submitInterest` with the real request; the
- * component already models submitting / error states around it.
+ * Waitlist form. The API returns acceptance only after the configured email
+ * provider accepts the submission; see the API README for delivery limits.
  */
 
 type InterestValue =
@@ -50,6 +47,7 @@ type FormState = {
   company: string;
   interest: InterestValue;
   message: string;
+  website: string;
 };
 
 type Errors = Partial<Record<"name" | "email", string>>;
@@ -59,7 +57,8 @@ const EMPTY: FormState = {
   email: "",
   company: "",
   interest: "unsure",
-  message: ""
+  message: "",
+  website: ""
 };
 
 // Deliberately permissive: the browser's own check plus "something@something.tld".
@@ -76,13 +75,24 @@ function validate(state: FormState): Errors {
   return errors;
 }
 
-/**
- * Placeholder transport. See the KNOWN LIMITATION note at the top of this file.
- * The payload already carries the team built on the roster, so a real backend
- * receives everything the visitor chose.
- */
+/** Sends the visitor's request and requires explicit provider acceptance. */
 async function submitInterest(payload: FormState & { team: Team }): Promise<void> {
-  void payload;
+  const response = await fetch(INTEREST_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error("The request was not accepted");
+  const result: unknown = await response.json();
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("status" in result) ||
+    result.status !== "accepted"
+  ) {
+    throw new Error("The delivery service did not confirm acceptance");
+  }
 }
 
 export default function InterestForm({
@@ -142,13 +152,13 @@ export default function InterestForm({
         <Badge tone="ok">You're on the list</Badge>
         <h3 className="mk-interest__title">Thanks, {firstName}.</h3>
         <p className="mk-interest__body">
-          We're opening Minkops a few businesses at a time, and we set each one up by
-          hand. When it's your turn, you'll hear from a person, not a drip campaign.
+          Our email service accepted your note for delivery. We can&apos;t confirm when it
+          reaches the inbox, but you&apos;ve given us a way to follow up.
         </p>
         <p className="mk-interest__body">
           Can't wait? Write to{" "}
-          <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>. Imel will
-          read it first, and one of us will reply.
+          <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>. One of us
+          will reply.
         </p>
       </Card>
     );
@@ -165,6 +175,17 @@ export default function InterestForm({
       </div>
 
       <form className="mk-interest__form" onSubmit={onSubmit} noValidate>
+        <div className="mk-interest__trap" aria-hidden="true">
+          <label htmlFor="interest-website">Website</label>
+          <input
+            id="interest-website"
+            name="website"
+            value={state.website}
+            onChange={update("website")}
+            autoComplete="off"
+            tabIndex={-1}
+          />
+        </div>
         <Field label="Your name" htmlFor="interest-name" required error={errors.name}>
           <Input
             id="interest-name"

@@ -25,7 +25,7 @@ frontend/
     sections/             Landing page sections (hero, funnel, roster, console
                           preview, access form)
     pages/                One file per route; blog posts live in pages/blog/
-api/                      FastAPI service (health check)
+api/                      FastAPI service (health and discovery form delivery)
 ```
 
 ## Rules that keep the site consistent
@@ -44,11 +44,10 @@ api/                      FastAPI service (health check)
 
 ## Known limitations
 
-- **The waitlist form does not submit anywhere yet.** `src/sections/InterestForm.tsx`
-  validates input and shows its confirmation state, but `submitInterest` is a no-op:
-  there is no form backend. Visitors see "You're on the list" while nothing is
-  stored. Wiring a real endpoint means replacing `submitInterest`; the component
-  already handles submitting and failure states.
+- **Discovery form delivery requires deployment setup.** The form posts to the FastAPI
+  service, which sends through Resend when `RESEND_API_KEY` and `RESEND_FROM_EMAIL` are
+  configured. Provider acceptance is not proof of receipt in `info@minkops.com`; see the
+  API README for deployment configuration and verification limits.
 - **Fonts load from Google Fonts.** No licensed font binaries exist in the repo. If
   woff2 files are supplied, self-host them and drop the Google Fonts link from
   `index.html`.

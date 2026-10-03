@@ -257,3 +257,13 @@ the original hashes. Shared services import with both the API package and FastAP
 blocked. Excel tests retain destination selection, edits, formula preservation,
 duplicate checks and write receipts. Running workflow processes were left alone;
 this verifies the code refactor rather than claiming a new deployment.
+
+### 2026-10-03 — Define the Employee/Workflow model and make discovery delivery explicit
+
+**Situation:** The corporate site mixed a fictional employee roster, unsourced time-saved estimates, and simulated external actions with product descriptions. Its discovery form validated locally but did not deliver visitor submissions.
+
+**Task:** Make the product structure legible across the existing site and deliver submitted discovery details to the fixed Minkops inbox without reporting provider acceptance as inbox receipt.
+
+**Action:** Reframed supporting copy around an AI Employee as the product grouping and a Workflow as a defined outcome, procedure and review path. Removed the roster and obsolete live handoff diagrams; replaced the savings calculator with an illustrative outline and labeled the retained console scenarios as fictional. Wired the existing form to a FastAPI endpoint that validates fields, caps the request body, rate-limits before schema validation, ignores a honeypot, and sends escaped text/HTML through Resend to info@minkops.com. The recipient and subject are server-controlled, the visitor email is Reply-To, provider idempotency keys cover identical retries, and provider credentials stay in server environment variables. The browser reports success only after the service returns acceptance.
+
+**Result:** The API suite covers delivery, fixed target, field validation, idempotency, provider failures, request escaping, missing configuration, rate limiting and CORS; the frontend passes its production build and lint. Real provider credentials, deployment configuration and recipient inbox receipt remain unverified and require the release owner. A provider acceptance response is intentionally not presented as proof of inbox delivery.
