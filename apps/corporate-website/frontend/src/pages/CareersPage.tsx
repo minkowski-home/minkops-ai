@@ -17,21 +17,21 @@ const ROLES: readonly Role[] = [
     team: "Engineering",
     location: "Remote",
     pitch:
-      "You'd work on the engine behind our AI employees: the rules that decide what each one may do alone, the moments it stops to ask a person, and the loop that turns every human correction into something it learns from."
+      "You'd work on how a Workflow represents its steps, the approved tools it can use, and the moments it must stop for human review."
   },
   {
     title: "Product designer",
     team: "Design",
     location: "Remote",
     pitch:
-      "You'd shape the operator console, the place where one person meets a whole team. The job is making a queue of decisions feel calm, clear and quick to clear."
+      "You'd shape how people define, review and verify a Workflow's outcomes when it uses approved tools and connectors."
   },
   {
     title: "Growth manager",
     team: "Marketing",
     location: "Hybrid",
     pitch:
-      "You'd tell the story of a company that runs on its own product, honestly, and find the first small businesses who want the same. No invented numbers, ever."
+      "You'd explain the Employee and Workflow model clearly and help businesses assess fit without implying unverified integrations or results."
   }
 ];
 
@@ -45,14 +45,14 @@ export default function CareersPage() {
     <>
       <SeoHead
         title="Careers"
-        description="Small team, real responsibility, and colleagues who happen to be AI employees. Open roles in engineering, design and growth at Minkops."
+        description="Work on the system that organizes AI Employees around business Workflows, with explicit tools and human review."
         path="/careers"
       />
 
       <PageHero
         eyebrow="Careers"
         title="Work on the thing that takes on the work."
-        lead="We're a small team with a lot of responsibility each, and some of our most reliable colleagues are the AI employees we build. If that sounds more interesting than strange, keep reading."
+        lead="We're building a product that organizes AI Employees around defined business Workflows. Our engineering, design and growth work connects clear procedures, approved system access and review by people."
       />
 
       <Section eyebrow={`Open roles · ${ROLES.length}`} title="Where you'd fit.">

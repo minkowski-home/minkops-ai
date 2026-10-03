@@ -9,21 +9,20 @@ export default function WhatIsAnAiEmployee() {
       post={POSTS.whatIsAnAiEmployee}
       cta={{
         title: "Not sure which role to hire first?",
-        body: "Answer four questions and get a specific recommendation in about ninety seconds. No call, no demo booking.",
-        label: "Find your first hire",
+        body: "Describe a process you want to improve and see an illustrative workflow outline to discuss.",
+        label: "Find a workflow starting point",
         to: FUNNEL_HREF
       }}
     >
       <p>
-        Every second software product now calls itself &quot;AI-powered.&quot; Somewhere
-        in that noise, a genuinely different category has appeared, and most buyers
-        haven&apos;t been given the words to tell it apart: the{" "}
-        <strong>AI employee</strong>.
+        This guide explains the terms used by Minkops. “AI Employee” describes a product
+        grouping; a Workflow defines the business outcome and steps. It does not mean a
+        particular system is connected or ready to act.
       </p>
       <p>
-        If you run a small business and you&apos;re trying to work out whether a given AI
-        product deserves your time, this is the most useful distinction to understand
-        before you look at anything else.
+        Skills describe procedures. Tools and connectors provide approved access to
+        systems. People remain responsible for granting that access and reviewing
+        outcomes where judgment is needed.
       </p>
 
       <h2>You operate a tool. You hire an employee.</h2>
@@ -35,19 +34,16 @@ export default function WhatIsAnAiEmployee() {
         decide what happens next.
       </p>
       <p>
-        An <strong>AI employee</strong> is given a role, not a prompt box. It has standing
-        access to the context it needs for that job: your inbox, your ticket queue, your
-        customer records, your product catalog. It carries the work through to the end
-        inside guardrails you set, the same way you&apos;d hand a role to a new hire and
-        trust them to run with it once they&apos;re trained.
+        An <strong>AI Employee</strong> is Minkops&apos; product grouping. A{" "}
+        <strong>Workflow</strong> defines the outcome, the procedure, the approved tools
+        and connectors it may use, and where a person reviews or decides. The actual
+        integrations and permissions must be confirmed for each deployment.
       </p>
       <p>
-        So the test isn&apos;t &quot;does it use AI.&quot; Almost everything does now. The
-        test is <strong>who does the last step?</strong> If a person still has to take the
-        output and turn it into the action (the sent reply, the resolved ticket, the
-        updated record), you&apos;re looking at a tool. If the system takes that last step
-        itself, inside limits it can&apos;t override, you&apos;re looking at something
-        much closer to an employee.
+        So ask <strong>what is connected and verified?</strong> A demonstration, a
+        written procedure and a live external action are different things. Confirm which
+        tools are authorized, which actions require approval, and how the result can be
+        checked.
       </p>
 
       <h2>What an AI employee needs to do a real job</h2>
@@ -57,28 +53,20 @@ export default function WhatIsAnAiEmployee() {
       </p>
       <ul>
         <li>
-          <strong>Shared context, not a blank slate.</strong> A real employee doesn&apos;t
-          re-learn your business every morning. An AI employee needs standing access to
-          company knowledge (policies, product facts, customer history) so it isn&apos;t
-          starting from zero on every conversation.
+          <strong>Relevant context.</strong> Identify which approved business information
+          the Workflow needs, how it is accessed and how it stays current.
         </li>
         <li>
-          <strong>A defined scope, not open-ended autonomy.</strong> &quot;Do whatever
-          seems right&quot; isn&apos;t a job description, for a person or an AI employee.
-          A well-built AI employee works inside an explicit policy: what it may decide on
-          its own, and what needs sign-off.
+          <strong>A defined scope.</strong> Document what the Workflow may do, what tools
+          it can access, and which actions require sign-off.
         </li>
         <li>
-          <strong>A real way to ask for help.</strong> The honest failure mode for an AI
-          employee isn&apos;t &quot;it made a mistake.&quot; Every new hire does that.
-          It&apos;s &quot;it wasn&apos;t sure, and it guessed instead of asking.&quot; The
-          systems worth trusting are built to stop and ask a person when confidence is
-          low, not tuned to always sound confident.
+          <strong>A review path.</strong> Define where the Workflow pauses for an
+          approval, escalation or decision that needs a person.
         </li>
         <li>
-          <strong>Memory that lasts.</strong> If it forgets the customer it spoke to
-          yesterday, it isn&apos;t working like an employee. It&apos;s working like a
-          form.
+          <strong>Verification.</strong> Specify how someone can confirm an external
+          action succeeded, such as a sent reply or an updated record.
         </li>
       </ul>
 
@@ -106,19 +94,15 @@ export default function WhatIsAnAiEmployee() {
 
       <h2>What this looks like in practice</h2>
       <p>
-        At Minkops, this distinction is the whole design brief. <strong>Imel</strong>, who
-        looks after email, doesn&apos;t hand you a draft to review and send yourself. It
-        reads the incoming message, checks it against your policies, and drafts (or sends,
-        depending on the guardrails you set) the reply. <strong>Kall</strong>, who runs
-        support, doesn&apos;t summarise a ticket for someone else to close. It resolves
-        the ticket and updates the record itself. Everyone on the roster shares the same{" "}
-        <Link to="/orchestration">way of working</Link>, so adding a role doesn&apos;t
-        mean bolting on another disconnected bot. It means hiring into the same team.
+        In Minkops&apos; model, an Employee is the product grouping and a{" "}
+        <strong>Workflow</strong> describes the outcome and steps. The{" "}
+        <Link to="/orchestration">product model</Link> also names the procedural skills
+        and approved tools or connectors involved. Specific access and external writes
+        must be verified for each deployment.
       </p>
       <p>
-        That&apos;s the real bar an AI employee has to clear. Plenty of tools can hold a
-        conversation now. The question is whether you can hand it a role and trust it to
-        do the job.
+        Those details make the difference between a useful design description and a
+        verified workflow running against real systems.
       </p>
     </BlogPostLayout>
   );

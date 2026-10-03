@@ -1,5 +1,5 @@
 /* ============================================================
-   LANDING PAGE SECTIONS — hero, funnel, roster, console preview,
+   LANDING PAGE SECTIONS — hero, funnel, workflow model, console preview,
    access. Everything here composes tokens and ui.css primitives.
    ============================================================ */
 
@@ -31,6 +31,40 @@
   max-width: var(--measure);
   font: var(--type-body-lg);
   color: var(--text-secondary);
+}
+
+/* ---- Employee / Workflow model -------------------------------- */
+
+.mk-model {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-model__card {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+  min-height: 100%;
+}
+
+.mk-model__title {
+  font: var(--type-h3);
+}
+
+.mk-model__body,
+.mk-model__note {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+
+.mk-model__note {
+  max-width: var(--measure);
+  margin-top: var(--sp-6);
 }
 
 .mk-hero__actions {
@@ -970,7 +1004,7 @@
   color: var(--text-muted);
 }
 
-/* "How work moves": sources and destinations as outlined chips, agents in graphite. */
+/* "How work moves": sources and destinations as outlined chips, with skills between. */
 .mk-pipeline {
   display: flex;
   flex-wrap: wrap;
@@ -1342,6 +1376,15 @@
   gap: var(--sp-6);
 }
 
+.mk-interest__trap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .mk-interest__error {
   font: var(--type-body-sm);
   color: var(--status-alert);
@@ -1399,6 +1442,9 @@
 }
 
 @media (max-width: 720px) {
+  .mk-model {
+    grid-template-columns: 1fr;
+  }
   .mk-hero {
     padding: var(--sp-12) var(--sp-6) var(--sp-11);
   }

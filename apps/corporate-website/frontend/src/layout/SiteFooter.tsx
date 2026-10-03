@@ -9,9 +9,9 @@ const COLUMNS: ReadonlyArray<{ heading: string; links: readonly FooterLink[] }> 
   {
     heading: "Platform",
     links: [
-      { label: "Meet the team", to: "/" },
-      { label: "How they work together", to: "/orchestration" },
-      { label: "Find your first hire", to: FUNNEL_HREF },
+      { label: "Explore workflow examples", to: "/" },
+      { label: "How workflows work", to: "/orchestration" },
+      { label: "Find a workflow starting point", to: FUNNEL_HREF },
       { label: "Get access", to: ACCESS_HREF }
     ]
   },
@@ -69,7 +69,7 @@ export default function SiteFooter() {
         <div className="mk-footer__brand">
           <Wordmark inverse />
           <p className="mk-footer__tagline">
-            AI employees for small teams with more work than hands.
+            AI employees organized around practical Workflows, with people responsible for decisions.
           </p>
           <address className="mk-footer__address">
             {SITE.address.map((line) => (

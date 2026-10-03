@@ -15,10 +15,7 @@ import { TypingIndicator } from "../ui/product";
 import { Badge, Button, Eyebrow, StatusDot, cx } from "../ui/primitives";
 
 /*
- * An illustrative Minkops console, framed as an app window so it reads as
- * product rather than page. Four businesses, one shape: agents report finished
- * work in plain sentences and turn anything above their authority into one
- * question with the answers already worked out. The operator never types.
+ * Interactive sketches of four example workflows, not a running console.
  *
  * Each workflow keeps its own state, so switching back and forth mid-morning
  * never loses a decision. Content lives in content/consoleWorkflows.ts.
@@ -197,8 +194,7 @@ export default function ConsolePreview() {
     update: (current: WorkflowState) => WorkflowState
   ) => setStates((current) => ({ ...current, [id]: update(current[id]) }));
 
-  // Choosing hands the work back to the agent; a moment later the finished work
-  // lands at the top of the log and the entry that flagged it is marked resolved.
+  // Choosing an option advances this illustration to its example outcome.
   const choose = (target: Workflow, decision: Decision, choice: Choice) => {
     updateWorkflow(target.id, (current) => ({
       ...current,
@@ -261,7 +257,7 @@ export default function ConsolePreview() {
     <Section
       eyebrow="Inside the console · an illustration"
       title="Nothing to type. Just decide."
-      lead="No chat window, no empty box asking what you want. Your employees work from rules you set once and tell you what they finished. When something sits above their authority, you get one short question with the answers already worked out. Pick a business and try it."
+      lead="These fictional scenarios show how an Employee could work through a Workflow and pause for a person when a decision needs review. They are examples, not live integrations or proven customer outcomes."
     >
       <div className="mk-app" role="group" aria-label="Illustrative Minkops console">
         <div className="mk-app__titlebar">
@@ -271,8 +267,8 @@ export default function ConsolePreview() {
           </span>
           <span className="mk-app__titlebar-status">
             <StatusDot
-              status="active"
-              label={`${workflow.agents.length} employees on shift`}
+              status="idle"
+              label="Illustrative workflow"
             />
           </span>
         </div>
@@ -359,9 +355,9 @@ export default function ConsolePreview() {
             </div>
 
             <div className="mk-app__panes">
-              <section className="mk-app__log" aria-label="Work finished since yesterday">
+              <section className="mk-app__log" aria-label="Example work in the workflow illustration">
                 <header className="mk-app__pane-head">
-                  <Eyebrow>Done while you were away</Eyebrow>
+                  <Eyebrow>Example work</Eyebrow>
                 </header>
                 <ol className="mk-log" aria-live="polite">
                   {state.log.map((entry) => (
@@ -407,7 +403,8 @@ export default function ConsolePreview() {
       </div>
 
       <p className="mk-app__disclaimer">
-        Illustrative examples. The businesses, people and figures are invented.
+        Illustrative examples only. The businesses, people, figures and outcomes are
+        invented; no external system is connected by this demo.
       </p>
     </Section>
   );

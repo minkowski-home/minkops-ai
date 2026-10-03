@@ -29,11 +29,15 @@ export default function AutoLeadGeneration() {
       post={POSTS.autoLeadGeneration}
       cta={{
         title: "Does pipeline keep you up at night?",
-        body: "We're choosing a small group of early partners to shape this rep in real production environments. Tell us about yours.",
+        body: "Tell us about a process you want to improve. We’ll discuss the required inputs, permissions and review points.",
         label: "Request early access",
         to: ACCESS_HREF
       }}
     >
+      <PostNote label="Planning note">
+        This is a design exploration, not a shipped outbound sales capability. No lead
+        sourcing, email outreach, booking or CRM writes are verified by this article.
+      </PostNote>
       <p>
         Lead generation is one of the last corners of modern business where we still
         accept an almost absurd amount of manual work. Teams spend hours stitching
