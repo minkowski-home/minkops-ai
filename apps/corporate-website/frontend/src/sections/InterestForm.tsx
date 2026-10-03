@@ -1,18 +1,25 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { WorkArea } from "../content/funnel";
-import type { Team } from "../content/team";
 import { SITE } from "../content/site";
 import { Field, Input, Select, Textarea } from "../ui/forms";
 import { Badge, Button, Card } from "../ui/primitives";
 
+const PUBLIC_PRODUCTION_INTEREST_API_URL =
+  "https://minkops-interest-api-330283498133.us-central1.run.app/api/interest";
+const CANONICAL_PRODUCTION_HOSTS = new Set(["minkops.com", "www.minkops.com"]);
+const configuredInterestApiUrl = import.meta.env.VITE_INTEREST_API_URL?.trim();
+const currentHost = typeof window === "undefined" ? "" : window.location.hostname;
+const INTEREST_API_URL =
+  configuredInterestApiUrl ||
+  (import.meta.env.DEV
+    ? "/api/interest"
+    : CANONICAL_PRODUCTION_HOSTS.has(currentHost)
+      ? PUBLIC_PRODUCTION_INTEREST_API_URL
+      : undefined);
+
 /*
- * Waitlist form.
- *
- * KNOWN LIMITATION: submissions are not persisted or sent anywhere yet. There
- * is no form backend for the marketing site (see apps/corporate-website/README.md,
- * "Known limitations"). The form validates, then shows its confirmation state.
- * When a backend lands, replace `submitInterest` with the real request; the
- * component already models submitting / error states around it.
+ * Waitlist form. The API returns acceptance only after the configured email
+ * provider accepts the submission; see the API README for delivery limits.
  */
 
 type InterestValue =
@@ -50,16 +57,20 @@ type FormState = {
   company: string;
   interest: InterestValue;
   message: string;
+  website: string;
 };
 
 type Errors = Partial<Record<"name" | "email", string>>;
+
+class InterestApiUnavailableError extends Error {}
 
 const EMPTY: FormState = {
   name: "",
   email: "",
   company: "",
   interest: "unsure",
-  message: ""
+  message: "",
+  website: ""
 };
 
 // Deliberately permissive: the browser's own check plus "something@something.tld".
@@ -76,25 +87,36 @@ function validate(state: FormState): Errors {
   return errors;
 }
 
-/**
- * Placeholder transport. See the KNOWN LIMITATION note at the top of this file.
- * The payload already carries the team built on the roster, so a real backend
- * receives everything the visitor chose.
- */
-async function submitInterest(payload: FormState & { team: Team }): Promise<void> {
-  void payload;
+/** Sends the visitor's request and requires explicit provider acceptance. */
+async function submitInterest(payload: FormState): Promise<void> {
+  if (!INTEREST_API_URL) {
+    throw new InterestApiUnavailableError();
+  }
+
+  const response = await fetch(INTEREST_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) throw new Error("The request was not accepted");
+  const result: unknown = await response.json();
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("status" in result) ||
+    result.status !== "accepted"
+  ) {
+    throw new Error("The delivery service did not confirm acceptance");
+  }
 }
 
-export default function InterestForm({
-  suggestedArea,
-  team = []
-}: {
-  suggestedArea?: WorkArea;
-  team?: Team;
-}) {
+export default function InterestForm({ suggestedArea }: { suggestedArea?: WorkArea }) {
   const [state, setState] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
-  const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "failed">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "submitting" | "sent" | "failed" | "unavailable"
+  >("idle");
 
   // When the visitor finishes the funnel, pre-select what it recommended,
   // unless they've already chosen something themselves.
@@ -127,10 +149,10 @@ export default function InterestForm({
 
     setStatus("submitting");
     try {
-      await submitInterest({ ...state, team });
+      await submitInterest(state);
       setStatus("sent");
-    } catch {
-      setStatus("failed");
+    } catch (error) {
+      setStatus(error instanceof InterestApiUnavailableError ? "unavailable" : "failed");
     }
   };
 
@@ -142,13 +164,13 @@ export default function InterestForm({
         <Badge tone="ok">You're on the list</Badge>
         <h3 className="mk-interest__title">Thanks, {firstName}.</h3>
         <p className="mk-interest__body">
-          We're opening Minkops a few businesses at a time, and we set each one up by
-          hand. When it's your turn, you'll hear from a person, not a drip campaign.
+          Our email service accepted your note for delivery. We can&apos;t confirm when it
+          reaches the inbox, but you&apos;ve given us a way to follow up.
         </p>
         <p className="mk-interest__body">
           Can't wait? Write to{" "}
-          <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>. Imel will
-          read it first, and one of us will reply.
+          <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>. One of us
+          will reply.
         </p>
       </Card>
     );
@@ -165,6 +187,17 @@ export default function InterestForm({
       </div>
 
       <form className="mk-interest__form" onSubmit={onSubmit} noValidate>
+        <div className="mk-interest__trap" aria-hidden="true">
+          <label htmlFor="interest-website">Website</label>
+          <input
+            id="interest-website"
+            name="website"
+            value={state.website}
+            onChange={update("website")}
+            autoComplete="off"
+            tabIndex={-1}
+          />
+        </div>
         <Field label="Your name" htmlFor="interest-name" required error={errors.name}>
           <Input
             id="interest-name"
@@ -230,20 +263,17 @@ export default function InterestForm({
           />
         </Field>
 
-        {team.length > 0 ? (
-          <div className="mk-interest__team">
-            <p className="mk-field__label">Your shortlist</p>
-            <p className="mk-interest__team-list">{team.join(" · ")}</p>
-            <p className="mk-field__hint">
-              We&apos;ll come to the conversation ready to talk about these {team.length}.
-              Change them in the roster above.
-            </p>
-          </div>
+        {status === "unavailable" ? (
+          <p className="mk-interest__error" role="alert">
+            This form isn't connected on this site yet. Please email us instead: {" "}
+            <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>.
+          </p>
         ) : null}
 
         {status === "failed" ? (
           <p className="mk-interest__error" role="alert">
-            That didn't go through on our side. Please try again, or write to{" "}
+            We couldn't confirm whether your note went through. Please email us and we'll
+            check before you try again: {" "}
             <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>.
           </p>
         ) : null}
@@ -255,11 +285,7 @@ export default function InterestForm({
           fullWidth
           disabled={status === "submitting"}
         >
-          {status === "submitting"
-            ? "Sending…"
-            : team.length > 0
-              ? "Book a conversation"
-              : "Put me on the list"}
+          {status === "submitting" ? "Sending…" : "Put me on the list"}
         </Button>
       </form>
     </Card>

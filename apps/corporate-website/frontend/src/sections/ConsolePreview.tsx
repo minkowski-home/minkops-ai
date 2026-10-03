@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { getAgent } from "../content/agents";
 import {
   WORKFLOWS,
   type Choice,
@@ -11,14 +10,10 @@ import {
 import { Section } from "../layout/Section";
 import Wordmark from "../layout/Wordmark";
 import { Icon } from "../ui/Icon";
-import { TypingIndicator } from "../ui/product";
 import { Badge, Button, Eyebrow, StatusDot, cx } from "../ui/primitives";
 
 /*
- * An illustrative Minkops console, framed as an app window so it reads as
- * product rather than page. Four businesses, one shape: agents report finished
- * work in plain sentences and turn anything above their authority into one
- * question with the answers already worked out. The operator never types.
+ * Interactive sketches of four example workflows, not a running console.
  *
  * Each workflow keeps its own state, so switching back and forth mid-morning
  * never loses a decision. Content lives in content/consoleWorkflows.ts.
@@ -32,8 +27,8 @@ type WorkflowState = {
   done: readonly string[];
 };
 
-/** Long enough to read "Tali is working", short enough not to feel staged. */
-const AGENT_WORK_MS = 1200;
+/** Brief pause before the illustrative workflow shows its example outcome. */
+const WORKFLOW_STEP_MS = 1200;
 
 function initialState(workflow: Workflow): WorkflowState {
   return { log: workflow.log, chosen: {}, done: [] };
@@ -49,10 +44,10 @@ function awaitingCount(workflow: Workflow, state: WorkflowState) {
   return workflow.decisions.filter((decision) => !state.chosen[decision.id]).length;
 }
 
-function AgentGlyphTile({ name, size = "sm" }: { name: string; size?: "sm" | "md" }) {
+function WorkflowGlyphTile({ label, size = "sm" }: { label: string; size?: "sm" | "md" }) {
   return (
-    <span className={cx("mk-app-glyph", `mk-app-glyph--${size}`)} title={name}>
-      <Icon name={getAgent(name).glyph} size={size === "sm" ? 14 : 18} />
+    <span className={cx("mk-app-glyph", `mk-app-glyph--${size}`)} title={label}>
+      <Icon name="check" size={size === "sm" ? 14 : 18} />
     </span>
   );
 }
@@ -68,10 +63,10 @@ function Pipeline({ steps }: { steps: readonly PipelineStep[] }) {
             </li>
           ) : null}
           <li className={cx("mk-pipeline__step", `mk-pipeline__step--${step.kind}`)}>
-            {step.kind === "agent" ? (
+            {step.kind === "workflow" ? (
               <>
-                <Icon name={getAgent(step.agent).glyph} size={14} />
-                {step.agent}
+                <Icon name="check" size={14} />
+                {step.workflow}
               </>
             ) : (
               step.label
@@ -86,7 +81,7 @@ function Pipeline({ steps }: { steps: readonly PipelineStep[] }) {
 function LogRow({ entry }: { entry: LiveEntry }) {
   return (
     <li className={cx("mk-log__row", entry.fresh && "is-fresh")}>
-      <AgentGlyphTile name={entry.agent} size="md" />
+      <WorkflowGlyphTile label={entry.workflow} size="md" />
       <div className="mk-log__body">
         <p className="mk-log__text">{entry.text}</p>
         {entry.attachments ? (
@@ -97,7 +92,7 @@ function LogRow({ entry }: { entry: LiveEntry }) {
           </ul>
         ) : null}
         <p className="mk-log__meta">
-          {entry.agent} · {entry.time}
+          {entry.workflow} · {entry.time}
         </p>
       </div>
       <Badge tone={entry.outcome.tone} className="mk-log__outcome">
@@ -123,7 +118,7 @@ function DecisionCard({
       aria-labelledby={questionId}
     >
       <p className="mk-decision__meta">
-        <strong>{decision.agent}</strong> · {decision.context}
+        <strong>{decision.workflow}</strong> · {decision.context}
       </p>
       <h4 className="mk-decision__question" id={questionId}>
         {decision.question}
@@ -136,7 +131,7 @@ function DecisionCard({
             <Icon name="check" size={14} />
             {chosen.label}
           </p>
-          <TypingIndicator name={decision.agent} />
+          <p className="mk-decision__working" role="status">Showing an example outcome…</p>
         </div>
       ) : (
         <div className="mk-decision__choices" role="group" aria-labelledby={questionId}>
@@ -197,8 +192,7 @@ export default function ConsolePreview() {
     update: (current: WorkflowState) => WorkflowState
   ) => setStates((current) => ({ ...current, [id]: update(current[id]) }));
 
-  // Choosing hands the work back to the agent; a moment later the finished work
-  // lands at the top of the log and the entry that flagged it is marked resolved.
+  // Choosing an option advances this illustration to its example outcome.
   const choose = (target: Workflow, decision: Decision, choice: Choice) => {
     updateWorkflow(target.id, (current) => ({
       ...current,
@@ -214,7 +208,7 @@ export default function ConsolePreview() {
         log: [
           {
             id: `${decision.id}-result`,
-            agent: decision.agent,
+            workflow: decision.workflow,
             time: "09:02",
             text: choice.result,
             outcome: { label: "Done · your call", tone: "ok" },
@@ -227,7 +221,7 @@ export default function ConsolePreview() {
           )
         ]
       }));
-    }, AGENT_WORK_MS);
+    }, WORKFLOW_STEP_MS);
     timers.current.set(key, timer);
   };
 
@@ -261,7 +255,7 @@ export default function ConsolePreview() {
     <Section
       eyebrow="Inside the console · an illustration"
       title="Nothing to type. Just decide."
-      lead="No chat window, no empty box asking what you want. Your employees work from rules you set once and tell you what they finished. When something sits above their authority, you get one short question with the answers already worked out. Pick a business and try it."
+      lead="These fictional scenarios show how an Employee could work through a Workflow and pause for a person when a decision needs review. They are examples, not live integrations or proven customer outcomes."
     >
       <div className="mk-app" role="group" aria-label="Illustrative Minkops console">
         <div className="mk-app__titlebar">
@@ -271,8 +265,8 @@ export default function ConsolePreview() {
           </span>
           <span className="mk-app__titlebar-status">
             <StatusDot
-              status="active"
-              label={`${workflow.agents.length} employees on shift`}
+              status="idle"
+              label="Illustrative workflow"
             />
           </span>
         </div>
@@ -302,9 +296,7 @@ export default function ConsolePreview() {
                     onKeyDown={(event) => onTabKeyDown(event, index)}
                   >
                     <span className="mk-app-tab__glyphs" aria-hidden="true">
-                      {candidate.agents.map((name) => (
-                        <AgentGlyphTile key={name} name={name} />
-                      ))}
+                      <WorkflowGlyphTile label={candidate.name} />
                     </span>
                     <span className="mk-app-tab__text">
                       <span className="mk-app-tab__name">{candidate.name}</span>
@@ -359,9 +351,9 @@ export default function ConsolePreview() {
             </div>
 
             <div className="mk-app__panes">
-              <section className="mk-app__log" aria-label="Work finished since yesterday">
+              <section className="mk-app__log" aria-label="Example work in the workflow illustration">
                 <header className="mk-app__pane-head">
-                  <Eyebrow>Done while you were away</Eyebrow>
+                  <Eyebrow>Example work</Eyebrow>
                 </header>
                 <ol className="mk-log" aria-live="polite">
                   {state.log.map((entry) => (
@@ -407,7 +399,8 @@ export default function ConsolePreview() {
       </div>
 
       <p className="mk-app__disclaimer">
-        Illustrative examples. The businesses, people and figures are invented.
+        Illustrative examples only. The businesses, people, figures and outcomes are
+        invented; no external system is connected by this demo.
       </p>
     </Section>
   );

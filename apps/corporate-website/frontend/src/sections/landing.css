@@ -1,5 +1,5 @@
 /* ============================================================
-   LANDING PAGE SECTIONS — hero, funnel, roster, console preview,
+   LANDING PAGE SECTIONS — hero, funnel, workflow model, console preview,
    access. Everything here composes tokens and ui.css primitives.
    ============================================================ */
 
@@ -31,6 +31,84 @@
   max-width: var(--measure);
   font: var(--type-body-lg);
   color: var(--text-secondary);
+}
+
+/* ---- Two ways to get started ----------------------------------- */
+
+@keyframes mk-starting-point-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mk-starting-points {
+  width: 100%;
+}
+
+.mk-starting-points__options {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-6);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-starting-points__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--sp-5);
+  min-height: 100%;
+  padding: var(--sp-7);
+  border: var(--rule-default);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  text-decoration: none;
+  animation: mk-starting-point-in var(--dur-slow) var(--ease-out) both;
+  transition:
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.mk-starting-points__options li:nth-child(2) .mk-starting-points__option {
+  animation-delay: 70ms;
+}
+
+.mk-starting-points__option:hover,
+.mk-starting-points__option:focus-visible {
+  border-color: var(--ember-tint-24);
+  background: var(--surface-accent-soft);
+}
+
+.mk-starting-points__content {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+}
+
+.mk-starting-points__number {
+  color: var(--text-accent);
+  font: var(--type-mono);
+}
+
+.mk-starting-points__title {
+  margin: 0;
+  font: var(--type-h3);
+}
+
+.mk-starting-points__description {
+  max-width: var(--measure);
+  margin: var(--sp-3) 0 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+
+.mk-starting-points__action {
+  margin-top: var(--sp-6);
+  color: var(--text-action);
+  font: var(--type-label);
 }
 
 .mk-hero__actions {
@@ -916,7 +994,7 @@
   color: var(--status-ok);
 }
 
-/* ---- Glyph tiles (graphite, like agent avatars in the real console) ---- */
+/* ---- Simple markers for the illustrative workflow preview ---------- */
 
 .mk-app-glyph {
   display: grid;
@@ -970,7 +1048,7 @@
   color: var(--text-muted);
 }
 
-/* "How work moves": sources and destinations as outlined chips, agents in graphite. */
+/* "How work moves": sources and destinations as outlined chips, with skills between. */
 .mk-pipeline {
   display: flex;
   flex-wrap: wrap;
@@ -997,9 +1075,15 @@
   color: var(--text-secondary);
 }
 
-.mk-pipeline__step--agent {
+.mk-pipeline__step--workflow {
   background: var(--surface-inverse);
   color: var(--text-inverse);
+}
+
+.mk-decision__working {
+  margin: 0;
+  color: var(--text-muted);
+  font: var(--type-body-sm);
 }
 
 .mk-pipeline__step--destination {
@@ -1342,6 +1426,15 @@
   gap: var(--sp-6);
 }
 
+.mk-interest__trap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .mk-interest__error {
   font: var(--type-body-sm);
   color: var(--status-alert);
@@ -1399,6 +1492,10 @@
 }
 
 @media (max-width: 720px) {
+  .mk-starting-points__options {
+    grid-template-columns: 1fr;
+    gap: var(--sp-6);
+  }
   .mk-hero {
     padding: var(--sp-12) var(--sp-6) var(--sp-11);
   }

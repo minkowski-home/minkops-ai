@@ -23,7 +23,7 @@ export const CREWS: readonly Crew[] = [
     name: "Front desk crew",
     replaces: "a receptionist and a support rep",
     pitch: "The inbox and the support queue, handled before you've had your coffee.",
-    members: ["Imel", "Kall"],
+    members: ["Inbox", "Support"],
     covers: [
       "Every email read, sorted, and answered or drafted",
       "Support tickets and calls resolved start to finish",
@@ -35,7 +35,7 @@ export const CREWS: readonly Crew[] = [
     name: "Online store crew",
     replaces: "an e-commerce operations manager",
     pitch: "Everything a Shopify store needs between the order and the five-star review.",
-    members: ["Imel", "Kall", "Leed", "Kim"],
+    members: ["Inbox", "Support", "Lead Follow-up", "Inventory"],
     covers: [
       "Order questions answered with the real tracking link",
       "Abandoned carts called back within minutes",
@@ -47,7 +47,7 @@ export const CREWS: readonly Crew[] = [
     name: "Social media crew",
     replaces: "a social media manager",
     pitch: "A feed that stays full and sounds like you, without you writing a word.",
-    members: ["Ora", "Floc", "Eko", "Insi"],
+    members: ["Creative", "Content Drafting", "Social Replies", "Reporting"],
     covers: [
       "Visuals and captions planned a week ahead",
       "Comments answered, complaints passed to support",
@@ -58,8 +58,8 @@ export const CREWS: readonly Crew[] = [
     id: "staffing-desk",
     name: "Staffing desk",
     replaces: "a staffing clerk",
-    pitch: "Rotas built, sick calls covered, and the timesheets already match.",
-    members: ["Kall", "Rota", "Insi"],
+    pitch: "Schedules built, sick calls covered, and the timesheets already match.",
+    members: ["Support", "Staffing", "Reporting"],
     covers: [
       "Sick calls taken and logged at 5am, not 9am",
       "Open shifts filled from qualified staff, inside your hour limits",
@@ -71,7 +71,7 @@ export const CREWS: readonly Crew[] = [
     name: "Site office crew",
     replaces: "a site administrator and a bookkeeper",
     pitch: "From the site WhatsApp group to the books, without anyone retyping a thing.",
-    members: ["Sito", "Tali", "Insi"],
+    members: ["Site Records", "Accounts", "Reporting"],
     covers: [
       "Site messages and photos turned into proper records",
       "Supplier bills checked against what actually arrived",
@@ -83,7 +83,7 @@ export const CREWS: readonly Crew[] = [
     name: "Restaurant crew",
     replaces: "your shift manager's busiest hours",
     pitch: "Counter, pass and kitchen in step from open to close.",
-    members: ["Hosi", "Cruz", "Prex"],
+    members: ["Order Intake", "Restaurant Operations", "Kitchen Orders"],
     covers: [
       "Orders taken and sent straight to the kitchen",
       "Rush forecasts and prep lists ready before service",

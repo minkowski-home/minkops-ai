@@ -53,15 +53,14 @@ function LegalPage({
   );
 }
 
-const CORPORATE_ADDRESS =
-  "Minkops is a product of Minkowski Home. Our corporate mailing address is 375 University Avenue Suite 3215, Toronto, ON M5G 2J5, Canada.";
+const CORPORATE_ADDRESS = `Minkops AI is the company behind Myndral. Our corporate mailing address is ${SITE.address.slice(1).join(", ")}.`;
 
 export function TermsOfServicePage() {
   return (
     <LegalPage
       title="Terms of service"
       path="/terms"
-      description="The terms that apply when you use Minkops, a product of Minkowski Home."
+      description="The terms that apply when you use Minkops, from the team behind Myndral."
       lead={
         <>
           The agreement between you and us, in five short clauses. If anything here is
@@ -72,7 +71,7 @@ export function TermsOfServicePage() {
       clauses={[
         {
           heading: "Acceptance of Terms",
-          body: "By accessing and using Minkops, a product of Minkowski Home, you accept and agree to be bound by the terms and provision of this agreement."
+          body: "By accessing and using Minkops, from the team behind Myndral, you accept and agree to be bound by the terms and provision of this agreement."
         },
         {
           heading: "Use of Service",

@@ -29,11 +29,15 @@ export default function AutoLeadGeneration() {
       post={POSTS.autoLeadGeneration}
       cta={{
         title: "Does pipeline keep you up at night?",
-        body: "We're choosing a small group of early partners to shape this rep in real production environments. Tell us about yours.",
+        body: "Tell us about a process you want to improve. We’ll discuss the required inputs, permissions and review points.",
         label: "Request early access",
         to: ACCESS_HREF
       }}
     >
+      <PostNote label="Planning note">
+        This is a design exploration, not a shipped outbound sales capability. No lead
+        sourcing, email outreach, booking or CRM writes are verified by this article.
+      </PostNote>
       <p>
         Lead generation is one of the last corners of modern business where we still
         accept an almost absurd amount of manual work. Teams spend hours stitching
@@ -42,45 +46,40 @@ export default function AutoLeadGeneration() {
         up, only to repeat the whole cycle next week.
       </p>
       <p>
-        At Minkops, we&apos;re starting to build a new kind of teammate: an{" "}
-        <strong>AI sales rep</strong> that can own the entire top-of-funnel workflow from
-        end to end. Not &quot;automation&quot; in the brittle sense of a chain of
-        triggers, but a rep that can plan, reason, decide, act and improve, while staying
-        inside strict guardrails.
+        This planning note explores how an AI Employee might be organized around a
+        carefully scoped outbound Workflow. It describes questions to resolve before
+        implementation; it does not report a product currently being built or available.
       </p>
       <p>
-        This post walks through what we&apos;re building, why we think it will change how
-        businesses operate, and how we&apos;re approaching the hard parts: quality,
-        compliance, personalisation and measurement.
+        The sections below outline possible inputs, permissions, review points and
+        verification needs for such a design.
       </p>
 
       <h2>Why lead generation is still broken</h2>
       <p>
-        The core problem isn&apos;t a lack of tools. It&apos;s that the workflow is
-        scattered across tools, channels and people, each with different incentives and
-        incomplete context. The result is predictable:
+        A common design challenge is that lead work can be spread across tools, channels
+        and people, with incomplete context. A workflow proposal should first identify
+        which sources are authorized and which steps need a person:
       </p>
       <ul>
         <li>
-          <strong>Inconsistent quality.</strong> Prospect lists drift away from the ideal
-          customer profile (ICP), and outreach turns into a numbers game.
+          <strong>Data quality.</strong> How should prospect records be checked against an
+          approved profile?
         </li>
         <li>
-          <strong>Thin personalisation at scale.</strong> Even good teams can&apos;t
-          deeply personalise hundreds of touches a week.
+          <strong>Personalisation.</strong> Which verified signals may inform a draft?
         </li>
         <li>
-          <strong>Operational drag.</strong> Updating the CRM, de-duplicating contacts and
-          managing sequences steals time from actually selling.
+          <strong>Record hygiene.</strong> Which CRM updates are allowed, and who reviews
+          them?
         </li>
         <li>
-          <strong>Slow learning loops.</strong> When results are poor, it&apos;s hard to
-          tell why: targeting, message-market fit, deliverability, timing or follow-up.
+          <strong>Evaluation.</strong> How will targeting, timing and follow-up outcomes be
+          measured?
         </li>
       </ul>
       <p>
-        An AI sales rep should fix this by keeping the whole workflow in one coherent
-        loop:{" "}
+        A proposed Workflow could be scoped around a sequence such as:{" "}
         <strong>
           target, discover, validate, personalise, reach out, respond, route, learn
         </strong>
@@ -89,10 +88,9 @@ export default function AutoLeadGeneration() {
 
       <h2>What we mean by an AI sales rep</h2>
       <p>
-        We&apos;re not building a spam bot. We&apos;re building an employee that behaves
-        like a highly disciplined sales development rep: one that never forgets the
-        playbook, never loses track of context and never stops iterating. Its real
-        strength shows up when it works alongside the other employees on the team.
+        Here, &quot;AI sales rep&quot; is shorthand for a possible Employee grouping, not
+        a claim about a shipped capability. Any Workflow would need a defined procedure,
+        permitted tools and connectors, and explicit points for human review.
       </p>
       <PostNote label="Our north star">
         The rep should be able to start with a clear ICP and end with qualified meetings
@@ -102,15 +100,14 @@ export default function AutoLeadGeneration() {
 
       <h2>The workflow, from ICP to meetings</h2>
       <p>
-        Here&apos;s the high-level pipeline we&apos;re implementing. Think of it as a
-        living system that can be tuned, extended and audited.
+        The outline below is one design to evaluate. Each step would need its own
+        permissions, safeguards and success measures before implementation.
       </p>
 
       <h3>1. Define the ICP as structured policy</h3>
       <p>
-        Most teams describe an ICP loosely: &quot;mid-market SaaS&quot; or
-        &quot;construction companies.&quot; Our rep needs something more precise, so we
-        represent the ICP as structured constraints and preferences:
+        An ICP might be recorded as structured constraints and preferences instead of
+        relying on an informal description:
       </p>
       <ul>
         <li>Company size ranges, revenue ranges and hiring signals.</li>
@@ -121,20 +118,19 @@ export default function AutoLeadGeneration() {
       </ul>
       <PostCode label="Example ICP policy snapshot" lines={ICP_POLICY} />
       <p>
-        Treating the ICP as policy matters because it makes the system testable. When the
-        rep proposes a lead or a message, it can explain which constraints it satisfied
-        and which signals it wasn&apos;t sure about.
+        A future implementation could make those constraints testable and show which
+        approved signals support a proposed lead or draft, along with anything uncertain.
       </p>
 
       <h3>2. Source candidates and build a lead graph</h3>
       <p>
-        Instead of a flat spreadsheet, we think in graphs. A good lead isn&apos;t just a
-        person. It&apos;s a <strong>relationship</strong> between a company, an intent
-        signal, a role and a message angle.
+        A data model could connect a company, a verified intent signal, a role and a
+        message angle instead of treating a lead as an isolated row.
       </p>
       <p>
-        The rep gathers candidates from several sources (databases, websites, public
-        signals, internal referrals, inbound hints) and builds a lead graph that includes:
+        Before considering sources such as databases, websites, public signals, referrals
+        or inbound enquiries, a deployment would need to document which sources are
+        authorized. A proposed record could include:
       </p>
       <ul>
         <li>The company: domain, size, tech stack, category, hiring pace.</li>
@@ -143,15 +139,13 @@ export default function AutoLeadGeneration() {
         <li>Message angles: pain points mapped to signals and product capabilities.</li>
       </ul>
       <p>
-        This is where AI employees start to look different from point tools. The system
-        isn&apos;t just collecting contacts. It&apos;s building a story about why this
-        contact is a good fit <em>right now</em>.
+        Any fit assessment should show its supporting evidence and uncertainty for a
+        person to review; this example does not source or enrich real leads.
       </p>
 
       <h3>3. Validate, enrich and protect deliverability</h3>
       <p>
-        If you&apos;ve ever run outbound, you know deliverability is everything. A lead
-        generation rep has to be opinionated about hygiene:
+        A design should define how it handles data hygiene:
       </p>
       <ul>
         <li>De-duplication across sources and sequences.</li>
@@ -171,9 +165,9 @@ export default function AutoLeadGeneration() {
         suggest a sensible next step.
       </p>
       <p>
-        Our rep personalises by choosing a <strong>reason to reach out</strong> (a
-        signal), matching it to a <strong>message angle</strong> (a pain point), and
-        making a <strong>single, credible ask</strong> (a next action).
+        A proposed draft could connect a <strong>reason to reach out</strong> (a
+        verified signal), a <strong>message angle</strong> (an approved topic), and a
+        <strong>single, reviewable ask</strong> (a next action).
       </p>
       <ul>
         <li>
@@ -181,8 +175,8 @@ export default function AutoLeadGeneration() {
           training.
         </li>
         <li>
-          If a team recently adopted a tool we integrate with, the angle might be workflow
-          automation and attribution.
+          If a team uses a tool explicitly approved for a future workflow, an angle might
+          discuss how the processes could fit together.
         </li>
         <li>
           If a founder has written about outbound fatigue, the angle might be
@@ -190,19 +184,18 @@ export default function AutoLeadGeneration() {
         </li>
       </ul>
       <p>
-        Crucially, the rep has to record its reasoning internally: which signal it used,
-        what it couldn&apos;t verify, and what it chose <em>not</em> to claim. That cuts
-        down on invented personalisation and keeps outreach honest.
+        Before any outreach capability exists, its design should record the source for
+        each claim, what could not be verified, and what should not be stated.
       </p>
 
       <h3>5. Sequencing across channels that adapts to what happens</h3>
       <p>
-        People don&apos;t follow a fixed cadence. A good SDR changes approach based on
-        what happens, and the rep should do the same, within policy.
+        A Workflow should not assume a fixed cadence. Its policy could define when to
+        stop, wait, change a draft or request human review.
       </p>
       <p>
         Instead of a rigid &quot;day 1 email, day 3 email, day 5 LinkedIn&quot; sequence,
-        we treat sequencing as a decision problem:
+        a design could treat sequencing as a decision problem:
       </p>
       <ul>
         <li>Which channel suits this persona best?</li>
@@ -214,9 +207,8 @@ export default function AutoLeadGeneration() {
 
       <h3>6. Handle replies like an employee, not a template</h3>
       <p>
-        Replies are where most automation falls apart. People ask messy questions about
-        pricing, timing, competitors and edge cases. The rep needs a controlled ability to
-        reason and respond. Our approach:
+        Replies can raise questions about pricing, timing, competitors or edge cases. A
+        proposed reply Workflow would need clear boundaries:
       </p>
       <ul>
         <li>
@@ -233,8 +225,7 @@ export default function AutoLeadGeneration() {
 
       <h3>7. Keep the CRM up to date, and correct</h3>
       <p>
-        This sounds mundane, but it&apos;s one of the biggest levers. If the rep owns the
-        workflow, it should own the record of truth too:
+        If a future Workflow is permitted to update a CRM, its scope should specify:
       </p>
       <ul>
         <li>Create and update contacts and companies without duplicates.</li>
@@ -243,14 +234,14 @@ export default function AutoLeadGeneration() {
         <li>Attach the rationale: why this lead, why this message, why now.</li>
       </ul>
       <p>
-        Done well, this means founders and teams can finally trust their pipeline data
-        again, because one consistent system maintained it instead of many human habits.
+        Any claimed improvement in record quality would need to be measured against a
+        documented baseline.
       </p>
 
       <h2>Guardrails: compliance, consent and safety</h2>
       <p>
-        Any system that sends outbound messages has to treat compliance and trust as
-        first-class concerns. Our design includes:
+        A system that sends outbound messages would need to address compliance and trust
+        before deployment. Design questions include:
       </p>
       <ul>
         <li>Rate limits, warm-up strategies and per-domain suppression.</li>
@@ -260,46 +251,41 @@ export default function AutoLeadGeneration() {
         <li>Human approval gates for sensitive claims, pricing or unusual asks.</li>
       </ul>
       <p>
-        We think of the rep as working under a strict company policy, because in the real
-        world, that&apos;s how great teams grow without breaking trust.
+        These are requirements to evaluate, not safeguards this article claims are
+        implemented.
       </p>
 
       <h2>Why this changes how a business works</h2>
       <p>
-        When a lead generation workflow becomes an employee, the organisation changes. The
-        bottleneck moves from &quot;how many touches can we do?&quot; to &quot;how good is
-        our strategy and our offer?&quot; In practice, a smaller team can operate like a
-        much larger one:
+        If a scoped lead Workflow proves useful, it could change how a team spends time.
+        A pilot could measure whether:
       </p>
       <ul>
-        <li>Founders can launch new outbound experiments in hours, not weeks.</li>
-        <li>RevOps can enforce hygiene automatically instead of chasing it.</li>
-        <li>Sales can spend more time in qualified conversations and less on admin.</li>
+        <li>Founders launch outbound experiments more quickly.</li>
+        <li>RevOps improves record hygiene with less manual follow-up.</li>
+        <li>Sales spends more time in qualified conversations and less on admin.</li>
         <li>
           Teams can iterate on messaging with real feedback loops and measurable outcomes.
         </li>
       </ul>
       <p>
-        And perhaps most importantly, a business can stop treating lead generation as a
-        chaotic art project and start treating it as a repeatable system that gets better
-        over time.
+        These are hypotheses, not promised results. A pilot would need agreed measures
+        and a review of actual outcomes.
       </p>
 
       <h2>Where we are today</h2>
       <p>
-        We&apos;re early, and we&apos;re building deliberately. The first milestone is an
-        rep that runs a narrow workflow reliably for our own use: a single ICP, a small
-        set of channels, strict messaging boundaries and complete observability.
+        This article does not establish the current build or deployment status of an
+        outbound product. A responsible first milestone, if approved, could scope one
+        narrow process, one authorized source and explicit human review.
       </p>
       <p>
-        From there we expand carefully: more industries, more channels, better intent
-        signals, richer personalisation, smarter routing to people, and continuous
-        evaluation.
+        Any expansion would depend on measured results, verified integrations, and
+        separate decisions about industries, channels, data sources and permissions.
       </p>
       <p>
-        If you run a business where pipeline matters, we&apos;d love to talk. We&apos;re
-        choosing a small group of early partners to help shape the rep in real production
-        environments.
+        If this kind of workflow is relevant to your business, contact Minkops to discuss
+        the process and the evidence a real deployment would require.
       </p>
     </BlogPostLayout>
   );

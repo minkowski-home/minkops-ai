@@ -16,7 +16,7 @@ export default function NotFoundPage() {
       <PageHero
         eyebrow="404 · Not found"
         title="Nothing lives at this address."
-        lead="Even Imel couldn't find this one. The link may be old, or the page may have moved when we rebuilt the site. Everything that matters is a click away."
+        lead="We couldn't find this page. The link may be old, or the page may have moved. Everything that matters is a click away."
       >
         <p className="mk-not-found__path">{pathname}</p>
         <div className="mk-not-found__actions">

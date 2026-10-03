@@ -14,8 +14,7 @@ export const SITE = {
   ],
   links: {
     linkedin: "https://linkedin.com/company/minkops",
-    myndral: "https://app.myndral.com",
-    minkowskiHome: "https://minkowskihome.com"
+    myndral: "https://app.myndral.com"
   }
 } as const;
 

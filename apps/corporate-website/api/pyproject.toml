@@ -5,6 +5,7 @@ description = "FastAPI backend for corporate website"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiosmtplib>=3.0.0",
     "fastapi>=0.115",
     "uvicorn>=0.53.0",
 ]
