@@ -13,7 +13,7 @@ from aiosmtplib.errors import SMTPRecipientsRefused, SMTPResponseException
 
 RECIPIENT = "info@minkops.com"
 PUBLIC_SENDER = "info@minkops.com"
-SMTP_HOST = "smtp.gmail.com"
+SMTP_HOST = "smtp-relay.gmail.com"
 SMTP_PORT = 587
 SMTP_TIMEOUT_SECONDS = 8
 logger = logging.getLogger(__name__)
