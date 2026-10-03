@@ -69,3 +69,19 @@ def test_missing_smtp_configuration_fails_closed(monkeypatch, submission):
         asyncio.run(guard.send(submission, "same-key"))
     assert not error.value.ambiguous
     assert "private configuration" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [workspace_smtp.SmtpSetupFailure, workspace_smtp.SmtpRejected],
+)
+def test_pre_acceptance_failure_is_not_marked_ambiguous(monkeypatch, submission, failure):
+    async def reject(**_kwargs):
+        raise failure("private diagnostic")
+
+    monkeypatch.setattr(interest_delivery, "send_discovery_notification", reject)
+    guard = interest_delivery.DeliveryGuard()
+
+    with pytest.raises(interest_delivery.DeliveryError) as error:
+        asyncio.run(guard.send(submission, "same-key"))
+    assert not error.value.ambiguous

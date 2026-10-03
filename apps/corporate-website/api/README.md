@@ -50,9 +50,20 @@ The API includes a honeypot, a five-request-per-ten-minute per-process limiter,
 and a bounded one-day in-process duplicate guard. Google Workspace SMTP has no
 provider idempotency key: accepted or ambiguous attempts are suppressed only in
 that process, not durably across restarts, instances, or overlapping revisions.
-A transport failure after SMTP begins is treated as ambiguous; the visitor is
+A disconnect or timeout during message submission is ambiguous; the visitor is
 told not to retry automatically and to contact the fixed inbox so a person can
-check. Do not log request bodies, credentials, or provider response details.
+check. Connection, TLS, authentication, and explicit SMTP rejection responses
+are reported as confirmed pre-acceptance failures. Adapter logs include only
+the phase, exception class, and numeric SMTP response code; they never include
+request bodies, credentials, provider response text, or account addresses.
+The relay connection uses `minkops.com` as its EHLO identity.
+
+The connector's no-message runtime check can distinguish relay reachability/TLS
+from authentication without sending a test email:
+
+```bash
+python -m minkops_connectors.smtp_diagnostics
+```
 
 The API returns `202` only after the Workspace SMTP server accepts the message;
 that alone does not prove the message reached or was read in the target inbox.
