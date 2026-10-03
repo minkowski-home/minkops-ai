@@ -1,5 +1,3 @@
-import type { WorkArea } from "../content/funnel";
-import type { Team } from "../content/team";
 import { ANCHORS } from "../content/site";
 import { Section } from "../layout/Section";
 import InterestForm from "./InterestForm";
@@ -7,36 +5,30 @@ import InterestForm from "./InterestForm";
 const PROMISES = [
   {
     title: "We use it before we sell it",
-    body: "Imel reads our own inbox and drafts replies before anyone on the team opens it. Kall works our support queue. If something is rough, we're the first to feel it."
+    body: "We try these ideas in our own businesses to learn what helps and where a person should step in."
   },
   {
     title: "One employee, one whole role",
-    body: "Each one takes an entire job with its own skills, not a single chore. They talk to each other and share one memory of your business, so nothing gets explained twice."
+    body: "Choose an employee for a job you want off your plate, then decide what that job includes."
   },
   {
     title: "You stay in charge",
-    body: "Anything above an employee's authority lands in your queue with a drafted answer. You approve it, change it, or take it from there, and every correction teaches them something."
+    body: "Agree on what it can do and when it should check with you. You can review what happened."
   },
   {
     title: "It doesn't clock off",
-    body: "Your team works around the clock, not in one-off bursts. Monday morning starts with the weekend already handled."
+    body: "These examples are just illustrations. We first agree where the work fits and when it should ask you."
   }
 ] as const;
 
-export default function AccessSection({
-  suggestedArea,
-  team
-}: {
-  suggestedArea?: WorkArea;
-  team: Team;
-}) {
+export default function AccessSection() {
   return (
     <Section
       id={ANCHORS.access}
       tone="sunken"
       eyebrow="Get access"
       title="Hire your first employee."
-      lead="Minkops is pre-sale, and that's on purpose. Our first customers get their team set up by hand, by the people who built it, so we can see what works in your business and not just in ours."
+      lead="Tell us what you wish took less time. We’ll talk through what to hand off and where you want to stay involved."
     >
       <div className="mk-access">
         <ul className="mk-access__promises">
@@ -47,7 +39,7 @@ export default function AccessSection({
             </li>
           ))}
         </ul>
-        <InterestForm suggestedArea={suggestedArea} team={team} />
+        <InterestForm />
       </div>
     </Section>
   );

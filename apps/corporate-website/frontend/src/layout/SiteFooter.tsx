@@ -9,9 +9,9 @@ const COLUMNS: ReadonlyArray<{ heading: string; links: readonly FooterLink[] }> 
   {
     heading: "Platform",
     links: [
-      { label: "Meet the team", to: "/" },
-      { label: "How they work together", to: "/orchestration" },
-      { label: "Find your first hire", to: FUNNEL_HREF },
+      { label: "Explore workflow examples", to: "/" },
+      { label: "How workflows work", to: "/orchestration" },
+      { label: "Find a workflow starting point", to: FUNNEL_HREF },
       { label: "Get access", to: ACCESS_HREF }
     ]
   },
@@ -33,10 +33,7 @@ const COLUMNS: ReadonlyArray<{ heading: string; links: readonly FooterLink[] }> 
   },
   {
     heading: "The family",
-    links: [
-      { label: "Myndral", to: SITE.links.myndral, external: true },
-      { label: "Minkowski Home", to: SITE.links.minkowskiHome, external: true }
-    ]
+    links: [{ label: "Myndral", to: SITE.links.myndral, external: true }]
   }
 ];
 
@@ -69,7 +66,7 @@ export default function SiteFooter() {
         <div className="mk-footer__brand">
           <Wordmark inverse />
           <p className="mk-footer__tagline">
-            AI employees for small teams with more work than hands.
+            AI employees organized around practical Workflows, with people responsible for decisions.
           </p>
           <address className="mk-footer__address">
             {SITE.address.map((line) => (
@@ -93,7 +90,7 @@ export default function SiteFooter() {
       </div>
 
       <div className="mk-footer__base">
-        <p>© {year} Minkops. A product of Minkowski Home. All rights reserved.</p>
+        <p>© {year} Minkops AI. The team behind Myndral. All rights reserved.</p>
         <span className="mk-footer__legal">
           <Link to="/privacy" className="mk-footer__link mk-footer__link--quiet">
             Privacy policy

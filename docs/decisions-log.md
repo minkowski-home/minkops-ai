@@ -3,6 +3,31 @@
 Entries below preserve historical decisions and may describe structures that
 have since changed. See `engineering-architecture.md` for the current model.
 
+### 2026-10-03 — Keep website inquiry delivery inside the repository layers
+
+**Situation:** The corporate website's discovery form needed real server-side
+delivery, while its API package ships independently from the broader backend.
+Embedding SMTP construction and retry policy in the HTTP app would couple
+transport details to the external provider and make the delivery behavior hard
+to exercise separately.
+
+**Decision:** Keep request validation, CORS, HTTP errors, and request rate
+limiting in `apps/corporate-website/api`. Put the submission value, bounded
+best-effort duplicate control, and delivery orchestration in `platform/`; keep
+Workspace SMTP configuration, MIME construction, and network calls in
+`connectors/`. Package only these scoped modules into the standalone website
+container rather than importing unrelated platform features.
+
+SMTP does not offer an idempotency key for this flow. The process-local guard
+suppresses identical submissions while its state exists and records an
+uncertain result after an ambiguous send failure. This is not durable or
+cross-instance exactly-once delivery; visitors are told not to resubmit when
+acceptance cannot be confirmed.
+
+**Result:** API, orchestration, and transport behavior can be tested at their
+respective boundaries, and the website release does not need unrelated
+Accounts, authentication, or database packages.
+
 ### 2026-09-28 — Workflow-first Python architecture and lean repository layout
 
 **Situation:** The repository's backend architecture centered named agents, a

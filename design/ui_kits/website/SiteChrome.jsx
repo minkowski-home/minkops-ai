@@ -42,7 +42,7 @@ function SiteNav({ route, onRoute }) {
 const FOOTER_COLS = [
   { head: "Platform", links: ["Agents", "Orchestration", "Pricing"] },
   { head: "Company", links: ["About us", "Careers", "Blog", "info@minkops.com", "hr@minkops.com", "LinkedIn"] },
-  { head: "More from the family", links: ["Myndral", "Minkowski Home"] }
+  { head: "More from the family", links: ["Myndral"] }
 ];
 
 function SiteFooter() {
@@ -56,7 +56,7 @@ function SiteFooter() {
           </span>
           <p style={{ margin: 0, font: "var(--type-body-sm)", color: "var(--text-inverse-muted)" }}>Operating system for zero-man companies</p>
           <address style={{ font: "var(--type-mono)", color: "var(--text-inverse-muted)", fontStyle: "normal", lineHeight: 1.7 }}>
-            375 University Avenue Suite 3215<br />Toronto, ON M5G 2J5<br />Canada
+            375 University Avenue Suite 3273<br />Toronto, ON M5G 2J5<br />Canada
           </address>
         </div>
         {FOOTER_COLS.map((c) => (
@@ -69,7 +69,7 @@ function SiteFooter() {
         ))}
       </div>
       <div style={{ maxWidth: "var(--container-w)", margin: "40px auto 0", paddingTop: "16px", borderTop: "1px solid var(--border-inverse)", display: "flex", gap: "16px", flexWrap: "wrap" }}>
-        <p style={{ margin: 0, font: "var(--type-mono)", color: "var(--text-inverse-muted)" }}>© 2026 Minkops. A product of Minkowski Home. All rights reserved.</p>
+        <p style={{ margin: 0, font: "var(--type-mono)", color: "var(--text-inverse-muted)" }}>© 2026 Minkops AI. The team behind Myndral.</p>
         <span style={{ marginLeft: "auto", display: "flex", gap: "16px" }}>
           <a href="#" style={{ font: "var(--type-mono)", color: "var(--text-inverse-muted)", borderBottom: "none" }}>Privacy policy</a>
           <a href="#" style={{ font: "var(--type-mono)", color: "var(--text-inverse-muted)", borderBottom: "none" }}>Terms of service</a>
