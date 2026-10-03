@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 
 import aiosmtplib
+from aiosmtplib.errors import SMTPRecipientsRefused, SMTPResponseException
 
 RECIPIENT = "info@minkops.com"
 PUBLIC_SENDER = "info@minkops.com"
-SMTP_HOST = "smtp.gmail.com"
+SMTP_HOST = "smtp-relay.gmail.com"
 SMTP_PORT = 587
 SMTP_TIMEOUT_SECONDS = 8
+logger = logging.getLogger(__name__)
 
 
 class SmtpConfigurationError(Exception):
@@ -22,6 +25,44 @@ class SmtpConfigurationError(Exception):
 
 class SmtpOutcomeUncertain(Exception):
     """SMTP stopped responding after a send attempt began."""
+
+
+class SmtpSetupFailure(Exception):
+    """The SMTP connection or authentication failed before message submission."""
+
+
+class SmtpRejected(Exception):
+    """The SMTP server explicitly rejected a message before accepting it."""
+
+
+def _log_smtp_failure(phase: str, error: Exception) -> None:
+    """Log only safe diagnostic metadata, never provider text or message data."""
+
+    code = getattr(error, "code", None)
+    if not isinstance(code, int) or not 100 <= code <= 599:
+        code = None
+    reason = str(error).lower()
+    if type(error).__name__ == "SMTPAuthenticationError":
+        category = "authentication_rejected"
+    elif any(term in reason for term in ("try again later", "server busy", "service isn't available")):
+        category = "temporary_service_unavailable"
+    elif any(term in reason for term in ("relay denied", "not authorized", "not registered")):
+        category = "relay_policy_rejected"
+    elif any(term in reason for term in ("invalid credentials", "authentication failed")):
+        category = "authentication_rejected"
+    elif code is not None and 400 <= code < 500:
+        category = "temporary_smtp_failure"
+    elif code is not None and 500 <= code < 600:
+        category = "permanent_smtp_failure"
+    else:
+        category = "unknown_smtp_failure"
+    logger.warning(
+        "Workspace SMTP failed phase=%s error_class=%s response_code=%s category=%s",
+        phase,
+        type(error).__name__,
+        code,
+        category,
+    )
 
 
 def _render_message(
@@ -77,21 +118,44 @@ async def send_discovery_notification(
     mail["Message-ID"] = message_id
     mail.set_content(text_body)
     mail.add_alternative(html_body, subtype="html")
+    client = aiosmtplib.SMTP(
+        hostname=host,
+        port=SMTP_PORT,
+        local_hostname="minkops.com",
+        start_tls=True,
+        timeout=SMTP_TIMEOUT_SECONDS,
+    )
+    connected = False
     try:
-        await aiosmtplib.send(
-            mail,
-            hostname=host,
-            port=SMTP_PORT,
-            start_tls=True,
-            username=username,
-            password=password,
-            sender=sender,
-            recipients=[RECIPIENT],
-            timeout=SMTP_TIMEOUT_SECONDS,
-        )
-    except Exception:
-        # SMTP may accept DATA before a timeout/disconnect reaches this client.
-        raise SmtpOutcomeUncertain(
-            "Email acceptance could not be confirmed."
-        ) from None
+        try:
+            await client.connect()
+            connected = True
+        except Exception as exc:
+            _log_smtp_failure("connect_or_tls", exc)
+            raise SmtpSetupFailure("SMTP connection could not be established") from None
+
+        try:
+            await client.login(username, password)
+        except Exception as exc:
+            _log_smtp_failure("authentication", exc)
+            raise SmtpSetupFailure("SMTP authentication failed") from None
+
+        try:
+            await client.send_message(mail, sender=sender, recipients=[RECIPIENT])
+        except (SMTPResponseException, SMTPRecipientsRefused) as exc:
+            # A complete negative SMTP response confirms this message was refused.
+            _log_smtp_failure("message_rejected", exc)
+            raise SmtpRejected("SMTP server rejected the message") from None
+        except Exception as exc:
+            # A disconnect while sending DATA may follow server acceptance.
+            _log_smtp_failure("message_outcome_uncertain", exc)
+            raise SmtpOutcomeUncertain(
+                "Email acceptance could not be confirmed."
+            ) from None
+    finally:
+        if connected:
+            try:
+                await client.quit()
+            except Exception as exc:
+                _log_smtp_failure("connection_cleanup", exc)
     return message_id
