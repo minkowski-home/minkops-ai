@@ -5,19 +5,19 @@ import InterestForm from "./InterestForm";
 const PROMISES = [
   {
     title: "We use it before we sell it",
-    body: "We use our own businesses to learn where practical workflows help and where people need to review the result."
+    body: "We try these ideas in our own businesses to learn what helps and where a person should step in."
   },
   {
     title: "One employee, one whole role",
-    body: "An Employee is a product grouping. Each Workflow defines a business outcome, its steps and the points where a person reviews or decides."
+    body: "Choose an employee for a job you want off your plate, then decide what that job includes."
   },
   {
     title: "You stay in charge",
-    body: "Approvals and decisions that need a person should be explicit in the Workflow, with a clear way to review what happened."
+    body: "Agree on what it can do and when it should check with you. You can review what happened."
   },
   {
     title: "It doesn't clock off",
-    body: "Examples on this site are illustrations. We confirm fit, integrations, permissions and verification before treating any Workflow as ready."
+    body: "These examples are just illustrations. We first agree where the work fits and when it should ask you."
   }
 ] as const;
 
@@ -28,7 +28,7 @@ export default function AccessSection() {
       tone="sunken"
       eyebrow="Get access"
       title="Hire your first employee."
-      lead="Tell us what the process should accomplish and where it happens today. We’ll discuss the steps, the tools you can authorize, and how you would verify the result."
+      lead="Tell us what you wish took less time. We’ll talk through what to hand off and where you want to stay involved."
     >
       <div className="mk-access">
         <ul className="mk-access__promises">
