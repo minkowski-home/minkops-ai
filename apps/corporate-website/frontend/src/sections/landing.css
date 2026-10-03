@@ -41,84 +41,51 @@
 }
 
 .mk-starting-points {
-  display: grid;
-  justify-items: center;
-}
-
-.mk-starting-points__origin {
-  position: relative;
-  margin: 0;
-  padding: var(--sp-3) var(--sp-5);
-  border: var(--rule-default);
-  border-radius: var(--radius-2);
-  background: var(--surface-raised);
-  font: var(--type-label);
-}
-
-.mk-starting-points__origin::after {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  width: 1px;
-  height: var(--sp-7);
-  background: var(--border-strong);
-  content: "";
+  width: 100%;
 }
 
 .mk-starting-points__options {
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-9);
+  gap: var(--sp-6);
   width: 100%;
-  margin: var(--sp-7) 0 0;
-  padding: var(--sp-7) 0 0;
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
-.mk-starting-points__options::before {
-  position: absolute;
-  top: 0;
-  left: 25%;
-  right: 25%;
-  height: 1px;
-  background: var(--border-strong);
-  content: "";
-}
-
 .mk-starting-points__option {
-  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: var(--sp-4);
-  padding: var(--sp-6) var(--sp-4) var(--sp-3);
-  border: 1px solid transparent;
-  border-top: var(--rule);
+  align-items: stretch;
+  gap: var(--sp-5);
+  min-height: 100%;
+  padding: var(--sp-7);
+  border: var(--rule-default);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  text-decoration: none;
   animation: mk-starting-point-in var(--dur-slow) var(--ease-out) both;
   transition:
     background-color var(--dur-base) var(--ease-out),
     border-color var(--dur-base) var(--ease-out);
 }
 
-.mk-starting-points__option::before {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  width: 1px;
-  height: var(--sp-7);
-  background: var(--border-strong);
-  content: "";
-}
-
-.mk-starting-points__option:nth-child(2) {
+.mk-starting-points__options li:nth-child(2) .mk-starting-points__option {
   animation-delay: 70ms;
 }
 
 .mk-starting-points__option:hover,
-.mk-starting-points__option:focus-within {
+.mk-starting-points__option:focus-visible {
   border-color: var(--ember-tint-24);
   background: var(--surface-accent-soft);
+}
+
+.mk-starting-points__content {
+  display: grid;
+  align-content: start;
+  justify-items: start;
 }
 
 .mk-starting-points__number {
@@ -136,6 +103,12 @@
   margin: var(--sp-3) 0 0;
   color: var(--text-secondary);
   font: var(--type-body-sm);
+}
+
+.mk-starting-points__action {
+  margin-top: var(--sp-6);
+  color: var(--text-action);
+  font: var(--type-label);
 }
 
 .mk-hero__actions {
@@ -1522,13 +1495,6 @@
   .mk-starting-points__options {
     grid-template-columns: 1fr;
     gap: var(--sp-6);
-    padding-top: 0;
-  }
-
-  .mk-starting-points__options::before,
-  .mk-starting-points__origin::after,
-  .mk-starting-points__option::before {
-    display: none;
   }
   .mk-hero {
     padding: var(--sp-12) var(--sp-6) var(--sp-11);

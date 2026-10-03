@@ -34,58 +34,47 @@ export default function MyndralOperations() {
 
       <h2>Listener email, read before anyone opens the inbox</h2>
       <p>
-        <strong>Imel</strong> triages everything that arrives in Myndral&apos;s listener
-        inbox: subscription questions, playback problems and, more often than you&apos;d
-        expect from a music app, genuine questions about the lore. Fans of a closed
-        musical universe ask detailed questions about artist backstories and how two
-        artists&apos; catalogs connect. Imel sorts the billing issues from the canon
-        questions, and drafts replies that stay consistent with each artist&apos;s
-        established story instead of a generic &quot;thanks for reaching out.&quot;
+        A possible inbox Workflow could classify a listener question as billing, playback
+        or catalog context, then prepare a draft using approved source material. A person
+        would review the draft and handle anything the available context cannot answer.
+        No listener inbox is connected in this example.
       </p>
-      <PostNote label="Why this is harder than a normal support inbox">
-        A generic support bot doesn&apos;t know Myndral&apos;s canon. Imel works from the
-        same catalog context the product itself is built on, so a reply about an
-        artist&apos;s backstory doesn&apos;t contradict what&apos;s actually been
-        published.
+      <PostNote label="Context a workflow would need">
+        A real implementation would need an approved, current catalog source and a way
+        for a person to verify the draft before it is sent.
       </PostNote>
 
       <h2>Catalog and subscription questions, resolved without a queue</h2>
       <p>
-        <strong>Kall</strong> handles the recurring account and subscription tickets: a
-        listener who can&apos;t find a saved playlist after switching devices, someone
-        asking why a track vanished from a playlist after an artist&apos;s catalog was
-        updated. Each of those has a real, specific answer sitting in the account or
-        catalog record, so Kall resolves the ticket directly instead of routing it into a
-        backlog that gets worked through once a week.
+        For an account or subscription question, a proposed Workflow could gather the
+        relevant record and prepare a response for review. Whether it can retrieve that
+        record or resolve the request depends on separately approved integrations and
+        permissions; neither is demonstrated here.
       </p>
-      <PostNote label="The quiet win">
-        Tickets get closed the day they&apos;re opened, not the week they&apos;re opened,
-        without adding a support hire to a five-person team.
+      <PostNote label="Outcome to verify">
+        Response time and resolution rate would need to be measured in a real deployment.
+        This sketch reports no operational results.
       </PostNote>
 
       <h2>Watching the catalog, not just the inbox</h2>
       <p>
-        <strong>Insi</strong>, our business analyst, keeps an eye on which artists and
-        albums are landing with listeners and which are quietly underperforming. It&apos;s
-        the same signal a label&apos;s A&amp;R team tracks by hand, watched continuously
-        instead of reviewed once a quarter. A curated label needs that before deciding
-        what to release next. It just shouldn&apos;t need a dedicated analyst on payroll
-        to get it.
+        A reporting Workflow might summarize approved catalog and listening data for a
+        person to review before making a release decision. This example has no access to
+        Myndral&apos;s analytics and makes no claim about listener response or release
+        performance.
       </p>
-      <PostNote label="Why curation and automation aren't in tension here">
-        Myndral&apos;s whole pitch is coherence over volume. Employees carrying the
-        operational load are what let a small team hold that bar, instead of trading it
-        away for scale.
+      <PostNote label="Human decision point">
+        The example leaves interpretation and release choices with a person; it does not
+        automate catalog decisions.
       </PostNote>
 
       <h2>What this actually proves</h2>
       <p>
-        Myndral and Minkowski Home could hardly be less alike. One sells furniture; the
-        other runs a music label. That&apos;s exactly why we use both as case studies. The
-        same employees, <Link to="/orchestration">working as one team</Link>, handle inbox
-        triage, support resolution and catalog monitoring in either one, because the
-        underlying job doesn&apos;t change between a furniture company and a record label:
-        read the message, work out what it needs, act on it inside a policy.
+        This sketch proves no integration or customer outcome. It illustrates how a
+        small creative business might approach repeat work like message triage and
+        response drafts, while keeping each
+        business&apos;s tools, permissions and procedures distinct. See the{" "}
+        <Link to="/orchestration">product model</Link> for those boundaries.
       </p>
     </BlogPostLayout>
   );
