@@ -26,7 +26,6 @@ def valid_payload(**overrides):
         "company": "Example Co",
         "interest": "operations",
         "message": "We need help with <reports>.",
-        "team": ["Imel", "Kall"],
         **overrides,
     }
 
@@ -39,7 +38,6 @@ def test_valid_submission_returns_provider_acceptance_and_fixed_recipient(client
     assert response.status_code == 202
     assert response.json() == {"status": "accepted", "message_id": "email_test_123"}
     assert len(sent) == 1
-    assert sent[0][0].team == ["Imel", "Kall"]
 
 
 def test_invalid_fields_are_rejected_before_delivery(client):
@@ -156,7 +154,6 @@ def test_resend_request_uses_fixed_target_and_escaped_content(monkeypatch):
     assert captured["headers"]["Idempotency-key"] == "stable-key"
     assert captured["payload"]["to"] == ["info@minkops.com"]
     assert captured["payload"]["reply_to"] == "alex@example.com"
-    assert "Imel, Kall" in captured["payload"]["text"]
     assert "&lt;reports&gt;" in captured["payload"]["html"]
     assert captured["timeout"] == 8
 

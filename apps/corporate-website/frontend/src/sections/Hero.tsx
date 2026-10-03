@@ -14,15 +14,13 @@ export default function Hero() {
 
         <div className="mk-hero__lead">
           <p>
-            Minkops groups AI Employees around practical business Workflows. A Workflow
-            describes the outcome, the steps involved and the tools it may use. Start with
-            a repeatable process, then shape its access and review rules around your
-            business.
+            Start with the repeat work that keeps landing on your plate. Minkops helps
+            you find a good way to handle it while keeping you in charge of the decisions
+            that matter.
           </p>
           <p>
-            Skills explain how work should be done. Tools and connectors provide the
-            approved way to interact with existing systems. People remain responsible for
-            approvals and decisions the Workflow is not allowed to make.
+            Choose and set things up yourself, or tell us about your business and let
+            Minkops put together a good place to start.
           </p>
         </div>
 

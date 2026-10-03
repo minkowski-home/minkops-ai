@@ -33,38 +33,109 @@
   color: var(--text-secondary);
 }
 
-/* ---- Employee / Workflow model -------------------------------- */
+/* ---- Two ways to get started ----------------------------------- */
 
-.mk-model {
+@keyframes mk-starting-point-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mk-starting-points {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-5);
+  justify-items: center;
+}
+
+.mk-starting-points__origin {
+  position: relative;
   margin: 0;
-  padding: 0;
+  padding: var(--sp-3) var(--sp-5);
+  border: var(--rule-default);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+  font: var(--type-label);
+}
+
+.mk-starting-points__origin::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: var(--sp-7);
+  background: var(--border-strong);
+  content: "";
+}
+
+.mk-starting-points__options {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-9);
+  width: 100%;
+  margin: var(--sp-7) 0 0;
+  padding: var(--sp-7) 0 0;
   list-style: none;
 }
 
-.mk-model__card {
-  display: grid;
-  align-content: start;
-  gap: var(--sp-4);
-  min-height: 100%;
+.mk-starting-points__options::before {
+  position: absolute;
+  top: 0;
+  left: 25%;
+  right: 25%;
+  height: 1px;
+  background: var(--border-strong);
+  content: "";
 }
 
-.mk-model__title {
+.mk-starting-points__option {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-4) var(--sp-3);
+  border: 1px solid transparent;
+  border-top: var(--rule);
+  animation: mk-starting-point-in var(--dur-slow) var(--ease-out) both;
+  transition:
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.mk-starting-points__option::before {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 1px;
+  height: var(--sp-7);
+  background: var(--border-strong);
+  content: "";
+}
+
+.mk-starting-points__option:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.mk-starting-points__option:hover,
+.mk-starting-points__option:focus-within {
+  border-color: var(--ember-tint-24);
+  background: var(--surface-accent-soft);
+}
+
+.mk-starting-points__number {
+  color: var(--text-accent);
+  font: var(--type-mono);
+}
+
+.mk-starting-points__title {
+  margin: 0;
   font: var(--type-h3);
 }
 
-.mk-model__body,
-.mk-model__note {
-  margin: 0;
+.mk-starting-points__description {
+  max-width: var(--measure);
+  margin: var(--sp-3) 0 0;
   color: var(--text-secondary);
   font: var(--type-body-sm);
-}
-
-.mk-model__note {
-  max-width: var(--measure);
-  margin-top: var(--sp-6);
 }
 
 .mk-hero__actions {
@@ -950,7 +1021,7 @@
   color: var(--status-ok);
 }
 
-/* ---- Glyph tiles (graphite, like agent avatars in the real console) ---- */
+/* ---- Simple markers for the illustrative workflow preview ---------- */
 
 .mk-app-glyph {
   display: grid;
@@ -1031,9 +1102,15 @@
   color: var(--text-secondary);
 }
 
-.mk-pipeline__step--agent {
+.mk-pipeline__step--workflow {
   background: var(--surface-inverse);
   color: var(--text-inverse);
+}
+
+.mk-decision__working {
+  margin: 0;
+  color: var(--text-muted);
+  font: var(--type-body-sm);
 }
 
 .mk-pipeline__step--destination {
@@ -1442,8 +1519,16 @@
 }
 
 @media (max-width: 720px) {
-  .mk-model {
+  .mk-starting-points__options {
     grid-template-columns: 1fr;
+    gap: var(--sp-6);
+    padding-top: 0;
+  }
+
+  .mk-starting-points__options::before,
+  .mk-starting-points__origin::after,
+  .mk-starting-points__option::before {
+    display: none;
   }
   .mk-hero {
     padding: var(--sp-12) var(--sp-6) var(--sp-11);

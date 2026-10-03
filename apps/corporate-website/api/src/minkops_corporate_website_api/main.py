@@ -45,15 +45,6 @@ class InterestSubmission(BaseModel):
     interest: str = Field(default="unsure", max_length=40)
     message: str = Field(default="", max_length=3000)
     website: str = Field(default="", max_length=200)
-    team: list[str] = Field(default_factory=list, max_length=40)
-
-    @field_validator("team")
-    @classmethod
-    def validate_team(cls, value: list[str]) -> list[str]:
-        if any(not name.strip() or len(name) > 80 for name in value):
-            raise ValueError("Choose a valid team member")
-        return value
-
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: str) -> str:
@@ -116,7 +107,6 @@ def _render_message(payload: InterestSubmission) -> tuple[str, str]:
         f"Email: {payload.email}",
         f"Company: {payload.company or 'Not provided'}",
         f"Interested in: {payload.interest}",
-        f"Shortlist: {', '.join(payload.team) or 'Not provided'}",
         "",
         "Additional context:",
         payload.message or "Not provided",

@@ -1,6 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { WorkArea } from "../content/funnel";
-import type { Team } from "../content/team";
 import { SITE } from "../content/site";
 import { Field, Input, Select, Textarea } from "../ui/forms";
 import { Badge, Button, Card } from "../ui/primitives";
@@ -76,7 +75,7 @@ function validate(state: FormState): Errors {
 }
 
 /** Sends the visitor's request and requires explicit provider acceptance. */
-async function submitInterest(payload: FormState & { team: Team }): Promise<void> {
+async function submitInterest(payload: FormState): Promise<void> {
   const response = await fetch(INTEREST_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -95,13 +94,7 @@ async function submitInterest(payload: FormState & { team: Team }): Promise<void
   }
 }
 
-export default function InterestForm({
-  suggestedArea,
-  team = []
-}: {
-  suggestedArea?: WorkArea;
-  team?: Team;
-}) {
+export default function InterestForm({ suggestedArea }: { suggestedArea?: WorkArea }) {
   const [state, setState] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
   const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "failed">("idle");
@@ -137,7 +130,7 @@ export default function InterestForm({
 
     setStatus("submitting");
     try {
-      await submitInterest({ ...state, team });
+      await submitInterest(state);
       setStatus("sent");
     } catch {
       setStatus("failed");
@@ -251,17 +244,6 @@ export default function InterestForm({
           />
         </Field>
 
-        {team.length > 0 ? (
-          <div className="mk-interest__team">
-            <p className="mk-field__label">Your shortlist</p>
-            <p className="mk-interest__team-list">{team.join(" · ")}</p>
-            <p className="mk-field__hint">
-              We&apos;ll come to the conversation ready to talk about these {team.length}.
-              Change them in the roster above.
-            </p>
-          </div>
-        ) : null}
-
         {status === "failed" ? (
           <p className="mk-interest__error" role="alert">
             That didn't go through on our side. Please try again, or write to{" "}
@@ -276,11 +258,7 @@ export default function InterestForm({
           fullWidth
           disabled={status === "submitting"}
         >
-          {status === "submitting"
-            ? "Sending…"
-            : team.length > 0
-              ? "Book a conversation"
-              : "Put me on the list"}
+          {status === "submitting" ? "Sending…" : "Put me on the list"}
         </Button>
       </form>
     </Card>

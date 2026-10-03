@@ -1,43 +1,41 @@
 import { Section } from "../layout/Section";
-import { Card, Eyebrow } from "../ui/primitives";
 
-const MODEL = [
+const STARTING_POINTS = [
   {
-    name: "Employee",
-    body: "The product grouping for AI-supported business work, configured under rules set by people."
+    number: "01",
+    title: "You choose",
+    description: "Pick the employees and workflows your business needs."
   },
   {
-    name: "Workflow",
-    body: "The defined business outcome, steps, and points where a person reviews or decides."
-  },
-  {
-    name: "Skills, tools and connectors",
-    body: "Skills describe procedures. Approved tools and connectors provide access to files and external systems."
+    number: "02",
+    title: "Minkops curates",
+    description: "Tell us what your business needs. We’ll put together a starting point."
   }
 ] as const;
 
 export default function WorkflowModel() {
   return (
     <Section
-      eyebrow="The product model"
-      title="Employee, Workflow, skills and tools."
-      lead="The Employee is the product grouping. The Workflow is the unit of work. Its instructions describe the procedure, while approved tools and connectors determine which systems it can use."
+      title="A good place to start."
     >
-      <ol className="mk-model">
-        {MODEL.map((item, index) => (
-          <li key={item.name}>
-            <Card className="mk-model__card">
-              <Eyebrow>{String(index + 1).padStart(2, "0")}</Eyebrow>
-              <h3 className="mk-model__title">{item.name}</h3>
-              <p className="mk-model__body">{item.body}</p>
-            </Card>
-          </li>
-        ))}
-      </ol>
-      <p className="mk-model__note">
-        A skill describes a procedure; it does not grant system access or prove an
-        external write. Workflows need explicit access and verification for those steps.
-      </p>
+      <div className="mk-starting-points">
+        <p className="mk-starting-points__origin">Your business</p>
+        <ol className="mk-starting-points__options">
+          {STARTING_POINTS.map((point) => (
+            <li className="mk-starting-points__option" key={point.number}>
+              <span className="mk-starting-points__number" aria-hidden="true">
+                {point.number}
+              </span>
+              <div>
+                <h3 className="mk-starting-points__title">{point.title}</h3>
+                <p className="mk-starting-points__description">
+                  {point.description}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
     </Section>
   );
 }
