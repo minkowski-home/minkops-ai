@@ -11,9 +11,11 @@ import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable
-from urllib.error import HTTPError, URLError
-from urllib.request import Request as UrlRequest, urlopen
+from email.message import EmailMessage
+from email.utils import formataddr, make_msgid
+from typing import Literal
+
+import aiosmtplib
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +23,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.responses import JSONResponse
 
 RECIPIENT = "info@minkops.com"
-RESEND_ENDPOINT = "https://api.resend.com/emails"
+PUBLIC_SENDER = "info@minkops.com"
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_TIMEOUT_SECONDS = 8
+DELIVERY_DEDUPE_TTL_SECONDS = 24 * 60 * 60
+DELIVERY_DEDUPE_MAX_ENTRIES = 20_000
 EMAIL_PATTERN = re.compile(r"^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$")
 INTEREST_VALUES = {
     "unsure",
@@ -61,7 +68,81 @@ class InterestSubmission(BaseModel):
 
 
 class DeliveryError(Exception):
-    """Provider not configured or unable to accept the submission."""
+    """SMTP delivery could not be confirmed, with a conservative send outcome."""
+
+    def __init__(self, message: str, *, ambiguous: bool = False) -> None:
+        super().__init__(message)
+        self.ambiguous = ambiguous
+
+
+@dataclass(frozen=True)
+class DeliveryRecord:
+    state: Literal["accepted", "uncertain"]
+    message_id: str
+    created_at: float
+
+
+class DeliveryGuard:
+    """Suppress same-process retries when SMTP cannot supply idempotency keys.
+
+    Accepted and uncertain attempts are retained for one day. This is a
+    best-effort guard for a single process, not a cross-instance or durable
+    exactly-once guarantee; Gmail SMTP does not provide one.
+    """
+
+    def __init__(self) -> None:
+        self._records: dict[str, DeliveryRecord] = {}
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._lock_users: dict[str, int] = defaultdict(int)
+
+    async def send(self, payload: InterestSubmission, key: str) -> str:
+        lock = self._locks[key]
+        self._lock_users[key] += 1
+        try:
+            async with lock:
+                now = time.monotonic()
+                record = self._records.get(key)
+                if record and now - record.created_at < DELIVERY_DEDUPE_TTL_SECONDS:
+                    if record.state == "accepted":
+                        return record.message_id
+                    raise DeliveryError(
+                        "Email acceptance is uncertain; do not retry automatically.",
+                        ambiguous=True,
+                    )
+                if record:
+                    self._records.pop(key, None)
+
+                self._prune(now)
+                if len(self._records) >= DELIVERY_DEDUPE_MAX_ENTRIES:
+                    raise DeliveryError("Email delivery is temporarily unavailable.")
+
+                try:
+                    message_id = await _send_with_workspace_smtp(payload)
+                except asyncio.CancelledError:
+                    self._records[key] = DeliveryRecord("uncertain", "", now)
+                    raise
+                except DeliveryError as exc:
+                    if exc.ambiguous:
+                        self._records[key] = DeliveryRecord("uncertain", "", now)
+                    raise
+                self._records[key] = DeliveryRecord("accepted", message_id, now)
+                return message_id
+        finally:
+            self._lock_users[key] -= 1
+            if self._lock_users[key] == 0:
+                self._lock_users.pop(key, None)
+                self._locks.pop(key, None)
+
+    def _prune(self, now: float) -> None:
+        expired = [
+            key
+            for key, record in self._records.items()
+            if now - record.created_at >= DELIVERY_DEDUPE_TTL_SECONDS
+        ]
+        for key in expired:
+            self._records.pop(key, None)
+            if self._lock_users.get(key, 0) == 0:
+                self._locks.pop(key, None)
 
 
 @dataclass
@@ -116,59 +197,61 @@ def _render_message(payload: InterestSubmission) -> tuple[str, str]:
     return text_body, f"<div>{html_body}</div>"
 
 
-def _send_with_resend(
-    payload: InterestSubmission,
-    idempotency_key: str,
-    *,
-    opener: Callable[..., object] = urlopen,
-) -> str:
-    api_key = os.getenv("RESEND_API_KEY", "").strip()
-    sender = os.getenv("RESEND_FROM_EMAIL", "").strip()
-    if not api_key or not sender:
-        raise DeliveryError("Email delivery is not configured")
-    if "\r" in sender or "\n" in sender:
+async def _send_with_workspace_smtp(payload: InterestSubmission) -> str:
+    """Send through the existing Google Workspace SMTP configuration."""
+
+    host = os.getenv("SMTP_HOST", "").strip().lower()
+    raw_port = os.getenv("SMTP_PORT", "").strip()
+    username = os.getenv("SMTP_USER", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "")
+    sender = os.getenv("SMTP_FROM_EMAIL", "").strip().lower()
+    sender_name = os.getenv("SMTP_FROM_NAME", "").strip()
+    if (
+        host != SMTP_HOST
+        or raw_port != str(SMTP_PORT)
+        or not username
+        or not password
+        or sender != PUBLIC_SENDER
+        or not sender_name
+        or any(char in sender_name for char in "\r\n")
+    ):
         raise DeliveryError("Email delivery is not configured")
 
     text_body, html_body = _render_message(payload)
-    request_body = json.dumps(
-        {
-            "from": sender,
-            "to": [RECIPIENT],
-            "reply_to": payload.email,
-            "subject": "New Minkops discovery request",
-            "text": text_body,
-            "html": html_body,
-        }
-    ).encode("utf-8")
-    request = UrlRequest(
-        RESEND_ENDPOINT,
-        data=request_body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Idempotency-Key": idempotency_key,
-        },
-        method="POST",
-    )
+    message_id = make_msgid(domain="minkops.com")
+    message = EmailMessage()
+    message["From"] = formataddr((sender_name, sender))
+    message["To"] = RECIPIENT
+    message["Reply-To"] = payload.email
+    message["Subject"] = "New Minkops discovery request"
+    message["Message-ID"] = message_id
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
     try:
-        with opener(request, timeout=8) as response:  # type: ignore[attr-defined]
-            status = getattr(response, "status", 200)
-            response_data = json.loads(response.read().decode("utf-8"))  # type: ignore[attr-defined]
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
-        raise DeliveryError("Email delivery was not accepted") from exc
-
-    if status < 200 or status >= 300 or not isinstance(response_data, dict):
-        raise DeliveryError("Email delivery was not accepted")
-    message_id = response_data.get("id")
-    if not isinstance(message_id, str) or not message_id:
-        raise DeliveryError("Email delivery was not accepted")
+        await aiosmtplib.send(
+            message,
+            hostname=host,
+            port=SMTP_PORT,
+            start_tls=True,
+            username=username,
+            password=password,
+            sender=sender,
+            recipients=[RECIPIENT],
+            timeout=SMTP_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        # Once transport begins, a disconnect may happen after SMTP accepted
+        # DATA. Preserve an uncertain outcome rather than risking a blind retry.
+        raise DeliveryError(
+            "Email acceptance could not be confirmed.", ambiguous=True
+        ) from None
     return message_id
 
 
 async def send_interest_email(payload: InterestSubmission, idempotency_key: str) -> str:
-    """Send with provider idempotency so browser retries cannot fan out duplicates."""
+    """Submit through the local duplicate guard and Workspace SMTP."""
 
-    return await asyncio.to_thread(_send_with_resend, payload, idempotency_key)
+    return await app.state.delivery_guard.send(payload, idempotency_key)
 
 
 app = FastAPI()
@@ -185,6 +268,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 app.state.interest_limiter = SlidingWindowLimiter()
+app.state.delivery_guard = DeliveryGuard()
 
 
 @app.middleware("http")
@@ -230,13 +314,16 @@ async def submit_interest(payload: InterestSubmission) -> dict[str, str]:
         json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     try:
-        message_id = await send_interest_email(payload, idempotency_key)
+        await send_interest_email(payload, idempotency_key)
     except DeliveryError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="We couldn't send your note yet. Please try again or email info@minkops.com.",
-        ) from exc
-    return {"status": "accepted", "message_id": message_id}
+        detail = (
+            "We couldn't confirm whether your note was sent. Please don't submit it again; "
+            "email info@minkops.com and we'll check."
+            if exc.ambiguous
+            else "We couldn't send your note yet. Please try again or email info@minkops.com."
+        )
+        raise HTTPException(status_code=503, detail=detail) from None
+    return {"status": "accepted"}
 
 
 if __name__ == "__main__":

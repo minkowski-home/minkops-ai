@@ -44,10 +44,12 @@ api/                      FastAPI service (health and discovery form delivery)
 
 ## Known limitations
 
-- **Discovery form delivery requires deployment setup.** The form posts to the FastAPI
-  service, which sends through Resend when `RESEND_API_KEY` and `RESEND_FROM_EMAIL` are
-  configured. Provider acceptance is not proof of receipt in `info@minkops.com`; see the
-  API README for deployment configuration and verification limits.
+- **Discovery form delivery requires deployment setup.** The form posts to a separately
+  deployed FastAPI service. The canonical Minkops production hosts use the checked-in
+  public Cloud Run endpoint; other hosts can override it with `VITE_INTEREST_API_URL`.
+  The service uses Google Workspace SMTP from server-only
+  environment settings. SMTP acceptance is not proof of receipt in
+  `info@minkops.com`; see the API README for deployment and verification limits.
 - **Fonts load from Google Fonts.** No licensed font binaries exist in the repo. If
   woff2 files are supplied, self-host them and drop the Google Fonts link from
   `index.html`.

@@ -1,4 +1,4 @@
-import json
+import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,13 +9,14 @@ from minkops_corporate_website_api import main
 @pytest.fixture
 def client(monkeypatch):
     main.app.state.interest_limiter = main.SlidingWindowLimiter()
+    main.app.state.delivery_guard = main.DeliveryGuard()
     sent = []
 
-    async def fake_send(payload, idempotency_key):
-        sent.append((payload, idempotency_key))
-        return "email_test_123"
+    async def fake_send(payload):
+        sent.append(payload)
+        return "<interest-test@minkops.com>"
 
-    monkeypatch.setattr(main, "send_interest_email", fake_send)
+    monkeypatch.setattr(main, "_send_with_workspace_smtp", fake_send)
     return TestClient(main.app), sent
 
 
@@ -36,7 +37,7 @@ def test_valid_submission_returns_provider_acceptance_and_fixed_recipient(client
     response = test_client.post("/api/interest", json=valid_payload())
 
     assert response.status_code == 202
-    assert response.json() == {"status": "accepted", "message_id": "email_test_123"}
+    assert response.json() == {"status": "accepted"}
     assert len(sent) == 1
 
 
@@ -49,7 +50,7 @@ def test_invalid_fields_are_rejected_before_delivery(client):
     assert sent == []
 
 
-def test_same_submission_uses_stable_provider_idempotency_key(client):
+def test_same_submission_is_sent_once(client):
     test_client, sent = client
     payload = valid_payload()
 
@@ -57,16 +58,41 @@ def test_same_submission_uses_stable_provider_idempotency_key(client):
     retry = test_client.post("/api/interest", json=payload)
 
     assert first.status_code == retry.status_code == 202
-    assert sent[0][1] == sent[1][1]
+    assert first.json() == retry.json()
+    assert len(sent) == 1
+
+
+def test_concurrent_identical_submissions_share_one_smtp_attempt(monkeypatch):
+    guard = main.DeliveryGuard()
+    calls = 0
+
+    async def fake_send(_payload):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        return "<interest-test@minkops.com>"
+
+    monkeypatch.setattr(main, "_send_with_workspace_smtp", fake_send)
+    payload = main.InterestSubmission(**valid_payload())
+
+    async def submit_twice():
+        return await asyncio.gather(
+            guard.send(payload, "same-key"), guard.send(payload, "same-key")
+        )
+
+    first, second = asyncio.run(submit_twice())
+
+    assert first == second == "<interest-test@minkops.com>"
+    assert calls == 1
 
 
 def test_provider_failure_is_reported_without_leaking_provider_details(client, monkeypatch):
     test_client, _ = client
 
-    async def fail_send(_payload, _idempotency_key):
+    async def fail_send(_payload):
         raise main.DeliveryError("secret provider response")
 
-    monkeypatch.setattr(main, "send_interest_email", fail_send)
+    monkeypatch.setattr(main, "_send_with_workspace_smtp", fail_send)
     response = test_client.post("/api/interest", json=valid_payload())
 
     assert response.status_code == 503
@@ -121,46 +147,111 @@ def test_invalid_requests_consume_rate_limit(client):
     assert sent == []
 
 
-def test_resend_request_uses_fixed_target_and_escaped_content(monkeypatch):
-    monkeypatch.setenv("RESEND_API_KEY", "test_secret")
-    monkeypatch.setenv("RESEND_FROM_EMAIL", "Minkops <hello@minkops.com>")
+def test_workspace_smtp_uses_fixed_target_sender_reply_to_and_escaped_content(monkeypatch):
+    monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "private@example.test")
+    monkeypatch.setenv("SMTP_PASSWORD", "not-a-real-password")
+    monkeypatch.setenv("SMTP_FROM_EMAIL", "info@minkops.com")
+    monkeypatch.setenv("SMTP_FROM_NAME", "Minkops")
     captured = {}
 
-    class Response:
-        status = 200
-
-        def read(self):
-            return b'{"id":"email_test_123"}'
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return None
-
-    def opener(request, timeout):
-        captured["url"] = request.full_url
-        captured["headers"] = dict(request.header_items())
-        captured["timeout"] = timeout
-        captured["payload"] = json.loads(request.data)
-        return Response()
+    async def fake_send(message, **kwargs):
+        captured["message"] = message
+        captured["kwargs"] = kwargs
 
     payload = main.InterestSubmission(**valid_payload())
-    message_id = main._send_with_resend(payload, "stable-key", opener=opener)
+    monkeypatch.setattr(main.aiosmtplib, "send", fake_send)
+    message_id = asyncio.run(main._send_with_workspace_smtp(payload))
+    message = captured["message"]
 
-    assert message_id == "email_test_123"
-    assert captured["url"] == "https://api.resend.com/emails"
-    assert captured["headers"]["Authorization"] == "Bearer test_secret"
-    assert captured["headers"]["Idempotency-key"] == "stable-key"
-    assert captured["payload"]["to"] == ["info@minkops.com"]
-    assert captured["payload"]["reply_to"] == "alex@example.com"
-    assert "&lt;reports&gt;" in captured["payload"]["html"]
-    assert captured["timeout"] == 8
+    assert message_id == message["Message-ID"]
+    assert message["From"] == "Minkops <info@minkops.com>"
+    assert message["To"] == "info@minkops.com"
+    assert message["Reply-To"] == "alex@example.com"
+    assert "&lt;reports&gt;" in message.get_body(preferencelist=("html",)).get_content()
+    assert captured["kwargs"] == {
+        "hostname": "smtp.gmail.com",
+        "port": 587,
+        "start_tls": True,
+        "username": "private@example.test",
+        "password": "not-a-real-password",
+        "sender": "info@minkops.com",
+        "recipients": ["info@minkops.com"],
+        "timeout": 8,
+    }
 
 
-def test_delivery_fails_closed_without_credentials(monkeypatch):
-    monkeypatch.delenv("RESEND_API_KEY", raising=False)
-    monkeypatch.delenv("RESEND_FROM_EMAIL", raising=False)
+def test_delivery_fails_closed_without_workspace_configuration(monkeypatch):
+    for name in (
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "SMTP_FROM_EMAIL",
+        "SMTP_FROM_NAME",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
     with pytest.raises(main.DeliveryError):
-        main._send_with_resend(main.InterestSubmission(**valid_payload()), "stable-key")
+        asyncio.run(
+            main._send_with_workspace_smtp(main.InterestSubmission(**valid_payload()))
+        )
+
+
+def test_smtp_timeout_is_ambiguous_and_identical_retry_is_suppressed(client, monkeypatch):
+    test_client, _sent = client
+    calls = 0
+
+    async def timeout_after_attempt(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise main.DeliveryError(
+            "Email acceptance could not be confirmed.", ambiguous=True
+        )
+
+    monkeypatch.setattr(main, "_send_with_workspace_smtp", timeout_after_attempt)
+    payload = valid_payload()
+
+    first = test_client.post("/api/interest", json=payload)
+    retry = test_client.post("/api/interest", json=payload)
+
+    assert first.status_code == retry.status_code == 503
+    assert "Please don't submit it again" in first.json()["detail"]
+    assert "Please don't submit it again" in first.json()["detail"]
+    assert calls == 1
+
+
+def test_workspace_smtp_rejects_non_google_hosts_and_non_public_from(monkeypatch):
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "private@example.test")
+    monkeypatch.setenv("SMTP_PASSWORD", "not-a-real-password")
+    monkeypatch.setenv("SMTP_FROM_EMAIL", "private@example.test")
+    monkeypatch.setenv("SMTP_FROM_NAME", "Minkops")
+
+    with pytest.raises(main.DeliveryError):
+        asyncio.run(
+            main._send_with_workspace_smtp(main.InterestSubmission(**valid_payload()))
+        )
+
+
+def test_smtp_transport_error_is_classified_as_ambiguous(monkeypatch):
+    monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "private@example.test")
+    monkeypatch.setenv("SMTP_PASSWORD", "not-a-real-password")
+    monkeypatch.setenv("SMTP_FROM_EMAIL", "info@minkops.com")
+    monkeypatch.setenv("SMTP_FROM_NAME", "Minkops")
+
+    async def timeout(*_args, **_kwargs):
+        raise TimeoutError("private transport diagnostic")
+
+    monkeypatch.setattr(main.aiosmtplib, "send", timeout)
+
+    with pytest.raises(main.DeliveryError) as error:
+        asyncio.run(
+            main._send_with_workspace_smtp(main.InterestSubmission(**valid_payload()))
+        )
+    assert error.value.ambiguous is True
+    assert "private transport diagnostic" not in str(error.value)

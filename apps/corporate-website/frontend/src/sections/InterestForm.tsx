@@ -4,7 +4,18 @@ import { SITE } from "../content/site";
 import { Field, Input, Select, Textarea } from "../ui/forms";
 import { Badge, Button, Card } from "../ui/primitives";
 
-const INTEREST_API_URL = import.meta.env.VITE_INTEREST_API_URL || "/api/interest";
+const PUBLIC_PRODUCTION_INTEREST_API_URL =
+  "https://minkops-interest-api-330283498133.us-central1.run.app/api/interest";
+const CANONICAL_PRODUCTION_HOSTS = new Set(["minkops.com", "www.minkops.com"]);
+const configuredInterestApiUrl = import.meta.env.VITE_INTEREST_API_URL?.trim();
+const currentHost = typeof window === "undefined" ? "" : window.location.hostname;
+const INTEREST_API_URL =
+  configuredInterestApiUrl ||
+  (import.meta.env.DEV
+    ? "/api/interest"
+    : CANONICAL_PRODUCTION_HOSTS.has(currentHost)
+      ? PUBLIC_PRODUCTION_INTEREST_API_URL
+      : undefined);
 
 /*
  * Waitlist form. The API returns acceptance only after the configured email
@@ -51,6 +62,8 @@ type FormState = {
 
 type Errors = Partial<Record<"name" | "email", string>>;
 
+class InterestApiUnavailableError extends Error {}
+
 const EMPTY: FormState = {
   name: "",
   email: "",
@@ -76,6 +89,10 @@ function validate(state: FormState): Errors {
 
 /** Sends the visitor's request and requires explicit provider acceptance. */
 async function submitInterest(payload: FormState): Promise<void> {
+  if (!INTEREST_API_URL) {
+    throw new InterestApiUnavailableError();
+  }
+
   const response = await fetch(INTEREST_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -97,7 +114,9 @@ async function submitInterest(payload: FormState): Promise<void> {
 export default function InterestForm({ suggestedArea }: { suggestedArea?: WorkArea }) {
   const [state, setState] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
-  const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "failed">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "submitting" | "sent" | "failed" | "unavailable"
+  >("idle");
 
   // When the visitor finishes the funnel, pre-select what it recommended,
   // unless they've already chosen something themselves.
@@ -132,8 +151,8 @@ export default function InterestForm({ suggestedArea }: { suggestedArea?: WorkAr
     try {
       await submitInterest(state);
       setStatus("sent");
-    } catch {
-      setStatus("failed");
+    } catch (error) {
+      setStatus(error instanceof InterestApiUnavailableError ? "unavailable" : "failed");
     }
   };
 
@@ -244,9 +263,17 @@ export default function InterestForm({ suggestedArea }: { suggestedArea?: WorkAr
           />
         </Field>
 
+        {status === "unavailable" ? (
+          <p className="mk-interest__error" role="alert">
+            This form isn't connected on this site yet. Please email us instead: {" "}
+            <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>.
+          </p>
+        ) : null}
+
         {status === "failed" ? (
           <p className="mk-interest__error" role="alert">
-            That didn't go through on our side. Please try again, or write to{" "}
+            We couldn't confirm whether your note went through. Please email us and we'll
+            check before you try again: {" "}
             <a href={`mailto:${SITE.emails.general}`}>{SITE.emails.general}</a>.
           </p>
         ) : null}
