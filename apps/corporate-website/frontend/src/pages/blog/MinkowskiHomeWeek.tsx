@@ -29,55 +29,45 @@ export default function MinkowskiHomeWeek() {
 
       <h2>Monday, 7:14 a.m. The inbox is already handled.</h2>
       <p>
-        <strong>Imel</strong>, who looks after our email, has been reading MH&apos;s inbox
-        since before anyone opened a laptop. Order confirmations that never needed a
-        person get filed on their own. A real question about a delayed shipment gets
-        classified, checked against the actual logistics record, and drafted into a reply
-        with the real delivery window, not a canned &quot;we&apos;ll look into it.&quot;
+        In this proposed scenario, an inbox Workflow sorts routine confirmations and
+        prepares a reply to a shipping question using an authorized logistics record. It
+        pauses for review when the source data or policy does not support a safe answer.
+        This page does not connect to an inbox or logistics system.
       </p>
-      <PostNote label="What used to take a person 45–60 minutes a day">
-        Reading every inbound email, deciding what&apos;s routine and what needs
-        judgement, and drafting a reply that&apos;s actually specific to the
-        customer&apos;s order. Now it&apos;s done before the workday starts.
+      <PostNote label="Scope of this example">
+        The sketch shows possible classification, context gathering and draft preparation.
+        It makes no estimate of time saved and does not claim a message was sent.
       </PostNote>
 
       <h2>Wednesday. A question that would have sat for a day.</h2>
       <p>
-        A customer writes in asking whether the walnut coffee table finish will match a
-        chair they bought eight months ago. <strong>Kall</strong>, who runs our support
-        desk, doesn&apos;t push this into a queue. It pulls the customer&apos;s order
-        history, checks the finish batch notes, and answers directly, flagging a note for
-        a person only because the answer touches a return-policy edge case outside its
-        decision scope. That&apos;s the guardrail doing its job: Kall doesn&apos;t guess
-        on the parts it isn&apos;t supposed to decide. It hands those over and keeps
-        moving on everything else.
+        A sample question asks whether a walnut finish will match a prior purchase. A
+        possible Workflow would gather only authorized order and product context, draft a
+        response, and ask a person to review any return-policy edge case. These are
+        proposed steps, not actions performed for a customer.
       </p>
-      <PostNote label="The part that actually matters">
-        It isn&apos;t that Kall answers fast. It&apos;s that it knows which questions
-        it&apos;s allowed to answer on its own, and which ones it isn&apos;t.
+      <PostNote label="The review boundary">
+        A real deployment would need defined permissions and escalation rules before it
+        could answer or change anything in a customer record.
       </PostNote>
 
       <h2>Friday. The leads that don&apos;t slip anymore.</h2>
       <p>
-        MH used to lose a predictable share of warm leads to nothing more complicated than
-        nobody following up in time. Now, when a prospect opens a quote three times but
-        doesn&apos;t reply, that pattern gets flagged and worked. A follow-up goes out
-        that mentions the specific pieces they were looking at, not a generic &quot;just
-        checking in.&quot; It isn&apos;t a dramatic new capability. It&apos;s the
-        unglamorous, repetitive discipline a growing business always means to keep up with
-        and rarely does.
+        A separate example starts with an enquiry that has not received a follow-up. A
+        proposed Workflow could prepare a reminder from approved quote details for a
+        person to review. It does not monitor quote activity or send outreach today.
       </p>
 
       <h2>Why this is the case study that matters</h2>
       <p>
-        Most weeks aren&apos;t launch weeks. Most weeks are inbox triage, the same three
-        support questions, and a lead that almost got forgotten. That&apos;s where a small
-        business really spends its hours, and it&apos;s exactly the part that doesn&apos;t
-        need a person doing it by hand every week.
+        These examples focus on repeatable work: classifying a request, gathering
+        approved context, preparing a draft and routing exceptions. They illustrate a
+        design discussion; they do not establish Minkowski Home&apos;s current workload,
+        product deployment or customer outcomes.
       </p>
       <p>
-        MH still has people. They&apos;re just not the ones reading every email first
-        anymore.
+        People remain responsible for the review points and decisions defined for any
+        Workflow that might be deployed.
       </p>
     </BlogPostLayout>
   );
