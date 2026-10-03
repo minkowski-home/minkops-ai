@@ -71,8 +71,8 @@ export default function MyndralOperations() {
       <h2>What this actually proves</h2>
       <p>
         This sketch proves no integration or customer outcome. It illustrates how a
-        furniture business and a music label might discuss similar workflow building
-        blocks—message triage, approved context and human review—while keeping each
+        small creative business might approach repeat work like message triage and
+        response drafts, while keeping each
         business&apos;s tools, permissions and procedures distinct. See the{" "}
         <Link to="/orchestration">product model</Link> for those boundaries.
       </p>

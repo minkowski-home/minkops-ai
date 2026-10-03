@@ -44,8 +44,8 @@ function AboutPage() {
           ))}
         </div>
       </Section>
-      <Section eyebrow="Family" title="A product of Minkowski Home" tone="sunken"
-        lead="Minkops sits alongside Myndral and Minkowski Home. Frontends live in apps/, agents and data work in services/ — the same discipline applies to the brand." />
+      <Section eyebrow="Family" title="Myndral, from Minkops AI" tone="sunken"
+        lead="Myndral is a curated label for original fictional artists, albums and stories. Minkops builds the practical tools behind that creative work." />
     </>
   );
 }

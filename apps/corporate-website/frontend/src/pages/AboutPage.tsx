@@ -5,42 +5,37 @@ import { Icon } from "../ui/Icon";
 import { ButtonLink, Card, Eyebrow } from "../ui/primitives";
 
 const FACTS = [
-  { figure: "01", label: "Employee · the product grouping" },
+  { figure: "01", label: "A curated music label" },
   {
     figure: "02",
-    label: "Workflow · the defined unit of business work"
+    label: "Original fictional artists and releases"
   },
   {
     figure: "03",
-    label: "Skills, tools and connectors · procedure and approved access"
+    label: "One shared musical universe"
   }
 ] as const;
 
 const PRINCIPLES = [
   {
     title: "If we haven't used it, we won't sell it",
-    body: "We use our own businesses to understand practical work and the review points people need. Product examples remain illustrative until an integration is verified."
+    body: "We start with work we understand from our own businesses, and stay clear about what’s real and what’s only an example."
   },
   {
     title: "Quiet is the goal",
-    body: "A useful Workflow has a defined outcome, the necessary steps and clear points where someone should review or decide."
+    body: "Good software should handle repeat work quietly and bring a person in when judgment matters."
   },
   {
     title: "People above the line",
-    body: "Access follows the approved tools and connectors. Decisions that need a person should be explicit and reviewable."
+    body: "You decide what can happen on its own and when it should ask you."
   }
 ] as const;
 
 const FAMILY = [
   {
-    name: "Minkowski Home",
-    href: SITE.links.minkowskiHome,
-    body: "An interior product design business in the Minkops family."
-  },
-  {
     name: "Myndral",
     href: SITE.links.myndral,
-    body: "A curated music label in the Minkops family."
+    body: "A curated label for original fictional artists, music and stories that share one world."
   }
 ] as const;
 
@@ -49,14 +44,14 @@ export default function AboutPage() {
     <>
       <SeoHead
         title="About"
-        description="How Minkops thinks about AI Employees, business Workflows, approved tools and human review."
+        description="Minkops grew from the work around Myndral, a curated music label built around original fictional artists and a shared story world."
         path="/about"
       />
 
       <PageHero
         eyebrow="About"
         title="We run our own company on it first."
-        lead="Minkops organizes AI Employees around practical business Workflows. We focus on clear outcomes, explicit access and review points that keep people responsible for their decisions."
+        lead="Minkops grew from the work around Myndral, our curated music label. We’re exploring practical ways to help small teams with repeat work, while people stay in charge of important decisions."
       >
         <dl className="mk-facts">
           {FACTS.map((fact) => (
@@ -70,29 +65,28 @@ export default function AboutPage() {
 
       <Section
         eyebrow="Where it started"
-        title="It began with a furniture company."
+        title="It began with Myndral."
         tone="sunken"
       >
         <div className="mk-prose">
           <p>
-            Minkowski Home started as an interior product design company, with a long-term
-            picture of connected furniture and a design ecosystem where everything fits
-            together. As the plans grew, the work grew faster than the team did.
+            Myndral is a curated label built around original fictional artists, music and
+            a shared story world. Every release is chosen and cared for as part of that
+            universe.
           </p>
           <p>
-            That work led us to focus on repeatable processes: what outcome is needed,
-            which steps lead to it, and what a person should review. We describe that unit
-            of work as a Workflow.
+            A growing creative business also brings plenty of practical work behind the
+            scenes. We started asking how software could help a small team with the
+            repeat work, without taking important decisions away from people.
           </p>
           <p>
-            An AI Employee is the product grouping around that work. Skills describe
-            procedures; approved tools and connectors determine which files and external
-            systems a Workflow can use.
+            That question became Minkops: practical software for business work that
+            comes around again and again.
           </p>
           <p>
-            We keep a human decision-maker in the loop for approvals and outcomes that
-            need judgment. Examples on this site describe possible designs, not live
-            integrations or measured customer results.
+            The examples on this site show ideas we could explore together. They are not
+            claims that Myndral uses these workflows today or that we have measured a
+            particular result.
           </p>
         </div>
       </Section>
@@ -113,8 +107,8 @@ export default function AboutPage() {
 
       <Section
         eyebrow="The family"
-        title="A product of Minkowski Home."
-        lead="Minkops sits alongside two very different businesses. Their work gives us useful context, while each Workflow still needs its own permissions, verification and review rules."
+        title="Myndral, from Minkops AI."
+        lead="Myndral is a curated music label from Minkops AI, built around original artists and a catalogue with one shared story world."
         tone="sunken"
       >
         <ul className="mk-family">
@@ -140,8 +134,8 @@ export default function AboutPage() {
               Curious what it would take off your plate?
             </h2>
             <p className="mk-cta-band__lead">
-              Tell us about a process you want to improve and we’ll outline a workflow to
-              discuss. The example is not a live integration or a savings estimate.
+              Tell us what you wish took less time. We’ll talk about what to hand off and
+              where you want to stay involved.
             </p>
           </div>
           <div className="mk-cta-band__actions">

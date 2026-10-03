@@ -2058,7 +2058,7 @@ const INTERRUPTS = [{
 const USER = {
   name: "Kartik Shah",
   role: "Operator",
-  tenantName: "Minkowski Home",
+  tenantName: "Northfield Home",
   tenantId: "tenant_001"
 };
 Object.assign(window, {
@@ -2421,7 +2421,7 @@ function LoginScreen({
       font: "var(--type-mono)",
       color: "var(--text-inverse-muted)"
     }
-  }, "tenant_001 \xB7 Minkowski Home")), /*#__PURE__*/React.createElement("section", {
+  }, "tenant_001 \xB7 Northfield Home")), /*#__PURE__*/React.createElement("section", {
     style: {
       display: "grid",
       placeItems: "center",
@@ -2928,9 +2928,9 @@ function AboutPage() {
     }
   }, l))))), /*#__PURE__*/React.createElement(Section, {
     eyebrow: "Family",
-    title: "A product of Minkowski Home",
+    title: "Myndral, from Minkops AI",
     tone: "sunken",
-    lead: "Minkops sits alongside Myndral and Minkowski Home. Frontends live in apps/, agents and data work in services/ \u2014 the same discipline applies to the brand."
+    lead: "Myndral is a curated label for original fictional artists, albums and stories. Minkops builds the practical tools behind that creative work."
   }));
 }
 const ROLES = [{
@@ -3915,7 +3915,7 @@ const FOOTER_COLS = [{
   links: ["About us", "Careers", "Blog", "info@minkops.com", "hr@minkops.com", "LinkedIn"]
 }, {
   head: "More from the family",
-  links: ["Myndral", "Minkowski Home"]
+  links: ["Myndral"]
 }];
 function SiteFooter() {
   return /*#__PURE__*/React.createElement("footer", {
@@ -3969,7 +3969,7 @@ function SiteFooter() {
       fontStyle: "normal",
       lineHeight: 1.7
     }
-  }, "375 University Avenue Suite 3215", /*#__PURE__*/React.createElement("br", null), "Toronto, ON M5G 2J5", /*#__PURE__*/React.createElement("br", null), "Canada")), FOOTER_COLS.map(c => /*#__PURE__*/React.createElement("div", {
+  }, "375 University Avenue Suite 3273", /*#__PURE__*/React.createElement("br", null), "Toronto, ON M5G 2J5", /*#__PURE__*/React.createElement("br", null), "Canada")), FOOTER_COLS.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.head,
     style: {
       display: "grid",
@@ -4007,7 +4007,7 @@ function SiteFooter() {
       font: "var(--type-mono)",
       color: "var(--text-inverse-muted)"
     }
-  }, "\xA9 2026 Minkops. A product of Minkowski Home. All rights reserved."), /*#__PURE__*/React.createElement("span", {
+  }, "\xA9 2026 Minkops AI. The team behind Myndral."), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: "auto",
       display: "flex",

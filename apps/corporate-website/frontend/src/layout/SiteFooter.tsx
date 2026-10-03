@@ -33,10 +33,7 @@ const COLUMNS: ReadonlyArray<{ heading: string; links: readonly FooterLink[] }> 
   },
   {
     heading: "The family",
-    links: [
-      { label: "Myndral", to: SITE.links.myndral, external: true },
-      { label: "Minkowski Home", to: SITE.links.minkowskiHome, external: true }
-    ]
+    links: [{ label: "Myndral", to: SITE.links.myndral, external: true }]
   }
 ];
 
@@ -93,7 +90,7 @@ export default function SiteFooter() {
       </div>
 
       <div className="mk-footer__base">
-        <p>© {year} Minkops. A product of Minkowski Home. All rights reserved.</p>
+        <p>© {year} Minkops AI. The team behind Myndral. All rights reserved.</p>
         <span className="mk-footer__legal">
           <Link to="/privacy" className="mk-footer__link mk-footer__link--quiet">
             Privacy policy
