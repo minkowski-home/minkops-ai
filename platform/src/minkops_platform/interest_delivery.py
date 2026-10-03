@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 from minkops_connectors.workspace_smtp import (
+    SmtpRejected,
+    SmtpSetupFailure,
     SmtpConfigurationError,
     SmtpOutcomeUncertain,
     send_discovery_notification,
@@ -77,6 +79,8 @@ class DeliveryGuard:
                     message_id = await send_discovery_notification(**asdict(submission))
                 except SmtpConfigurationError:
                     raise DeliveryError("Email delivery is not configured") from None
+                except (SmtpSetupFailure, SmtpRejected):
+                    raise DeliveryError("Email delivery was rejected before acceptance") from None
                 except SmtpOutcomeUncertain:
                     self._records[key] = DeliveryRecord("uncertain", "", now)
                     raise DeliveryError(

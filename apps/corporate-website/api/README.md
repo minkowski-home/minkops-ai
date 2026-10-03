@@ -19,6 +19,27 @@ The local form server proxies `/api` to `http://127.0.0.1:5000`. To submit a
 real message, configure the SMTP settings listed in the service deployment
 runbook; tests use a stub transport.
 
+## Inquiry delivery
+
+The public `POST /api/interest` endpoint sends to the fixed inbox
+`info@minkops.com`. Visitor addresses are used only as `Reply-To`; the recipient
+and public sender are fixed. Configure `SMTP_HOST=smtp-relay.gmail.com`,
+`SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL=info@minkops.com`,
+and `SMTP_FROM_NAME=Minkops`. The existing SMTP authentication values are
+injected from Secret Manager references and must not be copied into frontend
+configuration or image contents.
+
+The connector uses STARTTLS and `minkops.com` as its EHLO identity. Logs contain
+only delivery phase, exception class, a numeric SMTP response code, and a
+whitelisted reason category; they never include provider text, account
+addresses, credentials, or submitted content. Connection/TLS/authentication
+and explicit server refusals are confirmed pre-acceptance failures. A timeout
+or disconnect during message submission is ambiguous and suppresses automatic
+same-process retry.
+
+For a no-email runtime check of relay reachability, TLS, and authentication, run
+`python -m minkops_connectors.smtp_diagnostics` in the configured service image.
+
 ## Container build and Cloud Run deployment
 
 The Docker build uses the repository root as its context so it can package the

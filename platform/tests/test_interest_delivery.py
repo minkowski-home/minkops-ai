@@ -2,77 +2,107 @@ import asyncio
 
 import pytest
 
-from minkops_connectors.workspace_smtp import (
-    SmtpConfigurationError,
-    SmtpOutcomeUncertain,
-)
+from minkops_connectors import workspace_smtp
 from minkops_platform import interest_delivery
 
 
-def submission(**overrides):
+@pytest.fixture
+def submission():
     return interest_delivery.InterestSubmission(
         name="Alex Visitor",
-        email="alex@example.com",
+        email="alex@example.test",
         company="Example Co",
         interest="operations",
-        message="Need help with reports.",
-        **overrides,
+        message="A short inquiry",
     )
 
 
-def test_identical_accepted_submission_is_sent_once(monkeypatch):
+def test_identical_submission_is_sent_once(monkeypatch, submission):
     calls = []
 
-    async def send(**payload):
-        calls.append(payload)
-        await asyncio.sleep(0.01)
-        return "<example@minkops.com>"
+    async def fake_send(**kwargs):
+        calls.append(kwargs)
+        return "<test@minkops.com>"
 
-    monkeypatch.setattr(interest_delivery, "send_discovery_notification", send)
+    monkeypatch.setattr(interest_delivery, "send_discovery_notification", fake_send)
     guard = interest_delivery.DeliveryGuard()
 
-    async def submit_twice():
-        await asyncio.gather(
-            guard.send(submission(), "same-key"),
-            guard.send(submission(), "same-key"),
-        )
+    async def run():
+        await guard.send(submission, "same-key")
+        await guard.send(submission, "same-key")
 
-    asyncio.run(submit_twice())
+    asyncio.run(run())
     assert len(calls) == 1
 
 
-def test_uncertain_attempt_blocks_automatic_resend(monkeypatch):
+def test_concurrent_identical_submissions_share_one_attempt(monkeypatch, submission):
+    calls = []
+
+    async def fake_send(**kwargs):
+        calls.append(kwargs)
+        await asyncio.sleep(0.01)
+        return "<test@minkops.com>"
+
+    monkeypatch.setattr(interest_delivery, "send_discovery_notification", fake_send)
+    guard = interest_delivery.DeliveryGuard()
+
+    async def run():
+        await asyncio.gather(
+            guard.send(submission, "same-key"),
+            guard.send(submission, "same-key"),
+        )
+
+    asyncio.run(run())
+    assert len(calls) == 1
+
+
+def test_ambiguous_smtp_acceptance_blocks_automatic_retry(monkeypatch, submission):
     calls = 0
 
-    async def uncertain(**_payload):
+    async def uncertain(**_kwargs):
         nonlocal calls
         calls += 1
-        raise SmtpOutcomeUncertain()
+        raise workspace_smtp.SmtpOutcomeUncertain("safe message")
 
     monkeypatch.setattr(interest_delivery, "send_discovery_notification", uncertain)
     guard = interest_delivery.DeliveryGuard()
 
-    async def submit_twice():
+    async def run():
         with pytest.raises(interest_delivery.DeliveryError) as first:
-            await guard.send(submission(), "same-key")
+            await guard.send(submission, "same-key")
+        assert first.value.ambiguous
         with pytest.raises(interest_delivery.DeliveryError) as retry:
-            await guard.send(submission(), "same-key")
-        return first.value, retry.value
+            await guard.send(submission, "same-key")
+        assert retry.value.ambiguous
 
-    first, retry = asyncio.run(submit_twice())
-    assert first.ambiguous is True
-    assert retry.ambiguous is True
+    asyncio.run(run())
     assert calls == 1
 
 
-def test_missing_configuration_is_a_safe_retryable_failure(monkeypatch):
-    async def unconfigured(**_payload):
-        raise SmtpConfigurationError()
+def test_missing_smtp_configuration_fails_closed(monkeypatch, submission):
+    async def unconfigured(**_kwargs):
+        raise workspace_smtp.SmtpConfigurationError("private configuration")
 
     monkeypatch.setattr(interest_delivery, "send_discovery_notification", unconfigured)
+    guard = interest_delivery.DeliveryGuard()
 
     with pytest.raises(interest_delivery.DeliveryError) as error:
-        asyncio.run(interest_delivery.deliver_interest(submission()))
+        asyncio.run(guard.send(submission, "same-key"))
+    assert not error.value.ambiguous
+    assert "private configuration" not in str(error.value)
 
-    assert error.value.ambiguous is False
-    assert str(error.value) == "Email delivery is not configured"
+
+@pytest.mark.parametrize(
+    "failure",
+    [workspace_smtp.SmtpSetupFailure, workspace_smtp.SmtpRejected],
+)
+def test_pre_acceptance_failure_is_not_marked_ambiguous(monkeypatch, submission, failure):
+    async def reject(**_kwargs):
+        raise failure("private diagnostic")
+
+    monkeypatch.setattr(interest_delivery, "send_discovery_notification", reject)
+    guard = interest_delivery.DeliveryGuard()
+
+    with pytest.raises(interest_delivery.DeliveryError) as error:
+        asyncio.run(guard.send(submission, "same-key"))
+    assert not error.value.ambiguous
