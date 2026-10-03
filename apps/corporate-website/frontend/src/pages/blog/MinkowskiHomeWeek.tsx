@@ -8,22 +8,23 @@ export default function MinkowskiHomeWeek() {
       post={POSTS.minkowskiHomeWeek}
       cta={{
         title: "Want to see this on your own inbox?",
-        body: "Start with the one role that's costing you the most hours this month. Four questions will tell you which one that is.",
-        label: "Find your first hire",
+        body: "Describe a process you want to improve and see an illustrative workflow outline to discuss.",
+        label: "Find a workflow starting point",
         to: FUNNEL_HREF
       }}
     >
+      <PostNote label="Illustrative design example">
+        This article sketches a possible Workflow. It is not evidence of a deployed
+        Minkops integration, measured time savings or a verified customer result.
+      </PostNote>
       <p>
-        Launches get the attention because they&apos;re dramatic. This story is
-        deliberately less dramatic, because most of what actually costs a small business
-        its time isn&apos;t the big launch. It&apos;s the ordinary Tuesday.
+        The example uses familiar furniture-business tasks to show how a Workflow could
+        gather context, draft a response and route decisions that need a person.
       </p>
       <p>
-        <strong>Minkowski Home (MH)</strong> is a small furniture company. Before Minkops,
-        a normal week meant someone (usually the same one or two people) triaging a shared
-        inbox, answering the same handful of shipping and material questions over and
-        over, and letting warm leads go cold because nobody got round to the follow-up.
-        Here&apos;s what that same week looks like now.
+        <strong>Minkowski Home (MH)</strong> is a small furniture company. These
+        scenarios use it as context for a possible workflow; they do not describe the
+        company&apos;s current systems or operations.
       </p>
 
       <h2>Monday, 7:14 a.m. The inbox is already handled.</h2>

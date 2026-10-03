@@ -9,11 +9,15 @@ export default function MyndralOperations() {
       post={POSTS.myndralOperations}
       cta={{
         title: "Small team, growing inbox?",
-        body: "See which Minkops employee would take the most off your plate first. It takes four questions.",
-        label: "Find your first hire",
+        body: "Describe a process you want to improve and see an illustrative workflow outline to discuss.",
+        label: "Find a workflow starting point",
         to: FUNNEL_HREF
       }}
     >
+      <PostNote label="Illustrative design example">
+        This article sketches a possible Workflow. It is not evidence of a deployed
+        Minkops integration, measured results or current Myndral operations.
+      </PostNote>
       <p>
         <a href={SITE.links.myndral} target="_blank" rel="noopener noreferrer">
           Myndral
@@ -24,11 +28,8 @@ export default function MyndralOperations() {
         and looked after in-house. That curation is the whole product.
       </p>
       <p>
-        It also means Myndral runs into a very ordinary small-team problem. A catalog that
-        has grown to two dozen artists and dozens of albums produces a real, steady stream
-        of listener email and catalog questions, and the team behind it is small enough
-        that nobody wants that stream to become someone&apos;s full-time job. Here&apos;s
-        how it&apos;s handled instead.
+        This example uses catalog and listener questions to illustrate a routing
+        workflow. It makes no claim about Myndral&apos;s current systems or message volume.
       </p>
 
       <h2>Listener email, read before anyone opens the inbox</h2>

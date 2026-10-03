@@ -1,11 +1,4 @@
-import { getAgent, type Agent } from "./agents";
-
-/*
- * The "find your agent stack" questionnaire: four questions, one
- * recommendation. Question copy, the agent mapping and the recovery maths
- * live here as data and pure functions so the UI stays a thin renderer and
- * the estimate logic can be reasoned about (and tested) on its own.
- */
+/* Intake questions and illustrative workflow outlines for the home page. */
 
 export type QuestionKind = "single" | "multi";
 
@@ -16,7 +9,7 @@ export type FunnelOption = {
 };
 
 export type FunnelQuestion = {
-  id: "revenue" | "timeSinks" | "bottleneck" | "hours";
+  id: "business" | "timeSinks" | "bottleneck" | "systems";
   kicker: string;
   question: string;
   subtext: string;
@@ -24,145 +17,117 @@ export type FunnelQuestion = {
   options: readonly FunnelOption[];
 };
 
-/** Keys shared by the "time sink" and "bottleneck" questions. */
 export type WorkArea = "support" | "leads" | "email" | "social" | "ads" | "analytics";
 
 export const QUESTIONS: readonly FunnelQuestion[] = [
   {
-    id: "revenue",
-    kicker: "Step 01 / Your store",
-    question: "Roughly what does your store bring in each month?",
-    subtext: "A ballpark is plenty. It tells us how much you're juggling.",
+    id: "business",
+    kicker: "Step 01 / Your business",
+    question: "What kind of work does your business do?",
+    subtext: "This helps us choose an example closer to your day-to-day.",
     kind: "single",
     options: [
-      { value: "early", label: "Under $2,000", meta: "Just getting going" },
-      { value: "growth", label: "$2,000 to $15,000", meta: "Finding its feet" },
-      { value: "scaling", label: "$15,000 to $75,000", meta: "Stretching the team" },
-      { value: "established", label: "$75,000 or more", meta: "A proper operation" }
+      { value: "retail", label: "Retail and online sales" },
+      { value: "construction", label: "Construction and field work" },
+      { value: "hospitality", label: "Food and hospitality" },
+      { value: "services", label: "Professional services" },
+      { value: "creative", label: "Creative and media" },
+      { value: "other", label: "Something else" }
     ]
   },
   {
     id: "timeSinks",
-    kicker: "Step 02 / Time audit",
+    kicker: "Step 02 / Repeatable work",
     question: "Where does your week actually disappear?",
-    subtext:
-      "Pick everything that pulls you away from the work you started the store to do.",
+    subtext: "Pick the work that pulls you away from higher-priority tasks.",
     kind: "multi",
     options: [
-      { value: "support", label: "Answering support tickets and customer calls" },
-      { value: "leads", label: "Chasing abandoned carts and quiet leads" },
-      { value: "email", label: "Keeping up with the inbox and email campaigns" },
-      { value: "social", label: "Making something to post on social, again" },
-      { value: "ads", label: "Writing ad copy and creative" },
-      { value: "analytics", label: "Pulling reports and working out what they mean" }
+      { value: "support", label: "Answering customer questions" },
+      { value: "leads", label: "Following up with prospects" },
+      { value: "email", label: "Sorting and responding to email" },
+      { value: "social", label: "Preparing social content" },
+      { value: "ads", label: "Preparing marketing material" },
+      { value: "analytics", label: "Collecting information and reports" }
     ]
   },
   {
     id: "bottleneck",
-    kicker: "Step 03 / The big one",
-    question: "If one of these vanished tomorrow, which would you pick?",
-    subtext: "Your answer decides who we'd hire first.",
+    kicker: "Step 03 / Priority",
+    question: "If one of these improved, which would matter most?",
+    subtext: "We’ll use this as the starting point for an outline.",
     kind: "single",
     options: [
       { value: "support", label: "The steady stream of support questions" },
       { value: "leads", label: "Leads that go cold after they browse" },
       { value: "email", label: "The inbox that never quite reaches zero" },
       { value: "social", label: "Showing up on social every single week" },
-      { value: "ads", label: "Ad creative that actually earns its budget" },
+      { value: "ads", label: "Ad creative that earns its budget" },
       { value: "analytics", label: "Knowing which numbers matter this week" }
     ]
   },
   {
-    id: "hours",
-    kicker: "Step 04 / Hours",
-    question: "How many hours a week go into all of that?",
-    subtext: "Be honest. This is where the maths starts.",
+    id: "systems",
+    kicker: "Step 04 / Existing tools",
+    question: "Where does this work happen today?",
+    subtext: "A workflow should fit the systems and permissions you already have.",
     kind: "single",
     options: [
-      { value: "2", label: "Under 2 hours", meta: "A light lift" },
-      { value: "8", label: "2 to 8 hours", meta: "About a full day" },
-      { value: "15", label: "8 to 15 hours", meta: "Nearly half your week" },
-      { value: "20", label: "15 hours or more", meta: "A second job, really" }
+      { value: "email", label: "Email or a shared inbox" },
+      { value: "sheets", label: "Spreadsheets" },
+      { value: "business-app", label: "A business app or CRM" },
+      { value: "messages", label: "Chat or messaging" },
+      { value: "unknown", label: "A mix, or I’m not sure yet" }
     ]
   }
 ];
 
 export type FunnelAnswers = {
-  revenue?: string;
+  business?: string;
   timeSinks?: string[];
   bottleneck?: string;
-  hours?: string;
+  systems?: string;
 };
 
 type Recommendation = {
-  agent: Agent;
-  pitch: string;
-  /** Typical weekly hours this role absorbs, as a range. An estimate, not a promise. */
-  typicalSaving: string;
+  name: string;
+  description: string;
 };
 
 const RECOMMENDATIONS: Record<WorkArea, Recommendation> = {
   support: {
-    agent: getAgent("Kall"),
-    pitch:
-      "Picks up each support ticket, works out what the customer actually needs, resolves it and updates the record. Anything above its authority lands on your desk with an answer already drafted.",
-    typicalSaving: "8–12 hrs / wk"
+    name: "Customer support workflow",
+    description:
+      "Gather the request and relevant context, draft a response, then pause for approval when policy requires it."
   },
   leads: {
-    agent: getAgent("Leed"),
-    pitch:
-      "Follows up on abandoned carts and quiet browsers within minutes, while they still remember why they came.",
-    typicalSaving: "4–7 hrs / wk"
+    name: "Lead follow-up workflow",
+    description:
+      "Collect an enquiry, check it against qualification rules, prepare a follow-up and record the outcome."
   },
   email: {
-    agent: getAgent("Imel"),
-    pitch:
-      "Reads every email that lands, sorts the routine from the tricky, and drafts replies with the real order details in them, usually before you've opened your laptop.",
-    typicalSaving: "5–9 hrs / wk"
+    name: "Shared inbox workflow",
+    description:
+      "Classify an incoming message, find approved context, draft a reply and route exceptions to a person."
   },
   social: {
-    agent: getAgent("Eko"),
-    pitch:
-      "Keeps your channels fed with posts that sound like you, and notices when a comment is really a complaint.",
-    typicalSaving: "4–6 hrs / wk"
+    name: "Social content workflow",
+    description:
+      "Prepare content from an approved brief, check it against brand guidance and leave publishing for review."
   },
   ads: {
-    agent: getAgent("Floc"),
-    pitch:
-      "Drafts ad copy and content in several directions, so you get to pick the good one instead of staring at a blank page.",
-    typicalSaving: "3–5 hrs / wk"
+    name: "Marketing preparation workflow",
+    description:
+      "Turn a campaign brief into draft copy and creative directions for a person to review."
   },
   analytics: {
-    agent: getAgent("Insi"),
-    pitch:
-      "Reads your numbers across channels and tells you, in plain words, what changed and what deserves your attention this week.",
-    typicalSaving: "3–4 hrs / wk"
+    name: "Reporting workflow",
+    description:
+      "Gather approved source data, check it for gaps and prepare a concise report for review."
   }
 };
 
-export const STAGE_LABEL: Record<string, string> = {
-  early: "Early-stage store",
-  growth: "Growing store",
-  scaling: "Scaling store",
-  established: "Established store"
-};
-
-/*
- * Recovery estimate. We assume an agent absorbs 45–70% of the hours the
- * visitor reported. The band is deliberately conservative and is shown to
- * the visitor alongside the result, so the number never floats free of its basis.
- */
-export const RECOVERY_BAND = { low: 0.45, high: 0.7 } as const;
-
 export type FunnelResult = {
-  stageLabel: string;
-  /** The band the visitor picked, as they saw it ("8 to 15 hours"). */
-  reportedBand: string;
-  /** The single figure the estimate is computed from: the top of that band. */
-  reportedHours: number;
-  recovered: { low: number; high: number };
-  recoveredLabel: string;
-  /** The work area the recommendation answers, e.g. to pre-fill the access form. */
+  businessLabel: string;
   primaryArea: WorkArea;
   primary: Recommendation;
   supporting: Recommendation[];
@@ -172,32 +137,18 @@ function isWorkArea(value: string | undefined): value is WorkArea {
   return value !== undefined && value in RECOMMENDATIONS;
 }
 
-function formatHours(low: number, high: number) {
-  if (high <= 1) return "about an hour";
-  if (low === high) return `about ${high} hours`;
-  return `${low}–${high} hours`;
-}
-
 export function buildResult(answers: FunnelAnswers): FunnelResult {
   const sinks = (answers.timeSinks ?? []).filter(isWorkArea);
   const primaryKey: WorkArea = isWorkArea(answers.bottleneck)
     ? answers.bottleneck
     : (sinks[0] ?? "support");
-
-  const hoursQuestion = QUESTIONS.find((question) => question.id === "hours");
-  const hoursOption = hoursQuestion?.options.find(
-    (option) => option.value === answers.hours
-  );
-  const reportedHours = Number.parseInt(hoursOption?.value ?? "8", 10);
-  const low = Math.max(1, Math.round(reportedHours * RECOVERY_BAND.low));
-  const high = Math.max(low, Math.round(reportedHours * RECOVERY_BAND.high));
+  const business = QUESTIONS.find((question) => question.id === "business");
+  const businessLabel =
+    business?.options.find((option) => option.value === answers.business)?.label ??
+    "Your business";
 
   return {
-    stageLabel: STAGE_LABEL[answers.revenue ?? ""] ?? "Your store",
-    reportedBand: (hoursOption?.label ?? "2 to 8 hours").toLowerCase(),
-    reportedHours,
-    recovered: { low, high },
-    recoveredLabel: formatHours(low, high),
+    businessLabel,
     primaryArea: primaryKey,
     primary: RECOMMENDATIONS[primaryKey],
     supporting: sinks

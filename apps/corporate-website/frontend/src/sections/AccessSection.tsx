@@ -1,5 +1,3 @@
-import type { WorkArea } from "../content/funnel";
-import type { Team } from "../content/team";
 import { ANCHORS } from "../content/site";
 import { Section } from "../layout/Section";
 import InterestForm from "./InterestForm";
@@ -7,36 +5,30 @@ import InterestForm from "./InterestForm";
 const PROMISES = [
   {
     title: "We use it before we sell it",
-    body: "Imel reads our own inbox and drafts replies before anyone on the team opens it. Kall works our support queue. If something is rough, we're the first to feel it."
+    body: "We use our own businesses to learn where practical workflows help and where people need to review the result."
   },
   {
     title: "One employee, one whole role",
-    body: "Each one takes an entire job with its own skills, not a single chore. They talk to each other and share one memory of your business, so nothing gets explained twice."
+    body: "An Employee is a product grouping. Each Workflow defines a business outcome, its steps and the points where a person reviews or decides."
   },
   {
     title: "You stay in charge",
-    body: "Anything above an employee's authority lands in your queue with a drafted answer. You approve it, change it, or take it from there, and every correction teaches them something."
+    body: "Approvals and decisions that need a person should be explicit in the Workflow, with a clear way to review what happened."
   },
   {
     title: "It doesn't clock off",
-    body: "Your team works around the clock, not in one-off bursts. Monday morning starts with the weekend already handled."
+    body: "Examples on this site are illustrations. We confirm fit, integrations, permissions and verification before treating any Workflow as ready."
   }
 ] as const;
 
-export default function AccessSection({
-  suggestedArea,
-  team
-}: {
-  suggestedArea?: WorkArea;
-  team: Team;
-}) {
+export default function AccessSection() {
   return (
     <Section
       id={ANCHORS.access}
       tone="sunken"
       eyebrow="Get access"
       title="Hire your first employee."
-      lead="Minkops is pre-sale, and that's on purpose. Our first customers get their team set up by hand, by the people who built it, so we can see what works in your business and not just in ours."
+      lead="Tell us what the process should accomplish and where it happens today. We’ll discuss the steps, the tools you can authorize, and how you would verify the result."
     >
       <div className="mk-access">
         <ul className="mk-access__promises">
@@ -47,7 +39,7 @@ export default function AccessSection({
             </li>
           ))}
         </ul>
-        <InterestForm suggestedArea={suggestedArea} team={team} />
+        <InterestForm />
       </div>
     </Section>
   );

@@ -1,22 +1,15 @@
 import { useRef, useState } from "react";
 import {
   QUESTIONS,
-  RECOVERY_BAND,
   buildResult,
   type FunnelAnswers,
-  type FunnelResult,
-  type WorkArea
+  type FunnelResult
 } from "../content/funnel";
 import { ACCESS_HREF, ANCHORS } from "../content/site";
 import { Section } from "../layout/Section";
 import { Icon } from "../ui/Icon";
 import { OptionRow, ProgressSteps } from "../ui/forms";
 import { Badge, Button, ButtonLink, Card, Eyebrow } from "../ui/primitives";
-
-type Props = {
-  /** Lets the access form pre-select the area the visitor cares about most. */
-  onRecommendation?: (area: WorkArea) => void;
-};
 
 function selectionFor(answers: FunnelAnswers, index: number): string[] {
   const question = QUESTIONS[index];
@@ -27,74 +20,38 @@ function selectionFor(answers: FunnelAnswers, index: number): string[] {
 
 function Results({ result, onRestart }: { result: FunnelResult; onRestart: () => void }) {
   const { primary, supporting } = result;
-  const fillPercent = Math.round((result.recovered.high / result.reportedHours) * 100);
 
   return (
     <div className="mk-funnel__results mk-enter" aria-live="polite">
       <div className="mk-funnel__results-head">
-        <Badge tone="ok">Your answer</Badge>
-        <span className="mk-funnel__stage">{result.stageLabel}</span>
+        <Badge tone="review">Illustrative workflow</Badge>
+        <span className="mk-funnel__stage">{result.businessLabel}</span>
       </div>
 
       <h3 className="mk-funnel__results-title">
-        That's <span className="mk-accent">{result.recoveredLabel}</span> a week you could
-        have back.
+        A workflow outline for <span className="mk-accent">{primary.name.toLowerCase()}</span>
       </h3>
 
-      <Card tone="sunken" className="mk-funnel__recovery">
-        <div className="mk-funnel__recovery-row">
-          <Eyebrow>Estimated hours back each week</Eyebrow>
-          <strong className="mk-funnel__recovery-figure">
-            {result.recovered.low === result.recovered.high
-              ? `${result.recovered.high} hr`
-              : `${result.recovered.low}–${result.recovered.high} hrs`}
-          </strong>
-        </div>
-        <div className="mk-funnel__bar" aria-hidden="true">
-          <span style={{ width: `${fillPercent}%` }} />
-        </div>
-        <p className="mk-funnel__basis">
-          You told us {result.reportedBand} a week. We worked from {result.reportedHours}{" "}
-          and assumed an AI employee takes on {Math.round(RECOVERY_BAND.low * 100)}–
-          {Math.round(RECOVERY_BAND.high * 100)}% of it. We&apos;d rather under-promise.
-        </p>
-      </Card>
-
       <Card as="article" className="mk-funnel__primary">
-        <div className="mk-funnel__agent-head">
-          <span className="mk-glyph-tile">
-            <Icon name={primary.agent.glyph} size={22} />
-          </span>
-          <span className="mk-funnel__agent-id">
-            <Eyebrow>Who we'd hire first</Eyebrow>
-            <span className="mk-funnel__agent-name">{primary.agent.name}</span>
-            <span className="mk-funnel__agent-role">{primary.agent.role}</span>
-          </span>
-          <Badge tone="approval" className="mk-funnel__agent-status">
-            Ready for work
-          </Badge>
-        </div>
-        <p className="mk-funnel__pitch">{primary.pitch}</p>
-        <p className="mk-funnel__saving">Typically {primary.typicalSaving}</p>
+        <Eyebrow>Example steps to scope</Eyebrow>
+        <h4 className="mk-funnel__workflow-name">{primary.name}</h4>
+        <p className="mk-funnel__pitch">{primary.description}</p>
         <p className="mk-funnel__honest">
-          {primary.agent.name} doesn&apos;t work alone. Whatever it can&apos;t decide goes
-          to the teammate who can, and only the calls above everyone&apos;s authority come
-          to you.
+          This is an example outline, not a live integration or a promise of time saved.
+          Actual access, tools and approval rules depend on your process.
         </p>
       </Card>
 
       {supporting.length > 0 ? (
         <div className="mk-funnel__supporting">
-          <Eyebrow>Then, when you're ready</Eyebrow>
+          <Eyebrow>Other workflow areas you selected</Eyebrow>
           <ul className="mk-funnel__supporting-list">
             {supporting.map((item) => (
-              <li key={item.agent.name}>
+              <li key={item.name}>
                 <Card tone="sunken" className="mk-funnel__support-card">
-                  <span className="mk-funnel__support-name">{item.agent.name}</span>
-                  <span className="mk-funnel__agent-role">{item.agent.role}</span>
-                  <span className="mk-funnel__support-meta">
-                    {item.agent.department} · {item.typicalSaving}
-                  </span>
+                  <span className="mk-funnel__support-name">{item.name}</span>
+                  <span className="mk-funnel__support-meta">Example workflow area</span>
+                  <span className="mk-funnel__pitch">{item.description}</span>
                 </Card>
               </li>
             ))}
@@ -117,7 +74,7 @@ function Results({ result, onRestart }: { result: FunnelResult; onRestart: () =>
   );
 }
 
-export default function AgentFunnel({ onRecommendation }: Props) {
+export default function AgentFunnel() {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<FunnelAnswers>({});
   const [selected, setSelected] = useState<string[]>([]);
@@ -155,7 +112,6 @@ export default function AgentFunnel({ onRecommendation }: Props) {
 
     const computed = buildResult(nextAnswers);
     setResult(computed);
-    onRecommendation?.(computed.primaryArea);
     panelRef.current?.scrollIntoView({ block: "nearest" });
   };
 
@@ -168,9 +124,9 @@ export default function AgentFunnel({ onRecommendation }: Props) {
   return (
     <Section
       id={ANCHORS.funnel}
-      eyebrow="Find your first hire"
+      eyebrow="Find a workflow starting point"
       title="Four questions. One straight answer."
-      lead="Tell us where your hours leak and we'll tell you who we'd hire first, and roughly what you'd get back. It takes about ninety seconds, and nobody will call you afterwards. Worst case, it tells you Minkops isn't the right fit yet."
+      lead="Tell us about the process you want to improve, the work it involves and the tools you use. We’ll show an illustrative workflow outline; it is not a live integration or a time-saved estimate."
     >
       <div className="mk-funnel" ref={panelRef}>
         {result ? (
@@ -218,7 +174,7 @@ export default function AgentFunnel({ onRecommendation }: Props) {
                 onClick={advance}
                 iconRight={<Icon name="chevronRight" size={16} />}
               >
-                {isLast ? "Show me who to hire" : "Next question"}
+                {isLast ? "Show me a workflow outline" : "Next question"}
               </Button>
               {step > 0 ? (
                 <Button
