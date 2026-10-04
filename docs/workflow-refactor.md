@@ -1,11 +1,19 @@
-# Hosted skill-driven workflow refactor
+# Canonical hosted skill-driven workflow architecture
 
-## Scope and benchmark
+## Selected architecture and scope
 
-`mock-client/pdf-flow` at `6cad769` is the preserved implementation benchmark.
-The refactor lives on `platform/skill-driven-workflows`. Its scope is the first
-three agreed stages: baseline evaluation, shared control/lifecycle boundaries,
-and complete definition-driven hosted execution bundles.
+Skills, prompts, declared supporting resources, and adequate authorized
+MCP/REST tools drive the OpenAI-managed Codex harness. Minkops owns the product
+experience and thin shared controls for access, run lifecycle, approvals,
+recovery, and verified results. This is the canonical architecture for new
+workflow development as of 2026-10-04.
+
+The implementation on `platform/skill-driven-workflows` includes shared
+control/lifecycle boundaries and complete definition-driven hosted execution
+bundles, integrated with current staging's corporate website and SMTP delivery.
+Commit `6cad769` is historical evaluation evidence; there is no requirement to
+maintain its branch or preserve a parallel execution methodology. Business
+regression cases remain valuable regardless of implementation.
 
 OpenAI-hosted Agents API execution and gpt-6-luna remain selected. Existing
 Accounts prompts, business checks, Excel mechanics, HTTP routes, and browser

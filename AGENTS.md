@@ -1,5 +1,6 @@
 - Keep the Product Vision in README.md in mind while building any feature.
 - Important: Always keep the bigger system picture in mind. Prioritize long-term codebase sanity over shipping speed. Follow industry standard best practices to keep the codebase and repo maintainable as it grows.
+- Respect the boundaries created by platform/, solutions/, employees/, and apps/ - each layer has a purpose, never mix up. Avoid spaghetti code, and prefer few deep modules over many shallow ones.
 - Follow test-driven development, avoid massive commits and keep commit sizes maintainable, and test your work before calling it done.
 - Only create/merge PRs when explicitly asked to do so, and only always merge into `staging` branch, never `main`.
 - Never mentioned "Co-authored by Claude" or any references to Claude/Codex in commit/PR messages.

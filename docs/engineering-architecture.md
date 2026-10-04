@@ -2,6 +2,14 @@
 
 ## Current product boundary
 
+Skill-driven execution using the OpenAI-managed Codex harness and adequate
+authorized MCP/REST tools is the canonical workflow architecture. New workflows
+start with employee procedures, tool capabilities, and business contracts;
+custom implementation follows only demonstrated gaps or enforceable guarantees.
+The pre-refactor methodology is historical, with no parallel-maintenance
+requirement. Existing deterministic adapters, checks, and non-agent application
+services remain appropriate for their concrete integration and control roles.
+
 OpenAI-hosted Agents API environments are the selected execution architecture.
 Self-hosted Codex executors are outside the current refactor. Hosted sandbox
 Python execution and browser-granted local file saves do not imply an agent

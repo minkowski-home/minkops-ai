@@ -1,6 +1,6 @@
 # Minkops.ai
 
-## Product Vision
+### Product Vision
 Minkops offers AI Employees that carry out practical business workflows in a
 customer's existing tools and processes.
 In simple terms, we are building something as close as possible to ChatGPT Work desktop app, except replace prompting with one-click workflows.
@@ -16,6 +16,15 @@ may combine methods. First check what skill-driven Codex, OpenAI-provided tools,
 and existing MCP/REST integrations can already do. Add custom code only for a
 demonstrated access, correctness, or product gap.
 
+**Canonical architecture:** Skills and authorized MCP/REST tools drive the
+OpenAI-managed Codex harness. Minkops supplies the product experience and a thin
+control layer for access, durable runs, approvals, recovery, and verified writes.
+This is the selected architecture for all new workflow work. The previous
+workflow implementation remains Git history, not a parallel methodology to
+preserve. Existing deterministic adapters and checks remain where they enforce
+real integration or correctness requirements.
+
+
 ### Workflow methods and current scope
 
 Execution method and environment hosting are separate choices. Minkops uses
@@ -23,18 +32,18 @@ Execution method and environment hosting are separate choices. Minkops uses
 that hosted sandbox are not execution on the customer's machine. Self-hosted
 Codex executors are not part of the current refactor.
 
-| Method | Current implementation | Current refactor direction | Not introduced yet |
+| Method | Current implementation | Development direction | Not introduced yet |
 | --- | --- | --- | --- |
 | REST/MCP | Preferred product direction; Accounts does not currently bind business-system MCPs to its sessions. | Let skills compose existing authorized tools; keep access and consequential-write policy enforceable. Add a binding only for a concrete workflow need. | New SaaS/Tally integrations or a general connector catalogue. |
 | Local execution | The browser saves approved Excel bytes to a granted folder; Codex runs Python in an OpenAI-hosted sandbox. | Preserve the browser write adapter and its verified in-place saves. Keep file access separate from skill instructions. | Customer-machine Python/terminal execution, a desktop executor, or self-hosted Agents API environments. |
 | Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
 | Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
 
-The current refactor implements reusable run controls and lifecycle boundaries,
-complete versioned workflow skill bundles, and a regression baseline against the
-preserved Accounts implementation. Skill-generated workbook editing is a later
-evaluated pilot. New execution methods are separate work. See
-[the refactor scope and evaluation guide](docs/workflow-refactor.md).
+The implementation provides reusable run controls and lifecycle boundaries,
+complete versioned workflow skill bundles, and business regression checks.
+Skill-generated workbook editing is a later evaluated pilot. New execution
+methods are separate work. See
+[the architecture and evaluation guide](docs/workflow-refactor.md).
 
 ### Where development belongs
 

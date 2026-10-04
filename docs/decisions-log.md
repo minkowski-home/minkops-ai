@@ -300,6 +300,10 @@ claimed; improvements to workflow economics remain to be evaluated.
 
 ### 2026-10-02 — Pin complete skill revisions behind reusable hosted run controls
 
+**Status:** The 2026-10-04 decision below makes this architecture canonical and
+ends the requirement to retain a separate benchmark methodology. Results and
+commit references in this entry remain historical verification evidence.
+
 **Situation:** Accounts pinned SKILL.md and its proposal schema at launch, but
 loaded turn instructions from the current checkout during execution. A queued
 run could therefore execute a different revision from its recorded definition.
@@ -340,3 +344,36 @@ deployment, improved workflow economics, or the later workbook-editing pilot.
 **Action:** Reframed supporting copy around an AI Employee as the product grouping and a Workflow as a defined outcome, procedure and review path. Removed the roster and obsolete live handoff diagrams; replaced the savings calculator with an illustrative outline and labeled the retained console scenarios as fictional. Wired the existing form to a FastAPI endpoint that validates fields, caps the request body, rate-limits before schema validation, ignores a honeypot, and sends escaped text/HTML through Google Workspace SMTP to info@minkops.com. The recipient, public From identity and subject are server-controlled, the visitor email is Reply-To, and SMTP credentials stay in Secret Manager. Because SMTP has no provider idempotency key, a deterministic Message-ID and bounded process-local duplicate guard suppress accepted and ambiguous retries without claiming durable exactly-once delivery. The browser reports success only after the SMTP server accepts the message.
 
 **Result:** The API suite covers delivery, fixed target and sender, field validation, duplicate/ambiguous outcomes, SMTP failures, request escaping, missing configuration, rate limiting and CORS; the frontend passes its production build and lint. Real SMTP acceptance, deployment configuration, sender-alias header privacy and recipient inbox receipt remain unverified until a controlled deployment and send. SMTP acceptance is intentionally not presented as proof of inbox delivery.
+
+### 2026-10-04 — Adopt the skill-driven architecture and reconcile current staging
+
+**Situation:** The hosted workflow refactor and subsequent corporate-site/SMTP
+work had diverged from the same Accounts implementation. Keeping an obsolete
+benchmark methodology alive was no longer aligned with the selected product
+direction, while replacing the staging snapshot would discard recent work.
+
+**Task:** Integrate both histories safely and make skill-driven Codex execution
+with authorized MCP/REST capabilities the canonical architecture for future
+workflow development.
+
+**Decision:** OpenAI-hosted Agents API owns the harness and AI execution loop.
+Employee skills, prompts, and supporting resources own workflow procedure.
+Existing adequate tools and integrations are preferred; custom implementation
+serves demonstrated gaps or enforceable controls. Minkops owns the product
+experience and thin shared permissions, lifecycle, approval, recovery, and
+verification boundaries. The old methodology remains history, with no separate
+branch or parallel-maintenance requirement. Business regression checks and
+necessary deterministic adapters remain applicable.
+
+**Action:** Merge origin/staging at af95d82 into platform/skill-driven-workflows
+without rewriting either history. Preserve both decision-log additions and the
+merged SMTP/YAML dependencies, and update README, architecture guidance, the
+implementation guide, and AGENTS.md. Keep corporate website, SMTP delivery,
+and design source files identical to staging. Main and staging refs are unchanged.
+
+**Result:** The combined backend suites pass 93 tests and 27 subtests with no
+skips using an isolated migrated/seeded PostgreSQL database. All 10 solution-web
+tests pass; both frontends pass TypeScript/Vite builds and lint. The dependency
+lock validates with uv sync --locked, and Git reports no whitespace errors.
+These are local integration checks; no new live model call, SMTP message,
+production deployment, or PR merge is claimed.
