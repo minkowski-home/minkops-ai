@@ -47,6 +47,15 @@ infrastructure guidance. Retain the working apps, warehouse, and solution
 manifests. No Agents API integration or cloud deployment is claimed by this
 directory change.
 
+**Follow-up:** Production preflight exposed that the relay rejected the default
+localhost SMTP greeting before authentication. The connector now identifies
+itself with the verified public domain and distinguishes connection/TLS/auth
+failures from uncertain failures after message submission begins. Logs keep
+only the failure phase, exception class, numeric response code, and a safe
+reason category. The no-message production preflight authenticated, and the
+received test message's raw headers showed only the public sender/return path;
+SPF, DKIM, and DMARC passed. No private mailbox identity is recorded here.
+
 ### 2026-09-28 — Workflow-first Python architecture and lean repository layout
 
 **Situation:** The repository's backend architecture centered named agents, a
@@ -321,3 +330,13 @@ completed after a temporary local file was reread and its receipt submitted.
 Both hosted sessions were released. This verifies the API/runtime/file-receipt
 path locally; it does not claim a new browser directory-grant check, production
 deployment, improved workflow economics, or the later workbook-editing pilot.
+
+### 2026-10-03 — Define the Employee/Workflow model and make discovery delivery explicit
+
+**Situation:** The corporate site mixed a fictional employee roster, unsourced time-saved estimates, and simulated external actions with product descriptions. Its discovery form validated locally but did not deliver visitor submissions.
+
+**Task:** Make the product structure legible across the existing site and deliver submitted discovery details to the fixed Minkops inbox without reporting provider acceptance as inbox receipt.
+
+**Action:** Reframed supporting copy around an AI Employee as the product grouping and a Workflow as a defined outcome, procedure and review path. Removed the roster and obsolete live handoff diagrams; replaced the savings calculator with an illustrative outline and labeled the retained console scenarios as fictional. Wired the existing form to a FastAPI endpoint that validates fields, caps the request body, rate-limits before schema validation, ignores a honeypot, and sends escaped text/HTML through Google Workspace SMTP to info@minkops.com. The recipient, public From identity and subject are server-controlled, the visitor email is Reply-To, and SMTP credentials stay in Secret Manager. Because SMTP has no provider idempotency key, a deterministic Message-ID and bounded process-local duplicate guard suppress accepted and ambiguous retries without claiming durable exactly-once delivery. The browser reports success only after the SMTP server accepts the message.
+
+**Result:** The API suite covers delivery, fixed target and sender, field validation, duplicate/ambiguous outcomes, SMTP failures, request escaping, missing configuration, rate limiting and CORS; the frontend passes its production build and lint. Real SMTP acceptance, deployment configuration, sender-alias header privacy and recipient inbox receipt remain unverified until a controlled deployment and send. SMTP acceptance is intentionally not presented as proof of inbox delivery.

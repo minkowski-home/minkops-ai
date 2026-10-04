@@ -1,4 +1,3 @@
-import { AGENTS, DEPARTMENTS } from "../content/agents";
 import { FUNNEL_HREF, SITE } from "../content/site";
 import { PageHero, Section } from "../layout/Section";
 import SeoHead from "../layout/SeoHead";
@@ -6,42 +5,37 @@ import { Icon } from "../ui/Icon";
 import { ButtonLink, Card, Eyebrow } from "../ui/primitives";
 
 const FACTS = [
-  { figure: "Under 10", label: "People on the team, most wearing four or five hats" },
+  { figure: "01", label: "A curated music label" },
   {
-    figure: String(DEPARTMENTS.length),
-    label: "Departments they cover, from the front desk to a building site"
+    figure: "02",
+    label: "Original fictional artists and releases"
   },
   {
-    figure: String(AGENTS.length),
-    label: "Roles designed, each one a job we needed ourselves"
+    figure: "03",
+    label: "One shared musical universe"
   }
 ] as const;
 
 const PRINCIPLES = [
   {
     title: "If we haven't used it, we won't sell it",
-    body: "Every employee works inside our own businesses before it's offered to yours. Minkowski Home and Myndral are its first two customers, and by some distance the pickiest."
+    body: "We start with work we understand from our own businesses, and stay clear about what’s real and what’s only an example."
   },
   {
     title: "Quiet is the goal",
-    body: "The best employee is the one you forget is there. We tune for fewer interruptions, not more impressive ones, and we measure ourselves by how little you have to think about us."
+    body: "Good software should handle repeat work quietly and bring a person in when judgment matters."
   },
   {
     title: "People above the line",
-    body: "Our employees decide what they're allowed to decide. Everything else waits for a person, with the homework already done and a suggested answer attached."
+    body: "You decide what can happen on its own and when it should ask you."
   }
 ] as const;
 
 const FAMILY = [
   {
-    name: "Minkowski Home",
-    href: SITE.links.minkowskiHome,
-    body: "Interior product design, and the first business ever to run on Minkops."
-  },
-  {
     name: "Myndral",
     href: SITE.links.myndral,
-    body: "A curated music label with its own musical universe. Its listener inbox runs through Imel."
+    body: "A curated label for original fictional artists, music and stories that share one world."
   }
 ] as const;
 
@@ -50,14 +44,14 @@ export default function AboutPage() {
     <>
       <SeoHead
         title="About"
-        description="Minkops is under ten people. We build the AI employees we sell, and run our own company on them first. Here's where it started and what we won't compromise on."
+        description="Minkops grew from the work around Myndral, a curated music label built around original fictional artists and a shared story world."
         path="/about"
       />
 
       <PageHero
         eyebrow="About"
         title="We run our own company on it first."
-        lead="Minkops is under ten people, and most of us wear four or five hats before lunch. What makes that possible isn't hustle. We build the AI employees we're selling, then put them to work in our own businesses before anyone else gets them."
+        lead="Minkops grew from the work around Myndral, our curated music label. We’re exploring practical ways to help small teams with repeat work, while people stay in charge of important decisions."
       >
         <dl className="mk-facts">
           {FACTS.map((fact) => (
@@ -71,30 +65,28 @@ export default function AboutPage() {
 
       <Section
         eyebrow="Where it started"
-        title="It began with a furniture company."
+        title="It began with Myndral."
         tone="sunken"
       >
         <div className="mk-prose">
           <p>
-            Minkowski Home started as an interior product design company, with a long-term
-            picture of connected furniture and a design ecosystem where everything fits
-            together. As the plans grew, the work grew faster than the team did.
+            Myndral is a curated label built around original fictional artists, music and
+            a shared story world. Every release is chosen and cared for as part of that
+            universe.
           </p>
           <p>
-            Instead of hiring for every function at once, we built small AI helpers for
-            specific jobs, from writing content to keeping the paperwork moving. They
-            worked. They took on the repetitive thinking that would otherwise have meant
-            another hire, and they did it the same way every time.
+            A growing creative business also brings plenty of practical work behind the
+            scenes. We started asking how software could help a small team with the
+            repeat work, without taking important decisions away from people.
           </p>
           <p>
-            So we gave them more. We spread them across departments, gave them a way to
-            talk to each other, and shaped each one into a lasting role that matches a
-            real job in a real business.
+            That question became Minkops: practical software for business work that
+            comes around again and again.
           </p>
           <p>
-            That internal system became Minkops. Today the whole roster runs our own
-            operations, from the inbox to the books, and every new role is built the same
-            way: because we needed it before anyone else did.
+            The examples on this site show ideas we could explore together. They are not
+            claims that Myndral uses these workflows today or that we have measured a
+            particular result.
           </p>
         </div>
       </Section>
@@ -115,8 +107,8 @@ export default function AboutPage() {
 
       <Section
         eyebrow="The family"
-        title="A product of Minkowski Home."
-        lead="Minkops sits alongside two very different businesses. That's useful: if the same employees can serve a furniture maker and a music label, the job underneath is the same."
+        title="Myndral, from Minkops AI."
+        lead="Myndral is a curated music label from Minkops AI, built around original artists and a catalogue with one shared story world."
         tone="sunken"
       >
         <ul className="mk-family">
@@ -142,8 +134,8 @@ export default function AboutPage() {
               Curious what it would take off your plate?
             </h2>
             <p className="mk-cta-band__lead">
-              Four questions, about ninety seconds, and a straight answer about which
-              employee we'd hire first for you.
+              Tell us what you wish took less time. We’ll talk about what to hand off and
+              where you want to stay involved.
             </p>
           </div>
           <div className="mk-cta-band__actions">
@@ -153,7 +145,7 @@ export default function AboutPage() {
               variant="primary"
               iconRight={<Icon name="chevronRight" size={16} />}
             >
-              Find your first hire
+              Explore a workflow
             </ButtonLink>
             <ButtonLink
               to={`mailto:${SITE.emails.general}`}
