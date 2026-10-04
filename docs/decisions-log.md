@@ -42,6 +42,15 @@ infrastructure guidance. Retain the working apps, warehouse, and solution
 manifests. No Agents API integration or cloud deployment is claimed by this
 directory change.
 
+**Follow-up:** Production preflight exposed that the relay rejected the default
+localhost SMTP greeting before authentication. The connector now identifies
+itself with the verified public domain and distinguishes connection/TLS/auth
+failures from uncertain failures after message submission begins. Logs keep
+only the failure phase, exception class, numeric response code, and a safe
+reason category. The no-message production preflight authenticated, and the
+received test message's raw headers showed only the public sender/return path;
+SPF, DKIM, and DMARC passed. No private mailbox identity is recorded here.
+
 ### 2026-09-28 — Workflow-first Python architecture and lean repository layout
 
 **Situation:** The repository's backend architecture centered named agents, a
