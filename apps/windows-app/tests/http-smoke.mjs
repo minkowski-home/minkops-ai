@@ -145,6 +145,26 @@ try {
   await worker.tick();
   const tally = await api(base + `/desktop/jobs/${probe.id}`);
   assert.ok(["completed", "failed"].includes(tally.state));
+  if (process.env.MINKOPS_SMOKE_EXPECT_COMPANY) {
+    assert.equal(tally.state, "completed");
+    assert.equal(tally.result.available, true);
+    assert.ok(
+      tally.result.companies.includes(process.env.MINKOPS_SMOKE_EXPECT_COMPANY),
+    );
+    assert.ok(
+      tally.result.companies.every((name) => name !== "[object Object]"),
+    );
+    const task = await api(base + `/tasks/${probe.task_id}`);
+    assert.equal(task.status, "completed");
+    assert.equal(task.progress, 100);
+    assert.deepEqual(
+      task.events.map((event) => event.event_type),
+      ["queued", "executing", "completed"],
+    );
+    console.log(
+      `Live Tally company export and server task completion verified: ${process.env.MINKOPS_SMOKE_EXPECT_COMPANY}.`,
+    );
+  }
   console.log(
     `HTTP + PostgreSQL + Windows native folder refresh and restart/replay passed. Tally: ${tally.state}.`,
   );

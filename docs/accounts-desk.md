@@ -32,8 +32,10 @@ never included in agent files or exposed to the browser.
 Minkops owns authorization, immutable inputs, approvals, validation and safe
 commits. OpenAI owns reasoning and its execution environment. This first web
 version synchronizes selected bytes to the API and hosted session; it is not
-fully local processing. A future desktop adapter can implement the same approved
-write contract using local execution or integrations. Tally is not implemented.
+fully local processing. The Windows companion implements the same approved
+write contract for granted folders, including requests started from the web.
+See [Windows setup and recovery](windows-app.md). Tally company connection checks
+are read-only; Tally discovery and financial-entry workflows remain separate work.
 
 ## Run contracts and recovery
 

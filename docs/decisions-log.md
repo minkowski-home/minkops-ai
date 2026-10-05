@@ -423,3 +423,26 @@ local service is stopped; the unavailable path is verified. The installer is
 unsigned, deployment is separate, and MIN-121/122 retain scheduling and UI/clean
 Windows 10/11 install checks as Todo. No paid model call or accounting write was
 made for this verification.
+
+### 2026-10-05 — Verify the live Tally XML contract before closing the desktop work
+
+**Situation:** Restarting Tally exposed a real response shape absent from the
+original fixtures: `<NAME TYPE="String">` becomes an object when XML attributes
+are preserved. The connection check reported `[object Object]` as a company name
+instead of the actual text, despite the service responding successfully.
+
+**Task:** Correct the native adapter and prove that the actual company name
+survives the full Windows-companion/API/task-result path.
+
+**Action:** Add a failing regression for typed names and attribute-only names,
+then explicitly extract scalar text or the typed element's `#text`. Reject
+unexpected nested name structures instead of string coercion. Add an optional
+expected-company assertion to the HTTP smoke, including durable task status and
+queued/executing/completed events. Rebuild the Windows installer with the fix.
+
+**Result:** Live read-only company export returns `Minkops Test`; the real
+Windows/HTTP/PostgreSQL journey persists that name and completes its task.
+Folder refresh, interrupted receipt recovery and revocation still pass. All 14
+native tests pass on Windows and Linux; the full backend regression suite passes
+111 tests and 27 subtests. No accounting write was made. UI and clean-install
+checks remain the separately deferred MIN-122 work.

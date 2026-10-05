@@ -41,6 +41,31 @@ test("Tally rejects errors, malformed XML, entity definitions and large response
   }
 });
 
+test("Tally typed company names retain text and never become object strings", async () => {
+  const result = await tallyProbe({
+    request: async () =>
+      new Response(
+        "<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>" +
+          '<COMPANY NAME="Minkops Test" RESERVEDNAME=""><NAME TYPE="String">Minkops Test</NAME></COMPANY>' +
+          '<COMPANY NAME="Attribute &amp; Co"/>' +
+          "</COLLECTION></DATA></BODY></ENVELOPE>",
+      ),
+  });
+  assert.deepEqual(result, {
+    available: true,
+    companies: ["Minkops Test", "Attribute & Co"],
+  });
+  await assert.rejects(
+    tallyProbe({
+      request: async () =>
+        new Response(
+          "<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY><NAME><UNEXPECTED>nested</UNEXPECTED></NAME></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>",
+        ),
+    }),
+    /company name/i,
+  );
+});
+
 test("Tally rejects configurable remote addresses and invalid ports", async () => {
   for (const port of [0, -1, "9000", 65536])
     await assert.rejects(tallyProbe({ port }));

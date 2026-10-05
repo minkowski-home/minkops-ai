@@ -84,9 +84,31 @@ export async function tallyProbe({ port = 9000, request = fetch } = {}) {
     throw new Error("Tally could not list the open companies.");
   const nodes = envelope.BODY?.DATA?.COLLECTION?.COMPANY;
   const list = nodes ? (Array.isArray(nodes) ? nodes : [nodes]) : [];
-  const companies = list
-    .map((c) => String(c.NAME || c["@_NAME"] || ""))
-    .filter(Boolean);
+  const companies = list.map((company) => {
+    // With attributes enabled, <NAME TYPE="String"> is an object containing
+    // #text. Accept scalar text or this typed-text shape, never object coercion.
+    const node = company.NAME;
+    let name;
+    if (typeof node === "string") name = node;
+    else if (node !== undefined) {
+      if (
+        !node ||
+        Array.isArray(node) ||
+        typeof node !== "object" ||
+        Object.keys(node).some(
+          (key) => key !== "#text" && !key.startsWith("@_"),
+        ) ||
+        (node["#text"] !== undefined && typeof node["#text"] !== "string")
+      ) {
+        throw new Error("Tally returned an invalid company name.");
+      }
+      name = node["#text"];
+    }
+    name = name || company["@_NAME"];
+    if (typeof name !== "string" || !name.trim())
+      throw new Error("Tally returned an invalid company name.");
+    return name.trim();
+  });
   if (companies.length > 100 || companies.some((c) => c.length > 200))
     throw new Error("Tally returned an invalid company list.");
   return { available: true, companies };

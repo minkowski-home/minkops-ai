@@ -122,5 +122,11 @@ through HTTP/PostgreSQL, loses a server acknowledgement, recreates the worker,
 replays the receipt, checks Tally availability and revokes the PC. It makes no
 accounting writes or paid agent calls.
 
+Set `MINKOPS_SMOKE_EXPECT_COMPANY` to an open test company's exact name to require
+a successful live Tally export and verified server task completion. The live
+Windows check on 5 October 2026 returned `Minkops Test`, with queued → executing
+→ completed observations. Typed XML name elements are parsed as text; malformed
+nested names are rejected rather than converted into misleading object strings.
+
 User-facing UI, picker, clean install, tray and Windows 10/11 visual/accessibility
 checks remain Todo in [MIN-122](https://linear.app/minkops/issue/MIN-122).
