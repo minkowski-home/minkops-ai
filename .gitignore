@@ -5,6 +5,8 @@ apps/solution-web/node_modules
 .env
 .DS_Store
 dist/
+release/
+/apps/windows-app/bundle/
 deprecated/
 /apps/solution-api/data/
 .vscode/
