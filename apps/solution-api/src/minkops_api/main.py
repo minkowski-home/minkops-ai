@@ -14,6 +14,7 @@ from minkops_api.auth import Db, User, require_csrf, tenant_access
 from minkops_api.auth import router as core_router
 from minkops_api.workspace import router as workspace_router
 from minkops_api.accounts import router as accounts_router
+from minkops_api.desktop import router as desktop_router
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -21,6 +22,7 @@ app = FastAPI()
 app.include_router(core_router)
 app.include_router(workspace_router)
 app.include_router(accounts_router)
+app.include_router(desktop_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

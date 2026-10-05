@@ -10,6 +10,7 @@ from unittest import TestCase
 class PackageBoundaryTests(TestCase):
     def test_shared_services_import_without_web_application_dependencies(self):
         for name in (
+            "minkops_platform.desktop",
             "minkops_platform.accounts.service",
             "minkops_platform.accounts.repository",
             "minkops_platform.accounts.checks",
