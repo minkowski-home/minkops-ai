@@ -1,3 +1,4 @@
+import { DiscoveryLaunch } from './Discovery';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Workflow } from '../api';
@@ -5,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { chooseFolder, refreshFolder, supportsLocalFolder } from './localFiles';
 import type { Run, Source, SavedCatalog } from './types';
 
-export function AccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug: string; workflow: Workflow }) {
+function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug: string; workflow: Workflow }) {
   const { user } = useAuth(); const navigate = useNavigate();
   const [sources, setSources] = useState<Source[]>([]);
   const [catalogs, setCatalogs] = useState<SavedCatalog[]>([]);
@@ -24,7 +25,7 @@ export function AccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string
 
   async function refresh() {
     const [loadedSources, loadedCatalogs] = await Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs')]);
-    setSources(loadedSources); setCatalogs(loadedCatalogs);
+    setSources(loadedSources); setCatalogs(loadedCatalogs.filter(c=>c.catalog.sheets.some(s=>s.role==='destination')));
     setCatalogId((current) => current || loadedCatalogs[0]?.id || '');
     let saved: string[] = [];
     try { saved = JSON.parse(localStorage.getItem(preferences) ?? '[]') as string[]; } catch { /* Ignore old preference formats. */ }
@@ -35,7 +36,8 @@ export function AccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string
   useEffect(() => { let active = true;
     void Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs')]).then(([ss, cc]) => {
       if (!active) return;
-      setSources(ss); setCatalogs(cc); setCatalogId(cc[0]?.id ?? '');
+      const destinations=cc.filter(c=>c.catalog.sheets.some(s=>s.role==='destination'));
+      setSources(ss); setCatalogs(destinations); setCatalogId(destinations[0]?.id ?? '');
       let saved: string[] = []; try { saved = JSON.parse(localStorage.getItem(preferences) ?? '[]') as string[]; } catch { /* Old preferences are optional. */ }
       setSelected(ss.flatMap((s) => s.files.filter((f) => (discovery ? /\.xlsx$/i.test(f.path) : /\.(pdf|png|jpe?g|webp)$/i.test(f.path)) && (!saved.length || saved.includes(`${s.id}:${f.path}`))).map((f) => f.id)));
     }).catch((e: Error) => { if (active) setError(e.message); });
@@ -81,7 +83,7 @@ export function AccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string
     <div className="accounts-sources">{sources.map((source) => {
       const eligible = source.files.filter((f) => discovery ? /\.xlsx$/i.test(f.path) : /\.(pdf|png|jpe?g|webp)$/i.test(f.path));
       if (!eligible.length) return null;
-      return <details key={source.id} open={sources.length < 4}><summary>{source.label} · {eligible.length} files · {source.writable ? 'Local folder' : 'Uploaded'}</summary>
+      return <details key={source.id} open={sources.length < 4}><summary>{source.label} Â· {eligible.length} files Â· {source.writable ? 'Local folder' : 'Uploaded'}</summary>
         {source.writable && <div className="accounts-toolbar"><button className="button button-ghost" disabled={busy} onClick={() => user && void action(() => refreshFolder(tenant,source,user.csrf_token))}>Refresh folder</button>
           <button className="button button-ghost" disabled={busy} onClick={() => user && void action(() => chooseFolder(tenant,user.csrf_token,source))}>Reconnect folder</button></div>}
         <div className="accounts-file-list">{eligible.map((file) => <label key={file.id}><input type="checkbox" checked={selected.includes(file.id)} onChange={(e) => setSelected((old) => e.target.checked ? [...old,file.id] : old.filter((id) => id !== file.id))} />{file.path}</label>)}</div>
@@ -94,13 +96,13 @@ export function AccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string
         <label>File limit<input type="number" min="1" max="1000" value={maxFiles} onChange={(e) => setMaxFiles(Number(e.target.value))} /></label></> : <>
         <label>Input types<select value={inputFormat} onChange={(e) => setInputFormat(e.target.value)}><option value="mixed">PDFs and images</option><option value="pdf">PDFs</option><option value="image">Images</option></select></label>
         <label>Review policy<select value={reviewMode} onChange={(e) => setReviewMode(e.target.value)}><option value="all_outputs">Approve every output</option><option value="only_exceptions">Only exceptions</option></select></label>
-        <label>Output platform<select value="excel" disabled><option value="excel">Excel · update existing sheets</option></select></label>
-        <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} · {c.catalog.sheets.length} sheets</option>)}</select></label>
+        <label>Output platform<select value="excel" disabled><option value="excel">Excel Â· update existing sheets</option></select></label>
+        <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} Â· {c.catalog.sheets.length} sheets</option>)}</select></label>
         <fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>
       </>}
     </div></details>
     {error && <p role="alert" className="form-message">{error}</p>}
-    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (!discovery && !catalogId)} onClick={() => void launch()}>{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
+    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (!discovery && !catalogId)} onClick={() => void launch()}>{busy ? 'Workingâ€¦' : `Run ${workflow.name.toLowerCase()}`}</button>
     <span className="quiet-state"> {selected.length} files selected</span>
   </section>;
 }
@@ -115,6 +117,12 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     const base = `/api/tenants/${tenant}/accounts`;
     const discovery = workflow.key === 'source-discovery';
     try {
+      if (discovery) {
+        const latest=await api<{device_id:string;config:Record<string,unknown>}|null>(`/api/tenants/${tenant}/discovery/latest`);
+        if (!latest) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
+        const launched=await api<Run>(`/api/tenants/${tenant}/discovery/runs`,{method:'POST',body:JSON.stringify({device_id:latest.device_id,config:latest.config,request_key:crypto.randomUUID()})},user.csrf_token);
+        navigate(`/${routeSlug}/tasks/${launched.task_id}`); return;
+      }
       const [sources,catalogs] = await Promise.all([api<Source[]>(base+'/sources'),api<SavedCatalog[]>(base+'/catalogs')]);
       let selections: string[] = [];
       try {
@@ -139,6 +147,10 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     } catch (e) { setError(e instanceof Error ? e.message : 'Open workflow details to reconnect your folder.'); }
     finally { setBusy(false); }
   }
-  return <div><button className="button button-primary" disabled={busy} onClick={() => void run()}>{busy ? 'Starting…' : 'Run workflow'}</button>
+  return <div><button className="button button-primary" disabled={busy} onClick={() => void run()}>{busy ? 'Startingâ€¦' : 'Run workflow'}</button>
     {error && <p role="alert" className="form-message">{error}</p>}</div>;
+}
+
+export function AccountsLaunch(props:{tenant:string;routeSlug:string;workflow:Workflow}) {
+  return props.workflow.key==='source-discovery'?<DiscoveryLaunch {...props}/>:<LegacyAccountsLaunch {...props}/>;
 }

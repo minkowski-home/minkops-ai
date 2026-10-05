@@ -119,3 +119,8 @@
     flex-direction: column;
   }
 }
+
+.discovery-source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 20px 0; }
+.discovery-source-card { border: var(--rule-default); border-radius: var(--radius-card, 12px); padding: 20px; background: var(--surface-raised); }
+.discovery-source-card h4 { margin: 0 0 12px; }
+.discovery-source-card details { margin-top: 12px; }
