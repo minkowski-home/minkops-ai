@@ -27,7 +27,10 @@ import {
   inventory,
   replaceApproved,
   tallyProbe,
+  inspectExcel,
+  discoverTally,
 } from "@minkops/desktop-connectors";
+import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
 import {
   trustedOrigin,
@@ -35,16 +38,21 @@ import {
   validateFolderReconnect,
 } from "./policy.js";
 
+const localDemo = process.argv.includes("--local-demo");
 const origin = trustedOrigin(
-  process.env.MINKOPS_APP_URL || "https://app.minkops.com",
-  !app.isPackaged,
+  process.env.MINKOPS_APP_URL ||
+    (localDemo ? "http://127.0.0.1:3018" : "https://app.minkops.com"),
+  !app.isPackaged || localDemo,
 );
+if (localDemo)
+  app.setPath("userData", join(app.getPath("appData"), "Minkops Local Demo"));
 let window;
 let tray;
 let quitting = false;
 let worker;
 let timer;
 let state = {
+  server_origin: origin,
   installation_id: randomUUID(),
   device: null,
   bindings: {},
@@ -147,6 +155,29 @@ function startWorker() {
         return tallyProbe();
       const grantFor = (sourceId) =>
         binding(identity.tenant, sourceId, { id: identity.owner_id });
+      if (job.operation === "sources.discover") {
+        const plan = await request(
+          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
+        );
+        return collectSources(plan, {
+          folderFor: (id) => grantFor(id).root,
+          inventory,
+          inspectExcel,
+          discoverTally,
+          onProgress: async (source_key, status, category = null) => {
+            try {
+              await request(`/api/desktop/worker/jobs/${job.id}/progress`, {
+                claim_token: job.claim_token,
+                source_key,
+                status,
+                category,
+              });
+            } catch (error) {
+              if ([401, 404, 409].includes(error.status)) throw error;
+            }
+          },
+        });
+      }
       if (job.operation === "files.refresh")
         return { files: await inventory(grantFor(job.input.source_id).root) };
       if (job.operation !== "accounts.save")
@@ -453,9 +484,12 @@ else {
       app.setAppUserModelId("com.minkops.desktop");
       if (existsSync(statePath()) && safeStorage.isEncryptionAvailable()) {
         try {
-          state = JSON.parse(
+          const restored = JSON.parse(
             safeStorage.decryptString(await readFile(statePath())),
           );
+          // Credentials and grants belong to one server. Changing deployments
+          // requires explicit pairing; never send a prior server's token away.
+          if (restored.server_origin === origin) state = restored;
         } catch {
           /* Damaged local credentials require explicit reconnection. */
         }

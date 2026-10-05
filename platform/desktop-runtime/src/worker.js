@@ -53,6 +53,26 @@ export class CompanionWorker {
         );
       } catch (error) {
         // A superseded attempt is terminal; network failures retain the receipt.
+        if ([413, 422].includes(error.status) && !pending.receipt.error) {
+          // A rejected result must become an observable failure, not an endless
+          // reclaim loop. Persist the small error receipt before trying again.
+          pending = {
+            id: pending.id,
+            receipt: {
+              claim_token: pending.receipt.claim_token,
+              result: null,
+              error:
+                "The collected result could not be accepted. Choose a smaller supported scope and start again.",
+            },
+          };
+          await this.savePending(pending);
+          await this.request(
+            `/api/desktop/worker/jobs/${pending.id}/finish`,
+            pending.receipt,
+          );
+          await this.savePending(null);
+          return;
+        }
         if ([404, 409, 422].includes(error.status))
           await this.savePending(null);
         throw error;

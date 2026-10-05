@@ -1,6 +1,66 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CompanionWorker } from "../../../platform/desktop-runtime/src/worker.js";
+import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
+
+test("discovery continues after a missing folder and reports a separate Tally result", async () => {
+  const events = [];
+  const result = await collectSources(
+    {
+      config: { depth: "structure", tally: {} },
+      sources: [
+        { key: "missing", tool: "excel" },
+        { key: "tally", tool: "tally" },
+      ],
+    },
+    {
+      folderFor: () => {
+        throw new Error("Missing");
+      },
+      inventory: async () => [],
+      inspectExcel: async () => {},
+      discoverTally: async () => ({ collections: [] }),
+      onProgress: async (...args) => events.push(args),
+    },
+  );
+  assert.deepEqual(
+    result.sources.map((s) => s.status),
+    ["unavailable", "ready"],
+  );
+  assert.equal(events.at(-1)[0], "tally");
+});
+
+test("a rejected receipt becomes an observable failure instead of an endless read retry", async () => {
+  let pending = null;
+  let rejected = false;
+  let accepted;
+  const worker = new CompanionWorker({
+    pending: () => pending,
+    savePending: async (p) => {
+      pending = p;
+    },
+    execute: async () => ({ sources: [] }),
+    request: async (path, body) => {
+      if (path.endsWith("/claim"))
+        return {
+          id: "job",
+          claim_token: "token",
+          operation: "sources.discover",
+        };
+      if (!rejected) {
+        rejected = true;
+        const e = new Error("Invalid receipt");
+        e.status = 422;
+        throw e;
+      }
+      accepted = body;
+    },
+  });
+  await worker.tick();
+  assert.equal(accepted.result, null);
+  assert.match(accepted.error, /could not be accepted/);
+  assert.equal(pending, null);
+});
 import {
   trustedOrigin,
   validateSender,

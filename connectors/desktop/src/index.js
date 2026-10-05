@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join, dirname, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
+export { inspectExcel, discoverTally } from './discovery.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|pdf|png|jpe?g|webp)$/i;
@@ -33,7 +34,7 @@ async function workbookBytes(path) {
   return bytes;
 }
 
-async function boundedText(response, limit = 1_000_000) {
+export async function boundedText(response, limit = 1_000_000) {
   if (!response.ok || !response.body)
     throw new Error("Tally did not accept the connection check.");
   const reader = response.body.getReader();
