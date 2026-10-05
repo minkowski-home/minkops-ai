@@ -9,10 +9,11 @@ import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
   type WorkflowSort } from "../workspace/presentation";
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
 import { Icon } from "./Icon";
+import { progressView, type ProgressMode } from '../workspace/progress';
 
 const statusText: Record<string, string> = {
   active: "Active", inactive: "Inactive", paused: "Paused", planned: "Planned",
-  running: "Running", attention: "Needs attention", handoff: "Handoff",
+  running: "In progress", attention: "Needs attention", handoff: "Save pending",
   completed: "Completed", failed: "Failed",
 };
 
@@ -288,29 +289,35 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
   </section>;
   if (!detail) return <section className="route-screen"><p>Loading task…</p></section>;
+  const key = workspace.workflows.find((w) => w.id === detail.workflow_id)?.key;
+  const mode: ProgressMode = key === 'bill-entry' || key === 'source-discovery' ? key
+    : !detail.workflow_id && detail.title === 'Check Tally connection' ? 'tally.probe'
+      : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : 'simple';
+  const progress = progressView(detail, mode);
   return <section className="route-screen detail-screen task-detail">
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
-    <header className="detail-heading"><div><h2>{detail.title}</h2><p>{detail.summary}</p></div>
+    <header className="detail-heading"><div><h2>{detail.title}</h2></div>
       <Status value={detail.status} /></header>
-    <AccountsReview key={id} tenant={workspace.tenant.slug} taskId={id} />
     <div className="task-progress">
-      <div className="progress-ring" style={{ "--progress": `${detail.progress}%` } as CSSProperties}>
-        <strong>{detail.progress}%</strong><span>progress</span>
-      </div>
-      <div><h3>Where things stand</h3><p>{detail.summary}</p>
-        <div className="progress-track"><span style={{ width: `${detail.progress}%` }} /></div>
+      <div className={`task-stage-mark${progress.finished ? ' is-finished' : ''}`} aria-hidden="true"><Icon name={progress.finished ? 'check' : detail.status === 'failed' ? 'x' : 'tasks'} size={28} /></div>
+      <div className="task-stage-copy"><h3>{progress.label}</h3><p>{detail.summary}</p>
+        <ol className="task-stage-list" aria-label="Task stages">{progress.stages.map((stage, index) => <li key={stage}
+          className={index < progress.current || progress.finished ? 'is-done' : index === progress.current ? 'is-current' : ''}
+          aria-current={!progress.finished && index === progress.current ? 'step' : undefined}>
+          <span aria-hidden="true">{index < progress.current || progress.finished ? <Icon name="check" size={14} /> : index + 1}</span>{stage}</li>)}</ol>
       </div>
     </div>
-    <section className="timeline"><h3>What happened</h3>
+    <AccountsReview key={id} tenant={workspace.tenant.slug} taskId={id} />
+    <details className="timeline"><summary>Activity details · {detail.events.length} updates</summary>
       {error && <p role="alert" className="form-message">The latest timeline could not load. {error} <button
         className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Loading timeline…</p>}
       {!loading && !error && detail.events.length === 0 && <p className="quiet-state">No activity recorded yet.</p>}
       <ol>{detail.events.map((event) => <li key={event.id}>
         <span className="timeline-point" /><div><strong>{event.summary}</strong>
-          <small>{event.progress ?? detail.progress}% · {new Date(event.created_at).toLocaleString()}</small>
+          <small>{new Date(event.created_at).toLocaleString()}</small>
         </div></li>)}</ol>
-    </section>
+    </details>
   </section>;
 }
 

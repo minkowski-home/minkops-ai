@@ -81,6 +81,10 @@ export function AccountsReview({ tenant, taskId }: { tenant: string; taskId: str
     {['queued','executing'].includes(run.state) && <p role="status">Accounts desk is working. You can leave this page and return to the task.</p>}
     {run.state === 'failed' && <p role="alert">{run.error} Start a new run from the workflow after resolving the issue.</p>}
     {run.state === 'review' && edited && <>
+      <div className="accounts-review-summary" aria-label="Review summary">
+        <span>{discovery ? `${(edited as Catalog).sheets.length} sheets to confirm` : `${(edited as BillResult).records.length} entries to review`}</span>
+        {!discovery && <span>{(edited as BillResult).unresolved?.length ?? 0} destinations need clarification</span>}
+      </div>
       <p>{discovery ? 'Confirm the purpose, field meanings and record keys for each sheet.' : 'Review the proposed entries and source evidence before saving to Excel.'}</p>
       {discovery ? <>
         <label className="config-field">Find a workbook, sheet or table<input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search files, sheets or tables" /></label>
@@ -89,8 +93,8 @@ export function AccountsReview({ tenant, taskId }: { tenant: string; taskId: str
       {!discovery && <label className="accounts-check"><input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />I reviewed and acknowledge the unresolved findings.</label>}
       <button className="button button-primary" disabled={busy || (!discovery && Boolean((edited as BillResult).unresolved?.length))} onClick={() => void approve()}>{busy ? 'Saving…' : discovery ? 'Confirm source mappings' : 'Approve Excel entries'}</button>
     </>}
-    {run.state === 'writing' && <><p>Approved entries are waiting for verified writes to the local folder. Keep this browser open while saving.</p>
-      <div className="accounts-toolbar"><button className="button button-primary" disabled={busy} onClick={() => void apply(run)}>{busy ? 'Saving and verifying…' : 'Resume local writes'}</button>
+    {run.state === 'writing' && <><p>Saving your approved entries to the original workbooks. A connected PC keeps working while Minkops runs in its tray. For a browser-only folder, keep this page open.</p>
+      <div className="accounts-toolbar"><button className="button button-primary" disabled={busy} onClick={() => void apply(run)}>{busy ? 'Saving and checking…' : 'Resume saves'}</button>
         <button className="button button-ghost" disabled={busy} onClick={() => void reconnect()}>Reconnect original folder</button>
         <button className="button button-ghost" disabled={busy} onClick={() => void cancelWrites()}>Cancel remaining saves</button></div>
       <p className="quiet-state">Cancelling leaves any already applied entries in the workbook.</p></>}

@@ -377,3 +377,49 @@ tests pass; both frontends pass TypeScript/Vite builds and lint. The dependency
 lock validates with uv sync --locked, and Git reports no whitespace errors.
 These are local integration checks; no new live model call, SMTP message,
 production deployment, or PR merge is claimed.
+
+### 2026-10-05 — Share the desktop product and separate local execution authority
+
+**Situation:** MIN-117 needed a Windows product capable of reaching local Tally
+and files, with web parity and future cross-device continuity. Duplicating the
+UI, account database or agent loop would create drift and fragment task history.
+Blindly retrying an interrupted financial write could duplicate entries.
+
+**Task:** Add the smallest useful native companion while preserving existing
+identity, approvals and verification, and make execution understandable to
+nontechnical users. Scheduling and UI testing were explicitly deferred.
+
+**Decision:** Serve one React UI in web and sandboxed Electron, with the existing
+verified email/password accounts. PostgreSQL owns tasks, selected file versions
+and receipts. A registered companion polls outbound HTTPS for an allowlist of
+bounded operations; Windows-encrypted local state holds only necessary grants,
+credentials, pending receipts and recovery backups. The OpenAI-hosted Codex
+harness remains the AI execution loop; no local shell or self-hosted agent is
+introduced. This also lets a future mobile client use the same durable runs.
+
+**Action:** Put device/job controls in `platform/`, reusable worker recovery in
+`platform/desktop-runtime`, native Tally/filesystem adapters in `connectors/`,
+and IPC/HTTP transport in `apps/`. Scope credentials to account/workspace and
+recheck membership and source ownership. Persist every request key, including
+requests joining an existing job. Automatically reclaim only read jobs; recover
+saves through explicit requests, native before/after hashes, encrypted backups,
+atomic replacement and existing Accounts byte verification. Late cancellation
+receipts record applied writes without changing the cancelled run to success.
+Native save events report waiting, saving and attention states; only the domain
+can complete a multi-workbook run. Shared progress uses observed business stages
+and actual counts, with evidence/activity expandable instead of simulated ETAs.
+
+**Result:** The full backend suite passes 111 tests and 27 subtests on a freshly
+migrated/seeded isolated PostgreSQL database. All 15 web and 13 native tests pass;
+native file tests also pass on Windows, including junction containment. A real
+HTTP/PostgreSQL/Windows smoke verifies folder refresh, lost-acknowledgement
+recovery and device revocation. A headless Windows Electron check confirms
+credential encryption. The x64 NSIS installer builds natively and its packaged
+bundles match the compiled source without unbundled workspace dependencies.
+The app's new dependency audit is clean. WSL packaging limitations were resolved
+with a Windows-local compiled build directory; the working repository and
+backend environment remain intact. Live Tally reads are unverified because the
+local service is stopped; the unavailable path is verified. The installer is
+unsigned, deployment is separate, and MIN-121/122 retain scheduling and UI/clean
+Windows 10/11 install checks as Todo. No paid model call or accounting write was
+made for this verification.

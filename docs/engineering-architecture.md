@@ -16,6 +16,12 @@ Python execution and browser-granted local file saves do not imply an agent
 running on the customer's machine. The four workflow methods and their current
 scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
 
+The Windows shell shares the web UI and adds an authenticated outbound companion
+for bounded native folder operations and a Tally connection check. Durable
+device/job controls live in `platform/`; native filesystem/Tally adapters live
+in `connectors/`. The companion does not host or replace the managed AI harness.
+See [Windows app architecture and recovery](windows-app.md).
+
 Product development centers on `apps/`; workflow execution should maximize
 employee skills, prompts, OpenAI-provided capabilities, and adequate existing
 MCP/REST integrations. `platform/` supplies only shared control requirements

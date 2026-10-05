@@ -35,7 +35,7 @@ Codex executors are not part of the current refactor.
 | Method | Current implementation | Development direction | Not introduced yet |
 | --- | --- | --- | --- |
 | REST/MCP | Preferred product direction; Accounts does not currently bind business-system MCPs to its sessions. | Let skills compose existing authorized tools; keep access and consequential-write policy enforceable. Add a binding only for a concrete workflow need. | New SaaS/Tally integrations or a general connector catalogue. |
-| Local execution | The browser saves approved Excel bytes to a granted folder; Codex runs Python in an OpenAI-hosted sandbox. | Preserve the browser write adapter and its verified in-place saves. Keep file access separate from skill instructions. | Customer-machine Python/terminal execution, a desktop executor, or self-hosted Agents API environments. |
+| Local execution | Browser-granted saves and the Windows tray companion refresh selected folders and save approved Excel bytes. Web users can request bounded work on their connected PC. Codex Python runs in an OpenAI-hosted sandbox. | Keep native adapters bounded by explicit grants, approval and saved-byte verification. | Customer-machine Python/terminal execution, general remote shells, or self-hosted Agents API environments. |
 | Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
 | Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
 
@@ -80,7 +80,7 @@ The [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overvi
 supplies the Codex harness for reasoning, tool use, session orchestration,
 compaction, and recovery. Accounts desk uses **OpenAI-hosted execution environments**
 with `gpt-6-luna`. Minkops persists tenant-scoped runs and approvals; the browser
-applies approved Excel changes directly to a granted local folder. See
+or registered Windows companion applies approved Excel changes to a granted local folder. See
 [the Accounts desk guide](docs/accounts-desk.md) for contracts and recovery.
 
 Use OpenAI-provided capabilities when appropriate, including web search and
@@ -97,6 +97,11 @@ alongside the older image-to-Excel test. Agent results, reviews and verified loc
 writes appear in task progress and timelines. The outbox has no production
 publisher yet; the app polls durable state. Deployment remains separate from
 local execution proof. Customer manifests in `solutions/` describe composition.
+
+`apps/windows-app` supplies the Windows 10/11 x64 shell for that shared UI,
+tray execution, native folder grants, and a read-only Tally connection check.
+See [Windows app setup and recovery](docs/windows-app.md). Scheduling and UI
+installation testing are deferred to MIN-121 and MIN-122.
 
 For a local manual test, start the OLTP database and run migrations and the
 demo seed as described in [db/README.md](db/README.md). Start the API with a
