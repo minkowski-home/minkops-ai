@@ -27,3 +27,14 @@ The application persists catalogs, approves mappings, and enforces scope. Do
 not write back to the discovered source files. The hosted execution path
 inspects granted workbook snapshots. The application validates every proposed
 header against the workbook before accepting confirmation.
+
+For registered-PC discovery, the native adapters first collect Tally masters
+and Excel structure under collection-config.schema.json. `context.local_discovery`
+contains those observations and reference records, collected on the client's PC.
+Treat Tally fields as observed integration data, not confirmed business mappings.
+Company, source IDs and reference categories are explicitly selected. Use only
+the supplied scope. The server owns versioned JSON catalogs and partial results;
+never create an automatic local JSON copy or claim an unavailable source is ready.
+Your output still follows agent-output.schema.json for the validated Excel
+mapping contract. Native Tally schema/reference catalogs are preserved by the
+application; Tally financial writes belong to a later approved workflow.

@@ -1,6 +1,6 @@
 {
   "key": "source-discovery",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "name": "Source discovery",
   "description": "Discover approved source structures and reference data, with evidenced business mapping proposals.",
   "owner": "accounts-desk",
@@ -9,7 +9,7 @@
   "output_schema": "output.schema.json",
   "instructions": "SKILL.md",
   "tenant_defaults": {
-    "discovery_depth": "reference_data",
+    "discovery_depth": "business_mappings",
     "max_files": 100
   },
   "run_defaults": {
@@ -28,7 +28,9 @@
       "pymupdf"
     ],
     "instructions": "execution-instructions.md",
-    "resources": [],
+    "resources": [
+      "collection-config.schema.json"
+    ],
     "result_path": "/workspace/outputs/result.json"
   }
 }

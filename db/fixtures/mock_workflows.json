@@ -1,6 +1,6 @@
 {
   "source-discovery": {
-    "discovery_depth": "reference_data",
+    "discovery_depth": "business_mappings",
     "max_files": 100
   },
   "bill-entry": {

@@ -4,7 +4,7 @@ from copy import copy
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.formula.translate import Translator
@@ -15,7 +15,11 @@ MAX_CELLS = 250_000
 
 
 def open_workbook(content):
-    with ZipFile(BytesIO(content)) as archive:
+    try:
+        archive = ZipFile(BytesIO(content))
+    except (BadZipFile, OSError) as error:
+        raise ValueError("The selected workbook is not a valid .xlsx file.") from error
+    with archive:
         if sum(item.file_size for item in archive.infolist()) > 80_000_000:
             raise ValueError("Workbook expands beyond the supported size.")
         # openpyxl cannot safely round-trip every Excel extension.

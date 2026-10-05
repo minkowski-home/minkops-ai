@@ -14,10 +14,10 @@ from psycopg.types.json import Jsonb
 from minkops_platform.runtime import lifecycle
 
 from .agent import close_session, execute
-from .run_store import AccountsRunStore
 from .catalog import validate_catalog
 from .checks import check_records, populate_entry_ids
 from .repository import catalog_contents, files_for, observe
+from .run_store import AccountsRunStore
 from .service import prepare_writes
 
 STORE = AccountsRunStore()
@@ -35,6 +35,8 @@ def process(connection, run, *, executor=execute):
         refs, contents = catalog_contents(connection, run["tenant_id"], context["catalog"])
         files += [f for f in refs if f["id"] not in {i["id"] for i in files}]
     else:
+        if run["config"].get("local_discovery_snapshot"):
+            context["local_discovery"] = run["config"]["local_discovery_snapshot"]
         context["inventory"] = [
             {"file_id": str(f["id"]), "sheets": inspect_workbook(bytes(f["content"]))}
             for f in files

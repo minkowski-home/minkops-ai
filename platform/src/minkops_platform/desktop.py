@@ -127,6 +127,28 @@ def public_job(row):
 
 
 def _observe(connection, job, state, summary, progress):
+    if job["operation"] == "sources.discover":
+        # Discovery owns collection -> hosted mapping -> confirmation lifecycle.
+        if state in ("queued", "executing"):
+            from . import discovery
+
+            row = discovery.get_run(connection, job["tenant_id"], job["input"]["discovery_run_id"])
+            discovery._observe(
+                connection,
+                row,
+                state,
+                "Waiting for your PC."
+                if state == "queued"
+                else "Reading your selected business sources…",
+                progress,
+            )
+        elif state == "failed":
+            from . import discovery
+
+            row = discovery.get_run(connection, job["tenant_id"], job["input"]["discovery_run_id"])
+            if row["state"] != "failed":
+                discovery.fail(connection, {"tenant_id": job["tenant_id"]}, job, summary)
+        return
     # Accounts owns its run's lifecycle. A single workbook receipt must not
     # complete a multi-workbook run or turn a cancellation back into success.
     if job["operation"] == "accounts.save":
@@ -403,6 +425,10 @@ def _claimed_job(connection, device, job_id, claim_token):
 
 def plan(connection, device, job_id, claim_token):
     job = _claimed_job(connection, device, job_id, claim_token)
+    if job["state"] == "executing" and job["operation"] == "sources.discover":
+        from . import discovery
+
+        return discovery.plan(connection, device, job)
     if job["state"] != "executing" or job["operation"] != "accounts.save":
         raise ServiceError("conflict", "This save is no longer running.")
     _, spec = _save_spec(connection, device, job["input"])
@@ -501,6 +527,14 @@ def finish(connection, device, job_id, receipt):
         )
         result = {"verified": True, "run_state": verified["state"]}
         summary = "Workbook saved and checked."
+    elif job["operation"] == "sources.discover":
+        from . import discovery
+
+        if error:
+            discovery.fail(connection, device, job, error)
+        else:
+            result = discovery.collect(connection, device, job, result)
+        summary = "Source collection finished."
     elif result and not result["available"]:
         error = "Tally is not available. Open Tally and try again."
     state = "failed" if error else "completed"

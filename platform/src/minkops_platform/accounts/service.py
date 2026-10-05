@@ -34,9 +34,12 @@ from .repository import (
 SUPPORTED = {".xlsx", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
-def launch_run(connection, tenant, user, body):
+def launch_run(connection, tenant, user, body, *, task_id=None):
     raw_hash, previous = resolve_request(
-        connection, tenant["id"], body["request_key"], body,
+        connection,
+        tenant["id"],
+        body["request_key"],
+        body,
         lambda c, tenant_id, request_key: c.execute(
             "SELECT * FROM account_runs WHERE tenant_id=%s AND request_key=%s",
             (tenant_id, request_key),
@@ -73,6 +76,18 @@ def launch_run(connection, tenant, user, body):
         ).fetchone()
         if not catalog_row:
             raise ServiceError("not_found", "Catalog not found.")
+        if not any(s["role"] == "destination" for s in catalog_row["catalog"]["sheets"]):
+            raise ServiceError(
+                "conflict", "Confirm a Bill Entry destination in source discovery first."
+            )
+        discovered = connection.execute(
+            "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
+            (tenant["id"], str(catalog_id)),
+        ).fetchone()
+        if discovered:
+            from minkops_platform.discovery import require_ready
+
+            require_ready(connection, tenant["id"], discovered["id"], ["excel"])
         if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
             raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
         try:
@@ -138,11 +153,15 @@ def launch_run(connection, tenant, user, body):
     config["file_provenance"] = [
         {"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files
     ]
-    task = connection.execute(
-        """INSERT INTO tasks (tenant_id,workflow_id,title,summary)
+    task = (
+        {"id": task_id}
+        if task_id
+        else connection.execute(
+            """INSERT INTO tasks (tenant_id,workflow_id,title,summary)
          VALUES (%s,%s,%s,'Queued for Accounts desk.') RETURNING id""",
-        (tenant["id"], workflow["id"], workflow["name"]),
-    ).fetchone()
+            (tenant["id"], workflow["id"], workflow["name"]),
+        ).fetchone()
+    )
     run = connection.execute(
         """INSERT INTO account_runs
          (tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,request_hash,config,file_ids,catalog_id)
@@ -164,7 +183,7 @@ def launch_run(connection, tenant, user, body):
     return public_run(connection, run)
 
 
-def approve_run(connection, tenant, user, run_id, body):
+def approve_run(connection, tenant, user, run_id, body, *, require_destination=True):
     run = run_for(connection, tenant["id"], run_id, True)
     if run["state"] != "review":
         raise ServiceError("conflict", "This run is not awaiting review.")
@@ -177,7 +196,7 @@ def approve_run(connection, tenant, user, run_id, body):
             destinations = {
                 s["file_id"] for s in body["result"]["sheets"] if s["role"] == "destination"
             }
-            if not destinations:
+            if require_destination and not destinations:
                 raise ValueError("Confirm at least one bill-entry destination.")
             if any(not f["writable"] for f in files if str(f["id"]) in destinations):
                 raise ValueError(
@@ -192,7 +211,10 @@ def approve_run(connection, tenant, user, run_id, body):
                 "UPDATE account_runs SET catalog_id=%s WHERE tenant_id=%s AND id=%s",
                 (catalog["id"], tenant["id"], run["id"]),
             )
-            state, message = "completed", "Source mappings confirmed. Bill entry is ready."
+            state, message = (
+                "completed",
+                "Source mappings confirmed." + (" Bill entry is ready." if destinations else ""),
+            )
         else:
             # Only data and operation are editable. Source evidence and routing
             # originate from the agent result, preventing fabricated approvals.
@@ -359,7 +381,18 @@ def cancel_writes(connection, tenant, run_id):
     return public_run(connection, run_for(connection, tenant["id"], run_id))
 
 
-def upload_source(connection, tenant, user, names, contents, label, writable, source_id=None):
+def upload_source(
+    connection,
+    tenant,
+    user,
+    names,
+    contents,
+    label,
+    writable,
+    source_id=None,
+    *,
+    refresh_extensions=None,
+):
     try:
         if (
             not isinstance(names, list)
@@ -409,10 +442,17 @@ def upload_source(connection, tenant, user, names, contents, label, writable, so
               VALUES (%s,%s,%s,%s) RETURNING *""",
             (tenant["id"], user["id"], label, writable),
         ).fetchone()
-    connection.execute(
-        "UPDATE account_files SET current=false WHERE tenant_id=%s AND source_id=%s AND current",
-        (tenant["id"], source["id"]),
-    )
+    if refresh_extensions is None:
+        connection.execute(
+            "UPDATE account_files SET current=false WHERE tenant_id=%s AND source_id=%s AND current",
+            (tenant["id"], source["id"]),
+        )
+    else:
+        # Discovery refreshes Excel without invalidating unrelated bill snapshots.
+        connection.execute(
+            "UPDATE account_files SET current=false WHERE tenant_id=%s AND source_id=%s AND current AND lower(substring(path from '\\.[^.]+$'))=ANY(%s)",
+            (tenant["id"], source["id"], refresh_extensions),
+        )
     saved = []
     for path, content in zip(names, data, strict=True):
         saved.append(
