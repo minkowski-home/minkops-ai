@@ -99,7 +99,8 @@ publisher yet; the app polls durable state. Deployment remains separate from
 local execution proof. Customer manifests in `solutions/` describe composition.
 
 `apps/windows-app` supplies the Windows 10/11 x64 shell for that shared UI,
-tray execution, native folder grants, and a read-only Tally connection check.
+tray execution, native folder grants, and client-PC Tally/Excel source discovery.
+See [Source discovery setup and catalog contracts](docs/source-discovery.md).
 See [Windows app setup and recovery](docs/windows-app.md). Scheduling and UI
 installation testing are deferred to MIN-121 and MIN-122.
 
