@@ -17,6 +17,30 @@ URL = os.environ.get("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class AccountsTests(unittest.TestCase):
+    def test_hosted_cleanup_retries_are_bounded_without_claiming_false_success(self):
+        from minkops_platform.accounts.worker import STORE
+
+        run, _ = self.launch()
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute(
+                "UPDATE account_runs SET state='failed',session_id='cleanup-bound-test',updated_at='2000-01-01',config=config || '{\"cleanup_attempt_count\":9}'::jsonb WHERE id=%s",
+                (run["id"],),
+            )
+            claimed = STORE.claim_cleanup(c)
+            self.assertEqual(str(claimed["id"]), run["id"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute(
+                'UPDATE account_runs SET config=config || \'{"cleanup_attempt_at":"2000-01-01"}\'::jsonb WHERE id=%s',
+                (run["id"],),
+            )
+            claimed = STORE.claim_cleanup(c)
+            self.assertTrue(not claimed or str(claimed["id"]) != run["id"])
+            config = c.execute(
+                "SELECT config FROM account_runs WHERE id=%s", (run["id"],)
+            ).fetchone()["config"]
+            self.assertEqual(config["cleanup_attempt_count"], 10)
+            self.assertFalse(config.get("hosted_session_closed", False))
+
     def test_launch_pins_complete_definition_and_replay_keeps_the_original_bundle(self):
         from minkops_platform.runtime.bundles import validate_snapshot
 

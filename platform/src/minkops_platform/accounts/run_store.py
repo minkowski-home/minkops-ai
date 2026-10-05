@@ -38,11 +38,13 @@ class AccountsRunStore:
         run = connection.execute("""SELECT id,tenant_id,session_id FROM account_runs
             WHERE state NOT IN ('queued','executing') AND session_id IS NOT NULL
             AND NOT coalesce((config->>'hosted_session_closed')::boolean,false)
+            AND coalesce((config->>'cleanup_attempt_count')::integer,0) < 10
             AND coalesce((config->>'cleanup_attempt_at')::timestamptz,'epoch') < now()-interval '1 minute'
             ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED""").fetchone()
         if run:
             connection.execute(
-                """UPDATE account_runs SET config=config || jsonb_build_object('cleanup_attempt_at',now())
+                """UPDATE account_runs SET config=config || jsonb_build_object('cleanup_attempt_at',now(),
+                    'cleanup_attempt_count',coalesce((config->>'cleanup_attempt_count')::integer,0)+1)
                     WHERE tenant_id=%s AND id=%s""",
                 (run["tenant_id"], run["id"]),
             )
