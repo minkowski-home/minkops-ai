@@ -14,11 +14,12 @@ one workspace/account is connected per running installation.
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
 | Save approved Excel entries | Yes | Yes | Accounts approval, before/after hashes, backup, atomic replacement and saved-byte verification |
+| Save approved Tally bills | Yes | Yes | Confirmed company/ledger references, immutable approved Purchase plan, read-before-write and exact readback |
 | Existing hosted workflows | Yes | Yes | Existing server and OpenAI-hosted Agents API contracts |
 
 This version adds bounded native operations, not customer-machine agent hosting
 or a general remote shell. See [source discovery](source-discovery.md) for MIN-118.
-Bill-to-Tally writes and bank statement logic remain MIN-119/120. Tally must be
+Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Tally must be
 open, with its HTTP server enabled on port 9000. A company listing is a connection
 check, not verification of financial writes.
 
@@ -83,7 +84,7 @@ default is `https://app.minkops.com`. Packaged releases accept HTTPS only.
 Development can use localhost HTTP. The web host must serve existing `/api/`
 routes at the same origin; Vite already supports this through `VITE_API_TARGET`.
 A build does not deploy or prove that the default production host serves this
-branch. Apply migrations 0005–0007 before connecting devices. Use normal
+branch. Apply all migrations through 0010 before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
