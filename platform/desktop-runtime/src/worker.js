@@ -38,7 +38,9 @@ export class CompanionWorker {
             error:
               job.operation === "tally.probe"
                 ? "Tally is not responding. Open Tally, load your company, and try again."
-                : job.operation === "accounts.save"
+                : job.operation === "tally.save"
+                  ? "Tally could not confirm this bill. Check the company and resume; existing vouchers will be reconciled before writing."
+                  : job.operation === "accounts.save"
                   ? "The workbook could not be saved. Close Excel, check the original folder, and select Resume saves."
                   : "The connected folder could not be read. Reconnect it and try again.",
           };
