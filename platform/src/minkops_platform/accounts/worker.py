@@ -7,6 +7,7 @@ are surfaced for explicit intervention, never automatically resubmitted.
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from minkops_connectors.excel import inspect_workbook
 from psycopg.types.json import Jsonb
@@ -32,7 +33,11 @@ def process(connection, run, *, executor=execute):
     }
     if run["workflow_key"] == "bill-entry":
         context["catalog"] = run["config"]["catalog_snapshot"]
-        refs, contents = catalog_contents(connection, run["tenant_id"], context["catalog"])
+        refs, contents = (
+            ([], {})
+            if run["config"].get("tally_target")
+            else catalog_contents(connection, run["tenant_id"], context["catalog"])
+        )
         files += [f for f in refs if f["id"] not in {i["id"] for i in files}]
     else:
         if run["config"].get("local_discovery_snapshot"):
@@ -67,8 +72,16 @@ def process(connection, run, *, executor=execute):
             )
         result = populate_entry_ids(result, context["catalog"], run["id"])
         result = check_records(
-            result, context["catalog"], run["file_ids"], contents, run["config"]["checks"]
+            result,
+            context["catalog"],
+            run["file_ids"],
+            contents,
+            [] if run["config"].get("tally_target") else run["config"]["checks"],
         )
+        if not run["config"].get("tally_target"):
+            from .bills import capture_excel_state
+
+            capture_excel_state(result, context["catalog"], contents)
     connection.execute(
         "UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s",
         (Jsonb(result), run["tenant_id"], run["id"]),
@@ -79,40 +92,51 @@ def process(connection, run, *, executor=execute):
         "review",
         "Review the discovered mappings."
         if run["workflow_key"] == "source-discovery"
-        else "Review bill values, source evidence and proposed Excel entries.",
+        else "Review bill values, source evidence and proposed destination entries.",
         70,
     )
     if (
         run["workflow_key"] == "bill-entry"
+        and not run["config"].get("tally_target")
         and run["config"]["review_mode"] == "only_exceptions"
         and not result.get("unresolved")
         and not result["findings"]
         and not any(r["findings"] for r in result["records"])
     ):
         prepare_writes(connection, run, result, context["catalog"], refs, contents)
-        observe(
-            connection,
-            run,
-            "writing",
-            "Checks passed. Waiting for verified local Excel writes.",
-            85,
-        )
+        from .tally_writes import complete_run
+
+        complete_run(connection, run, result)
     connection.commit()
     if executor is execute:
         lifecycle.close_run(connection, STORE, run, close_session=close_session)
 
 
 def work_once(url, *, executor=execute):
-    return lifecycle.work_once(
+    from .batch import reconcile_once
+
+    reconcile_once(url)
+    worked = lifecycle.work_once(
         url, STORE, lambda connection, run: process(connection, run, executor=executor)
     )
+    reconcile_once(url)
+    return worked
 
 
 def run_forever(url):
-    while True:
-        if not work_once(url):
-            cleanup_once(url)
-            time.sleep(2)
+    def lane():
+        while True:
+            if not work_once(url):
+                cleanup_once(url)
+                time.sleep(2)
+
+    # Each lane has its own database connection and persisted hosted session.
+    # Four concurrent paid turns bound cost and provider pressure; no in-memory
+    # future is the source of truth for recovery.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(lane) for _ in range(4)]
+        for future in futures:
+            future.result()
 
 
 def cleanup_once(url):

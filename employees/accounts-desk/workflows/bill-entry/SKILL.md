@@ -1,6 +1,6 @@
 ---
 name: bill-entry
-description: Extract bills, check reference records, and propose reviewed entries to existing Excel sheets.
+description: Extract bills, check reference records, and propose reviewed entries to connected Excel or Tally.
 ---
 
 Read the approved PDF and image files, selected catalog version, and confirmed business
@@ -38,5 +38,9 @@ does not authorize a write. The application verifies results and produces Excel
 updates after required review. The browser applies the approved workbook content
 to the granted local file and reads it back; completion requires verification.
 
-The execution path supports PDFs, images, mixed batches, and in-place Excel
-entry. Tally requires a future adapter and cannot currently be selected.
+The execution path supports PDFs, images, mixed batches, and connected Excel or
+Tally Purchase vouchers. For Tally use the supplied catalog contract and exact
+discovered ledger names. The adapter owns XML, bill identity, duplicate checks,
+correction handoff and saved-voucher readback. Never send writes from the hosted
+session. When cost allocations or statutory details exceed the supported
+contract, leave the bill unresolved instead of inventing an accounting entry.

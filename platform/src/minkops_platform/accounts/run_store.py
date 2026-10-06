@@ -7,8 +7,8 @@ from .repository import observe, run_for
 
 class AccountsRunStore:
     def candidates(self, connection):
-        return connection.execute("""SELECT * FROM account_runs WHERE state='queued'
-            OR (state='executing' AND updated_at < now()-interval '30 seconds')
+        return connection.execute("""SELECT * FROM account_runs WHERE NOT coalesce((config->>'batch')::boolean,false)
+            AND (state='queued' OR (state='executing' AND updated_at < now()-interval '30 seconds'))
             ORDER BY updated_at LIMIT 10""").fetchall()
 
     def get(self, connection, tenant_id, run_id):

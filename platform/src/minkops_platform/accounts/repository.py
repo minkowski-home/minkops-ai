@@ -4,9 +4,8 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 
-from minkops_platform.run_controls import observe_task
-
 from minkops_platform.errors import ServiceError
+from minkops_platform.run_controls import observe_task
 
 from .catalog import validate_catalog
 
@@ -57,9 +56,17 @@ def observe(connection, run, state, summary, progress):
         "UPDATE account_runs SET state=%s, updated_at=now() WHERE tenant_id=%s AND id=%s",
         (state, run["tenant_id"], run["id"]),
     )
+    if run.get("parent_run_id"):
+        return
     observe_task(
-        connection, tenant_id=run["tenant_id"], task_id=run["task_id"], run_id=run["id"],
-        state=state, summary=summary, progress=progress, event_prefix="account_run",
+        connection,
+        tenant_id=run["tenant_id"],
+        task_id=run["task_id"],
+        run_id=run["id"],
+        state=state,
+        summary=summary,
+        progress=progress,
+        event_prefix="account_run",
     )
 
 
@@ -115,6 +122,10 @@ def public_run(connection, run):
          FROM account_writes WHERE tenant_id=%s AND run_id=%s ORDER BY path""",
         (run["tenant_id"], run["id"]),
     ).fetchall()
+    value["tally_writes"] = connection.execute(
+        "SELECT id,device_id,company,record_index,outcome,verified_at,finished_at,cancelled_at FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s ORDER BY created_at",
+        (run["tenant_id"], run["id"]),
+    ).fetchall()
     return value
 
 
@@ -142,7 +153,7 @@ def list_catalogs(connection, tenant):
 
 def list_runs(connection, tenant):
     rows = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s ORDER BY updated_at DESC LIMIT 50",
+        "SELECT * FROM account_runs WHERE tenant_id=%s AND parent_run_id IS NULL ORDER BY updated_at DESC LIMIT 50",
         (tenant["id"],),
     ).fetchall()
     return [public_run(connection, row) for row in rows]
@@ -150,6 +161,7 @@ def list_runs(connection, tenant):
 
 def task_run(connection, tenant, task_id):
     row = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s AND task_id=%s", (tenant["id"], task_id)
+        "SELECT * FROM account_runs WHERE tenant_id=%s AND task_id=%s AND parent_run_id IS NULL",
+        (tenant["id"], task_id),
     ).fetchone()
     return public_run(connection, row) if row else None

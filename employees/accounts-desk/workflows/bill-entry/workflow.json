@@ -1,8 +1,8 @@
 {
   "key": "bill-entry",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "Bill entry",
-  "description": "Enter reviewed PDF and image bills into existing Excel workbooks.",
+  "description": "Enter reviewed PDF and image bills into connected Excel or Tally with verified, repeatable writes.",
   "owner": "accounts-desk",
   "tenant_config_schema": "tenant-config.schema.json",
   "run_config_schema": "run-config.schema.json",
