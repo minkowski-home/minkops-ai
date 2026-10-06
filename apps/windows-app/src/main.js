@@ -29,6 +29,7 @@ import {
   tallyProbe,
   inspectExcel,
   discoverTally,
+  commitTallyBill,
 } from "@minkops/desktop-connectors";
 import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
@@ -180,6 +181,10 @@ function startWorker() {
       }
       if (job.operation === "files.refresh")
         return { files: await inventory(grantFor(job.input.source_id).root) };
+      if (job.operation === "tally.save") {
+        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
+        return commitTallyBill(plan);
+      }
       if (job.operation !== "accounts.save")
         throw new Error("Unsupported local operation.");
       const spec = await request(

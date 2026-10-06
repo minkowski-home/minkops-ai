@@ -13,6 +13,7 @@ import {
 import { join, dirname, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, discoverTally } from './discovery.js';
+export { commitTallyBill, readTallyBills } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|pdf|png|jpe?g|webp)$/i;
