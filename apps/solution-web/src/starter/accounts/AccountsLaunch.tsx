@@ -7,12 +7,16 @@ import { useAuth } from '../contexts/AuthContext';
 import { chooseFolder, refreshFolder, supportsLocalFolder } from './localFiles';
 import type { Run, Source, SavedCatalog } from './types';
 
+interface NativeCatalog { id:string; ready:boolean; config:{tally:{company:string}|null} }
+
 function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug: string; workflow: Workflow }) {
   const { user } = useAuth(); const navigate = useNavigate();
   const [sources, setSources] = useState<Source[]>([]);
   const [catalogs, setCatalogs] = useState<SavedCatalog[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [catalogId, setCatalogId] = useState('');
+  const [outputMode,setOutputMode] = useState(String(workflow.config_values.output_mode ?? 'excel_in_place'));
+  const [nativeCatalog,setNativeCatalog] = useState<NativeCatalog|null>(null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [inputFormat, setInputFormat] = useState(String(workflow.config_values.input_format ?? 'mixed'));
   const [reviewMode, setReviewMode] = useState(String(workflow.config_values.review_mode ?? 'all_outputs'));
@@ -23,6 +27,7 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
   const discovery = presentationFor(workflow) === 'accounts-discovery';
   const base = `/api/tenants/${tenant}/accounts`;
   const preferences = `${tenant}:${workflow.key}:selections:v1`;
+  useEffect(()=>{let active=true;void api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`).then(c=>{if(active)setNativeCatalog(c);}).catch((e:Error)=>{if(active)setError(e.message);});return()=>{active=false;};},[tenant]);
 
   async function refresh() {
     const [loadedSources, loadedCatalogs] = await Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs')]);
@@ -63,18 +68,19 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
     setBusy(true); setError('');
     try {
       localStorage.setItem(preferences, JSON.stringify(sources.flatMap((s) => s.files.filter((f) => selected.includes(f.id)).map((f) => `${s.id}:${f.path}`))));
+      if (!discovery) localStorage.setItem(`${tenant}:bill-entry:target:v1`,JSON.stringify({output_mode:outputMode,catalog_id:catalogId,discovery_id:nativeCatalog?.id}));
       const run = await api<Run>(base + '/runs', { method: 'POST', body: JSON.stringify({
         key: workflow.key, request_key: crypto.randomUUID(), file_ids: selected,
-        catalog_id: discovery ? null : catalogId,
-        config: discovery ? { max_files: maxFiles, discovery_depth:discoveryDepth, refresh_mode:refreshMode } : { input_format: inputFormat, review_mode: reviewMode, output_mode: 'excel_in_place', checks },
+        catalog_id: discovery || outputMode==='tally_in_place' ? null : catalogId,
+        config: discovery ? { max_files: maxFiles, discovery_depth:discoveryDepth, refresh_mode:refreshMode } : { input_format: inputFormat, review_mode: outputMode==='tally_in_place'?'all_outputs':reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id}:{}) },
       }) }, user.csrf_token);
       navigate(`/${routeSlug}/tasks/${run.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not start workflow.'); }
     finally { setBusy(false); }
   }
   return <section className="accounts-panel" aria-label="Run workflow">
-    <div className="section-heading"><div><h3>{discovery ? 'Discover your Excel sources' : 'Enter bills into Excel'}</h3>
-      <p>{discovery ? 'Inspect once, confirm the mappings, and refresh when your sources change.' : 'Read bills, review the entries, and update the right existing workbook.'}</p></div></div>
+    <div className="section-heading"><div><h3>{discovery ? 'Discover your Excel sources' : 'Enter bills'}</h3>
+      <p>{discovery ? 'Inspect once, confirm the mappings, and refresh when your sources change.' : 'Read bills in parallel, review entries, and save to your connected Excel or Tally.'}</p></div></div>
     <div className="accounts-toolbar">
       <button className="button button-ghost" disabled={busy || !supportsLocalFolder()} onClick={() => user && void action(() => chooseFolder(tenant,user.csrf_token))}>Connect local folder</button>
       <label className="button button-ghost">Upload files<input aria-label="Upload workflow files" type="file" multiple accept={discovery ? '.xlsx' : '.pdf,.png,.jpg,.jpeg,.webp'} disabled={busy} onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} /></label>
@@ -96,14 +102,15 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
         <label>Discovery run<select value={refreshMode} onChange={(e) => setRefreshMode(e.target.value)}><option value="initial">Initial discovery</option><option value="refresh">Refresh discovery</option></select></label>
         <label>File limit<input type="number" min="1" max="1000" value={maxFiles} onChange={(e) => setMaxFiles(Number(e.target.value))} /></label></> : <>
         <label>Input types<select value={inputFormat} onChange={(e) => setInputFormat(e.target.value)}><option value="mixed">PDFs and images</option><option value="pdf">PDFs</option><option value="image">Images</option></select></label>
-        <label>Review policy<select value={reviewMode} onChange={(e) => setReviewMode(e.target.value)}><option value="all_outputs">Approve every output</option><option value="only_exceptions">Only exceptions</option></select></label>
-        <label>Output platform<select value="excel" disabled><option value="excel">Excel Â· update existing sheets</option></select></label>
-        <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} Â· {c.catalog.sheets.length} sheets</option>)}</select></label>
-        <fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>
+        <label>Review policy<select disabled={outputMode==='tally_in_place'} value={outputMode==='tally_in_place'?'all_outputs':reviewMode} onChange={(e) => setReviewMode(e.target.value)}><option value="all_outputs">Approve every output</option><option value="only_exceptions">Only exceptions</option></select></label>
+        <label>Output platform<select value={outputMode} onChange={e=>setOutputMode(e.target.value)}><option value="excel_in_place">Excel · update existing sheets</option><option value="tally_in_place">Tally · purchase vouchers</option></select></label>
+        {outputMode==='tally_in_place'?<p role="status">{nativeCatalog?.ready&&nativeCatalog.config.tally?`Confirmed Tally company: ${nativeCatalog.config.tally.company}`:'Confirm Tally company, ledgers and voucher types in Source discovery first.'}</p>:
+        <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} Â· {c.catalog.sheets.length} sheets</option>)}</select></label>}
+        {outputMode!=='tally_in_place'&&<fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>}
       </>}
     </div></details>
     {error && <p role="alert" className="form-message">{error}</p>}
-    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (!discovery && !catalogId)} onClick={() => void launch()}>{busy ? 'Workingâ€¦' : `Run ${workflow.name.toLowerCase()}`}</button>
+    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (!discovery && (outputMode==='tally_in_place'? !nativeCatalog?.ready||!nativeCatalog.config.tally : !catalogId))} onClick={() => void launch()}>{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
     <span className="quiet-state"> {selected.length} files selected</span>
   </section>;
 }
@@ -125,12 +132,15 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
         navigate(`/${routeSlug}/tasks/${launched.task_id}`); return;
       }
       const [sources,catalogs] = await Promise.all([api<Source[]>(base+'/sources'),api<SavedCatalog[]>(base+'/catalogs')]);
+      let target:{output_mode?:string;catalog_id?:string;discovery_id?:string}={};
+      try { target=JSON.parse(localStorage.getItem(`${tenant}:bill-entry:target:v1`)??'{}') as typeof target; } catch { /* Setup is authoritative. */ }
+      const tally=target.output_mode==='tally_in_place';
       let selections: string[] = [];
       try {
         const saved: unknown = JSON.parse(localStorage.getItem(`${tenant}:${workflow.key}:selections:v1`) ?? '[]');
         if (Array.isArray(saved) && saved.every((v) => typeof v === 'string')) selections=saved;
       } catch { /* Preferences are optional; setup remains available. */ }
-      if (!selections.length || (!discovery && !catalogs.length)) {
+      if (!selections.length || (tally ? !target.discovery_id : !catalogs.length)) {
         navigate(`/${routeSlug}/workflows/${workflow.id}`); return;
       }
       // Refresh the selected local source before recognition so newly changed
@@ -142,7 +152,8 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
         (discovery ? /\.xlsx$/i.test(file.path) : /\.(pdf|png|jpe?g|webp)$/i.test(file.path))).map((file) => file.id));
       if (!files.length) throw new Error('Your saved selection is unavailable. Open workflow details to select files.');
       const loaded = await api<Run>(base+'/runs', {method:'POST',body:JSON.stringify({
-        key:workflow.key,request_key:crypto.randomUUID(),file_ids:files,catalog_id:discovery ? null : catalogs[0].id,
+        key:workflow.key,request_key:crypto.randomUUID(),file_ids:files,catalog_id:tally ? null : target.catalog_id??catalogs[0].id,
+        config:tally?{output_mode:'tally_in_place',discovery_id:target.discovery_id}:{output_mode:'excel_in_place'},
       })},user.csrf_token);
       navigate(`/${routeSlug}/tasks/${loaded.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Open workflow details to reconnect your folder.'); }

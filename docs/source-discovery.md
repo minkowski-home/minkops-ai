@@ -84,7 +84,9 @@ credentials/grants are never carried into a different deployment.
 complete latest catalog containing the selected tools. Excel Bill Entry already
 uses it for catalogs produced by native discovery. MIN-119/120 must pin this
 version, recheck live source versions and obtain approval before consequential
-writes; discovery never authorizes a financial write by itself.
+writes; discovery never authorizes a financial write by itself. MIN-119 now uses
+this gate for both Excel and Tally, including another check before dispatch and
+native company/ledger version checks before Tally saves. See [bill entry](bill-entry.md).
 
 Limits: 45 Excel workbooks / 8 MB per mapping run, 5 MB per workbook, 10,000 rows
 per worksheet, 250,000 cells per worksheet, 50 MB expanded ZIP, and 100 sheets.

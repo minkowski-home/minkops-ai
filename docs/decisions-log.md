@@ -554,3 +554,53 @@ run's policy after tenant changes. Existing separator encoding artifacts remain
 baseline UI debt. No production deployment, new business-system MCP integration,
 new employee/workflow, or later Bill entry/Tally financial-write branch changes
 are included. Future real workflows still need business-specific evaluations.
+### 2026-10-06 — Separate bill identity and approved intent from task execution
+
+**Situation:** MIN-119 needed parallel scanned-bill extraction on the existing
+Windows/web app. Replayed tasks, backfills and corrections could otherwise
+duplicate accounting records, and one unreadable bill could block an entire batch.
+
+**Task:** Keep source accuracy authoritative across hosted sessions, human review,
+registered-PC execution and restarts, while preserving platform/connector/app
+boundaries and the shared UI.
+
+**Action:** Use durable per-input hosted sessions under one review task, with
+independent failure handling and bounded worker concurrency. Derive bill identity
+from supplier/invoice/financial year or confirmed Excel business keys; reserve
+approved writes independently of task IDs. Scope Tally reservations by observed
+company GUID across PCs. Persist immutable approval plans and queue native jobs
+in the same transaction. Reconcile existing destination data before writing;
+hold different versions for explicit edits, compare extraction/read snapshots,
+and require exact saved-byte or ledger readback. Late cancelled Excel receipts
+retain audit evidence without replacing newer source metadata. Persist rejected
+inputs on batch children so sibling retries cannot resurrect old failures.
+
+**Result:** Parallel worker, duplicate/correction, partial failure, cross-PC
+reservation, stale review, cancellation and receipt regressions pass against
+PostgreSQL. Real gpt-6-luna sessions extracted complex raster bills into both
+Tally and inferred Excel contracts. Windows native saves and replayed receipts
+verified destination data; a provider-interrupted blank input was retried without
+repeating three successful sibling writes. Visual/installation QA stays MIN-122.
+
+### 2026-10-06 — Catch a Tally correction that silently became a creation
+
+**Situation:** Live testing of a synthetic Purchase correction showed that a
+MASTER ID selector without its original DATE could create another voucher,
+despite an apparent import success. Tally also assigned its own company GUID
+suffix instead of retaining the requested UUID on creation.
+
+**Task:** Prevent acknowledgements from masquerading as correct accounting data
+and implement an observed-identity correction contract.
+
+**Action:** Require the original DATE and MASTER ID for Alter, explicitly reject
+a CREATED response during correction, and re-export matching vouchers after
+every save. Verify a unique business identity, exact approved date and signed
+ledger amounts, and unchanged observed GUID during update. Add a failing native
+regression for the incorrect selector, then repeat the real Windows/Tally test.
+Remove only the duplicate synthetic test voucher after identifying its master ID.
+Guard complex existing inventory/bill/payment/cost allocations so the fixed mock
+Purchase contract cannot flatten financial structure it does not represent.
+
+**Result:** Live create, exact replay, correction handoff, approved Alter and
+unique readback pass. Protocol failures, ambiguous keys, changed fingerprints,
+wrong readbacks and unsupported allocations cannot be reported as saved.

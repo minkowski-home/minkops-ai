@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { commitLocalWrite } from './localWrites';
 import type { LocalFile } from './localWrites';
-import type { Source, WritePlan } from './types';
+import type { Source, WritePlan, TallyWrite } from './types';
 import { desktopBridge, nativeFilesForm } from '../desktop/bridge';
 
 export interface Directory {
@@ -162,4 +162,8 @@ export async function applyLocalPlan(tenant: string, runId: string, write: Write
   };
   if (navigator.locks) await navigator.locks.request(`${tenant}:write:${write.source_id}:${write.path}`, execute);
   else await execute();
+}
+
+export async function applyTallyPlan(tenant:string,runId:string,write:TallyWrite,csrf:string):Promise<void> {
+  await onConnectedPC(tenant,write.device_id,'tally.save',{run_id:runId,write_id:write.id},csrf);
 }
