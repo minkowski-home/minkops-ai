@@ -30,6 +30,7 @@ import {
   inspectExcel,
   discoverTally,
   commitTallyBill,
+  saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
 import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
@@ -182,7 +183,9 @@ function startWorker() {
       if (job.operation === "files.refresh")
         return { files: await inventory(grantFor(job.input.source_id).root) };
       if (job.operation === "tally.save") {
-        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
+        const plan = await request(
+          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
+        );
         return commitTallyBill(plan);
       }
       if (job.operation !== "accounts.save")
@@ -246,6 +249,28 @@ function handle(channel, operation) {
 }
 
 function setupBridge() {
+  handle("desktop:save-catalog", async ({ tenant, discoveryId }) => {
+    await profile(tenant);
+    if (!uuid(discoveryId)) throw new Error("Choose a valid source catalog.");
+    const catalog = await (
+      await cloud(
+        `/api/tenants/${tenant}/discovery/runs/${discoveryId}/catalog.json`,
+      )
+    ).json();
+    if (!catalog || !Array.isArray(catalog.sources))
+      throw new Error("Source catalog is unavailable.");
+    const selected = await dialog.showSaveDialog(window, {
+      title: "Save source catalog",
+      defaultPath: join(
+        app.getPath("documents"),
+        `minkops-sources-${discoveryId}.json`,
+      ),
+      filters: [{ name: "JSON source catalog", extensions: ["json"] }],
+    });
+    if (selected.canceled || !selected.filePath) return false;
+    await saveCatalogSnapshot(selected.filePath, catalog);
+    return true;
+  });
   handle("desktop:status", async () => ({
     version: app.getVersion(),
     name: hostname(),

@@ -17,6 +17,7 @@ export interface DesktopBridge {
   status(): Promise<DesktopStatus>;
   connect(tenant: string): Promise<{ id: string }>;
   disconnect(): Promise<void>;
+  saveCatalog?(tenant: string, discoveryId: string): Promise<boolean>;
   pickFolder(tenant: string, sourceId?: string): Promise<NativeFolder | null>;
   bindFolder(tenant: string, sourceId: string, grantId: string): Promise<void>;
   refreshFolder(tenant: string, sourceId: string): Promise<NativeFile[]>;

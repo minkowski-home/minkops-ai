@@ -10,7 +10,7 @@ import {
   rename,
   unlink,
 } from "node:fs/promises";
-import { join, dirname, sep, extname } from "node:path";
+import { join, dirname, basename, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, discoverTally } from './discovery.js';
 export { commitTallyBill, readTallyBills } from './tally.js';
@@ -23,6 +23,39 @@ const EXCLUDED = new Set([
   "pr-infra-sample-bills",
 ]);
 const runningWrites = new Map();
+
+/** Export only to the path chosen by the native Save As dialog. No web-supplied
+ * paths or folder traversal are accepted by the desktop bridge. */
+export async function saveCatalogSnapshot(path, snapshot) {
+  if (extname(path).toLowerCase() !== ".json")
+    throw new Error("Choose a JSON file.");
+  const bytes = Buffer.from(JSON.stringify(snapshot, null, 2));
+  if (bytes.length > 8_000_000)
+    throw new Error("Catalog exceeds the 8 MB export limit.");
+  try {
+    const existing = await lstat(path);
+    if (!existing.isFile() || existing.isSymbolicLink())
+      throw new Error("Choose a regular file for the catalog.");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  const parent = await realpath(dirname(path));
+  const temporary = join(parent, `.minkops-export-${randomUUID()}.tmp`);
+  let handle;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await rename(temporary, join(parent, basename(path)));
+  } finally {
+    await handle?.close();
+    await unlink(temporary).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+}
 
 async function workbookBytes(path) {
   if ((await lstat(path)).size > 5_000_000)

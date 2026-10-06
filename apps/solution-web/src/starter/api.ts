@@ -20,6 +20,7 @@ export interface SettingSpec {
   title?: string;
   description?: string;
   enum?: (string | number)[];
+  "x-enabled-options"?: (string | number)[];
 }
 
 export interface ConfigSchema {
