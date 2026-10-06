@@ -1,6 +1,7 @@
 """Accounts catalog and business record validation against confirmed mappings."""
 
 import json
+import math
 
 from jsonschema import Draft202012Validator, FormatChecker
 from minkops_connectors.excel import apply_records as write_records
@@ -68,8 +69,10 @@ def validate_data(mapping, data):
         raise ValueError(errors[0].message)
     for c in mapping["columns"]:
         v = data.get(c["name"])
-        if c["required"] and (v is None or v == ""):
+        if c["required"] and (v is None or (isinstance(v, str) and not v.strip())):
             raise ValueError(f"{c['name']} requires a value.")
+        if isinstance(v, float) and not math.isfinite(v):
+            raise ValueError(f"{c['name']} requires a finite number.")
         if isinstance(v, str) and v.lstrip().startswith(("=", "+", "-", "@")):
             raise ValueError(f"{c['name']} contains unsafe formula-like text.")
 
