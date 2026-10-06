@@ -604,3 +604,60 @@ Purchase contract cannot flatten financial structure it does not represent.
 **Result:** Live create, exact replay, correction handoff, approved Alter and
 unique readback pass. Protocol failures, ambiguous keys, changed fingerprints,
 wrong readbacks and unsupported allocations cannot be reported as saved.
+
+### 2026-10-06 — Keep client policy trusted while preserving reusable workflows
+
+**Situation:** The mock-client RC must save only to Tally, while the shared
+workflows retain Excel/Tally/Both choices and future client rules remain unknown.
+Editable preferences alone would let a caller bypass a disabled UI option.
+
+**Task:** Enforce the client restriction without embedding mock-client routing
+throughout the API, shared workflow or native adapters.
+
+**Action:** Bind repository-owned solution policy into the registered JSON Schema,
+retain the visible enum and annotate enabled choices. Validate settings and launch
+destinations against trusted registration. Preserve other clients' definitions
+when no policy exists and keep each run's versioned execution snapshot immutable.
+
+**Result:** Schema, authenticated launch and preference-override regressions pass;
+mock-client can save only to Tally. Source discovery remains independently
+configurable, and later client rules have an explicit composition boundary.
+
+### 2026-10-06 — Preserve financial approvals across periodic discovery
+
+**Situation:** A live bill approval was blocked by an unchanged periodic discovery
+even though its confirmed catalog and company identity were identical. Supplier
+remediation also needs newer masters without replaying already verified bills.
+
+**Task:** Allow safe refreshes while retaining immutable approvals, exact source
+identity and per-bill recovery.
+
+**Action:** Add failing database regressions, then accept an older pinned catalog
+only when the newer catalog is ready and its fingerprint is identical. For a
+supplier clarification, rebind only that retry to a confirmed catalog on the same
+PC/company GUID. Keep saved/duplicate siblings intact. Fix retry progress and
+review counts to exclude already checked bills, with regression coverage.
+
+**Result:** The installed app saves the remediated hire bill after a periodic
+refresh. A second five-input batch skips every duplicate after an independent
+reference clarification. Worker restart retains paid session identities, and
+original Test Company vouchers remain byte-equivalent after normalization.
+
+### 2026-10-06 — Make catalog export reliable in the installed Windows shell
+
+**Situation:** Visual RC testing found that Chromium's catalog download returned
+HTTP success but left an incomplete temporary file rather than the requested
+OneDrive artifact.
+
+**Task:** Produce a complete user-selected catalog without exposing arbitrary
+filesystem writes or renderer-controlled network requests.
+
+**Action:** Add bounded native IPC for an authenticated tenant/discovery ID, fetch
+the fixed authorized endpoint, show Save As and delegate file writing to the
+connector. Validate JSON extension, size and regular-file/parent containment;
+sync a temporary file and replace atomically. Add failure/containment regressions
+and verify the installed app's actual Windows picker/export.
+
+**Result:** A complete 537,848-byte catalog is saved in OneDrive. Native regression
+suites and live Windows export pass; the reusable adapter stays in connectors,
+while Electron owns only authenticated transport and the native dialog.
