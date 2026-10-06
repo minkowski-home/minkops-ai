@@ -117,12 +117,15 @@ def apply_records(content, mapping, records, *, validate_record):
         if any(data.get(k) is None or data.get(k) == "" for k in keys):
             raise ValueError("Record keys must be complete.")
         a, b, c, d = mapping_bounds(s, mapping)
+        match_data = record.get("match_data", data) if record.get("operation") == "update" else data
+        if any(match_data.get(k) in (None, "") for k in keys):
+            raise ValueError("Correction keys must be complete.")
         matches = [
             r
             for r in range(b + 1, d + 1)
             if all(
-                str(s.cell(r, columns[k]).value).strip().casefold()
-                == str(data[k]).strip().casefold()
+                str(value_json(s.cell(r, columns[k]).value)).strip().casefold()
+                == str(match_data[k]).strip().casefold()
                 for k in keys
             )
         ]
