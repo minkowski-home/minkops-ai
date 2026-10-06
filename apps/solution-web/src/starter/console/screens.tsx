@@ -75,7 +75,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
         : spec.enum
           ? <select value={String(values[key] ?? "")} disabled={!canEdit}
             onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))}>
-              {spec.enum.map((option) => <option key={String(option)} value={String(option)}>{option}</option>)}
+              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft'} as Record<string,string>)[String(option)] ?? option}</option>)}
             </select>
           : <input type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
             disabled={!canEdit} onChange={(event) => setValues((current) => ({

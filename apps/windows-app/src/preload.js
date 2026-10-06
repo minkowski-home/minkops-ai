@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld(
     status: () => ipcRenderer.invoke("desktop:status"),
     connect: (tenant) => ipcRenderer.invoke("desktop:connect", tenant),
     disconnect: () => ipcRenderer.invoke("desktop:disconnect"),
+    saveCatalog: (tenant, discoveryId) => ipcRenderer.invoke("desktop:save-catalog", {tenant, discoveryId}),
     pickFolder: (tenant, sourceId) =>
       ipcRenderer.invoke("desktop:pick-folder", { tenant, sourceId }),
     bindFolder: (tenant, sourceId, grantId) =>

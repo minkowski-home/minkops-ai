@@ -24,6 +24,7 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
   const [refreshMode,setRefreshMode] = useState('initial');
   const [checks, setChecks] = useState(['vendor_match','duplicate','totals','cost_codes']);
   const discovery = workflow.key === 'source-discovery';
+  const enabledOutputs = workflow.config_schema.properties.output_mode?.['x-enabled-options'];
   const base = `/api/tenants/${tenant}/accounts`;
   const preferences = `${tenant}:${workflow.key}:selections:v1`;
   useEffect(()=>{let active=true;void api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`).then(c=>{if(active)setNativeCatalog(c);}).catch((e:Error)=>{if(active)setError(e.message);});return()=>{active=false;};},[tenant]);
@@ -84,12 +85,12 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
       <button className="button button-ghost" disabled={busy || !supportsLocalFolder()} onClick={() => user && void action(() => chooseFolder(tenant,user.csrf_token))}>Connect local folder</button>
       <label className="button button-ghost">Upload files<input aria-label="Upload workflow files" type="file" multiple accept={discovery ? '.xlsx' : '.pdf,.png,.jpg,.jpeg,.webp'} disabled={busy} onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} /></label>
     </div>
-    <p className="quiet-state">Folder access stays in this browser. Excel destinations require a connected folder. Supported: .xlsx, PDF, PNG, JPEG and WebP. Other file types are skipped.</p>
+    <p className="quiet-state">{window.minkopsDesktop ? 'Folders remain connected on this PC.' : 'Folder access stays in this browser.'} Excel destinations require a connected folder. Supported: .xlsx, PDF, PNG, JPEG and WebP. Other file types are skipped.</p>
     {!supportsLocalFolder() && <p role="status">Open this workspace in Chrome or Edge to update local Excel files.</p>}
     <div className="accounts-sources">{sources.map((source) => {
       const eligible = source.files.filter((f) => discovery ? /\.xlsx$/i.test(f.path) : /\.(pdf|png|jpe?g|webp)$/i.test(f.path));
       if (!eligible.length) return null;
-      return <details key={source.id} open={sources.length < 4}><summary>{source.label} Â· {eligible.length} files Â· {source.writable ? 'Local folder' : 'Uploaded'}</summary>
+      return <details key={source.id} open={sources.length < 4}><summary>{source.label} · {eligible.length} files · {source.writable ? 'Local folder' : 'Uploaded'}</summary>
         {source.writable && <div className="accounts-toolbar"><button className="button button-ghost" disabled={busy} onClick={() => user && void action(() => refreshFolder(tenant,source,user.csrf_token))}>Refresh folder</button>
           <button className="button button-ghost" disabled={busy} onClick={() => user && void action(() => chooseFolder(tenant,user.csrf_token,source))}>Reconnect folder</button></div>}
         <div className="accounts-file-list">{eligible.map((file) => <label key={file.id}><input type="checkbox" checked={selected.includes(file.id)} onChange={(e) => setSelected((old) => e.target.checked ? [...old,file.id] : old.filter((id) => id !== file.id))} />{file.path}</label>)}</div>
@@ -102,9 +103,10 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
         <label>File limit<input type="number" min="1" max="1000" value={maxFiles} onChange={(e) => setMaxFiles(Number(e.target.value))} /></label></> : <>
         <label>Input types<select value={inputFormat} onChange={(e) => setInputFormat(e.target.value)}><option value="mixed">PDFs and images</option><option value="pdf">PDFs</option><option value="image">Images</option></select></label>
         <label>Review policy<select disabled={outputMode==='tally_in_place'} value={outputMode==='tally_in_place'?'all_outputs':reviewMode} onChange={(e) => setReviewMode(e.target.value)}><option value="all_outputs">Approve every output</option><option value="only_exceptions">Only exceptions</option></select></label>
-        <label>Output platform<select value={outputMode} onChange={e=>setOutputMode(e.target.value)}><option value="excel_in_place">Excel · update existing sheets</option><option value="tally_in_place">Tally · purchase vouchers</option></select></label>
+        <label>Output platform<select value={outputMode} onChange={e=>setOutputMode(e.target.value)}>{[['excel_in_place','Excel · update existing sheets'],['tally_in_place','Tally · purchase vouchers'],['both_in_place','Both · Excel and Tally']].map(([value,label])=><option key={value} value={value} disabled={Boolean(enabledOutputs && !enabledOutputs.includes(value))}>{label}</option>)}</select></label>
+        {enabledOutputs && <p className="quiet-state">This workspace saves bills to Tally only. Excel destinations are disabled.</p>}
         {outputMode==='tally_in_place'?<p role="status">{nativeCatalog?.ready&&nativeCatalog.config.tally?`Confirmed Tally company: ${nativeCatalog.config.tally.company}`:'Confirm Tally company, ledgers and voucher types in Source discovery first.'}</p>:
-        <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} Â· {c.catalog.sheets.length} sheets</option>)}</select></label>}
+        <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} · {c.catalog.sheets.length} sheets</option>)}</select></label>}
         {outputMode!=='tally_in_place'&&<fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>}
       </>}
     </div></details>
@@ -142,6 +144,18 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       if (!selections.length || (tally ? !target.discovery_id : !catalogs.length)) {
         navigate(`/${routeSlug}/workflows/${workflow.id}`); return;
       }
+      if (tally) {
+        type NativeSelection = NativeCatalog & {device_id:string;catalog:{sources:{tool:string;snapshot?:{collections:{category:string;records:Record<string,unknown>[]}[]}}[]}|null};
+        const [selectedTarget,latest] = await Promise.all([
+          api<NativeSelection>(`/api/tenants/${tenant}/discovery/runs/${target.discovery_id}`),
+          api<NativeSelection|null>(`/api/tenants/${tenant}/discovery/latest`),
+        ]);
+        const companyGuid=(catalog:NativeSelection)=>catalog.catalog?.sources.find(s=>s.tool==='tally')?.snapshot?.collections.find(c=>c.category==='company')?.records[0]?.GUID;
+        if (!latest?.ready || latest.device_id!==selectedTarget.device_id || latest.config.tally?.company!==selectedTarget.config.tally?.company || companyGuid(latest)!==companyGuid(selectedTarget)) {
+          navigate(`/${routeSlug}/workflows/${workflow.id}`);return;
+        }
+        target.discovery_id=latest.id;
+      }
       // Refresh the selected local source before recognition so newly changed
       // bytes cannot silently be treated as the earlier snapshot.
       const selectedSources = sources.filter((source) => source.files.some((file) => selections.includes(`${source.id}:${file.path}`)));
@@ -158,7 +172,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     } catch (e) { setError(e instanceof Error ? e.message : 'Open workflow details to reconnect your folder.'); }
     finally { setBusy(false); }
   }
-  return <div><button className="button button-primary" disabled={busy} onClick={() => void run()}>{busy ? 'Startingâ€¦' : 'Run workflow'}</button>
+  return <div><button className="button button-primary" disabled={busy} onClick={() => void run()}>{busy ? 'Starting…' : 'Run workflow'}</button>
     {error && <p role="alert" className="form-message">{error}</p>}</div>;
 }
 

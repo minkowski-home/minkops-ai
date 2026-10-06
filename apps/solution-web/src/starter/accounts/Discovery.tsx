@@ -20,6 +20,7 @@ interface Binding {
   device_id: string;
 }
 interface Config {
+  destination_mode?: 'excel' | 'tally' | 'both';
   depth: string;
   excel_source_ids: string[];
   tally: { company: string; port: number; categories: string[] } | null;
@@ -29,6 +30,7 @@ interface Collection {
   status: string;
   count?: number;
   fields?: string[];
+  records?: Record<string, unknown>[];
   error?: string;
 }
 interface Book {
@@ -100,7 +102,10 @@ export function DiscoveryLaunch({
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
-  const [tally, setTally] = useState(true);
+  const [destinationMode, setDestinationMode] = useState<'excel' | 'tally' | 'both'>(
+    (workflow.config_values.destination_mode ?? 'tally') as 'excel' | 'tally' | 'both'
+  );
+  const tally = destinationMode !== 'excel';
   const [company, setCompany] = useState("");
   const [port, setPort] = useState(9000);
   const [depth, setDepth] = useState(
@@ -133,7 +138,7 @@ export function DiscoveryLaunch({
     );
     if (latest) {
       setSelected(latest.config.excel_source_ids);
-      setTally(Boolean(latest.config.tally));
+      setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? (latest.config.excel_source_ids.length ? 'both' : 'tally') : 'excel'));
       setDepth(latest.config.depth);
       if (latest.config.tally) {
         setCompany(latest.config.tally.company);
@@ -168,8 +173,9 @@ export function DiscoveryLaunch({
     setError("");
     try {
       const config: Config = {
+        destination_mode: destinationMode,
         depth,
-        excel_source_ids: selected.filter((id) =>
+        excel_source_ids: destinationMode === 'tally' ? [] : selected.filter((id) =>
           bindings.some((b) => b.source_id === id && b.device_id === deviceId)
         ),
         tally: tally
@@ -214,12 +220,13 @@ export function DiscoveryLaunch({
             <option key={d.id} value={d.id}>
               {d.name}
               {!d.last_seen_at || Date.now() - new Date(d.last_seen_at).getTime() > 30000
-                ? " Â· waiting for connection"
+                ? " · waiting for connection"
                 : ""}
             </option>
           ))}
         </select>
       </label>
+      <label className="config-field">Sources to discover<select value={destinationMode} onChange={e=>setDestinationMode(e.target.value as typeof destinationMode)}><option value="excel">Excel</option><option value="tally">Tally</option><option value="both">Both · Excel and Tally</option></select></label>
       {!devices.length && (
         <p role="status">
           Open the Windows app and connect this workspace in Connections first.
@@ -227,14 +234,7 @@ export function DiscoveryLaunch({
       )}
       <div className="discovery-source-grid">
         <section className="discovery-source-card">
-          <label>
-            <input
-              type="checkbox"
-              checked={tally}
-              onChange={(e) => setTally(e.target.checked)}
-            />{" "}
-            Tally
-          </label>
+          <h4>Tally</h4>
           <p>Read company settings and the masters used for Bill Entry.</p>
           {tally && (
             <>
@@ -284,7 +284,7 @@ export function DiscoveryLaunch({
           </p>
           <button
             className="button button-ghost"
-            disabled={busy || !desktopBridge()}
+            disabled={busy || !desktopBridge() || destinationMode === 'tally'}
             onClick={() => void connectFolder()}
           >
             Connect Excel folder
@@ -300,13 +300,14 @@ export function DiscoveryLaunch({
               <input
                 type="checkbox"
                 checked={selected.includes(s.id)}
+                disabled={destinationMode === 'tally'}
                 onChange={(e) =>
                   setSelected((v) =>
                     e.target.checked ? [...v, s.id] : v.filter((id) => id !== s.id)
                   )
                 }
               />
-              {s.label} Â· {s.files.filter((f) => /\.xlsx$/i.test(f.path)).length}{" "}
+              {s.label} · {s.files.filter((f) => /\.xlsx$/i.test(f.path)).length}{" "}
               workbooks
             </label>
           ))}
@@ -339,11 +340,12 @@ export function DiscoveryLaunch({
           workflow.status !== "active" ||
           !deviceId ||
           (!tally && !selectedFolders.length) ||
+          (destinationMode === 'both' && !selectedFolders.length) ||
           (tally && (!company.trim() || !selectedCategories.length))
         }
         onClick={() => void launch()}
       >
-        {busy ? "Startingâ€¦" : "Discover sources"}
+        {busy ? "Starting…" : "Discover sources"}
       </button>
     </section>
   );
@@ -398,6 +400,13 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
       setBusy(false);
     }
   }
+  async function saveCatalog() {
+    if (!run) return;
+    setBusy(true);setError('');
+    try { await desktopBridge()?.saveCatalog?.(tenant,run.id); }
+    catch(e) {setError(e instanceof Error?e.message:'Could not save source catalog.');}
+    finally {setBusy(false);}
+  }
   if (!run) return error ? <p role="alert">{error}</p> : null;
   const sources =
     run.catalog?.sources ??
@@ -447,7 +456,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
             <section className="discovery-source-card" key={s.key}>
               <h4>
                 {s.tool === "tally"
-                  ? `Tally Â· ${s.snapshot?.company ?? run.config.tally?.company}`
+                  ? `Tally · ${s.snapshot?.company ?? run.config.tally?.company}`
                   : (s.label ?? "Excel folder")}
               </h4>
               <strong role="status">
@@ -455,7 +464,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                   ? "Partly collected"
                   : ({
                       ready: "Collected",
-                      reading: "Readingâ€¦",
+                      reading: "Reading…",
                       waiting: "Waiting for your PC",
                       unavailable: "Needs attention"
                     }[status] ?? status)}
@@ -464,23 +473,27 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
               {s.snapshot?.collections.map((c) => (
                 <details key={c.category}>
                   <summary>
-                    {categories.find((k) => k[0] === c.category)?.[1] ?? c.category} Â·{" "}
+                    {categories.find((k) => k[0] === c.category)?.[1] ?? c.category} ·{" "}
                     {c.status === "ready" ? `${c.count} records` : "Needs attention"}
                   </summary>
                   {c.error ? (
                     <p role="alert">{c.error}</p>
                   ) : (
-                    <p className="quiet-state">
+                    <><p className="quiet-state">
                       {c.fields?.length} observed fields. Reference identifiers and nested
                       tax details are included in the catalog.
-                    </p>
+                    </p><ul>{c.records?.slice(0,50).map((record,index)=>{
+                      const name=record['@_NAME'] ?? record.NAME;
+                      const label=typeof name==='string'?name:typeof name==='object'&&name?String((name as Record<string,unknown>)['#text']??''):'';
+                      return label?<li key={index}>{label}</li>:null;
+                    })}</ul>{(c.records?.length ?? 0)>50&&<p className="quiet-state">Showing the first 50 names. The saved catalog contains the complete list.</p>}</>
                   )}
                 </details>
               ))}
               {s.workbooks?.map((b) => (
                 <details key={b.path}>
                   <summary>
-                    {b.path} Â·{" "}
+                    {b.path} ·{" "}
                     {b.status === "ready"
                       ? `${b.structure?.sheets.length} sheets`
                       : "Needs attention"}
@@ -490,7 +503,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                   ) : (
                     b.structure?.sheets.map((sheet) => (
                       <p key={sheet.sheet}>
-                        {sheet.sheet} Â· {sheet.columns} columns Â· {sheet.tables.length}{" "}
+                        {sheet.sheet} · {sheet.columns} columns · {sheet.tables.length}{" "}
                         named tables
                       </p>
                     ))
@@ -502,9 +515,9 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                   .filter((o) => o.category)
                   .map((o) => (
                     <p className="quiet-state" key={o.category}>
-                      {categories.find((k) => k[0] === o.category)?.[1]} Â·{" "}
+                      {categories.find((k) => k[0] === o.category)?.[1]} ·{" "}
                       {o.status === "reading"
-                        ? "Readingâ€¦"
+                        ? "Reading…"
                         : o.status === "ready"
                           ? "Collected"
                           : "Needs attention"}
@@ -547,10 +560,10 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
             disabled={busy || run.catalog?.partial || Boolean(run.mapping_run && !edited)}
             onClick={() => void confirm()}
           >
-            {busy ? "Savingâ€¦" : "Confirm sources and mappings"}
+            {busy ? "Saving…" : "Confirm sources and mappings"}
           </button>
         )}
-        {run.catalog && (
+        {run.catalog && (desktopBridge()?.saveCatalog ? <button className="button button-ghost" disabled={busy} onClick={()=>void saveCatalog()}>Save source catalog</button> : (
           <a
             className="button button-ghost"
             href={base + `/runs/${run.id}/catalog.json`}
@@ -558,7 +571,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
           >
             Download source catalog
           </a>
-        )}
+        ))}
       </div>
       {error && (
         <p role="alert" className="form-message">
