@@ -11,7 +11,12 @@ launch rejects another model. The model never writes financial systems.
 1. Connect the Windows PC and grant the destination folder. Run Source discovery
    and confirm the Excel destination mappings, or discover the selected Tally
    company, ledgers and Purchase voucher type and confirm that catalog.
-2. Upload/select PDFs and images. Select Excel or Tally output in Bill entry.
+2. Upload/select PDFs and images. Excel, Tally and Both remain visible configuration
+   choices. Mock-client's trusted solution policy enables only Tally for Bill entry;
+   disabled choices cannot be enabled by changing preferences or launch payloads.
+   Source discovery independently supports Excel, Tally and Both.
+   Combined Bill entry writes are reserved for a later verified adapter contract;
+   the API rejects Both rather than silently using only one destination.
    Multiple inputs create independent durable hosted sessions under one task.
    Four worker lanes process them concurrently; a provider failure affects only
    its bill. The parent aggregates persisted proposals and unresolved inputs.
@@ -84,6 +89,33 @@ selector needs its original DATE and MASTER ID. References:
 
 ## Complex synthetic fixtures
 
+The current RC fixtures, generated history, source catalogs and evidence live in
+`C:\Users\gauss\OneDrive\Minkops\MockClient\ReleaseCandidate-20261006`, outside
+the repository and iCloud. Four vendors provide a cement tax invoice, skewed steel
+phone photo, faint aggregate carbon copy and two-page equipment hire bill. A JPEG
+copy of the steel PDF exercises duplicate identities across files. Separate
+`evidence/expected-bills.json` records exact dates, ledgers and amounts.
+
+Test Company is preserved: baseline exports capture every original voucher and
+master before adding RC-prefixed suppliers, purchase/tax ledgers, units, stock
+items and site references, plus two history vouchers. The hire supplier is
+initially absent. Its bill appears in Needs Attention while known bills save;
+after creating the supplier and confirming discovery, only that bill is retried.
+No live Excel data or writes are included in this RC.
+The three display-only seed tasks are backed up and removed from the RC database
+so its Active/Needs Attention sections reflect executable workflow outcomes.
+
+Discovery is intended for installation and periodic/schema-change refreshes.
+An identical confirmed refresh preserves pinned approval catalogs; pending,
+partial or changed catalogs still require review. Supplier remediation may bind
+the affected retry to newer confirmed masters on the same PC/company GUID.
+Full catalogs are exported as JSON through the native Save As dialog; credentials
+and folder grants remain PC-local. DWH storage is not introduced yet.
+
+The following generator and live scripts describe the earlier development proof.
+Do not run them against this preserved Test Company: their fixed fixture IDs
+belong to that earlier disposable environment.
+
 Generate a fresh set with the existing Python stack plus development-only PDF
 libraries:
 
@@ -114,8 +146,22 @@ authenticated API transport and immutable financial plans. They cover
 backfills, corrections, stale review, cross-PC reservations, receipt replay,
 lease expiry, cancellation and late receipts. Native tests run on Windows and
 Linux and include the Tally alteration selector regression. Shared UI build,
-lint and existing web tests are run; visual and Windows installation QA remain
-MIN-122.
+lint and existing web tests are run. The 6 October RC additionally verifies the
+installed Windows 0.3.1 app, folder picker, catalog Save As, four desktop themes,
+shared web review at the minimum desktop width, source previews, and tray/reopen
+execution. See `docs/windows-app.md` for distribution limitations.
+Completed bills keep their read-only values and expandable source evidence;
+general extraction notes are collapsed while per-bill review findings stay visible.
+
+The current proof uses `minkops_mock_rc20261006`, with an independently migrated
+`minkops_min119_tests` database for regression tests. Initial extraction saves
+four unique bills and skips the steel copy. A complete second run skips all five
+inputs after an ambiguous steel reference is clarified independently; it creates
+no additional vouchers. Worker restart retains existing paid session IDs. Live
+correction verification holds a changed RC history voucher before import, then
+checks approved Alter and restoration with the same GUID/MASTER ID and count.
+Original company vouchers remain unchanged; master comparison allows only Tally's
+automatic Purchase `PREVNARRATION` bookkeeping, not configured accounting fields.
 
 Opt-in live proofs use the dedicated `minkops_min119_live` database. From WSL,
 set `DATABASE_URL`, `MINKOPS_TALLY_TEST_COMPANY` and `MINKOPS_WINDOWS_NODE` to the

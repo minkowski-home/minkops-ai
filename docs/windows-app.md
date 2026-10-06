@@ -88,6 +88,12 @@ branch. Apply all migrations through 0010 before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
+For an installed local RC, `Minkops.exe --local-demo` uses the fixed
+`http://127.0.0.1:3018` origin and isolated `Minkops Local Demo` profile. The normal
+packaged profile remains HTTPS-only. This switch grants no general URL override.
+The local profile retains encrypted registration credentials and folder grants
+across install/restart; keep the local API/UI/worker services running for testing.
+
 Configure an edge request limit of at most 42 MB on the base64 folder receipt
 route, with smaller limits elsewhere. Services/native adapters enforce 100
 supported files, 5 MB per file, 30 MB per snapshot and folder containment.
@@ -130,5 +136,22 @@ Windows check on 5 October 2026 returned `Minkops Test`, with queued → executi
 → completed observations. Typed XML name elements are parsed as text; malformed
 nested names are rejected rather than converted into misleading object strings.
 
-User-facing UI, picker, clean install, tray and Windows 10/11 visual/accessibility
-checks remain Todo in [MIN-122](https://linear.app/minkops/issue/MIN-122).
+On 6 October 2026 the unsigned 0.3.1 NSIS installer was installed successfully on
+Windows 11 Pro (build 26300) and launched against the shared production UI build. MIN-122's
+local sweep covers four themes, native folder selection, bounded JSON catalog
+Save As, missing-supplier Needs Attention, independent clarification, approve/
+hold/reject/edit controls, duplicate alerts, source previews and web/desktop task
+synchronization. Closing the main window leaves the native worker in the tray;
+a web-requested discovery finishes there and reopening shows its result.
+
+Catalog exports fetch only the authorized tenant/run endpoint, use a user-selected
+`.json` destination, enforce a size bound and reject symlinks/nonregular files.
+The connector writes through a synced temporary file and atomic replacement.
+The earlier Chromium download path left an incomplete temporary file in the
+installed shell; the explicit bounded IPC export fixes that failure.
+
+Evidence lives in the RC's OneDrive `evidence` and `schema` folders. Native suites
+pass on Linux and Windows; Windows skips only a file-symlink test that requires
+creation privileges (the same guard runs on Linux). A fresh Windows 10/11 device
+matrix, screen-reader audit, production hosting and signed distribution have not
+been verified by this local sweep.

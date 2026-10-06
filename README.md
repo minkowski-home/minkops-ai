@@ -105,8 +105,10 @@ Bill entry uses that discovery with shared approve/hold/reject/edit review,
 independent parallel bill sessions and verified, idempotent destination saves.
 See [Bill entry setup and demo verification](docs/bill-entry.md).
 See [Source discovery setup and catalog contracts](docs/source-discovery.md).
-See [Windows app setup and recovery](docs/windows-app.md). Scheduling and UI
-installation testing are deferred to MIN-121 and MIN-122.
+See [Windows app setup and recovery](docs/windows-app.md). The mock-client
+release candidate has been installed and visually checked on the current Windows
+PC, including shared web review and tray execution. Scheduling remains MIN-121;
+signing and broader Windows/device coverage remain distribution work.
 
 For a local manual test, start the OLTP database and run migrations and the
 demo seed as described in [db/README.md](db/README.md). Start the API with a

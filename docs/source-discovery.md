@@ -33,13 +33,14 @@ scheduling are outside this pass.
 ## Catalog contract and recovery
 
 `employees/accounts-desk/workflows/source-discovery/collection-config.schema.json`
-defines collection configuration. Workflow version 0.4.0 pins that schema in
+defines collection configuration. Workflow version 0.5.0 pins that schema in
 the hosted skill bundle. Canonical catalogs live in tenant-scoped PostgreSQL
 `discovery_runs`; each run is an immutable version identified by its UUID.
 The download includes collection time, device ID, depth, source identities,
 availability, workbook hashes, local observations, reference records and reviewed
-mappings. **Download source catalog** exports JSON. Automatic local JSON copies
-are not created.
+mappings. **Download source catalog** exports JSON: the installed Windows app
+uses a native Save As dialog and a bounded atomic file writer; the browser uses
+its normal download. Automatic local JSON copies are not created.
 
 Tally uses fixed, read-only collection exports scoped with `SVCurrentCompany`,
 following [Tally's XML collection contract](https://help.tallysolutions.com/understanding-tally-xml-tags/).
@@ -123,4 +124,15 @@ Database/API regressions cover ownership, tenant isolation, invalid configuratio
 receipt scope/hash validation, stale claims, revocation, readiness gates, mapping
 confirmation, ordinary row additions and changed-header review. Native tests run
 on Linux and Windows. Installer contents are compared with the compiled bundles.
-Clean Windows 10/11 installation and broad visual UI QA remain MIN-122 Todo.
+The 6 October release candidate verified the installed Windows 11 app's visual
+flows, native catalog Save As, tray collection and shared web/desktop results.
+MIN-122 remains In Progress for the clean Windows 10/11 installation matrix and
+production HTTPS profile; see [Windows verification](windows-app.md).
+
+The current mock-client release candidate uses Test Company on this PC and keeps
+fixtures, catalog snapshots and evidence in OneDrive outside the repository.
+Source discovery retains editable Excel/Tally/Both configuration; Bill Entry
+is restricted to Tally for this client. An unchanged confirmed refresh may
+satisfy an older pinned run only when its schema fingerprint matches exactly.
+Changed, partial or unreviewed discoveries continue to block writes. See
+[the release candidate bill proof](bill-entry.md) for paths and verified results.
