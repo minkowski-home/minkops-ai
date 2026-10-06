@@ -17,6 +17,75 @@ class BillEntryTests(unittest.TestCase):
     launch = accounts_tests.AccountsTests.launch
     execute_discovery = accounts_tests.AccountsTests.execute_discovery
 
+    def test_both_mode_cannot_silently_fall_through_to_excel(self):
+        response = self.client.post(self.base + '/runs', headers=self.csrf, json={
+            'key': 'bill-entry', 'request_key': str(uuid.uuid4()),
+            'file_ids': [self.upload_bill()], 'config': {'output_mode': 'both_in_place'},
+        })
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn('combined verified write contract', response.text)
+
+    def test_mock_policy_rejects_excel_both_and_preference_override(self):
+        from minkops_platform.resources import REPOSITORY_ROOT
+        from minkops_platform.solution_policy import bind_definition
+        from minkops_platform.workflows import load_definition
+        from psycopg.types.json import Jsonb
+
+        definition = bind_definition(load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry'), 'mock-client')
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            row = c.execute("""UPDATE workflows SET config_schema=%s,
+                config_values=jsonb_set(config_values,'{output_mode}','"tally_in_place"')
+                WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant') RETURNING id,config_values""",
+                (Jsonb(definition.tenant_schema),)).fetchone()
+        bill = self.upload_bill()
+        for mode in ('excel_in_place','both_in_place','draft_excel'):
+            with self.subTest(mode=mode):
+                response = self.client.post(self.base+'/runs',headers=self.csrf,json={
+                    'key':'bill-entry','request_key':str(uuid.uuid4()),'file_ids':[bill],
+                    'config':{'output_mode':mode},
+                })
+                self.assertEqual(response.status_code,422,response.text)
+                response = self.client.patch(f"/api/tenants/mock-tenant/workflows/{row['id']}",headers=self.csrf,
+                    json={'config_values':{**row['config_values'],'output_mode':mode}})
+                self.assertEqual(response.status_code,422,response.text)
+
+    def test_missing_vendor_holds_then_resumes_with_confirmed_new_master(self):
+        discovery = self.tally_discovery('same-company')
+        bill = self.upload_bill()
+        run, _ = self.launch('bill-entry',file_ids=[bill],config={'output_mode':'tally_in_place','discovery_id':discovery})
+        proposal = self.tally_result(run,bill)
+        proposal['records'][0]['data']['vendor'] = 'New supplier'
+        self.process(run,proposal)
+        result = self.client.get(self.base+f"/runs/{run['id']}").json()['result']
+        self.assertEqual(result['records'][0]['decision'],'hold')
+        self.assertIn('New supplier',result['unresolved'][0]['reason'])
+        reviewed = self.approve(run,result)
+        self.assertEqual(reviewed['tally_writes'],[])
+        new_discovery = self.tally_discovery('same-company',extra_ledgers=['New supplier'],reuse_device=True)
+        response = self.client.post(self.base+f"/runs/{run['id']}/resolve-bill",headers=self.csrf,
+            json={'file_id':bill,'user_input':'Supplier created. Use New supplier.','reject':False})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['config']['tally_target']['discovery_id'],new_discovery)
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            child=c.execute('SELECT config FROM account_runs WHERE parent_run_id=%s',(run['id'],)).fetchone()
+            c.execute("UPDATE account_runs SET config=config || '{\"batch_finished_count\":0}'::jsonb WHERE id=%s",(run['id'],))
+        self.assertEqual(child['config']['tally_target']['discovery_id'],new_discovery)
+        from minkops_platform.accounts.batch import reconcile_once
+        reconcile_once(URL)
+        resumed = self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual(resumed['state'],'executing')
+
+    def test_supplier_resume_cannot_change_tally_company_identity(self):
+        discovery = self.tally_discovery('first-company')
+        bill = self.upload_bill()
+        run, _ = self.launch('bill-entry',file_ids=[bill],config={'output_mode':'tally_in_place','discovery_id':discovery})
+        self.process(run,{'records':[],'findings':[], 'unresolved':[{'source_file_id':bill,'reason':'Supplier missing'}]})
+        self.tally_discovery('replacement-company',reuse_device=True)
+        response = self.client.post(self.base+f"/runs/{run['id']}/resolve-bill",headers=self.csrf,
+            json={'file_id':bill,'user_input':'Continue','reject':False})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertIn('identity changed',response.text)
+
     def upload_bill(self, name="bill.pdf"):
         return self.client.post(
             self.base + "/sources",
@@ -60,13 +129,14 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()
 
-    def tally_discovery(self, company_guid=None):
+    def tally_discovery(self, company_guid=None, *, extra_ledgers=(), reuse_device=False):
         self.native = "/api/tenants/mock-tenant/desktop"
-        self.device = self.client.post(
-            self.native + "/devices",
-            headers=self.csrf,
-            json={"name": "Bill PC", "installation_id": str(uuid.uuid4())},
-        ).json()
+        if not reuse_device:
+            self.device = self.client.post(
+                self.native + "/devices",
+                headers=self.csrf,
+                json={"name": "Bill PC", "installation_id": str(uuid.uuid4())},
+            ).json()
         self.worker = {"Authorization": "Bearer " + self.device["credential"]}
         discovery = "/api/tenants/mock-tenant/discovery"
         categories = ["company", "ledgers", "voucher_types"]
@@ -87,7 +157,7 @@ class BillEntryTests(unittest.TestCase):
         claim = self.client.post("/api/desktop/worker/claim", headers=self.worker, json={}).json()
         names = {
             "company": ["Test"],
-            "ledgers": ["Supplier", "Purchases", "Tax"],
+            "ledgers": ["Supplier", "Purchases", "Tax", *extra_ledgers],
             "voucher_types": ["Purchase"],
         }
         receipt = {
@@ -472,6 +542,14 @@ class BillEntryTests(unittest.TestCase):
             )
             self.process(child, proposal)
         reconcile_once(URL)
+        ready = self.client.get(self.base + f"/runs/{root['id']}").json()
+        approved = self.approve(ready, ready["result"])
+        claim, route, plan = self.tally_job(approved)
+        receipt = self.client.post(route + "/finish", headers=self.worker, json={
+            "claim_token": claim["claim_token"],
+            "result": {"outcome": "saved", "current": self.current(plan)},
+        })
+        self.assertEqual(receipt.status_code, 200, receipt.text)
         resumed = self.client.post(
             self.base + f"/runs/{root['id']}/resolve-bill",
             headers=self.csrf,
@@ -493,6 +571,11 @@ class BillEntryTests(unittest.TestCase):
         final = self.client.get(self.base + f"/runs/{root['id']}").json()
         self.assertEqual(len(final["result"]["records"]), 2)
         self.assertEqual(final["result"]["unresolved"], [])
+        saved = next(r for r in final["result"]["records"] if r["source_file_id"] == good)
+        self.assertEqual(saved["status"], "saved")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            summary = c.execute("SELECT summary FROM tasks WHERE id=%s", (root["task_id"],)).fetchone()["summary"]
+        self.assertEqual(summary, "1 bill entries ready; 0 bills need attention.")
 
     def test_pending_bill_reservation_holds_only_conflicting_intent(self):
         did = self.tally_discovery()

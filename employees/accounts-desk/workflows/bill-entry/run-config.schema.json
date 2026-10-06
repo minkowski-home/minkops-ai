@@ -15,6 +15,7 @@
       "enum": [
         "excel_in_place",
         "tally_in_place",
+        "both_in_place",
         "draft_excel"
       ],
       "title": "Output platform and write mode"

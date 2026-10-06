@@ -7,6 +7,7 @@
     "tally"
   ],
   "properties": {
+    "destination_mode": {"type": "string", "enum": ["excel", "tally", "both"]},
     "depth": {
       "enum": [
         "structure",

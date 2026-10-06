@@ -20,6 +20,19 @@ class DiscoveryTests(unittest.TestCase):
     setUp = test_desktop.DesktopTests.setUp
     pair = test_desktop.DesktopTests.pair
 
+    def test_explicit_source_choice_must_match_selected_tools(self):
+        _, body = self.start()
+        body["request_key"] = str(uuid.uuid4())
+        body["config"]["destination_mode"] = "tally"
+        accepted = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        for mode in ("excel", "both"):
+            with self.subTest(mode=mode):
+                body["request_key"] = str(uuid.uuid4())
+                body["config"]["destination_mode"] = mode
+                rejected = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
+                self.assertEqual(rejected.status_code, 422, rejected.text)
+
     def test_damaged_workbook_is_a_validation_error_not_a_backend_crash(self):
         r = self.client.post(
             f"/api/tenants/{self.slug}/accounts/sources",
@@ -298,6 +311,10 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(again["state"], "completed")
         self.assertTrue(again["ready"])
         self.assertEqual(again["catalog"]["review"]["reused_from"], run["id"])
+        from minkops_platform.discovery import require_ready
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            tenant = c.execute("SELECT id FROM tenants WHERE slug=%s", (self.slug,)).fetchone()
+            self.assertEqual(require_ready(c, tenant["id"], run["id"], ["tally"])["run_id"], run["id"])
 
     def test_scope_receipts_and_configuration_cannot_escape_the_requested_sources(self):
         run, _ = self.start()

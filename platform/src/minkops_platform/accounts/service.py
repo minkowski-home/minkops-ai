@@ -17,6 +17,7 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.resources import REPOSITORY_ROOT as ROOT
 from minkops_platform.run_controls import resolve_request
 from minkops_platform.workflows import load_definition, resolve_run_config
+from minkops_platform.solution_policy import validate_destination
 
 from .bills import tally_mapping, tally_target
 from .catalog import apply_records, validate_catalog, validate_data
@@ -67,6 +68,16 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
         selections.setdefault(
             "output_mode", workflow["config_values"].get("output_mode", "excel_in_place")
         )
+        try:
+            validate_destination(workflow["config_schema"], selections["output_mode"])
+        except ValidationError as error:
+            raise ServiceError("invalid", "Choose a destination enabled for this workspace.") from error
+        if selections["output_mode"] == "both_in_place":
+            # Retain the configuration choice for future client composition,
+            # but never report a dual save through the single Excel/Tally path.
+            raise ServiceError(
+                "invalid", "Both destinations require a combined verified write contract. Choose Excel or Tally."
+            )
     catalog_id = body["catalog_id"]
     if body["key"] == "source-discovery":
         if any(Path(f["path"]).suffix.lower() != ".xlsx" for f in files):

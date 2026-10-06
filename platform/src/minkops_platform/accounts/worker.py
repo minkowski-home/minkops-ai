@@ -78,7 +78,11 @@ def process(connection, run, *, executor=execute):
             contents,
             [] if run["config"].get("tally_target") else run["config"]["checks"],
         )
-        if not run["config"].get("tally_target"):
+        if run["config"].get("tally_target"):
+            from .bills import capture_tally_findings
+
+            capture_tally_findings(result, run["config"]["tally_target"])
+        else:
             from .bills import capture_excel_state
 
             capture_excel_state(result, context["catalog"], contents)

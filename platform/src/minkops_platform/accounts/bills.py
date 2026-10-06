@@ -215,6 +215,11 @@ def validate_tally(data, target):
         raise ValueError("Invalid bill amounts.") from error
     for key in ("vendor", "purchase_ledger") + (("tax_ledger",) if values[1] else ()):
         if data.get(key) not in target["ledgers"]:
+            if key == "vendor":
+                raise ValueError(
+                    f"Supplier '{data.get(key)}' is missing from the confirmed Tally ledgers. "
+                    "Add or map the supplier, refresh Source discovery, then continue this bill."
+                )
             raise ValueError(f"{key} must match a discovered ledger exactly.")
     selected = [data["vendor"], data["purchase_ledger"]] + (
         [data["tax_ledger"]] if values[1] else []
@@ -226,3 +231,41 @@ def validate_tally(data, target):
             "Cost allocations require a supported mapping; leave this bill for review."
         )
     return identity
+
+
+def capture_tally_findings(result, target):
+    """Hold invalid proposals before approval, preserving independent siblings.
+
+    Discovery references are deterministic authority. An agent's confident
+    interpretation must never make an unknown master silently writable.
+    """
+    unresolved = result.setdefault("unresolved", [])
+    for record in result["records"]:
+        try:
+            validate_tally(record["data"], target)
+        except ValueError as error:
+            reason = str(error)
+            if reason not in record["findings"]:
+                record["findings"].append(reason)
+            record["decision"] = "hold"
+            if not any(i["source_file_id"] == record["source_file_id"] for i in unresolved):
+                unresolved.append({"source_file_id": record["source_file_id"], "reason": reason})
+    return result
+
+
+def refreshed_tally_target(connection, tenant, user, current):
+    """Explicit bill continuation may use refreshed masters in the same company.
+
+    Never reroute a held bill to a different company or device. A pending or
+    failed refresh must be confirmed before a new paid extraction can start.
+    """
+    latest = connection.execute(
+        """SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
+        AND device_id=%s AND config->'tally'->>'company'=%s
+        ORDER BY created_at DESC LIMIT 1""",
+        (tenant["id"], user["id"], current["device_id"], current["company"]),
+    ).fetchone()
+    target = tally_target(connection, tenant, user, latest["id"] if latest else current["discovery_id"])
+    if target["destination_key"] != current["destination_key"]:
+        raise ServiceError("conflict", "The Tally company identity changed. Start a new bill run after checking the company.")
+    return target
