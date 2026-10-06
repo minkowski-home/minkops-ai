@@ -98,6 +98,25 @@ class Review(BaseModel):
     acknowledge_findings: bool = False
 
 
+class BillInput(BaseModel):
+    file_id: UUID
+    user_input: str = Field(default="", max_length=2000)
+    reject: bool = False
+
+
+@router.post("/runs/{run_id}/resolve-bill")
+def resolve_bill(
+    slug: str, run_id: UUID, body: BillInput, request: Request, user: User, connection: Db
+):
+    from minkops_platform.accounts.batch import resolve_bill as resolve
+
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    return _call(
+        resolve, connection, tenant, user, run_id, str(body.file_id), body.user_input, body.reject
+    )
+
+
 @router.post("/runs", status_code=202)
 def launch(slug: str, body: Launch, request: Request, user: User, connection: Db):
     require_csrf(request)

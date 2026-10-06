@@ -5,6 +5,7 @@ commit/rollback boundaries without depending on one another.
 """
 
 import json
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from jsonschema import ValidationError
@@ -13,17 +14,19 @@ from psycopg import errors
 from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
-from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
-from minkops_platform.workflows import load_definition as load_definition
+from minkops_platform.resources import REPOSITORY_ROOT as ROOT
+from minkops_platform.run_controls import resolve_request
+from minkops_platform.workflows import load_definition, resolve_run_config
 
-from .catalog import apply_records, validate_catalog
-from .checks import check_records
+from .bills import tally_mapping, tally_target
+from .catalog import apply_records, validate_catalog, validate_data
+from .checks import check_records, populate_entry_ids
 from .repository import (
-    catalog_contents,
     digest_bytes,
     files_for,
     observe,
     public_run,
+    resolve_catalog,
     run_for,
     safe_path,
 )
@@ -32,21 +35,243 @@ SUPPORTED = {".xlsx", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 def launch_run(connection, tenant, user, body, *, task_id=None):
-    from minkops_platform.runtime.launch import launch_run as launch
+    raw_hash, previous = resolve_request(
+        connection,
+        tenant["id"],
+        body["request_key"],
+        body,
+        lambda c, tenant_id, request_key: c.execute(
+            "SELECT * FROM account_runs WHERE tenant_id=%s AND request_key=%s",
+            (tenant_id, request_key),
+        ).fetchone(),
+    )
+    if previous:
+        return public_run(connection, previous)
+    workflow = connection.execute(
+        """SELECT * FROM workflows WHERE tenant_id=%s AND key=%s
+         AND status='active' """,
+        (tenant["id"], body["key"]),
+    ).fetchone()
+    if not workflow:
+        raise ServiceError("conflict", "This workflow is not active.")
+    ids = list(map(str, body["file_ids"]))
+    if len(ids) != len(set(ids)):
+        raise ServiceError("invalid", "Select each file only once.")
+    files = files_for(connection, tenant["id"], ids)
+    if any(not f["current"] for f in files):
+        raise ServiceError("conflict", "Refresh changed source files before launching.")
+    source_ids = list({str(f["source_id"]) for f in files})
+    definition = load_definition(ROOT / "employees/accounts-desk/workflows" / body["key"])
+    selections = {**body["config"], "source_ids": source_ids}
+    if body["key"] == "bill-entry":
+        selections.setdefault(
+            "output_mode", workflow["config_values"].get("output_mode", "excel_in_place")
+        )
+    catalog_id = body["catalog_id"]
+    if body["key"] == "source-discovery":
+        if any(Path(f["path"]).suffix.lower() != ".xlsx" for f in files):
+            raise ServiceError("invalid", "Discovery currently accepts Excel workbooks only.")
+    else:
+        if (
+            selections.get("output_mode", workflow["config_values"].get("output_mode"))
+            == "tally_in_place"
+        ):
+            discovery_id = selections.get("discovery_id")
+            if not discovery_id:
+                raise ServiceError("invalid", "Confirm Tally source discovery first.")
+            target = tally_target(connection, tenant, user, discovery_id)
+            catalog_snapshot = tally_mapping(discovery_id)
+            references = []
+            selections.update(
+                {
+                    "file_ids": ids,
+                    "catalog_version": str(discovery_id),
+                    "schema_id": str(discovery_id),
+                    "schema_version": "1",
+                    "destination_id": str(discovery_id),
+                }
+            )
+            catalog_id = None
+        elif not catalog_id:
+            raise ServiceError("invalid", "Confirm a source-discovery catalog first.")
+        if (
+            selections.get("output_mode", workflow["config_values"].get("output_mode"))
+            != "tally_in_place"
+        ):
+            catalog_snapshot, references = _excel_launch_catalog(connection, tenant, catalog_id)
+            selections.update(
+                {
+                    "file_ids": ids,
+                    "catalog_version": str(catalog_id),
+                    "schema_id": str(catalog_id),
+                    "schema_version": "1",
+                    "destination_id": str(catalog_id),
+                }
+            )
+        if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
+            raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
+        files += references
+    if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
+        raise ServiceError(
+            "invalid",
+            "Select a smaller scope: up to 45 files and 8 MB including references per run.",
+        )
+    return _launch_resolved(
+        connection,
+        tenant,
+        user,
+        body,
+        workflow,
+        definition,
+        selections,
+        files,
+        ids,
+        catalog_id,
+        raw_hash,
+        task_id=task_id,
+        catalog_snapshot=catalog_snapshot if body["key"] == "bill-entry" else None,
+        target=target
+        if body["key"] == "bill-entry" and selections.get("output_mode") == "tally_in_place"
+        else None,
+    )
 
-    return launch(connection, tenant, user, body, task_id=task_id)
+
+def _excel_launch_catalog(connection, tenant, catalog_id):
+    catalog_row = connection.execute(
+        "SELECT * FROM account_catalogs WHERE tenant_id=%s AND id=%s",
+        (tenant["id"], catalog_id),
+    ).fetchone()
+    if not catalog_row:
+        raise ServiceError("not_found", "Catalog not found.")
+    if not any(s["role"] == "destination" for s in catalog_row["catalog"]["sheets"]):
+        raise ServiceError(
+            "conflict", "Confirm a Bill Entry destination in source discovery first."
+        )
+    discovered = connection.execute(
+        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
+        (tenant["id"], str(catalog_id)),
+    ).fetchone()
+    if discovered:
+        from minkops_platform.discovery import require_ready
+
+        require_ready(connection, tenant["id"], discovered["id"], ["excel"])
+    try:
+        catalog_snapshot, references, _ = resolve_catalog(
+            connection, tenant["id"], catalog_row["catalog"]
+        )
+    except ValueError as error:
+        raise ServiceError("conflict", str(error)) from error
+    return catalog_snapshot, references
+
+
+def _launch_resolved(
+    connection,
+    tenant,
+    user,
+    body,
+    workflow,
+    definition,
+    selections,
+    files,
+    ids,
+    catalog_id,
+    raw_hash,
+    *,
+    task_id,
+    catalog_snapshot,
+    target,
+):
+    try:
+        config = resolve_run_config(
+            definition,
+            workflow["config_values"],
+            selections,
+            allowed_source_ids=set(selections["source_ids"]),
+            allowed_destination_ids={str(target["discovery_id"] if target else catalog_id)},
+        )
+    except (ValueError, ValidationError) as error:
+        raise ServiceError("invalid", str(error).splitlines()[0]) from error
+    if body["key"] == "source-discovery" and len(ids) > config["max_files"]:
+        raise ServiceError("invalid", "Selection exceeds the configured discovery file limit.")
+    if body["key"] == "source-discovery":
+        for file in files:
+            path = file["path"]
+            if not any(
+                scope == "." or path == scope or path.startswith(scope.rstrip("/") + "/")
+                for scope in config["scope_paths"]
+            ) or any(fnmatchcase(path, p) for p in config["exclusions"]):
+                raise ServiceError(
+                    "invalid",
+                    "A selected file is outside the configured discovery scope or is excluded.",
+                )
+    if body["key"] == "bill-entry":
+        config["catalog_snapshot"] = catalog_snapshot
+        if target:
+            config["tally_target"] = target
+            config["review_mode"] = "all_outputs"
+        fmt = config["input_format"]
+        if fmt != "mixed" and any(
+            (Path(f["path"]).suffix.lower() == ".pdf") != (fmt == "pdf") for f in files[: len(ids)]
+        ):
+            raise ServiceError(
+                "invalid", "Selected bills do not match the configured input format."
+            )
+        if config["output_mode"] not in ("excel_in_place", "tally_in_place"):
+            raise ServiceError("invalid", "Choose in-place Excel or Tally output.")
+    config["instructions_snapshot"] = definition.instructions
+    config["agent_output_schema"] = definition.agent_output_schema
+    if definition.execution_snapshot is None:
+        raise ServiceError("invalid", "This workflow has no hosted execution definition.")
+    if definition.execution_snapshot["execution"]["model"] != "gpt-6-luna":
+        raise ServiceError("invalid", "Accounts workflows must use the approved gpt-6-luna model.")
+    config["execution_snapshot"] = definition.execution_snapshot
+    config["file_provenance"] = [
+        {"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files
+    ]
+    task = (
+        {"id": task_id}
+        if task_id
+        else connection.execute(
+            """INSERT INTO tasks (tenant_id,workflow_id,title,summary)
+         VALUES (%s,%s,%s,'Queued for Accounts desk.') RETURNING id""",
+            (tenant["id"], workflow["id"], workflow["name"]),
+        ).fetchone()
+    )
+    run = connection.execute(
+        """INSERT INTO account_runs
+         (tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,request_hash,config,file_ids,catalog_id)
+         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+        (
+            tenant["id"],
+            task["id"],
+            user["id"],
+            body["key"],
+            definition.metadata["version"],
+            body["request_key"],
+            raw_hash,
+            Jsonb(config),
+            Jsonb(ids),
+            catalog_id,
+        ),
+    ).fetchone()
+    if body["key"] == "bill-entry" and len(ids) > 1:
+        from .batch import create_children
+
+        create_children(connection, run)
+    observe(connection, run, "queued", "Queued for Accounts desk.", 5)
+    return public_run(connection, run)
 
 
 def approve_run(connection, tenant, user, run_id, body, *, require_destination=True):
     run = run_for(connection, tenant["id"], run_id, True)
+    if run["workflow_key"] == "bill-entry" and run["actor_id"] != user["id"]:
+        raise ServiceError(
+            "forbidden", "Only the operator who started this bill run can approve its writes."
+        )
     if run["state"] != "review":
         raise ServiceError("conflict", "This run is not awaiting review.")
     try:
-        handler = binding_for(run).handler
-        if handler not in {"accounts.discovery", "accounts.bill"}:
-            get_handler(handler).approve(connection, tenant, user, run, body)
-            return public_run(connection, run_for(connection, tenant["id"], run_id))
-        if binding_for(run).handler == "accounts.discovery":
+        if run["workflow_key"] == "source-discovery":
             files = files_for(connection, tenant["id"], run["file_ids"])
             if any(not f["current"] for f in files):
                 raise ValueError("Source files changed. Run discovery again before confirming.")
@@ -77,14 +302,16 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
             # Only data and operation are editable. Source evidence and routing
             # originate from the agent result, preventing fabricated approvals.
             original = run["result"]
-            if original.get("unresolved"):
-                raise ValueError(
-                    "Destination recognition is unresolved. Update source mappings and run bill entry again."
-                )
             if len(body["result"].get("records", [])) != len(original["records"]):
                 raise ValueError("Review must retain every extracted record.")
             reviewed = json.loads(json.dumps(original))
             for old, edited in zip(reviewed["records"], body["result"]["records"], strict=True):
+                if old.get("status") in ("saved", "duplicate", "rejected"):
+                    continue
+                decision = edited.get("decision", "approve")
+                if decision not in ("approve", "hold", "reject"):
+                    raise ValueError("Choose approve, hold or reject for each bill.")
+                old["decision"] = decision
                 for field in (
                     "source_file_id",
                     "destination_file_id",
@@ -105,26 +332,86 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     )
                 old["data"], old["operation"] = edited["data"], edited["operation"]
             catalog = run["config"]["catalog_snapshot"]
-            files, contents = catalog_contents(connection, tenant["id"], catalog)
+            tally = run["config"].get("tally_target")
+            if tally:
+                run["config"]["tally_target"] = tally_target(
+                    connection, tenant, user, tally["discovery_id"]
+                )
+                connection.execute(
+                    "UPDATE account_runs SET config=%s WHERE id=%s",
+                    (Jsonb(run["config"]), run["id"]),
+                )
+                files, contents = [], {}
+            else:
+                discovered = connection.execute(
+                    "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
+                    (tenant["id"], str(run["catalog_id"])),
+                ).fetchone()
+                if discovered:
+                    from minkops_platform.discovery import require_ready
+
+                    require_ready(connection, tenant["id"], discovered["id"], ["excel"])
+                catalog, files, contents = resolve_catalog(connection, tenant["id"], catalog)
+                # Verified writes can advance the pinned mappings between partial approvals.
+                old_catalog = run["config"]["catalog_snapshot"]
+                for old_mapping, mapping in zip(
+                    old_catalog["sheets"], catalog["sheets"], strict=True
+                ):
+                    for record in reviewed["records"]:
+                        if (
+                            record["destination_file_id"],
+                            record["sheet"],
+                            record.get("table"),
+                        ) == (
+                            old_mapping["file_id"],
+                            old_mapping["sheet"],
+                            old_mapping.get("table"),
+                        ):
+                            record["destination_file_id"] = mapping["file_id"]
+                run["config"]["catalog_snapshot"] = catalog
+                connection.execute(
+                    "UPDATE account_runs SET config=%s WHERE id=%s",
+                    (Jsonb(run["config"]), run["id"]),
+                )
+            # User edits can correct bill identity. Recompute app-owned IDs from
+            # the reviewed values rather than retaining an extraction-time ID.
+            populate_entry_ids(
+                {
+                    "records": [
+                        r
+                        for r in reviewed["records"]
+                        if r.get("status") not in ("saved", "duplicate", "rejected")
+                    ]
+                },
+                catalog,
+                run["id"],
+            )
             checked = check_records(
-                reviewed, catalog, run["file_ids"], contents, run["config"]["checks"]
+                reviewed,
+                catalog,
+                run["file_ids"],
+                contents,
+                [] if tally else run["config"]["checks"],
             )
             if (checked["findings"] or any(r["findings"] for r in checked["records"])) and not body[
                 "acknowledge_findings"
             ]:
                 raise ValueError("Acknowledge unresolved findings before approving these entries.")
-            prepare_writes(connection, run, checked, catalog, files, contents, approved=True)
+            from . import tally_writes
+
+            if tally:
+                tally_writes.prepare(connection, run, checked)
+            else:
+                prepare_writes(connection, run, checked, catalog, files, contents)
             body["result"] = checked
-            state, message = (
-                "writing",
-                "Approved. Waiting for verified writes to the connected local folder.",
-            )
+            tally_writes.complete_run(connection, run, checked)
         connection.execute(
             """UPDATE account_runs SET result=%s, review_actor_id=%s, reviewed_at=now()
              WHERE tenant_id=%s AND id=%s""",
             (Jsonb(body["result"]), user["id"], tenant["id"], run["id"]),
         )
-        observe(connection, run, state, message, 100 if state == "completed" else 85)
+        if run["workflow_key"] == "source-discovery":
+            observe(connection, run, state, message, 100 if state == "completed" else 85)
     except (ValueError, ValidationError, KeyError, TypeError) as error:
         raise ServiceError("invalid", str(error).splitlines()[0]) from error
     except errors.UniqueViolation as error:
@@ -134,12 +421,21 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
     return public_run(connection, run_for(connection, tenant["id"], run_id))
 
 
-def prepare_writes(connection, run, result, catalog, files, contents, *, approved=False):
-    checked = enforce_policies(run["config"], result)
-    if checked.get("requires_review") and not approved:
-        raise ValueError("Client policy requires explicit review before writing.")
+def prepare_writes(connection, run, result, catalog, files, contents):
+    from minkops_connectors.excel import sheet_records
+
+    from .bills import classify_excel, excel_matches, same_value
+
     destinations = {}
     for record in result["records"]:
+        if record.get("status") in ("saved", "duplicate", "rejected", "writing"):
+            continue
+        if record.get("decision") == "reject":
+            record["status"] = "rejected"
+            continue
+        if record.get("decision") == "hold":
+            record["status"] = "held"
+            continue
         destinations.setdefault(record["destination_file_id"], []).append(record)
     for file_id, records in destinations.items():
         file = next(f for f in files if str(f["id"]) == file_id)
@@ -166,12 +462,55 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
                 if r["sheet"] == mapping["sheet"] and r.get("table") == mapping.get("table")
             ]
             if mapping["file_id"] == file_id and selected:
-                output, written = apply_records(output, mapping, selected)
-                changes.extend(written)
-        connection.execute(
+                for record in selected:
+                    try:
+                        validate_data(mapping, record["data"])
+                        classification = classify_excel(
+                            record["data"], mapping, sheet_records(output, mapping)
+                        )
+                        if classification == "correction":
+                            existing = excel_matches(
+                                record["data"], mapping, sheet_records(output, mapping)
+                            )[0]
+                            expected = record.get("expected_excel")
+                            record["current_excel"] = existing
+                            record["expected_excel"] = existing
+                            if record["operation"] == "update":
+                                if not expected or any(
+                                    not same_value(expected.get(k), v) for k, v in existing.items()
+                                ):
+                                    raise ValueError(
+                                        "Destination values changed after extraction. Review the observed values before approving this correction."
+                                    )
+                                record["match_data"] = {
+                                    k: existing[k] for k in mapping["key_columns"]
+                                }
+                        if classification == "duplicate":
+                            record["status"] = "duplicate"
+                            record["findings"].append(
+                                "Exact duplicate already exists; no additional row was created."
+                            )
+                            continue
+                        if classification == "ambiguous" or (
+                            classification == "correction" and record["operation"] != "update"
+                        ):
+                            raise ValueError(
+                                "Existing bill differs or has ambiguous keys. Review an explicit edit."
+                            )
+                        output, written = apply_records(output, mapping, [record])
+                        for change in written:
+                            change["record_index"] = result["records"].index(record)
+                        changes.extend(written)
+                        record["status"] = "writing"
+                    except ValueError as error:
+                        record["status"] = "held"
+                        record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
+        if not changes:
+            continue
+        write = connection.execute(
             """INSERT INTO account_writes
             (tenant_id,run_id,file_id,source_id,path,before_sha256,after_sha256,content,changes)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (
                 run["tenant_id"],
                 run["id"],
@@ -183,7 +522,16 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
                 output,
                 Jsonb(changes),
             ),
-        )
+        ).fetchone()
+        bound = connection.execute(
+            """SELECT d.id FROM desktop_source_bindings b JOIN desktop_devices d ON d.tenant_id=b.tenant_id AND d.id=b.device_id
+            WHERE b.tenant_id=%s AND b.source_id=%s AND d.owner_id=%s AND d.revoked_at IS NULL AND d.expires_at>now()""",
+            (run["tenant_id"], file["source_id"], run["actor_id"]),
+        ).fetchone()
+        if bound:
+            from minkops_platform.desktop import enqueue_approved
+
+            enqueue_approved(connection, run, bound["id"], "accounts.save", write["id"])
 
 
 def verify_write(connection, tenant, run_id, write_id, content):
@@ -202,15 +550,28 @@ def verify_write(connection, tenant, run_id, write_id, content):
             "SELECT id FROM account_sources WHERE tenant_id=%s AND id=%s FOR UPDATE",
             (tenant["id"], row["source_id"]),
         )
-        connection.execute(
-            "UPDATE account_files SET current=false WHERE tenant_id=%s AND source_id=%s AND path=%s",
+        current = connection.execute(
+            "SELECT sha256 FROM account_files WHERE tenant_id=%s AND source_id=%s AND path=%s AND current",
             (tenant["id"], row["source_id"], row["path"]),
-        )
-        connection.execute(
-            """INSERT INTO account_files (tenant_id,source_id,path,sha256,content)
-             VALUES (%s,%s,%s,%s,%s) ON CONFLICT (tenant_id,source_id,path,sha256) DO UPDATE SET current=true""",
-            (tenant["id"], row["source_id"], row["path"], row["after_sha256"], content),
-        )
+        ).fetchone()
+        advance = current and current["sha256"] in (row["before_sha256"], row["after_sha256"])
+        if not advance and not row["cancelled_at"]:
+            raise ServiceError(
+                "conflict",
+                "The destination has a newer source version. Reconcile it before completing this write.",
+            )
+        if advance:
+            connection.execute(
+                "UPDATE account_files SET current=false WHERE tenant_id=%s AND source_id=%s AND path=%s",
+                (tenant["id"], row["source_id"], row["path"]),
+            )
+            connection.execute(
+                """INSERT INTO account_files (tenant_id,source_id,path,sha256,content)
+                 VALUES (%s,%s,%s,%s,%s) ON CONFLICT (tenant_id,source_id,path,sha256) DO UPDATE SET current=true""",
+                (tenant["id"], row["source_id"], row["path"], row["after_sha256"], content),
+            )
+        # A late cancelled receipt proves an earlier save, not that these are
+        # today's bytes. Preserve newer observed source metadata and the audit.
         connection.execute(
             "UPDATE account_writes SET verified_at=now() WHERE tenant_id=%s AND id=%s",
             (tenant["id"], write_id),
@@ -219,7 +580,21 @@ def verify_write(connection, tenant, run_id, write_id, content):
         "SELECT count(*) AS n FROM account_writes WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL AND cancelled_at IS NULL",
         (tenant["id"], run_id),
     ).fetchone()["n"]
-    if not pending and run["state"] == "writing":
+    if run["workflow_key"] == "bill-entry" and run.get("result"):
+        result = run["result"]
+        for change in row["changes"]:
+            index = change.get("record_index")
+            if index is not None:
+                result["records"][index]["status"] = "saved"
+        if run["state"] == "writing":
+            from .tally_writes import complete_run
+
+            complete_run(connection, run, result)
+        else:
+            connection.execute(
+                "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), run["id"])
+            )
+    elif not pending and run["state"] == "writing":
         observe(connection, run, "completed", "Excel entries saved in place and verified.", 100)
     return public_run(connection, run_for(connection, tenant["id"], run_id))
 
@@ -233,7 +608,11 @@ def cancel_writes(connection, tenant, run_id):
          AND run_id=%s AND verified_at IS NULL""",
         (tenant["id"], run_id),
     )
-    message = "Remaining saves cancelled. Inspect the local workbooks before refreshing discovery; already applied changes remain."
+    connection.execute(
+        "UPDATE account_tally_writes SET cancelled_at=now() WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL",
+        (tenant["id"], run_id),
+    )
+    message = "Remaining saves cancelled. Inspect the destinations before refreshing discovery; already applied changes remain."
     connection.execute(
         "UPDATE account_runs SET error=%s WHERE tenant_id=%s AND id=%s",
         (message, tenant["id"], run_id),
