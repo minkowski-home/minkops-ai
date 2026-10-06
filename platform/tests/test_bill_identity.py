@@ -4,9 +4,25 @@ import unittest
 
 from minkops_platform.accounts.bills import business_identity, classify_excel
 from minkops_platform.accounts.checks import populate_entry_ids
+from minkops_platform.accounts.bills import capture_tally_findings
 
 
 class BillIdentityTests(unittest.TestCase):
+    def test_missing_supplier_is_held_without_blocking_valid_siblings(self):
+        target = {'discovery_id':'catalog', 'ledgers':['Known Supplier','Purchases']}
+        data = {'vendor':'Unknown Supplier','invoice_number':'RC-1','date':'2026-10-01',
+                'purchase_ledger':'Purchases','subtotal':100,'tax':0,'total':100}
+        result = {'records':[
+            {'source_file_id':'unknown','data':data,'findings':[]},
+            {'source_file_id':'known','data':{**data,'vendor':'Known Supplier'},'findings':[]},
+        ], 'findings':[]}
+        capture_tally_findings(result, target)
+        self.assertEqual(result['records'][0]['decision'], 'hold')
+        self.assertIn('Unknown Supplier', result['unresolved'][0]['reason'])
+        self.assertNotIn('decision', result['records'][1])
+        capture_tally_findings(result, target)
+        self.assertEqual(len(result['unresolved']), 1)
+
     def test_identity_uses_supplier_invoice_and_financial_year(self):
         a = {"vendor": " ACME ", "invoice_number": "Inv-01", "date": "2026-10-01"}
         b = {**a, "vendor": "acme", "date": "2026-11-01", "total": 999}

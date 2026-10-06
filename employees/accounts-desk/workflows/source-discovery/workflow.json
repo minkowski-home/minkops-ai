@@ -1,6 +1,6 @@
 {
   "key": "source-discovery",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "Source discovery",
   "description": "Discover approved source structures and reference data, with evidenced business mapping proposals.",
   "owner": "accounts-desk",
@@ -9,6 +9,7 @@
   "output_schema": "output.schema.json",
   "instructions": "SKILL.md",
   "tenant_defaults": {
+    "destination_mode": "tally",
     "discovery_depth": "business_mappings",
     "max_files": 100
   },

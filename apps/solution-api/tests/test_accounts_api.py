@@ -206,6 +206,17 @@ class AccountsTests(unittest.TestCase):
         self.csrf = {"x-csrf-token": self.client.get("/api/auth/me").json()["csrf_token"]}
         self.base = "/api/tenants/mock-tenant/accounts"
         with psycopg.connect(URL) as c:
+            # Excel adapter regression cases intentionally use a generic tenant
+            # binding. Client-specific policy has separate rejection tests.
+            from minkops_platform.resources import REPOSITORY_ROOT
+            from minkops_platform.workflows import load_definition
+            from psycopg.types.json import Jsonb
+
+            definition = load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry')
+            c.execute("""UPDATE workflows SET config_schema=%s,
+                config_values=jsonb_set(config_values,'{output_mode}','"excel_in_place"')
+                WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
+                (Jsonb(definition.tenant_schema),))
             c.execute(
                 "UPDATE workflows SET status='active' WHERE key IN ('bill-entry','source-discovery') AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')"
             )

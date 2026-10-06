@@ -114,6 +114,12 @@ def launch(connection, tenant, user, body):
     except ValidationError as error:
         raise ServiceError("invalid", "Choose valid Tally and Excel discovery options.") from error
     config = body["config"]
+    mode = config.get("destination_mode")
+    observed_mode = "both" if config["tally"] and config["excel_source_ids"] else (
+        "tally" if config["tally"] else "excel"
+    )
+    if mode and mode != observed_mode:
+        raise ServiceError("invalid", "Select the sources required by the chosen Excel, Tally or Both option.")
     if not config["excel_source_ids"] and not config["tally"]:
         raise ServiceError("invalid", "Select at least one source.")
     fingerprint, previous = resolve_request(
@@ -660,11 +666,15 @@ def require_ready(connection, tenant_id, run_id, required_tools):
             "Required sources are incomplete or unconfirmed. Finish source discovery first.",
         )
     latest = connection.execute(
-        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config=%s ORDER BY created_at DESC LIMIT 1",
+        "SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config=%s ORDER BY created_at DESC LIMIT 1",
         (tenant_id, row["actor_id"], row["device_id"], Jsonb(row["config"])),
     ).fetchone()
     if latest["id"] != row["id"]:
-        raise ServiceError(
-            "conflict", "Source discovery has a newer run. Review the latest catalog first."
-        )
+        # Periodic discovery must not invalidate an in-flight approval when its
+        # confirmed structure and references are exactly unchanged. Keep the
+        # pinned catalog; pending, partial or changed observations still block.
+        if not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]:
+            raise ServiceError(
+                "conflict", "Source discovery has a newer run. Review the latest catalog first."
+            )
     return current["catalog"]

@@ -78,6 +78,16 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
     else:
         if not user_input.strip():
             raise ServiceError("invalid", "Describe the correction or missing information.")
+        if run["config"].get("tally_target"):
+            from .bills import refreshed_tally_target
+
+            run["config"]["tally_target"] = refreshed_tally_target(
+                connection, tenant, user, run["config"]["tally_target"]
+            )
+            connection.execute(
+                "UPDATE account_runs SET config=%s WHERE id=%s",
+                (Jsonb(run["config"]), run_id),
+            )
         connection.execute(
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
@@ -109,7 +119,10 @@ def reconcile_once(url):
             ).fetchall()
             done = [c for c in children if c["state"] in ("review", "failed")]
             if len(done) != len(children):
-                if parent["config"].get("batch_finished_count") != len(done):
+                # A retry can have the same ready count as the earlier batch.
+                # Enter Work again instead of leaving an active child labelled
+                # as waiting to start until its extraction finishes.
+                if parent["state"] == "queued" or parent["config"].get("batch_finished_count") != len(done):
                     connection.execute(
                         "UPDATE account_runs SET config=config || jsonb_build_object('batch_finished_count',%s::integer) WHERE id=%s",
                         (len(done), parent["id"]),
@@ -160,10 +173,14 @@ def reconcile_once(url):
             connection.execute(
                 "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), parent["id"])
             )
+            pending = sum(
+                r.get("status") not in ("saved", "duplicate", "rejected")
+                for r in result["records"]
+            )
             observe(
                 connection,
                 parent,
                 "review",
-                f"{len(result['records'])} bill entries ready; {len(result['unresolved'])} bills need attention.",
+                f"{pending} bill entries ready; {len(result['unresolved'])} bills need attention.",
                 70,
             )

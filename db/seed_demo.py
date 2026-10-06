@@ -7,6 +7,8 @@ from pathlib import Path
 
 import psycopg
 from minkops_platform.workflows import load_definition, register_workflow
+from minkops_platform.solution_policy import bind_definition, validate_destination
+from jsonschema import ValidationError
 from psycopg.types.json import Jsonb
 from pwdlib import PasswordHash
 
@@ -22,7 +24,7 @@ def seed_demo(url: str, password: str | None = None) -> str:
                ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name RETURNING id"""
         ).fetchone()[0]
         mock = connection.execute(
-            """INSERT INTO tenants (slug, name) VALUES ('mock-tenant', 'Mock tenant')
+            """INSERT INTO tenants (slug, name) VALUES ('mock-tenant', 'Mock client')
                ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name RETURNING id"""
         ).fetchone()[0]
         user = connection.execute(
@@ -108,6 +110,23 @@ def seed_demo(url: str, password: str | None = None) -> str:
         registrations = json.loads((ROOT / "db/fixtures/mock_workflows.json").read_text())
         for key, defaults in registrations.items():
             definition = load_definition(ROOT / "employees/accounts-desk/workflows" / key)
+            definition = bind_definition(definition, "mock-client")
+            if key == "bill-entry":
+                existing = connection.execute(
+                    "SELECT config_values FROM workflows WHERE tenant_id=%s AND key=%s FOR UPDATE",
+                    (mock, key),
+                ).fetchone()
+                if existing:
+                    try:
+                        validate_destination(definition.tenant_schema, existing[0]["output_mode"])
+                    except ValidationError:
+                        # Apply the explicitly selected client policy while retaining
+                        # unrelated operator preferences and existing run snapshots.
+                        connection.execute(
+                            """UPDATE workflows SET config_values=jsonb_set(config_values,
+                            '{output_mode}', '"tally_in_place"'), config_version=config_version+1
+                            WHERE tenant_id=%s AND key=%s""", (mock, key),
+                        )
             workflow_ids[key] = register_workflow(connection, mock, definition, defaults)
             connection.execute("""UPDATE workflows SET status='active'
                 WHERE tenant_id=%s AND id=%s AND status='planned'""", (mock,workflow_ids[key]))
