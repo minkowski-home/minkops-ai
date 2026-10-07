@@ -32,9 +32,8 @@ class DiscoveryTests(unittest.TestCase):
     def test_excel_and_tally_collection_review_reuse_and_layout_change(self):
         from minkops_platform.accounts.worker import process
         from minkops_platform.resources import REPOSITORY_ROOT
-        from minkops_platform.workflows import load_definition
+        from minkops_platform.workflows import load_definition, register_workflow
         from openpyxl import load_workbook
-        from psycopg.types.json import Jsonb
 
         self.pair()
         self.discovery = f"/api/tenants/{self.slug}/discovery"
@@ -43,14 +42,15 @@ class DiscoveryTests(unittest.TestCase):
             REPOSITORY_ROOT / "employees/accounts-desk/workflows/source-discovery"
         )
         with psycopg.connect(URL) as c:
+            tenant_id = c.execute("SELECT id FROM tenants WHERE slug=%s", (self.slug,)).fetchone()[
+                0
+            ]
             c.execute(
-                "INSERT INTO workflows(tenant_id,key,name,description,status,config_schema,config_values) SELECT id,'source-discovery','Discovery','Test','active',%s,%s FROM tenants WHERE slug=%s",
-                (
-                    Jsonb(definition.tenant_schema),
-                    Jsonb(definition.metadata["tenant_defaults"]),
-                    self.slug,
-                ),
+                "INSERT INTO employees(tenant_id,key,name) VALUES (%s,'accounts-desk','Accounts desk')",
+                (tenant_id,),
             )
+            workflow_id = register_workflow(c, tenant_id, definition)
+            c.execute("UPDATE workflows SET status='active' WHERE id=%s", (workflow_id,))
         data = workbook()
         source = self.client.post(
             accounts + "/sources",

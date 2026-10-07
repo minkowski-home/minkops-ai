@@ -33,5 +33,10 @@
     "instructions": "execution-instructions.md",
     "resources": [],
     "result_path": "/workspace/outputs/result.json"
-  }
+  },
+  "handler": "accounts.bill",
+  "presentation": "accounts-bill",
+  "capabilities": [
+    "files.snapshot"
+  ]
 }

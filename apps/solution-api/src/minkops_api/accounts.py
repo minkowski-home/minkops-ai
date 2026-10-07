@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -86,7 +86,7 @@ def source_content(slug: str, file_id: UUID, user: User, connection: Db):
 
 
 class Launch(BaseModel):
-    key: Literal["source-discovery", "bill-entry"]
+    key: str = Field(pattern="^[a-z][a-z0-9-]*$", max_length=100)
     request_key: UUID
     file_ids: list[UUID] = Field(min_length=1, max_length=45)
     catalog_id: UUID | None = None

@@ -29,7 +29,8 @@ class WorkflowRegistrationTests(unittest.TestCase):
         self.connection.execute(
             sql.SQL("SET search_path TO {}").format(sql.Identifier(self.schema_name))
         )
-        self.connection.execute((ROOT / "db/migrations/0001_core.sql").read_text())
+        for migration in sorted((ROOT / "db/migrations").glob("*.sql")):
+            self.connection.execute(migration.read_text())
         self.connection.commit()
         self.addCleanup(self.remove_schema)
         self.tenant = self.connection.execute(

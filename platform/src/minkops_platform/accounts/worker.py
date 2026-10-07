@@ -8,98 +8,23 @@ are surfaced for explicit intervention, never automatically resubmitted.
 
 import time
 
-from minkops_connectors.excel import inspect_workbook
-from psycopg.types.json import Jsonb
-
-from minkops_platform.runtime import lifecycle
+from minkops_platform.runtime import application, lifecycle
 
 from .agent import close_session, execute
-from .catalog import validate_catalog
-from .checks import check_records, populate_entry_ids
-from .repository import catalog_contents, files_for, observe
 from .run_store import AccountsRunStore
-from .service import prepare_writes
 
 STORE = AccountsRunStore()
 
 
 def process(connection, run, *, executor=execute):
-    files = files_for(connection, run["tenant_id"], run["file_ids"])
-    context = {
-        "files": [{"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files],
-        "config": run["config"],
-        "definition_version": run["definition_version"],
-    }
-    if run["workflow_key"] == "bill-entry":
-        context["catalog"] = run["config"]["catalog_snapshot"]
-        refs, contents = catalog_contents(connection, run["tenant_id"], context["catalog"])
-        files += [f for f in refs if f["id"] not in {i["id"] for i in files}]
-    else:
-        if run["config"].get("local_discovery_snapshot"):
-            context["local_discovery"] = run["config"]["local_discovery_snapshot"]
-        context["inventory"] = [
-            {"file_id": str(f["id"]), "sheets": inspect_workbook(bytes(f["content"]))}
-            for f in files
-        ]
-    context["files"] = [{"id": str(f["id"]), "path": f["path"]} for f in files]
-    observe(connection, run, "executing", "Accounts desk is inspecting the selected files.", 20)
-    connection.commit()
-
-    result = lifecycle.execute_proposal(connection, STORE, run, files, context, executor)
-    if run["workflow_key"] == "source-discovery":
-        validate_catalog(
-            result, {str(f["id"]): bytes(f["content"]) for f in files}, review_proposal=True
-        )
-        # Missing sheets must be visible; don't silently call a partial scan complete.
-        expected = {
-            (str(f["id"]), s["sheet"], t["name"] if t else None)
-            for f in files
-            for s in inspect_workbook(bytes(f["content"]))
-            for t in (s["tables"] or [None])
-        }
-        actual = {(s["file_id"], s["sheet"], s.get("table")) for s in result["sheets"]}
-        if expected != actual:
-            raise ValueError("Discovery did not account for every selected worksheet.")
-    else:
-        if any(r.get("operation") != "append" for r in result.get("records", [])):
-            raise ValueError(
-                "Agent proposals must append by default; edits require explicit review."
-            )
-        result = populate_entry_ids(result, context["catalog"], run["id"])
-        result = check_records(
-            result, context["catalog"], run["file_ids"], contents, run["config"]["checks"]
-        )
-    connection.execute(
-        "UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s",
-        (Jsonb(result), run["tenant_id"], run["id"]),
-    )
-    observe(
+    application.process(
         connection,
+        STORE,
         run,
-        "review",
-        "Review the discovered mappings."
-        if run["workflow_key"] == "source-discovery"
-        else "Review bill values, source evidence and proposed Excel entries.",
-        70,
+        executor=executor,
+        close_session=close_session,
+        cleanup=executor is execute,
     )
-    if (
-        run["workflow_key"] == "bill-entry"
-        and run["config"]["review_mode"] == "only_exceptions"
-        and not result.get("unresolved")
-        and not result["findings"]
-        and not any(r["findings"] for r in result["records"])
-    ):
-        prepare_writes(connection, run, result, context["catalog"], refs, contents)
-        observe(
-            connection,
-            run,
-            "writing",
-            "Checks passed. Waiting for verified local Excel writes.",
-            85,
-        )
-    connection.commit()
-    if executor is execute:
-        lifecycle.close_run(connection, STORE, run, close_session=close_session)
 
 
 def work_once(url, *, executor=execute):

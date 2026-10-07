@@ -32,5 +32,10 @@
       "collection-config.schema.json"
     ],
     "result_path": "/workspace/outputs/result.json"
-  }
+  },
+  "handler": "accounts.discovery",
+  "presentation": "accounts-discovery",
+  "capabilities": [
+    "files.snapshot"
+  ]
 }
