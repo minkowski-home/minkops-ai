@@ -13,18 +13,25 @@ BASE = "/api/tenants/mock-tenant/accounts"
 REVIEWED_BILLS = json.loads(Path(__file__).with_name("release-bill-fixtures.json").read_text())
 
 
+def require(condition, message):
+    """Operator authorization guards must remain active under python -O."""
+    if not condition:
+        raise ValueError(message)
+
+
 def main(state_dir, phase, invoice):
     credentials = json.loads((state_dir / "demo-owner.json").read_text())
     with httpx.Client(base_url=ORIGIN, timeout=65) as api:
         login = api.post("/api/auth/login", json=credentials)
         login.raise_for_status()
-        assert "Secure" in login.headers["set-cookie"]
+        require("Secure" in login.headers["set-cookie"], "Production login must use a secure cookie")
         profile = api.get("/api/auth/me")
         profile.raise_for_status()
-        assert "no-store" in profile.headers["cache-control"]
+        require("no-store" in profile.headers["cache-control"], "Production identity must not be cached")
         user = profile.json()
-        assert not user["is_platform_admin"]
-        assert any(m["slug"] == "mock-tenant" and m["role"] == "admin" for m in user["memberships"])
+        require(not user["is_platform_admin"], "Release checks require the ordinary demo owner")
+        require(any(m["slug"] == "mock-tenant" and m["role"] == "admin" for m in user["memberships"]),
+                "The release owner must administer the isolated demo tenant")
         api.headers["x-csrf-token"] = user["csrf_token"]
         if phase == "bill-start":
             if not invoice:
@@ -32,12 +39,13 @@ def main(state_dir, phase, invoice):
             content = invoice.read_bytes()
             # Scope this paid release check to the reviewed RC fixture, never
             # arbitrary customer documents or a new financial test identity.
-            assert hashlib.sha256(content).hexdigest() in REVIEWED_BILLS
+            require(hashlib.sha256(content).hexdigest() in REVIEWED_BILLS, "Only reviewed synthetic fixtures may be tested")
             source = api.post(BASE + "/sources", data={"label": "Synthetic release verification", "paths": json.dumps([invoice.name])},
                               files={"files": (invoice.name, content, "application/pdf")})
             source.raise_for_status()
             discovery = api.get("/api/tenants/mock-tenant/discovery/latest").json()
-            assert discovery["ready"] and discovery["config"]["tally"]["company"] == "Test Company"
+            require(discovery["ready"] and discovery["config"]["tally"]["company"] == "Test Company",
+                    "A ready Test Company catalog is required")
             run = api.post(BASE + "/runs", json={"key": "bill-entry", "request_key": str(uuid.uuid4()),
                            "file_ids": [source.json()["files"][0]["id"]],
                            "config": {"output_mode": "tally_in_place", "discovery_id": discovery["id"]}})
@@ -52,10 +60,13 @@ def main(state_dir, phase, invoice):
             result = run.json()
             if phase == "bill-clarify":
                 provenance = result["config"]["file_provenance"]
-                assert len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS
+                require(len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS,
+                        "Clarification requires one reviewed synthetic fixture")
                 expected = REVIEWED_BILLS[provenance[0]["sha256"]]
-                assert result["state"] == "review" and result["result"]["unresolved"]
-                assert result["config"]["tally_target"]["company"] == "Test Company"
+                require(result["state"] == "review" and result["result"]["unresolved"],
+                        "Only unresolved reviews may be clarified")
+                require(result["config"]["tally_target"]["company"] == "Test Company",
+                        "Release clarification is restricted to Test Company")
                 clarification = api.post(BASE + f"/runs/{previous['id']}/resolve-bill", json={
                     "file_id": provenance[0]["id"],
                     "user_input": (
@@ -71,14 +82,17 @@ def main(state_dir, phase, invoice):
                 result = clarification.json()
             if phase == "bill-approve":
                 provenance = result["config"]["file_provenance"]
-                assert len(provenance) == 1
+                require(len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS,
+                        "Approval requires one reviewed synthetic fixture")
                 expected = REVIEWED_BILLS[provenance[0]["sha256"]]
-                assert result["state"] == "review"
-                assert result["config"]["tally_target"]["company"] == "Test Company"
-                assert not result["result"]["unresolved"]
+                require(result["state"] == "review", "Only a ready review may be approved")
+                require(result["config"]["tally_target"]["company"] == "Test Company",
+                        "Release approval is restricted to Test Company")
+                require(not result["result"]["unresolved"], "Unresolved bills cannot be approved")
                 records = result["result"]["records"]
-                assert len(records) == 1 and records[0]["data"] == expected
-                assert records[0]["operation"] == "append"
+                require(len(records) == 1 and records[0]["data"] == expected,
+                        "The reviewed record must match every expected fixture value")
+                require(records[0]["operation"] == "append", "Release checks permit only a reviewed append")
                 approval = api.post(BASE + f"/runs/{previous['id']}/approve",
                                     json={"result": result["result"], "acknowledge_findings": True})
                 approval.raise_for_status()

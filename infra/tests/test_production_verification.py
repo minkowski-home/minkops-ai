@@ -14,8 +14,11 @@ verification = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verification)
 
 
-@pytest.mark.parametrize("phase", ["bill-clarify", "bill-approve"])
-def test_existing_review_routes_clarification_and_blocks_unresolved_approval(tmp_path, monkeypatch, phase):
+@pytest.mark.parametrize("phase,problem", [
+    ("bill-clarify", "unresolved"), ("bill-approve", "unresolved"),
+    ("bill-approve", "company"), ("bill-approve", "record"),
+])
+def test_existing_review_routes_clarification_and_blocks_unsafe_approval(tmp_path, monkeypatch, phase, problem):
     (tmp_path / "demo-owner.json").write_text(json.dumps({"email": "owner@example.test", "password": "test"}))
     (tmp_path / "release-bill.json").write_text(json.dumps({"id": "owned-run"}))
     requests = []
@@ -31,10 +34,14 @@ def test_existing_review_routes_clarification_and_blocks_unresolved_approval(tmp
                 "memberships": [{"slug": "mock-tenant", "role": "admin"}],
             })
         if request.method == "GET":
+            data = dict(verification.REVIEWED_BILLS[digest])
+            if problem == "record":
+                data["total"] += 1
             return httpx.Response(200, json={"id": "owned-run", "state": "review", "config": {
                 "file_provenance": [{"id": "owned-file", "sha256": digest}],
-                "tally_target": {"company": "Test Company"},
-            }, "result": {"unresolved": ["invoice reference unclear"], "records": []}})
+                "tally_target": {"company": "Live Company" if problem == "company" else "Test Company"},
+            }, "result": {"unresolved": ["invoice reference unclear"] if problem == "unresolved" else [],
+                          "records": [{"data": data, "operation": "append"}]}})
         if request.url.path.endswith("/resolve-bill"):
             clarification = json.loads(request.content)
             assert clarification["file_id"] == "owned-file"
@@ -46,7 +53,7 @@ def test_existing_review_routes_clarification_and_blocks_unresolved_approval(tmp
     client = httpx.Client(base_url=verification.ORIGIN, transport=httpx.MockTransport(respond))
     monkeypatch.setattr(verification.httpx, "Client", lambda **kwargs: client)
     if phase == "bill-approve":
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             verification.main(tmp_path, phase, None)
         assert not any(path.endswith("/approve") for _, path in requests)
     else:

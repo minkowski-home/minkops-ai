@@ -854,3 +854,22 @@ identity provisioning tests and idempotent creation for every runtime account.
 pass; committed context is visible to the response-triggered dispatcher. The
 production migration was applied with the restricted migration identity. Existing
 coalescing, generation fencing and per-run locks continue to control concurrency.
+
+## Keep operator approval guards active under optimized Python (8 October 2026)
+
+**Situation:** Release review found that `python -O` removes assertion-based
+fixture, company and unresolved-result checks from the opt-in production operator.
+The server still enforces tenant/approval/write rules, but the operator could
+authorize data outside its narrower reviewed release-test scope.
+
+**Task:** Keep operator authorization independent of interpreter optimization and
+prove that unsafe reviews never submit an approval request.
+
+**Action:** Reproduced the approval submission with an optimized-interpreter
+regression using an isolated HTTP transport, without touching production. Replaced
+operator assertions with explicit validation errors, covered unresolved bills,
+wrong companies and mismatched fixture values, and added the optimized run to CI.
+
+**Result:** Normal and optimized checks reject unsafe reviews before `/approve`;
+the valid clarification path still submits through the ordinary tenant API.
+Production fixture/hash, owner and company limits no longer disappear under `-O`.

@@ -198,7 +198,10 @@ cookie, cache, CSRF/logout checks; trusted demo workspace; real metadata-only Ta
 discovery and receipt replay; hosted Bill Entry review, fresh append and duplicate reconciliation;
 interest-form SMTP acceptance; Windows 0.4.1 installer build/publication with checksum;
 custom-domain cutover and approved Vercel project retirement.
-Backend/operator suite: 197 tests plus 49 subtests. Web: 17 tests and lint. Native:
+Backend/operator suite: 199 tests plus 49 subtests. Operator approval regressions
+also pass under optimized Python; explicit authorization guards remain enabled
+under `-O` and CI checks unsafe reviews never submit `/approve`.
+Web: 17 tests and lint. Native:
 35 Linux tests; Windows passes 34 with one privilege-dependent symlink test skipped.
 
 **Still required before marking MIN-123 Done:** the remaining MIN-122 device and
