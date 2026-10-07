@@ -27,7 +27,7 @@ jobs:
           version: "0.12.23"
           python-version: "3.12"
       - run: uv sync --frozen --all-packages
-      - run: uv run --all-packages pytest platform/tests apps/solution-api/tests connectors/tests db/tests apps/corporate-website/api/tests -q --tb=short
+      - run: uv run --all-packages pytest platform/tests apps/solution-api/tests connectors/tests db/tests apps/corporate-website/api/tests infra/tests -q --tb=short
         env:
           TEST_DATABASE_URL: postgresql://minkops:test-only-password@localhost:5432/postgres
           AUTH_DEV_MODE: "1"
