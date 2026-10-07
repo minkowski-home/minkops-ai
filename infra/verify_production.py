@@ -53,11 +53,19 @@ def main(state_dir, phase, invoice):
             if phase == "bill-clarify":
                 provenance = result["config"]["file_provenance"]
                 assert len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS
+                expected = REVIEWED_BILLS[provenance[0]["sha256"]]
                 assert result["state"] == "review" and result["result"]["unresolved"]
                 assert result["config"]["tally_target"]["company"] == "Test Company"
                 clarification = api.post(BASE + f"/runs/{previous['id']}/resolve-bill", json={
                     "file_id": provenance[0]["id"],
-                    "user_input": "This is an authorized synthetic release test solely in Test Company, not a commercial transaction. Use the printed billing Ref as the invoice_number; the weighbridge ID is not the invoice number. The synthetic/non-commercial label is intentional test context. Preserve observed amounts and evidence, and leave any other missing or conflicting values unresolved.",
+                    "user_input": (
+                        "This is an authorized synthetic release test solely in Test Company, not a commercial transaction. "
+                        "Use the printed invoice identifier or billing Ref as the invoice_number; a weighbridge ID is not the invoice number. "
+                        "The synthetic/non-commercial label is intentional test context. "
+                        f"The reviewed fixture's approved purchase ledger is {expected['purchase_ledger']}; "
+                        f"allocate its stated GST to the exact tax ledger {expected['tax_ledger']}. "
+                        "Preserve observed amounts and evidence, and leave any other missing or conflicting values unresolved."
+                    ),
                 })
                 clarification.raise_for_status()
                 result = clarification.json()
