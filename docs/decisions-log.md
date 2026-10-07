@@ -773,3 +773,25 @@ read-only and document worker/recovery/budget gates before launch.
 privacy, current-reference gating, company identity and pinned core/client context.
 Current-PC ODBC metadata exposes 275 tables. Clean-PC/server-topology tests and
 bounded cloud worker deployment remain explicit production acceptance gates.
+
+## 7 October 2026 — Durable workflow wake-ups with bounded cloud execution
+
+**Situation:** The local worker ran continuously, which would spend the small
+hosting budget while idle. HTTP-triggered jobs also risk lost notifications and
+duplicate paid work around transaction commits, crashes and job overlap.
+
+**Task:** Preserve the existing workflow lifecycle and recovery while allowing
+Cloud Run to scale to zero, with a single bounded processing lane.
+
+**Action:** Add a transactional PostgreSQL generation counter, dispatch lease and
+global runner lock. Commit API mutations before dispatch; acknowledge only an
+observed idle generation while holding its row lock. Keep pending work on timeout
+and dispatch failure, with an hourly recovery sweep. Runtime identities invoke a
+fixed job through ephemeral metadata credentials. Existing per-run recovery and
+native-write policies remain authoritative.
+
+**Result:** Tests prove committed launch visibility, failed-dispatch retry,
+coalescing, concurrent-runner exclusion, idle-generation races and bounded exits.
+The complete backend suite passes 186 tests and 47 subtests. Deployment keeps
+separate database roles and denies runtime DDL; the cloud rollout records live
+verification separately from these regression results.
