@@ -400,7 +400,10 @@ def _validate_columns(columns):
         )
     ):
         raise ServiceError("invalid", "Invalid Tally column metadata.")
-    if len({c["name"] for c in columns}) != len(columns):
+    # Tally exposes repeated method names at distinct ODBC positions (e.g.
+    # $Category in CostCentreBreakUp). Preserve that schema; the position is
+    # the column identity. Repeated positions still indicate an invalid receipt.
+    if len({c["ordinal"] for c in columns}) != len(columns):
         raise ServiceError("invalid", "Duplicate Tally metadata columns.")
 
 

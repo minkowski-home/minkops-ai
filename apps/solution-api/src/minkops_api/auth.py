@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 from psycopg.rows import dict_row
 from pwdlib import PasswordHash
+from minkops_connectors.email import send_email
 
 
 router = APIRouter(prefix="/api")
@@ -35,7 +36,8 @@ def database():
         yield connection
 
 
-Db = Annotated[psycopg.Connection, Depends(database)]
+# Commit before a response-triggered wake-up reads the durable notification.
+Db = Annotated[psycopg.Connection, Depends(database, scope="function")]
 
 
 def digest(token: str) -> str:
@@ -118,12 +120,7 @@ def send_mail(email: str, subject: str, message_text: str) -> None:
     message["To"] = email
     message.set_content(message_text)
     try:
-        with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=10) as smtp:
-            if os.getenv("SMTP_STARTTLS", "1") == "1":
-                smtp.starttls()
-            if os.getenv("SMTP_USER"):
-                smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
-            smtp.send_message(message)
+        send_email(message)
     except (OSError, smtplib.SMTPException) as error:
         raise HTTPException(503, "Email could not be sent.") from error
 

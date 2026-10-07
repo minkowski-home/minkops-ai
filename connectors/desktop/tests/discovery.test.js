@@ -4,6 +4,24 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { inspectExcel, discoverTally } from "../src/discovery.js";
 
+test("typed Tally reference identities become exact strings and malformed wrappers fail closed", async () => {
+  for (const malformed of [false, true]) {
+    const result = await discoverTally({ company: "Test", port: 9000, categories: ["company", "ledgers"], depth: "reference_data" }, {
+      request: async (_url, options) => {
+        const record = options.body.includes("<TYPE>Ledger</TYPE>")
+          ? `<LEDGER NAME="Supplier"><GUID TYPE="String">${malformed ? '<VALUE>bad</VALUE>' : 'ledger-guid'}</GUID><PARENT TYPE="String">Sundry Creditors</PARENT><ALTERID TYPE="Number">0017</ALTERID></LEDGER>`
+          : '<COMPANY NAME="Test"><NAME TYPE="String">Test</NAME><GUID TYPE="String">company-guid</GUID><ALTERID TYPE="Number">0012</ALTERID><PARENT TYPE="String"></PARENT></COMPANY>';
+        return new Response(`<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${record}</COLLECTION></DATA></BODY></ENVELOPE>`);
+      },
+    });
+    assert.equal(result.collections[0].records[0].GUID, "company-guid");
+    assert.equal(result.collections[0].records[0].ALTERID, "0012");
+    assert.equal(result.collections[0].records[0].PARENT, "");
+    if (malformed) assert.equal(result.collections[1].status, "unavailable");
+    else assert.deepEqual(result.collections[1].records[0], { "@_NAME": "Supplier", GUID: "ledger-guid", PARENT: "Sundry Creditors", ALTERID: "0017" });
+  }
+});
+
 test("Excel inspection accepts absolute package table relationships produced by openpyxl", async () => {
   const w = new ExcelJS.Workbook();
   w.addWorksheet("Bills").addTable({

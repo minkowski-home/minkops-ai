@@ -773,3 +773,103 @@ read-only and document worker/recovery/budget gates before launch.
 privacy, current-reference gating, company identity and pinned core/client context.
 Current-PC ODBC metadata exposes 275 tables. Clean-PC/server-topology tests and
 bounded cloud worker deployment remain explicit production acceptance gates.
+
+## 7 October 2026 — Durable workflow wake-ups with bounded cloud execution
+
+**Situation:** The local worker ran continuously, which would spend the small
+hosting budget while idle. HTTP-triggered jobs also risk lost notifications and
+duplicate paid work around transaction commits, crashes and job overlap.
+
+**Task:** Preserve the existing workflow lifecycle and recovery while allowing
+Cloud Run to scale to zero, with a single bounded processing lane.
+
+**Action:** Add a transactional PostgreSQL generation counter, dispatch lease and
+global runner lock. Commit API mutations before dispatch; acknowledge only an
+observed idle generation while holding its row lock. Keep pending work on timeout
+and dispatch failure, with an hourly recovery sweep. Runtime identities invoke a
+fixed job through ephemeral metadata credentials. Existing per-run recovery and
+native-write policies remain authoritative.
+
+**Result:** Tests prove committed launch visibility, failed-dispatch retry,
+coalescing, concurrent-runner exclusion, idle-generation races and bounded exits.
+The complete backend suite passes 186 tests and 47 subtests. Deployment keeps
+separate database roles and denies runtime DDL; the cloud rollout records live
+verification separately from these regression results.
+## Preserve real ODBC column identity during production discovery (7 October 2026)
+
+**Situation:** The first live GCP discovery receipt was rejected even though the
+Windows adapter collected 275 tables with metadata-only GetSchema calls. Tally
+repeats `$Category` at positions 18 and 78 in CostCentreBreakUp and AllCostCentre;
+our server assumed column names were unique.
+
+**Task:** Preserve the provider's full schema without weakening receipt validation
+or sampling business records to infer it.
+
+**Action:** Reproduced both the valid repeated-name case and an invalid repeated
+position with failing tests. Changed the validator to use ordinal column identity,
+kept names/types/nullability and every existing allocation/scope limit, and tested
+the real PC-to-GCP completion path rather than relying on fabricated metadata.
+
+**Result:** Both regressions pass. The catalog retains repeated methods faithfully;
+malformed receipts cannot make two columns claim the same position. The corrected
+Cloud Run image accepted the real Windows receipt and its identical replay:
+275 schema tables, zero business records, and a completed tenant catalog.
+
+## Normalize typed Tally identities at the connector boundary (7 October 2026)
+
+**Situation:** The first hosted Bill Entry run stopped before paid extraction:
+Tally's XML TYPE attributes turned company GUIDs into parser objects, preventing
+the workflow from pinning the observed company identity.
+
+**Task:** Restore exact identity checks without relaxing company/ledger write
+validation or exposing business data through Source Discovery.
+
+**Action:** Added a failing native regression using real typed XML shapes and
+malformed nested values. Normalize only approved operational reference fields at
+the connector boundary, preserving exact strings and leading zeroes. Reject
+nested records instead of stringifying or guessing identity. Publish the changed
+native adapter as a new installer version rather than overwriting its predecessor.
+
+**Result:** Typed GUID, parent and alteration identifiers pass the regression;
+malformed wrappers remain unavailable. Live workflow verification is recorded
+separately in the deployment checklist.
+
+## Wake bounded workers on native context readiness (7 October 2026)
+
+**Situation:** Review found a race hidden by slow Cloud Run cold starts: an idle
+worker could acknowledge a queued bill before the PC finished its references.
+Completing that job left the run queued and generated no new notification.
+
+**Task:** Make readiness durable and immediate without polling continuously,
+replaying paid work or modifying an already-applied migration.
+
+**Action:** Added an API regression that acknowledges the initial generation,
+then completes the actual native-reference protocol. A new checksum-protected
+migration emits a wake when a Tally context job first becomes terminal. Its
+trigger covers readiness independently of workflow-state transitions, while
+identical completion replay emits no extra notification. Also added fresh-project
+identity provisioning tests and idempotent creation for every runtime account.
+
+**Result:** The previously failing readiness regression and failure-path subtest
+pass; committed context is visible to the response-triggered dispatcher. The
+production migration was applied with the restricted migration identity. Existing
+coalescing, generation fencing and per-run locks continue to control concurrency.
+
+## Keep operator approval guards active under optimized Python (8 October 2026)
+
+**Situation:** Release review found that `python -O` removes assertion-based
+fixture, company and unresolved-result checks from the opt-in production operator.
+The server still enforces tenant/approval/write rules, but the operator could
+authorize data outside its narrower reviewed release-test scope.
+
+**Task:** Keep operator authorization independent of interpreter optimization and
+prove that unsafe reviews never submit an approval request.
+
+**Action:** Reproduced the approval submission with an optimized-interpreter
+regression using an isolated HTTP transport, without touching production. Replaced
+operator assertions with explicit validation errors, covered unresolved bills,
+wrong companies and mismatched fixture values, and added the optimized run to CI.
+
+**Result:** Normal and optimized checks reject unsafe reviews before `/approve`;
+the valid clarification path still submits through the ordinary tenant API.
+Production fixture/hash, owner and company limits no longer disappear under `-O`.

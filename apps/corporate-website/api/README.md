@@ -70,13 +70,13 @@ that alone does not prove the message reached or was read in the target inbox.
 
 ## Production hosting
 
-The frontend is a static Vite site on Vercel. The FastAPI endpoint is a separate
-Cloud Run service. The canonical production hosts (`minkops.com` and
-`www.minkops.com`) use a checked-in public Cloud Run URL in the frontend; it
-contains no credentials. Other deployment hosts can override it with
-`VITE_INTEREST_API_URL`. Local Vite development uses its `/api` proxy, and
-preview hosts do not default to the live inbox. The API CORS allowlist includes
-Minkops production and local development origins.
+The frontend is a static Vite site on Firebase Hosting in `minkops-ai-prod`.
+Production builds use `VITE_INTEREST_API_URL=/api/interest`; Firebase routes that
+path to the separate `minkops-interest-api` Cloud Run service. Local Vite
+development uses its `/api` proxy, and preview hosts do not default to the live
+inbox. The API CORS allowlist includes Minkops production and local origins.
+The Minkops Vercel project has been deleted. See the repository's
+`docs/deployment-min-123.md` for the owner-operated deployment and rollback steps.
 
 ### Cloud Run deployment
 
@@ -85,7 +85,7 @@ service, and SMTP connector needed by this app:
 
 ```bash
 gcloud builds submit \
-  --project myndral-prod \
+  --project minkops-ai-prod \
   --region us-central1 \
   --config apps/corporate-website/api/cloudbuild.yaml \
   .

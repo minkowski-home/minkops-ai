@@ -4,6 +4,7 @@ import SiteLayout from "./layout/SiteLayout";
 import AboutPage from "./pages/AboutPage";
 import BlogIndexPage from "./pages/BlogIndexPage";
 import CareersPage from "./pages/CareersPage";
+import DownloadPage from "./pages/DownloadPage";
 import LandingPage from "./pages/LandingPage";
 import { PrivacyPolicyPage, TermsOfServicePage } from "./pages/LegalPages";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="orchestration" element={<OrchestrationPage />} />
           <Route path="about" element={<AboutPage />} />
           <Route path="careers" element={<CareersPage />} />
+          <Route path="download" element={<DownloadPage />} />
           <Route path="blogs" element={<BlogIndexPage />} />
           <Route
             path={`blogs/${POSTS.whatIsAnAiEmployee.slug}`}

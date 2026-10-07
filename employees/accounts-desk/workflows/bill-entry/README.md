@@ -13,7 +13,10 @@ Source discovery proposes actual workbook/sheet/table mappings with header
 positions and semantic concepts. Bill entry recognizes the appropriate confirmed
 destination, extracts PDFs/images, supplies field evidence and reports unresolved
 routing. The application owns approvals, checks and verified in-place Excel
-writes. Tally requires a future adapter.
+writes. The registered Windows companion also supports reviewed accounting
+Purchase vouchers in Tally, with current company/ledger identity checks and
+destination readback. Client-specific instructions are additive variants;
+approval and write validation remain core-owned.
 
 See [Accounts desk](../../../../docs/accounts-desk.md) for setup, ownership,
 recovery and supported workbook limits.

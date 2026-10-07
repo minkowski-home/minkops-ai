@@ -45,8 +45,8 @@ api/                      FastAPI service (health and discovery form delivery)
 ## Known limitations
 
 - **Discovery form delivery requires deployment setup.** The form posts to a separately
-  deployed FastAPI service. The canonical Minkops production hosts use the checked-in
-  public Cloud Run endpoint; other hosts can override it with `VITE_INTEREST_API_URL`.
+  deployed FastAPI service. Production builds set `VITE_INTEREST_API_URL=/api/interest`
+  and Firebase Hosting rewrites it to Cloud Run; other hosts can override that URL.
   The service uses Google Workspace SMTP from server-only
   environment settings. SMTP acceptance is not proof of receipt in
   `info@minkops.com`; see the API README for deployment and verification limits.

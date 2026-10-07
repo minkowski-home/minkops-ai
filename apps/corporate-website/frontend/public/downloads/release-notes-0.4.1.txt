@@ -1,0 +1,26 @@
+Minkops 0.4.1 — Windows release candidate — 7 October 2026
+
+Windows 10/11 x64. Unsigned installer; Windows may show a publisher warning.
+Default service: https://app.minkops.com
+
+Source Discovery reads Tally ODBC table/column metadata and Excel headers only.
+Its tenant-scoped JSON catalog supplies context to subsequent workflows.
+Bill Entry refreshes current company references separately, requires approval,
+and verifies destination readback with duplicate/retry protection.
+The companion supports explicit folder grants, tray execution and JSON export.
+
+Use an isolated test company for initial verification. Workspaces require
+administrator-installed workflow definitions and explicit resource connections.
+Tally discovery requires its local 64-bit ODBC driver and the intended company
+open in the client. Remote-server client installations still need device proof.
+
+Verified: automated backend/frontend/native suites, Windows installer packaging,
+GCP worker execution and database restore. Previous local UI review used 0.3.1.
+Verified live: 275 Tally schema tables with zero business records; hosted bill
+extraction, reviewed fresh Tally append and duplicate reconciliation, independent
+readback and receipt replay. Test fixtures respect Tally Educational Mode dates;
+actual invoice dates are preserved and unsupported writes remain held for review.
+Typed company and ledger identities are normalized without guessing values.
+Pending: fresh Windows 10/11 installation matrix, full screen-reader coverage,
+and broader manual native UI verification on the released companion.
+No automatic update is installed. Keep recovery backups until saves are verified.

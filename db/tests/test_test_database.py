@@ -7,6 +7,7 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
 from db.testing import disposable_database
+from db.migrate import MIGRATIONS
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
@@ -26,7 +27,8 @@ class TestDatabaseIsolation(unittest.TestCase):
                     connection.execute("SELECT count(*) FROM desktop_devices").fetchone()[0], 0
                 )
                 self.assertEqual(
-                    connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0], 14
+                    connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0],
+                    len(list(MIGRATIONS.glob("*.sql"))),
                 )
             raise RuntimeError("simulated failure")
         with psycopg.connect(source) as connection:
