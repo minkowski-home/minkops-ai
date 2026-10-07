@@ -5,6 +5,11 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
+Companion 0.4.0 is required for schema-only discovery grants. Tally metadata needs
+the local 64-bit Tally ODBC driver/DSN in addition to its HTTP service. Existing
+0.3.1 installed-RC evidence below is historical; repeat production HTTPS and clean
+Windows 10/11 acceptance with the rebuilt installer before publishing it.
+
 ## Local capabilities
 
 | Operation | Desktop | Web with a connected PC | Authority |

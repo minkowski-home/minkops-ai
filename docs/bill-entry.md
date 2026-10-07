@@ -9,8 +9,11 @@ launch rejects another model. The model never writes financial systems.
 ## Workflow
 
 1. Connect the Windows PC and grant the destination folder. Run Source discovery
-   and confirm the Excel destination mappings, or discover the selected Tally
-   company, ledgers and Purchase voucher type and confirm that catalog.
+   and confirm Excel header mappings, then explicitly refresh the real workbook
+   before using it as a destination. For Tally, confirm the selected company's
+   metadata catalog; launch separately reads current company, ledger and Purchase
+   references on the paired PC before paid execution. Each run pins its relevant
+   tenant schema JSON automatically; uploading arbitrary JSON is not required.
 2. Upload/select PDFs and images. Excel, Tally and Both remain visible configuration
    choices. Mock-client's trusted solution policy enables only Tally for Bill entry;
    disabled choices cannot be enabled by changing preferences or launch payloads.
@@ -106,6 +109,10 @@ The three display-only seed tasks are backed up and removed from the RC database
 so its Active/Needs Attention sections reflect executable workflow outcomes.
 
 Discovery is intended for installation and periodic/schema-change refreshes.
+Current discovery is schema/header-only. Runtime reference records belong to
+individual bill runs, and client allocation guidance is an additive variant over
+the core workflow. The RC evidence below predates that change and must be repeated
+with companion 0.4.0 before release.
 An identical confirmed refresh preserves pinned approval catalogs; pending,
 partial or changed catalogs still require review. Supplier remediation may bind
 the affected retry to newer confirmed masters on the same PC/company GUID.

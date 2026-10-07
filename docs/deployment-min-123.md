@@ -125,7 +125,9 @@ URL. Preserve existing interest API validation/delivery and email credentials.
 Attach the corporate custom domain and managed HTTPS, then change required DNS
 only; preserve mail/MX/TXT records. Verify apex/www redirects, HTTPS, deep-link
 refresh and a real interest submission outside the developer machine. Retain
-Vercel through DNS propagation and an agreed observation window. Once verified,
+Vercel only as needed for rollback during verification. The owner explicitly
+accepts migration downtime, so no prolonged dual deployment or zero-downtime
+cutover is required. Once the GCP route and form delivery are verified,
 remove its Git integration, credentials, project and paid plan. Replace its
 required CI checks with repository validation and explicit GCP deployment gates.
 Record rollback DNS, last-good image and Hosting release before removal.
