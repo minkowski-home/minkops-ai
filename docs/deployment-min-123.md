@@ -15,6 +15,11 @@ Local gcloud 588.0.0, uv and Firebase CLI 15.32.1 are installed.
 
 Use the same managed pattern as Myndral:
 
+"Myndral-like" means replicating its service pattern and modest database scale.
+Sharing its SQL instance is an optional cost-saving recommendation, not a user
+requirement. A dedicated small SQL instance remains a valid option if actual CAD
+prices and measured variable usage leave room below the agreed monthly ceiling.
+
 | Component | Initial setting |
 | --- | --- |
 | Website and console | Two static Firebase Hosting sites; existing Vite builds |
@@ -46,7 +51,7 @@ allocated reporting must include a stated share of the SQL baseline.
 | Scenario | Planning estimate |
 | --- | --- |
 | Shared SQL, small pilot | Target CAD 3–8 incremental/month, retaining budget margin |
-| New db-f1-micro + 10 GB SSD | About USD 9.37/CAD 13.12 per 730-hour month before backup/other charges; insufficient dependable margin |
+| New db-f1-micro + 10 GB SSD | About USD 9.37/CAD 13.12 per 730-hour month before backup/other charges; viable only with a verified very small variable-cost envelope |
 | Eligible free e2-micro + self-managed PostgreSQL | USD 3.65/CAD 5.11 public IPv4 baseline; plan CAD 6–10 with small backup/transfer, operational ownership required |
 | Continuous Cloud Run worker | Exceeds budget; do not deploy the current forever loop as always-on |
 
