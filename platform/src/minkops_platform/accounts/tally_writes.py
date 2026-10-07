@@ -12,7 +12,11 @@ from .bills import validate_tally
 from .repository import observe, run_for
 
 
-def prepare(connection, run, result):
+def prepare(connection, run, result, *, approved=False):
+    from minkops_platform.workflow_policies import enforce_policies
+
+    if enforce_policies(run["config"], result).get("requires_review") and not approved:
+        raise ValueError("Client policy requires explicit review before destination writes.")
     target = run["config"]["tally_target"]
     seen = {}
     for index, record in enumerate(result["records"]):

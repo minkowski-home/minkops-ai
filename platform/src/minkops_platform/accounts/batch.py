@@ -122,7 +122,9 @@ def reconcile_once(url):
                 # A retry can have the same ready count as the earlier batch.
                 # Enter Work again instead of leaving an active child labelled
                 # as waiting to start until its extraction finishes.
-                if parent["state"] == "queued" or parent["config"].get("batch_finished_count") != len(done):
+                if parent["state"] == "queued" or parent["config"].get(
+                    "batch_finished_count"
+                ) != len(done):
                     connection.execute(
                         "UPDATE account_runs SET config=config || jsonb_build_object('batch_finished_count',%s::integer) WHERE id=%s",
                         (len(done), parent["id"]),
@@ -170,12 +172,16 @@ def reconcile_once(url):
                 i for i in prior.get("unresolved", []) if i["source_file_id"] not in covered
             )
             result["findings"] = list(dict.fromkeys(result["findings"]))
+            from minkops_platform.workflow_policies import enforce_policies
+
+            # The parent review carries the same immutable client policy as its
+            # independent children; aggregation cannot discard a review gate.
+            result = enforce_policies(parent["config"], result)
             connection.execute(
                 "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), parent["id"])
             )
             pending = sum(
-                r.get("status") not in ("saved", "duplicate", "rejected")
-                for r in result["records"]
+                r.get("status") not in ("saved", "duplicate", "rejected") for r in result["records"]
             )
             observe(
                 connection,

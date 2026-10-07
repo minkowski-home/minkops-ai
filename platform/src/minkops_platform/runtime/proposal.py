@@ -14,6 +14,7 @@ from minkops_platform.resources import files_for
 from minkops_platform.workflows import resolve_run_config
 
 from .application import enforce_policies
+from .launch import LaunchInputs
 from .store import observe
 
 
@@ -45,7 +46,7 @@ class ProposalHandler:
             allowed_source_ids=sources,
             allowed_destination_ids=set(),
         )
-        return files, ids, None, config
+        return LaunchInputs(files, ids, None, config)
 
     def prepare(self, connection, run):
         files = files_for(connection, run["tenant_id"], run["file_ids"])

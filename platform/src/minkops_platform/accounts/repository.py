@@ -4,8 +4,9 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 
-from minkops_platform.errors import ServiceError
-from minkops_platform.run_controls import observe_task
+from minkops_platform.resources import files_for as files_for
+from minkops_platform.runtime.store import observe as observe
+from minkops_platform.runtime.store import run_for as run_for
 
 from .catalog import validate_catalog
 
@@ -27,47 +28,6 @@ def safe_path(path):
     if len(path) > 500:
         raise ValueError("File path is too long.")
     return path
-
-
-def files_for(connection, tenant_id, ids):
-    rows = connection.execute(
-        """SELECT f.*, s.writable, s.label FROM account_files f JOIN account_sources s
-           ON s.tenant_id=f.tenant_id AND s.id=f.source_id
-           WHERE f.tenant_id=%s AND f.id=ANY(%s::uuid[])""",
-        (tenant_id, ids),
-    ).fetchall()
-    if len(rows) != len(set(ids)):
-        raise ServiceError("not_found", "One or more files are not in this workspace.")
-    return rows
-
-
-def run_for(connection, tenant_id, run_id, lock=False):
-    row = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s" + (" FOR UPDATE" if lock else ""),
-        (tenant_id, run_id),
-    ).fetchone()
-    if not row:
-        raise ServiceError("not_found", "Run not found.")
-    return row
-
-
-def observe(connection, run, state, summary, progress):
-    connection.execute(
-        "UPDATE account_runs SET state=%s, updated_at=now() WHERE tenant_id=%s AND id=%s",
-        (state, run["tenant_id"], run["id"]),
-    )
-    if run.get("parent_run_id"):
-        return
-    observe_task(
-        connection,
-        tenant_id=run["tenant_id"],
-        task_id=run["task_id"],
-        run_id=run["id"],
-        state=state,
-        summary=summary,
-        progress=progress,
-        event_prefix="account_run",
-    )
 
 
 def catalog_contents(connection, tenant_id, catalog):
@@ -116,17 +76,9 @@ def resolve_catalog(connection, tenant_id, catalog):
 
 
 def public_run(connection, run):
-    value = {k: v for k, v in run.items() if k not in ("request_hash",)}
-    value["writes"] = connection.execute(
-        """SELECT id,source_id,path,before_sha256,after_sha256,changes,verified_at,cancelled_at
-         FROM account_writes WHERE tenant_id=%s AND run_id=%s ORDER BY path""",
-        (run["tenant_id"], run["id"]),
-    ).fetchall()
-    value["tally_writes"] = connection.execute(
-        "SELECT id,device_id,company,record_index,outcome,verified_at,finished_at,cancelled_at FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s ORDER BY created_at",
-        (run["tenant_id"], run["id"]),
-    ).fetchall()
-    return value
+    from minkops_platform.runtime.store import public_run as shared_public_run
+
+    return shared_public_run(connection, run)
 
 
 def list_sources(connection, tenant):

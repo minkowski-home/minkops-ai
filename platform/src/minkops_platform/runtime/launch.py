@@ -1,5 +1,6 @@
 """Shared launch transaction: identity, installed dispatch, pinned inputs, queue."""
 
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from jsonschema import ValidationError
@@ -11,7 +12,18 @@ from minkops_platform.run_controls import resolve_request
 from minkops_platform.workflows import load_definition
 
 from .application import RESERVED, execution_config, get_handler
-from .store import observe, public_run
+from .store import observe, public_run, run_for
+
+
+@dataclass(frozen=True)
+class LaunchInputs:
+    """Authorized resources and server-owned domain snapshots from a handler."""
+
+    files: list
+    file_ids: list
+    catalog_id: object
+    selections: dict
+    snapshots: dict = field(default_factory=dict)
 
 
 def installed_definition(binding, key):
@@ -66,20 +78,19 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
             raise ValueError("Run configuration contains reserved runtime fields.")
         definition = installed_definition(binding, body["key"])
         handler = get_handler(binding["handler"])
-        files, ids, catalog_id, selections = handler.prepare_launch(
-            connection, tenant, user, body, workflow, definition
-        )
+        prepared = handler.prepare_launch(connection, tenant, user, body, workflow, definition)
+        files, ids, catalog_id = prepared.files, prepared.file_ids, prepared.catalog_id
         # Only trusted adapters populate this list after tenant-scoped lookup.
         authorized = [
             {"capability": "files.snapshot", "resource_id": str(f["id"]), "sha256": f["sha256"]}
             for f in files
         ]
-        catalog_snapshot = selections.pop("catalog_snapshot", None)
         config = execution_config(
-            definition, selections, binding=binding, authorized_bindings=authorized
+            definition, prepared.selections, binding=binding, authorized_bindings=authorized
         )
-        if catalog_snapshot is not None:
-            config["catalog_snapshot"] = catalog_snapshot
+        if prepared.snapshots.keys() & (config.keys() | {"file_provenance"}):
+            raise ValueError("Domain snapshots cannot replace runtime or selection fields.")
+        config.update(prepared.snapshots)
         config["file_provenance"] = [
             {"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files
         ]
@@ -115,6 +126,9 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
             catalog_id,
         ),
     ).fetchone()
+    if hasattr(handler, "launched"):
+        handler.launched(connection, run)
+        run = run_for(connection, tenant["id"], run["id"])
     observe(
         connection, run, "queued", getattr(handler, "queued_summary", "Queued for workflow."), 5
     )

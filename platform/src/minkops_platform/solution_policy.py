@@ -13,8 +13,8 @@ from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.workflows import validate
 
 
-def bind_definition(definition, solution_id):
-    root = REPOSITORY_ROOT / "solutions"
+def bind_definition(definition, solution_id, *, repository_root=REPOSITORY_ROOT):
+    root = repository_root / "solutions"
     directory = (root / solution_id).resolve()
     if not directory.is_relative_to(root.resolve()):
         raise ValueError("Solution policy must be repository-owned")

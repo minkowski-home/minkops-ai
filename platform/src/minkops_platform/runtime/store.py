@@ -8,8 +8,9 @@ from minkops_platform.run_controls import observe_task
 
 class WorkflowRunStore:
     def candidates(self, connection):
-        return connection.execute("""SELECT * FROM workflow_runs WHERE state='queued'
-            OR (state='executing' AND updated_at < now()-interval '30 seconds')
+        return connection.execute("""SELECT * FROM workflow_runs WHERE
+            NOT coalesce((config->>'batch')::boolean,false)
+            AND (state='queued' OR (state='executing' AND updated_at < now()-interval '30 seconds'))
             ORDER BY updated_at LIMIT 10""").fetchall()
 
     def get(self, connection, tenant_id, run_id):
@@ -78,6 +79,10 @@ def observe(connection, run, state, summary, progress):
         "UPDATE workflow_runs SET state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s",
         (state, run["tenant_id"], run["id"]),
     )
+    # Child sessions update their own durable state. Only their orchestrator
+    # publishes the aggregate task, so one child cannot complete its siblings.
+    if run.get("parent_run_id"):
+        return
     observe_task(
         connection,
         tenant_id=run["tenant_id"],

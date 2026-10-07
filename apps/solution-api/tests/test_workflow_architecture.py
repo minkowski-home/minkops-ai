@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import psycopg
 import test_accounts_api as accounts
+import test_bill_entry as bills
 from minkops_platform.accounts.worker import process
 from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.workflows import load_definition, register_workflow
@@ -227,3 +228,103 @@ class WorkflowArchitectureTests(unittest.TestCase):
         with psycopg.connect(URL) as connection:
             connection.execute("""UPDATE workflows SET execution_binding=jsonb_set(execution_binding,'{policies}','[]')
                 WHERE tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant') AND key='bill-entry'""")
+
+
+@unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
+class UnifiedBillArchitectureTests(unittest.TestCase):
+    setUp = accounts.AccountsTests.setUp
+    launch = accounts.AccountsTests.launch
+    upload_bill = bills.BillEntryTests.upload_bill
+    tally_discovery = bills.BillEntryTests.tally_discovery
+    tally_result = bills.BillEntryTests.tally_result
+    approve = bills.BillEntryTests.approve
+    process = bills.BillEntryTests.process
+    clear_policy = WorkflowArchitectureTests.clear_policy
+
+    def test_batch_keeps_installed_binding_policy_and_single_parent_observation(self):
+        from minkops_platform.accounts.batch import reconcile_once
+        from minkops_platform.accounts.worker import STORE
+        from minkops_platform.runtime.store import WorkflowRunStore
+
+        self.assertIsInstance(STORE, WorkflowRunStore)
+        discovery = self.tally_discovery()
+        inputs = [self.upload_bill("first.pdf"), self.upload_bill("second.pdf")]
+        policies = [{"key": "review-threshold", "config": {"field": "total", "amount": 100}}]
+        with psycopg.connect(URL) as connection:
+            connection.execute(
+                """UPDATE workflows SET execution_binding=jsonb_set(execution_binding,'{policies}',%s)
+                WHERE tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant') AND key='bill-entry'""",
+                (Jsonb(policies),),
+            )
+        self.addCleanup(self.clear_policy)
+        parent, _ = self.launch(
+            "bill-entry",
+            file_ids=inputs,
+            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+        )
+        self.assertTrue(parent["config"]["batch"])
+        with psycopg.connect(URL, row_factory=dict_row) as connection:
+            children = connection.execute(
+                "SELECT * FROM workflow_runs WHERE parent_run_id=%s", (parent["id"],)
+            ).fetchall()
+            self.assertEqual(len(children), 2)
+            self.assertNotIn(parent["id"], {str(row["id"]) for row in STORE.candidates(connection)})
+            for child in children:
+                self.assertEqual(
+                    child["config"]["runtime_binding"], parent["config"]["runtime_binding"]
+                )
+                self.assertEqual(
+                    child["config"]["authorized_bindings"], parent["config"]["authorized_bindings"]
+                )
+                proposal = self.tally_result(parent, child["file_ids"][0])
+                proposal["records"][0]["data"]["invoice_number"] = (
+                    "BATCH-" + child["file_ids"][0][:8]
+                )
+                process(connection, child, executor=lambda *a, payload=proposal, **k: payload)
+            # Child results never advance the shared parent task by themselves.
+            self.assertEqual(
+                connection.execute(
+                    "SELECT state FROM workflow_runs WHERE id=%s", (parent["id"],)
+                ).fetchone()["state"],
+                "queued",
+            )
+        self.clear_policy()
+        reconcile_once(URL)
+        loaded = self.client.get(self.base + f"/runs/{parent['id']}").json()
+        self.assertTrue(loaded["result"]["requires_review"])
+        self.assertEqual(loaded["config"]["runtime_binding"]["policies"], policies)
+        self.assertEqual(loaded["tally_writes"], [])
+        self.assertEqual(loaded["state"], "review")
+        with psycopg.connect(URL, row_factory=dict_row) as connection:
+            from minkops_platform.accounts.tally_writes import prepare
+
+            row = connection.execute(
+                "SELECT * FROM workflow_runs WHERE id=%s", (parent["id"],)
+            ).fetchone()
+            with self.assertRaisesRegex(ValueError, "explicit review"):
+                prepare(connection, row, row["result"])
+        approved = self.approve(loaded, loaded["result"])
+        self.assertEqual(approved["state"], "writing")
+        self.assertEqual(len(approved["tally_writes"]), 2)
+        self.client.post(self.base + f"/runs/{parent['id']}/cancel-writes", headers=self.csrf)
+
+    def test_tally_child_cannot_execute_changed_authorized_input(self):
+        from unittest.mock import MagicMock
+
+        discovery = self.tally_discovery()
+        inputs = [self.upload_bill("first.pdf"), self.upload_bill("second.pdf")]
+        parent, _ = self.launch(
+            "bill-entry",
+            file_ids=inputs,
+            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+        )
+        executor = MagicMock()
+        with psycopg.connect(URL, row_factory=dict_row) as connection:
+            child = connection.execute(
+                "SELECT * FROM workflow_runs WHERE parent_run_id=%s LIMIT 1", (parent["id"],)
+            ).fetchone()
+            for grant in child["config"]["authorized_bindings"]:
+                grant["sha256"] = "changed"
+            with self.assertRaisesRegex(ValueError, "authorized resource snapshot"):
+                process(connection, child, executor=executor)
+        executor.assert_not_called()

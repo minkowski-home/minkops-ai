@@ -5,7 +5,6 @@ commit/rollback boundaries without depending on one another.
 """
 
 import json
-from fnmatch import fnmatchcase
 from pathlib import Path
 
 from jsonschema import ValidationError
@@ -14,12 +13,10 @@ from psycopg import errors
 from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
-from minkops_platform.resources import REPOSITORY_ROOT as ROOT
-from minkops_platform.run_controls import resolve_request
-from minkops_platform.workflows import load_definition, resolve_run_config
-from minkops_platform.solution_policy import validate_destination
+from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
+from minkops_platform.workflows import load_definition as load_definition
 
-from .bills import tally_mapping, tally_target
+from .bills import tally_target
 from .catalog import apply_records, validate_catalog, validate_data
 from .checks import check_records, populate_entry_ids
 from .repository import (
@@ -36,253 +33,28 @@ SUPPORTED = {".xlsx", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 def launch_run(connection, tenant, user, body, *, task_id=None):
-    raw_hash, previous = resolve_request(
-        connection,
-        tenant["id"],
-        body["request_key"],
-        body,
-        lambda c, tenant_id, request_key: c.execute(
-            "SELECT * FROM account_runs WHERE tenant_id=%s AND request_key=%s",
-            (tenant_id, request_key),
-        ).fetchone(),
-    )
-    if previous:
-        return public_run(connection, previous)
-    workflow = connection.execute(
-        """SELECT * FROM workflows WHERE tenant_id=%s AND key=%s
-         AND status='active' """,
-        (tenant["id"], body["key"]),
-    ).fetchone()
-    if not workflow:
-        raise ServiceError("conflict", "This workflow is not active.")
-    ids = list(map(str, body["file_ids"]))
-    if len(ids) != len(set(ids)):
-        raise ServiceError("invalid", "Select each file only once.")
-    files = files_for(connection, tenant["id"], ids)
-    if any(not f["current"] for f in files):
-        raise ServiceError("conflict", "Refresh changed source files before launching.")
-    source_ids = list({str(f["source_id"]) for f in files})
-    definition = load_definition(ROOT / "employees/accounts-desk/workflows" / body["key"])
-    selections = {**body["config"], "source_ids": source_ids}
-    if body["key"] == "bill-entry":
-        selections.setdefault(
-            "output_mode", workflow["config_values"].get("output_mode", "excel_in_place")
-        )
-        try:
-            validate_destination(workflow["config_schema"], selections["output_mode"])
-        except ValidationError as error:
-            raise ServiceError("invalid", "Choose a destination enabled for this workspace.") from error
-        if selections["output_mode"] == "both_in_place":
-            # Retain the configuration choice for future client composition,
-            # but never report a dual save through the single Excel/Tally path.
-            raise ServiceError(
-                "invalid", "Both destinations require a combined verified write contract. Choose Excel or Tally."
-            )
-    catalog_id = body["catalog_id"]
-    if body["key"] == "source-discovery":
-        if any(Path(f["path"]).suffix.lower() != ".xlsx" for f in files):
-            raise ServiceError("invalid", "Discovery currently accepts Excel workbooks only.")
-    else:
-        if (
-            selections.get("output_mode", workflow["config_values"].get("output_mode"))
-            == "tally_in_place"
-        ):
-            discovery_id = selections.get("discovery_id")
-            if not discovery_id:
-                raise ServiceError("invalid", "Confirm Tally source discovery first.")
-            target = tally_target(connection, tenant, user, discovery_id)
-            catalog_snapshot = tally_mapping(discovery_id)
-            references = []
-            selections.update(
-                {
-                    "file_ids": ids,
-                    "catalog_version": str(discovery_id),
-                    "schema_id": str(discovery_id),
-                    "schema_version": "1",
-                    "destination_id": str(discovery_id),
-                }
-            )
-            catalog_id = None
-        elif not catalog_id:
-            raise ServiceError("invalid", "Confirm a source-discovery catalog first.")
-        if (
-            selections.get("output_mode", workflow["config_values"].get("output_mode"))
-            != "tally_in_place"
-        ):
-            catalog_snapshot, references = _excel_launch_catalog(connection, tenant, catalog_id)
-            selections.update(
-                {
-                    "file_ids": ids,
-                    "catalog_version": str(catalog_id),
-                    "schema_id": str(catalog_id),
-                    "schema_version": "1",
-                    "destination_id": str(catalog_id),
-                }
-            )
-        if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
-            raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
-        files += references
-    if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
-        raise ServiceError(
-            "invalid",
-            "Select a smaller scope: up to 45 files and 8 MB including references per run.",
-        )
-    return _launch_resolved(
-        connection,
-        tenant,
-        user,
-        body,
-        workflow,
-        definition,
-        selections,
-        files,
-        ids,
-        catalog_id,
-        raw_hash,
-        task_id=task_id,
-        catalog_snapshot=catalog_snapshot if body["key"] == "bill-entry" else None,
-        target=target
-        if body["key"] == "bill-entry" and selections.get("output_mode") == "tally_in_place"
-        else None,
-    )
+    from minkops_platform.runtime.launch import launch_run as launch
 
-
-def _excel_launch_catalog(connection, tenant, catalog_id):
-    catalog_row = connection.execute(
-        "SELECT * FROM account_catalogs WHERE tenant_id=%s AND id=%s",
-        (tenant["id"], catalog_id),
-    ).fetchone()
-    if not catalog_row:
-        raise ServiceError("not_found", "Catalog not found.")
-    if not any(s["role"] == "destination" for s in catalog_row["catalog"]["sheets"]):
-        raise ServiceError(
-            "conflict", "Confirm a Bill Entry destination in source discovery first."
-        )
-    discovered = connection.execute(
-        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
-        (tenant["id"], str(catalog_id)),
-    ).fetchone()
-    if discovered:
-        from minkops_platform.discovery import require_ready
-
-        require_ready(connection, tenant["id"], discovered["id"], ["excel"])
-    try:
-        catalog_snapshot, references, _ = resolve_catalog(
-            connection, tenant["id"], catalog_row["catalog"]
-        )
-    except ValueError as error:
-        raise ServiceError("conflict", str(error)) from error
-    return catalog_snapshot, references
-
-
-def _launch_resolved(
-    connection,
-    tenant,
-    user,
-    body,
-    workflow,
-    definition,
-    selections,
-    files,
-    ids,
-    catalog_id,
-    raw_hash,
-    *,
-    task_id,
-    catalog_snapshot,
-    target,
-):
-    try:
-        config = resolve_run_config(
-            definition,
-            workflow["config_values"],
-            selections,
-            allowed_source_ids=set(selections["source_ids"]),
-            allowed_destination_ids={str(target["discovery_id"] if target else catalog_id)},
-        )
-    except (ValueError, ValidationError) as error:
-        raise ServiceError("invalid", str(error).splitlines()[0]) from error
-    if body["key"] == "source-discovery" and len(ids) > config["max_files"]:
-        raise ServiceError("invalid", "Selection exceeds the configured discovery file limit.")
-    if body["key"] == "source-discovery":
-        for file in files:
-            path = file["path"]
-            if not any(
-                scope == "." or path == scope or path.startswith(scope.rstrip("/") + "/")
-                for scope in config["scope_paths"]
-            ) or any(fnmatchcase(path, p) for p in config["exclusions"]):
-                raise ServiceError(
-                    "invalid",
-                    "A selected file is outside the configured discovery scope or is excluded.",
-                )
-    if body["key"] == "bill-entry":
-        config["catalog_snapshot"] = catalog_snapshot
-        if target:
-            config["tally_target"] = target
-            config["review_mode"] = "all_outputs"
-        fmt = config["input_format"]
-        if fmt != "mixed" and any(
-            (Path(f["path"]).suffix.lower() == ".pdf") != (fmt == "pdf") for f in files[: len(ids)]
-        ):
-            raise ServiceError(
-                "invalid", "Selected bills do not match the configured input format."
-            )
-        if config["output_mode"] not in ("excel_in_place", "tally_in_place"):
-            raise ServiceError("invalid", "Choose in-place Excel or Tally output.")
-    config["instructions_snapshot"] = definition.instructions
-    config["agent_output_schema"] = definition.agent_output_schema
-    if definition.execution_snapshot is None:
-        raise ServiceError("invalid", "This workflow has no hosted execution definition.")
-    if definition.execution_snapshot["execution"]["model"] != "gpt-6-luna":
-        raise ServiceError("invalid", "Accounts workflows must use the approved gpt-6-luna model.")
-    config["execution_snapshot"] = definition.execution_snapshot
-    config["file_provenance"] = [
-        {"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files
-    ]
-    task = (
-        {"id": task_id}
-        if task_id
-        else connection.execute(
-            """INSERT INTO tasks (tenant_id,workflow_id,title,summary)
-         VALUES (%s,%s,%s,'Queued for Accounts desk.') RETURNING id""",
-            (tenant["id"], workflow["id"], workflow["name"]),
-        ).fetchone()
-    )
-    run = connection.execute(
-        """INSERT INTO account_runs
-         (tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,request_hash,config,file_ids,catalog_id)
-         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-        (
-            tenant["id"],
-            task["id"],
-            user["id"],
-            body["key"],
-            definition.metadata["version"],
-            body["request_key"],
-            raw_hash,
-            Jsonb(config),
-            Jsonb(ids),
-            catalog_id,
-        ),
-    ).fetchone()
-    if body["key"] == "bill-entry" and len(ids) > 1:
-        from .batch import create_children
-
-        create_children(connection, run)
-    observe(connection, run, "queued", "Queued for Accounts desk.", 5)
-    return public_run(connection, run)
+    return launch(connection, tenant, user, body, task_id=task_id)
 
 
 def approve_run(connection, tenant, user, run_id, body, *, require_destination=True):
     run = run_for(connection, tenant["id"], run_id, True)
-    if run["workflow_key"] == "bill-entry" and run["actor_id"] != user["id"]:
+    binding = binding_for(run)
+    if binding.handler == "accounts.bill" and run["actor_id"] != user["id"]:
         raise ServiceError(
             "forbidden", "Only the operator who started this bill run can approve its writes."
         )
     if run["state"] != "review":
         raise ServiceError("conflict", "This run is not awaiting review.")
+    if binding.handler not in ("accounts.discovery", "accounts.bill"):
+        try:
+            get_handler(binding.handler).approve(connection, tenant, user, run, body)
+        except (ValueError, ValidationError) as error:
+            raise ServiceError("invalid", str(error).splitlines()[0]) from error
+        return public_run(connection, run_for(connection, tenant["id"], run_id))
     try:
-        if run["workflow_key"] == "source-discovery":
+        if binding.handler == "accounts.discovery":
             files = files_for(connection, tenant["id"], run["file_ids"])
             if any(not f["current"] for f in files):
                 raise ValueError("Source files changed. Run discovery again before confirming.")
@@ -408,12 +180,13 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                 "acknowledge_findings"
             ]:
                 raise ValueError("Acknowledge unresolved findings before approving these entries.")
+            checked = enforce_policies(run["config"], checked)
             from . import tally_writes
 
             if tally:
-                tally_writes.prepare(connection, run, checked)
+                tally_writes.prepare(connection, run, checked, approved=True)
             else:
-                prepare_writes(connection, run, checked, catalog, files, contents)
+                prepare_writes(connection, run, checked, catalog, files, contents, approved=True)
             body["result"] = checked
             tally_writes.complete_run(connection, run, checked)
         connection.execute(
@@ -421,7 +194,7 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
              WHERE tenant_id=%s AND id=%s""",
             (Jsonb(body["result"]), user["id"], tenant["id"], run["id"]),
         )
-        if run["workflow_key"] == "source-discovery":
+        if binding.handler == "accounts.discovery":
             observe(connection, run, state, message, 100 if state == "completed" else 85)
     except (ValueError, ValidationError, KeyError, TypeError) as error:
         raise ServiceError("invalid", str(error).splitlines()[0]) from error
@@ -432,7 +205,10 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
     return public_run(connection, run_for(connection, tenant["id"], run_id))
 
 
-def prepare_writes(connection, run, result, catalog, files, contents):
+def prepare_writes(connection, run, result, catalog, files, contents, *, approved=False):
+    checked = enforce_policies(run["config"], result)
+    if checked.get("requires_review") and not approved:
+        raise ValueError("Client policy requires explicit review before destination writes.")
     from minkops_connectors.excel import sheet_records
 
     from .bills import classify_excel, excel_matches, same_value

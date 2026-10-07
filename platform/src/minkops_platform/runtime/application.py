@@ -24,6 +24,11 @@ RESERVED = {
     "file_provenance",
     "catalog_snapshot",
     "local_discovery_snapshot",
+    "tally_target",
+    "batch",
+    "retry_file_id",
+    "superseded",
+    "user_input",
 }
 
 

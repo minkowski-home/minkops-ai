@@ -5,7 +5,9 @@ import secrets
 from pathlib import Path
 
 import psycopg
+from jsonschema import ValidationError
 from minkops_platform.installation import install, load_solution, register_employee
+from minkops_platform.solution_policy import validate_destination
 from psycopg.types.json import Jsonb
 from pwdlib import PasswordHash
 
@@ -143,6 +145,25 @@ def seed_demo(url: str, password: str | None = None) -> str:
                     (mock, workflow_ids[key], employee_ids[owner]),
                 )
 
+        existing = connection.execute(
+            "SELECT config_values FROM workflows WHERE tenant_id=%s AND key='bill-entry' FOR UPDATE",
+            (mock,),
+        ).fetchone()
+        if existing:
+            try:
+                validate_destination(
+                    composition.workflows["bill-entry"].tenant_schema, existing[0]["output_mode"]
+                )
+            except ValidationError:
+                # Explicit demo composition retains the Bill Entry branch's
+                # Tally-only mock policy without discarding other preferences.
+                # The production installer still rejects incompatible settings.
+                connection.execute(
+                    """UPDATE workflows SET config_values=jsonb_set(config_values,
+                    '{output_mode}', '"tally_in_place"'), config_version=config_version+1
+                    WHERE tenant_id=%s AND key='bill-entry'""",
+                    (mock,),
+                )
         install(connection, composition, actor_email="demo@example.com")
 
         samples = [

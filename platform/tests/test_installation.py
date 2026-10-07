@@ -18,6 +18,15 @@ class SolutionDefinitionTests(unittest.TestCase):
         self.assertEqual([e.metadata["key"] for e in installation.employees], ["accounts-desk"])
         self.assertEqual(set(installation.workflows), {"source-discovery", "bill-entry"})
         self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "accounts.bill")
+        self.assertEqual(
+            installation.workflows["bill-entry"].tenant_schema["properties"]["output_mode"][
+                "x-enabled-options"
+            ],
+            ["tally_in_place"],
+        )
+        self.assertEqual(
+            installation.bindings["bill-entry"]["defaults"]["output_mode"], "tally_in_place"
+        )
 
     def test_path_escape_cannot_select_a_solution(self):
         with self.assertRaises(ValueError):

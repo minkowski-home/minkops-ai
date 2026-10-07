@@ -119,6 +119,9 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             if key in workflows:
                 raise ValueError("Workflow keys must be unique in a tenant.")
             definition = load_definition(owned_directory(directory / "workflows", key))
+            from .solution_policy import bind_definition
+
+            definition = bind_definition(definition, solution_id, repository_root=root)
             if definition.metadata["owner"] != employee_key:
                 raise ValueError("Workflow must belong to its declared employee.")
             handler = definition.metadata.get("handler", "skill.proposal")

@@ -7,14 +7,18 @@ from jsonschema import ValidationError
 from minkops_connectors.excel import inspect_workbook
 
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.launch import LaunchInputs
+from minkops_platform.solution_policy import validate_destination
 from minkops_platform.workflows import resolve_run_config
 
+from .bills import tally_mapping, tally_target
 from .catalog import validate_catalog
 from .checks import check_records, populate_entry_ids
 from .repository import catalog_contents, files_for, resolve_catalog
 
 
 def prepare_launch(connection, tenant, user, body, workflow, definition):
+    catalog_snapshot, target = None, None
     ids = list(map(str, body["file_ids"]))
     if len(ids) != len(set(ids)):
         raise ServiceError("invalid", "Select each file only once.")
@@ -23,48 +27,66 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         raise ServiceError("conflict", "Refresh changed source files before launching.")
     source_ids = list({str(f["source_id"]) for f in files})
     selections = {**body["config"], "source_ids": source_ids}
+    if definition.metadata["handler"] == "accounts.bill":
+        selections.setdefault(
+            "output_mode", workflow["config_values"].get("output_mode", "excel_in_place")
+        )
+        try:
+            validate_destination(workflow["config_schema"], selections["output_mode"])
+        except ValidationError as error:
+            raise ServiceError(
+                "invalid", "Choose a destination enabled for this workspace."
+            ) from error
+        if selections["output_mode"] == "both_in_place":
+            # Retain the configuration choice for future client composition,
+            # but never report a dual save through the single Excel/Tally path.
+            raise ServiceError(
+                "invalid",
+                "Both destinations require a combined verified write contract. Choose Excel or Tally.",
+            )
     catalog_id = body["catalog_id"]
     if definition.metadata["handler"] == "accounts.discovery":
         if any(Path(f["path"]).suffix.lower() != ".xlsx" for f in files):
             raise ServiceError("invalid", "Discovery currently accepts Excel workbooks only.")
     else:
-        if not catalog_id:
-            raise ServiceError("invalid", "Confirm a source-discovery catalog first.")
-        catalog_row = connection.execute(
-            "SELECT * FROM account_catalogs WHERE tenant_id=%s AND id=%s",
-            (tenant["id"], catalog_id),
-        ).fetchone()
-        if not catalog_row:
-            raise ServiceError("not_found", "Catalog not found.")
-        if not any(s["role"] == "destination" for s in catalog_row["catalog"]["sheets"]):
-            raise ServiceError(
-                "conflict", "Confirm a Bill Entry destination in source discovery first."
+        if (
+            selections.get("output_mode", workflow["config_values"].get("output_mode"))
+            == "tally_in_place"
+        ):
+            discovery_id = selections.get("discovery_id")
+            if not discovery_id:
+                raise ServiceError("invalid", "Confirm Tally source discovery first.")
+            target = tally_target(connection, tenant, user, discovery_id)
+            catalog_snapshot = tally_mapping(discovery_id)
+            references = []
+            selections.update(
+                {
+                    "file_ids": ids,
+                    "catalog_version": str(discovery_id),
+                    "schema_id": str(discovery_id),
+                    "schema_version": "1",
+                    "destination_id": str(discovery_id),
+                }
             )
-        discovered = connection.execute(
-            "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
-            (tenant["id"], str(catalog_id)),
-        ).fetchone()
-        if discovered:
-            from minkops_platform.discovery import require_ready
-
-            require_ready(connection, tenant["id"], discovered["id"], ["excel"])
+            catalog_id = None
+        elif not catalog_id:
+            raise ServiceError("invalid", "Confirm a source-discovery catalog first.")
+        if (
+            selections.get("output_mode", workflow["config_values"].get("output_mode"))
+            != "tally_in_place"
+        ):
+            catalog_snapshot, references = _excel_launch_catalog(connection, tenant, catalog_id)
+            selections.update(
+                {
+                    "file_ids": ids,
+                    "catalog_version": str(catalog_id),
+                    "schema_id": str(catalog_id),
+                    "schema_version": "1",
+                    "destination_id": str(catalog_id),
+                }
+            )
         if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
             raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
-        try:
-            catalog_snapshot, references, _ = resolve_catalog(
-                connection, tenant["id"], catalog_row["catalog"]
-            )
-        except ValueError as error:
-            raise ServiceError("conflict", str(error)) from error
-        selections.update(
-            {
-                "file_ids": ids,
-                "catalog_version": str(catalog_id),
-                "schema_id": str(catalog_id),
-                "schema_version": "1",
-                "destination_id": str(catalog_id),
-            }
-        )
         files += references
     if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
         raise ServiceError(
@@ -76,8 +98,8 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             definition,
             workflow["config_values"],
             selections,
-            allowed_source_ids=set(source_ids),
-            allowed_destination_ids={str(catalog_id)},
+            allowed_source_ids=set(selections["source_ids"]),
+            allowed_destination_ids={str(target["discovery_id"] if target else catalog_id)},
         )
     except (ValueError, ValidationError) as error:
         raise ServiceError("invalid", str(error).splitlines()[0]) from error
@@ -96,6 +118,9 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 )
     if definition.metadata["handler"] == "accounts.bill":
         config["catalog_snapshot"] = catalog_snapshot
+        if target:
+            config["tally_target"] = target
+            config["review_mode"] = "all_outputs"
         fmt = config["input_format"]
         if fmt != "mixed" and any(
             (Path(f["path"]).suffix.lower() == ".pdf") != (fmt == "pdf") for f in files[: len(ids)]
@@ -103,9 +128,45 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             raise ServiceError(
                 "invalid", "Selected bills do not match the configured input format."
             )
-        if config["output_mode"] != "excel_in_place":
-            raise ServiceError("invalid", "This workflow currently supports in-place Excel output.")
-    return files, ids, catalog_id, config
+        if config["output_mode"] not in ("excel_in_place", "tally_in_place"):
+            raise ServiceError("invalid", "Choose in-place Excel or Tally output.")
+    if (
+        definition.execution_snapshot is None
+        or definition.execution_snapshot["execution"]["model"] != "gpt-6-luna"
+    ):
+        raise ServiceError("invalid", "Accounts workflows must use the approved gpt-6-luna model.")
+    snapshots = {
+        key: config.pop(key) for key in ("catalog_snapshot", "tally_target") if key in config
+    }
+    return LaunchInputs(files, ids, catalog_id, config, snapshots)
+
+
+def _excel_launch_catalog(connection, tenant, catalog_id):
+    catalog_row = connection.execute(
+        "SELECT * FROM account_catalogs WHERE tenant_id=%s AND id=%s",
+        (tenant["id"], catalog_id),
+    ).fetchone()
+    if not catalog_row:
+        raise ServiceError("not_found", "Catalog not found.")
+    if not any(s["role"] == "destination" for s in catalog_row["catalog"]["sheets"]):
+        raise ServiceError(
+            "conflict", "Confirm a Bill Entry destination in source discovery first."
+        )
+    discovered = connection.execute(
+        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
+        (tenant["id"], str(catalog_id)),
+    ).fetchone()
+    if discovered:
+        from minkops_platform.discovery import require_ready
+
+        require_ready(connection, tenant["id"], discovered["id"], ["excel"])
+    try:
+        catalog_snapshot, references, _ = resolve_catalog(
+            connection, tenant["id"], catalog_row["catalog"]
+        )
+    except ValueError as error:
+        raise ServiceError("conflict", str(error)) from error
+    return catalog_snapshot, references
 
 
 class AccountsHandler:
@@ -115,12 +176,16 @@ class AccountsHandler:
             FROM account_writes WHERE tenant_id=%s AND run_id=%s ORDER BY path""",
             (run["tenant_id"], run["id"]),
         ).fetchall()
-        return {"writes": writes}
+        tally_writes = connection.execute(
+            """SELECT id,device_id,company,record_index,outcome,verified_at,finished_at,cancelled_at
+            FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s ORDER BY created_at""",
+            (run["tenant_id"], run["id"]),
+        ).fetchall()
+        return {"writes": writes, "tally_writes": tally_writes}
 
     queued_summary = "Queued for Accounts desk."
     executing_summary = "Accounts desk is inspecting the selected files."
     prepare_launch = staticmethod(prepare_launch)
-
 
 
 class DiscoveryHandler(AccountsHandler):
@@ -157,11 +222,21 @@ class DiscoveryHandler(AccountsHandler):
 
 
 class BillHandler(AccountsHandler):
+    def launched(self, connection, run):
+        if len(run["file_ids"]) > 1:
+            from .batch import create_children
+
+            create_children(connection, run)
+
     def prepare(self, connection, run):
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
         context["catalog"] = run["config"]["catalog_snapshot"]
-        refs, contents = catalog_contents(connection, run["tenant_id"], context["catalog"])
+        refs, contents = (
+            ([], {})
+            if run["config"].get("tally_target")
+            else catalog_contents(connection, run["tenant_id"], context["catalog"])
+        )
         files += [f for f in refs if f["id"] not in {i["id"] for i in files}]
         context["files"] = [{"id": str(f["id"]), "path": f["path"]} for f in files]
         return files, context, {"refs": refs, "contents": contents}
@@ -174,8 +249,20 @@ class BillHandler(AccountsHandler):
             )
         result = populate_entry_ids(result, context["catalog"], run["id"])
         result = check_records(
-            result, context["catalog"], run["file_ids"], contents, run["config"]["checks"]
+            result,
+            context["catalog"],
+            run["file_ids"],
+            contents,
+            [] if run["config"].get("tally_target") else run["config"]["checks"],
         )
+        if run["config"].get("tally_target"):
+            from .bills import capture_tally_findings
+
+            capture_tally_findings(result, run["config"]["tally_target"])
+        else:
+            from .bills import capture_excel_state
+
+            capture_excel_state(result, context["catalog"], contents)
         return result
 
     def finish(self, connection, store, run, context, domain, result):
@@ -185,11 +272,12 @@ class BillHandler(AccountsHandler):
             connection,
             run,
             "review",
-            "Review bill values, source evidence and proposed Excel entries.",
+            "Review bill values, source evidence and proposed destination entries.",
             70,
         )
         if (
-            run["config"]["review_mode"] == "only_exceptions"
+            not run["config"].get("tally_target")
+            and run["config"]["review_mode"] == "only_exceptions"
             and not result.get("requires_review")
             and not result.get("unresolved")
             and not result["findings"]
@@ -198,10 +286,6 @@ class BillHandler(AccountsHandler):
             prepare_writes(
                 connection, run, result, context["catalog"], domain["refs"], domain["contents"]
             )
-            store.observe(
-                connection,
-                run,
-                "writing",
-                "Checks passed. Waiting for verified local Excel writes.",
-                85,
-            )
+            from .tally_writes import complete_run
+
+            complete_run(connection, run, result)
