@@ -43,6 +43,13 @@ def main(state_dir, phase, invoice):
                            "config": {"output_mode": "tally_in_place", "discovery_id": discovery["id"]}})
             run.raise_for_status()
             result = run.json()
+            (state_dir / "release-bill.json").write_text(json.dumps(result))
+            print(json.dumps({"bill_run": result["id"], "state": result["state"]}))
+        else:
+            previous = json.loads((state_dir / "release-bill.json").read_text())
+            run = api.get(BASE + f"/runs/{previous['id']}")
+            run.raise_for_status()
+            result = run.json()
             if phase == "bill-clarify":
                 provenance = result["config"]["file_provenance"]
                 assert len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS
@@ -54,13 +61,6 @@ def main(state_dir, phase, invoice):
                 })
                 clarification.raise_for_status()
                 result = clarification.json()
-            (state_dir / "release-bill.json").write_text(json.dumps(result))
-            print(json.dumps({"bill_run": result["id"], "state": result["state"]}))
-        else:
-            previous = json.loads((state_dir / "release-bill.json").read_text())
-            run = api.get(BASE + f"/runs/{previous['id']}")
-            run.raise_for_status()
-            result = run.json()
             if phase == "bill-approve":
                 provenance = result["config"]["file_provenance"]
                 assert len(provenance) == 1

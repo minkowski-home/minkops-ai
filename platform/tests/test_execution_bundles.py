@@ -92,10 +92,15 @@ class ExecutionBundleTests(TestCase):
     def test_provider_skill_description_matches_manifest_instead_of_product_copy(self):
         with TemporaryDirectory() as directory:
             target = self.fixture(directory)
+            skill = target / "SKILL.md"
+            lines = skill.read_text().splitlines()
+            lines = ["description: A concise provider-facing skill description."
+                     if line.startswith("description:") else line for line in lines]
+            skill.write_text("\n".join(lines))
             snapshot = load_definition(target).execution_snapshot
         self.assertEqual(
             snapshot["description"],
-            "Discover approved source structures and reference data, then propose evidenced business mappings.",
+            "A concise provider-facing skill description.",
         )
 
     def test_bundle_rejects_tampered_content_before_creating_session(self):

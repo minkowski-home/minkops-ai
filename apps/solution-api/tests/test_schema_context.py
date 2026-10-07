@@ -73,11 +73,21 @@ class SchemaContextTests(unittest.TestCase):
     def test_reference_readiness_wakes_after_initial_generation_was_acknowledged(self):
         from minkops_platform.runtime.store import WorkflowRunStore
 
+        created = []
+
+        def cleanup():
+            # Leave no queued runs in the shared disposable database's bounded
+            # candidate window; subsequent tests must not inherit this backlog.
+            with psycopg.connect(URL) as c:
+                c.execute("UPDATE workflow_runs SET state='failed' WHERE id=ANY(%s::uuid[])", (created,))
+
+        self.addCleanup(cleanup)
         for failed in (False, True):
             with self.subTest(failed=failed):
                 discovery = self.tally_discovery("company-1", schema=True, reuse_device=failed)
                 run, _ = self.launch("bill-entry", file_ids=[self.upload_bill()],
                                      config={"output_mode": "tally_in_place", "discovery_id": discovery})
+                created.append(run["id"])
                 with psycopg.connect(URL, row_factory=dict_row) as c:
                     self.assertNotIn(run["id"], [str(r["id"]) for r in WorkflowRunStore().candidates(c)])
                     c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL")
