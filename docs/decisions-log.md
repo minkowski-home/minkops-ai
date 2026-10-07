@@ -661,3 +661,45 @@ and verify the installed app's actual Windows picker/export.
 **Result:** A complete 537,848-byte catalog is saved in OneDrive. Native regression
 suites and live Windows export pass; the reusable adapter stays in connectors,
 while Electron owns only authenticated transport and the native dialog.
+### 2026-10-07 — Converge independently evolved workflow architecture and financial execution
+
+**Situation:** The shared declarative-workflow refactor and the complete Bill
+Entry RC had diverged from the same Windows baseline. Keeping only either tip
+would discard architecture or financial behavior; a mechanical replay restored
+the old Accounts-specific launch/store/worker. Both branches also published a
+different `0009`: Bill Entry required a table where the architecture exposed a
+compatibility view, so an architecture-first upgrade failed its foreign key.
+
+**Task:** Retain independent paid sessions, per-bill recovery, financial approvals,
+duplicate/correction/readback guarantees, native exports and client policy on one
+shared runtime. Upgrade existing databases without rewriting applied checksums,
+resetting history or abandoning pending financial intents. Preserve recoverable
+source revisions before retiring superseded development branches.
+
+**Action:** Replay all seven Bill Entry commits onto the architecture in a new
+consolidation branch, then move domain resource preparation/checks/finish behavior
+into registered Accounts handlers. Share launch identity, trusted snapshots,
+session lifecycle, durable store and child observations; retain Bill Entry's
+batch orchestrator and bounded native adapters. Apply client destination schema
+policy through installation and independently enforce pinned review policies
+before writes and after batch aggregation. Add two guarded schema bridges around
+the immutable branch migrations: temporarily restore the original table name
+inside the locked migration transaction, then restore the shared table/view.
+Preserve table OIDs, run IDs, paid-session identities, parent links, pending plans,
+company reservations, receipts and status. Test both predecessor upgrade paths,
+fresh/repeated migrations and reserved-input/hash rejection before paid calls.
+Archive exact original tips instead of forcing their history onto either branch.
+
+**Result:** The combined backend passes 168 tests and 45 subtests; all 17 web
+tests, production build and lint pass. Native suites pass 31 tests on Linux and
+30 on Windows with one privilege-dependent symlink case covered on Linux. A
+Windows-local unsigned x64 installer builds. Real hosted Excel discovery/bill
+extraction and saved-byte verification preserve formulas/unrelated sheets. A
+real two-bill hosted Tally batch recovers one ambiguous invoice through explicit
+clarification without replaying its successful sibling, then verifies native
+saves, receipt replay, duplicates and observed-identity corrections. All 10
+pre-existing company vouchers remain unchanged; paid environments close.
+Desktop/mobile browser checks cover both completed outcomes, all four themes and
+installed client policy. The consolidated branch becomes the development home;
+no merge or PR changes staging/main. Production deployment, signing and a fresh
+device installation matrix remain separate.

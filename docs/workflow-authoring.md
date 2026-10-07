@@ -122,6 +122,22 @@ returns files, model context, and domain context. `validate` checks the proposal
 owns locking, session recovery, raw-result persistence, and cleanup. A new
 handler should not recreate those controls or an agent planning loop.
 
+`prepare_launch` returns `runtime.launch.LaunchInputs`: authorized files, input
+IDs, optional catalog ID, validated selections, and optional server-owned domain
+snapshots. Snapshots cannot override runtime/selection fields. Clients cannot
+submit snapshot fields. A handler may implement `launched(connection, run)` to
+create durable domain children inside the launch transaction. Bill Entry uses
+this for independent paid sessions under one parent review task; the shared
+store excludes aggregate parents from execution and children do not update the
+parent task directly. Accounts remains an adapter over this single runtime.
+
+Client destination restrictions in `solutions/<id>/workflow-policy.json` are
+applied by declarative installation to the registered schema. Mock-client keeps
+Bill Entry Tally-only; the reusable workflow retains its Excel/Tally choices.
+Run snapshots and deterministic threshold policies survive batch aggregation,
+review, retries, and later installation changes. Explicit approval is required
+before preparing Tally writes, which independently enforce pinned review policy.
+
 An existing workflow can select a client policy in its trusted binding:
 
 ```json
@@ -156,7 +172,8 @@ compatible. `accounts_worker` is the existing bootstrap command over the shared
 dispatcher. Historical runs without handler bindings use the narrowly bounded
 legacy Accounts mapping; legacy unpinned queued runs still require relaunch.
 
-Apply migration `0009_workflow_bindings` before starting this revision. Stop
+Apply every pending migration through `0011_complete_branch_convergence` before
+starting this revision. See [branch convergence](branch-convergence.md). Stop
 workers while changing application revisions, preserve session/write records,
 and reconcile outstanding writes. An application rollback can use the retained
 Accounts view, but never run an older Accounts-only worker against new non-Accounts

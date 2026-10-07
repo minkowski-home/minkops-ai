@@ -136,7 +136,7 @@ The register uses obscure headers such as `Party.External`, `Txn.Base` and
 
 Only the explicitly selected test company should be used. Seed mock supplier,
 purchase and tax ledgers there before the live proof; do not overwrite existing
-masters. Apply migrations through 0010 and seed the isolated demo database.
+masters. Apply all pending migrations through 0011 and seed the isolated demo database.
 
 ## Verification
 

@@ -25,3 +25,14 @@ updatable `account_runs` compatibility view for Accounts/native callers. It also
 backfills trusted execution bindings for current workflows without changing
 settings or status. See `docs/workflow-authoring.md` for the standalone
 installation CLI and rollout/recovery instructions.
+
+The consolidated branch also retains Bill Entry's original `0009_bill_entry`
+and `0010_bill_company_reservation` migrations. Do not renumber or edit either
+branch's applied migrations. `0008z_prepare_branch_convergence` and
+`0011_complete_branch_convergence` bridge architecture-first databases back
+through the required table name, then restore the shared table and compatibility
+view. All pending files run inside the existing locked transaction; rows and
+foreign-key targets retain their IDs. Fresh, Bill-first, and architecture-first
+upgrades are regression-tested, including checksums, paid-session state, and
+writes through the compatibility view. Run the normal migrator through 0011;
+see [upgrade instructions](../docs/branch-convergence.md).

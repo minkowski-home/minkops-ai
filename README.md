@@ -24,6 +24,11 @@ workflow implementation remains Git history, not a parallel methodology to
 preserve. Existing deterministic adapters and checks remain where they enforce
 real integration or correctness requirements.
 
+`platform-ai/bill-entry-architecture` is the consolidated development branch:
+the declarative/shared runtime plus the complete Bill Entry and Windows companion
+work. See [branch convergence and upgrade](docs/branch-convergence.md) for the
+retained source revisions, migration paths, verification, and recovery.
+
 
 ### Workflow methods and current scope
 

@@ -62,11 +62,13 @@ request bounded work on an authorized connected PC.
 
 ## Build and run
 
-This architecture branch is based on `apps/windows-app` commit `c3b050c`.
-Its shared API/UI now uses installed workflow bindings and shared dispatch;
-native folder grants, discovery, receipts and tray execution keep their existing
-contracts. Apply migrations through `0009_workflow_bindings` before starting
-this revision. Later Bill entry/Tally financial-write branch work is not included.
+The consolidated branch retains Windows baseline `c3b050c`, the shared workflow
+architecture, and Bill Entry's financial-write work through `3dc6552`. Its API/UI
+uses installed bindings and shared dispatch, including independent bill sessions,
+native Tally reconciliation, and verified Excel/Tally writes. Apply all pending
+migrations through `0011_complete_branch_convergence` before starting this
+revision. Either predecessor database can upgrade without resetting run history.
+See [branch convergence](branch-convergence.md) for the tested paths.
 See [workflow authoring](workflow-authoring.md) for installation and recovery.
 
 Use Node 24 and the existing Python/uv workspace. From the repository root:
@@ -91,7 +93,7 @@ default is `https://app.minkops.com`. Packaged releases accept HTTPS only.
 Development can use localhost HTTP. The web host must serve existing `/api/`
 routes at the same origin; Vite already supports this through `VITE_API_TARGET`.
 A build does not deploy or prove that the default production host serves this
-branch. Apply all migrations through 0010 before using bill entry. Use normal
+branch. Apply all migrations through 0011 before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
