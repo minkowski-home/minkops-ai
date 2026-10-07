@@ -13,7 +13,7 @@ from aiosmtplib.errors import SMTPRecipientsRefused, SMTPResponseException
 
 RECIPIENT = "info@minkops.com"
 PUBLIC_SENDER = "info@minkops.com"
-SMTP_HOST = "smtp-relay.gmail.com"
+SMTP_HOSTS = frozenset({"smtp-relay.gmail.com", "smtp.gmail.com"})
 SMTP_PORT = 587
 SMTP_TIMEOUT_SECONDS = 8
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ async def send_discovery_notification(
     sender = os.getenv("SMTP_FROM_EMAIL", "").strip().lower()
     sender_name = os.getenv("SMTP_FROM_NAME", "").strip()
     if (
-        host != SMTP_HOST
+        host not in SMTP_HOSTS
         or raw_port != str(SMTP_PORT)
         or not username
         or not password

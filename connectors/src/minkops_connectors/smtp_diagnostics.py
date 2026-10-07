@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 
 import aiosmtplib
+from .workspace_smtp import SMTP_HOSTS
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ async def check_relay() -> DiagnosticResult:
     port = os.getenv("SMTP_PORT", "").strip()
     username = os.getenv("SMTP_USER", "").strip()
     password = os.getenv("SMTP_PASSWORD", "")
-    if host != "smtp-relay.gmail.com" or port != "587" or not username or not password:
+    if host not in SMTP_HOSTS or port != "587" or not username or not password:
         return DiagnosticResult("configuration", "ConfigurationMissing")
 
     client = aiosmtplib.SMTP(
