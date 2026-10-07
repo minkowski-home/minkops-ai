@@ -1,0 +1,11 @@
+{
+  "key": "accounts-desk",
+  "name": "Accounts desk",
+  "description": "Keeps account records ready for review.",
+  "config_schema": {
+    "type": "object",
+    "properties": {"daily_digest": {"type": "boolean", "title": "Daily digest"}},
+    "additionalProperties": false
+  },
+  "defaults": {"daily_digest": false}
+}
