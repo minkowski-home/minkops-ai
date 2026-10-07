@@ -31,5 +31,16 @@
     "tax_ledger": "RC Input GST Mock",
     "invoice_number": "RC26-CEM-GCP-1008-01",
     "purchase_ledger": "RC Civil Materials Purchase"
+  },
+  "f8105f4909bec752d48719f57cb7c93048794baac4e6f98d9d92ac4648edb648": {
+    "tax": 7056,
+    "date": "2026-10-02",
+    "total": 32256,
+    "vendor": "RC Deccan Cement Traders",
+    "subtotal": 25200,
+    "cost_code": null,
+    "tax_ledger": "RC Input GST Mock",
+    "invoice_number": "RC26-CEM-GCP-1002-01",
+    "purchase_ledger": "RC Civil Materials Purchase"
   }
 }

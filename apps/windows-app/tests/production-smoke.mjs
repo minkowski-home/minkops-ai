@@ -75,9 +75,16 @@ const worker = new CompanionWorker({
       assert.ok(expected, 'Only reviewed release fixtures may be written');
       assert.deepEqual(plan.data, expected);
       let imports = 0;
-      const request = (url, options) => {
-        if (options.body.includes('<TALLYREQUEST>Import Data</TALLYREQUEST>')) imports++;
-        return fetch(url, options);
+      const request = async (url, options) => {
+        const importing = options.body.includes('<TALLYREQUEST>Import Data</TALLYREQUEST>');
+        if (importing) imports++;
+        const response = await fetch(url, options);
+        if (importing) {
+          // Controlled Test Company diagnostics stay private, never in CI or
+          // general runtime logs. Preserve rejection evidence before retrying.
+          await writeFile(join(directory, 'release-tally-import.xml'), await response.clone().text(), { mode: 0o600 });
+        }
+        return response;
       };
       const result = await commitTallyBill(plan, { request });
       assert.ok(['saved', 'duplicate'].includes(result.outcome));
