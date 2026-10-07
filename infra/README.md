@@ -23,14 +23,17 @@ docker build -f infra/solution.Dockerfile -t minkops-solution:review .
 docker run --rm minkops-solution:review python -m minkops_api.install_workflows mock-client --validate-only
 ```
 
-The same image contains worker packages, but the forever-loop bootstrap needs
-bounded execution before low-cost Cloud Run Job deployment. See
+The same image runs `python -m minkops_api.accounts_worker --drain` as a bounded
+Cloud Run Job. Transactional generations coalesce immediate wakes and an hourly
+Scheduler recovers lost dispatches. See
 [deployment, website migration and MIN-123 closeout](../docs/deployment-min-123.md)
-for the Myndral-style topology and CAD 15 hosting envelope. Assign Firebase
-project/site targets before using `firebase.json`. Audit scripts read resource
+for the deployed Myndral-style topology and CAD 15 hosting envelope. Hosting sites
+are assigned by the explicit operator deploy script. Audit scripts read resource
 metadata/metrics without retrieving secrets or customer database rows.
 
 See [Accounts desk setup and limits](../docs/accounts-desk.md) and OpenAI's
 [hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted).
-Production deployment, worker supervision and database retention policy remain
-operational release work; local processes do not establish deployment health.
+Production deployment and database restore are verified; remaining device/demo
+release gates are recorded separately. Local processes alone do not establish
+deployment health. Use the documented owner-operated deployment scripts until a
+repository-bound OIDC pipeline and production approval environment are installed.

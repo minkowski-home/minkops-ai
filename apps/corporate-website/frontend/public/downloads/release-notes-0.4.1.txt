@@ -16,6 +16,9 @@ open in the client. Remote-server client installations still need device proof.
 
 Verified: automated backend/frontend/native suites, Windows installer packaging,
 GCP worker execution and database restore. Previous local UI review used 0.3.1.
+Verified live: 275 Tally schema tables with zero business records; hosted bill
+extraction, reviewed duplicate reconciliation, readback and receipt replay.
+Typed company and ledger identities are normalized without guessing values.
 Pending: fresh Windows 10/11 installation matrix, full screen-reader coverage,
-and live production verification of both workflows on the released companion.
+and broader manual native UI verification on the released companion.
 No automatic update is installed. Keep recovery backups until saves are verified.
