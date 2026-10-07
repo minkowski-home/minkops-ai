@@ -1,6 +1,6 @@
 # Production deployment and MIN-123 closeout
 
-Executed 7 October 2026. Target: **CAD 15/month incremental Minkops GCP hosting**,
+Executed 7–8 October 2026. Target: **CAD 15/month incremental Minkops GCP hosting**,
 including the product and corporate website. OpenAI usage and Myndral's existing
 bill are separate. Deployment availability does not close every MIN-123 gate.
 
@@ -22,7 +22,8 @@ Dedicated project `minkops-ai-prod` (791824186738), CAD billing account
 
 Temporary verification URLs: https://minkops-ai-prod.web.app and
 https://minkops-ai-console.web.app. Native release profile uses
-https://app.minkops.com. Managed certificate validation can lag authoritative DNS.
+https://app.minkops.com. HTTPS is verified on all three custom hosts, including
+the www-to-apex redirect and console deep-link navigation.
 
 Myndral-like means replicating its managed service pattern and modest scale.
 Sharing SQL was our cost-saving recommendation, not a user requirement. It avoids
@@ -42,6 +43,10 @@ superuser, role-creation or database-creation rights. `minkops_owner` is NOLOGIN
 
 A full pre-provisioning backup completed. A logical restore with PostgreSQL
 client 16 compared all 15 migration checksums, 27 tables and the worker wake row.
+The subsequent native-context wake migration brings production to 16 checksummed
+migrations; its terminal-job trigger is verified in production.
+A new full Cloud SQL backup completed after that migration and the production
+workflow checks. The original restore proof remains the pre-release baseline.
 The temporary restored database and bootstrap SQL login were removed. Match the
 dump/restore client to production: client 18 emits settings unsupported by 16.
 Restore a logical backup into a new isolated database, compare counts/checksums,
@@ -78,14 +83,18 @@ disable Myndral's billing account to enforce the Minkops budget.
 ## Production execution and ownership
 
 The immutable backend image packages core employees and additive client variants.
-Runtime baseline was `solution:d067b77`; corrected ODBC validation is
-`solution:30d1f87`. Interest image is `interest:6ce25fb`. Every future deployment
+Current API and worker image is `solution:7556783`, digest
+`sha256:9b8ef3bfb755e06be35e66678b1c6dea38c5115c928bdd402749ca6f131db886`.
+API revision `minkops-solution-api-00005-s7p` serves 100% of traffic.
+Interest image is `interest:6ce25fb`. Every future deployment
 must use a distinct reviewed commit tag or digest and record the previous revision.
 
 Worker wake generations commit with workflow changes. Dispatch follows commit,
 coalesces under a lease, and can fail without losing durable work. A bounded drain
 preserves existing per-run locks/session recovery; a global lane prevents overlap.
-Idle acknowledgement is fenced against concurrent enqueue. Hourly recovery handles
+Idle acknowledgement is fenced against concurrent enqueue. Completion or failure
+of required native Tally references creates a new durable wake even if the run
+remains queued; repeated receipts do not create another generation. Hourly recovery handles
 lost dispatches. A successful empty execution was verified before live workflows.
 
 The organization disallows allUsers IAM grants. Only the two public HTTP services
@@ -100,6 +109,10 @@ The isolated `mock-tenant` received only its administrator membership and the tw
 trusted mock-client workflows. No platform-admin role, fake display tasks or
 automatic customer folder grants were seeded. Generated credentials and pairing
 state reside only in the operator's private state directory, outside Git.
+Installed core Source Discovery is 0.6.1 and mock-client Bill Entry variant is
+1.0.2. Client guidance explains the synthetic demo, printed billing reference and
+reviewed RC supplier purchase/GST ledger mappings in Test Company;
+core instructions, tenant boundaries and financial write checks remain shared.
 
 Source catalogs are immutable tenant-owned PostgreSQL JSON snapshots. Bill Entry
 pins the reviewed catalog and separately prepares current company references;
@@ -115,7 +128,19 @@ ledger rechecks. Tally readback found exactly one existing matching voucher;
 save reconciliation and replay performed no new import. The server accepted the
 same completion receipt twice, and the OpenAI session was deleted successfully.
 This proves the existing-voucher path; fresh append evidence remains a separate
-test rather than being inferred from duplicate reconciliation.
+test rather than being inferred from duplicate reconciliation. Scanned steel run
+`68a19c1f-9f34-49bd-9189-640c215cd794` also completed after normal clarification:
+all nine fields matched, exactly one existing voucher was read back, and both
+native replay and repeated server receipt were accepted without another import.
+
+Fresh append run `301c95d5-78d6-4acc-9168-b765efe8a922` completed for synthetic
+invoice `RC26-CEM-GCP-1002-01`, dated 2 October. Independent pre-read found zero
+matching vouchers; all nine reviewed values matched, the native outcome was
+`saved`, independent post-read found exactly one matching voucher, replay performed
+zero additional imports and the server accepted the repeated completion receipt.
+The completed task is
+https://app.minkops.com/mock-tenant/tasks/3ef93004-5f56-4f23-8d60-33c466588809.
+The local Educational Mode date rejection is preserved separately, with zero writes.
 
 ## Repeatable operator deployment
 
@@ -157,32 +182,35 @@ GoDaddy authoritative DNS now has A `@` → `199.36.158.100`, CNAME `www` →
 records were preserved. Old website records were A `216.198.79.1` and www CNAME
 `cname.vercel-dns.com`. Downtime is acceptable; no prolonged dual hosting is needed.
 
-Verify Google-managed HTTPS, www redirect, deep-link refresh, installer hash and
-interest delivery before retiring the Minkops Vercel project. A previous Hosting
-release and Cloud Run revision provide rollback. DNS rollback to Vercel is useful
-only while that project still exists. Its permanent deletion is a distinct final
-action; do not delete unrelated Vercel projects or the account.
+Google-managed HTTPS, www redirect, deep-link refresh, installer hash and the
+interest form's SMTP acceptance were verified on the custom domain. The user
+approved permanent deletion of `minkops-ai`; Vercel confirmed its removal and the
+team retains only the unrelated `the-gauss-ledger` project. Both obsolete Vercel
+configuration files were removed from the repository. A previous Firebase Hosting
+release and Cloud Run revision provide rollback; the retired Vercel deployment
+can no longer provide DNS rollback.
 
 ## MIN-123 and MIN-122 completion gates
 
 **Completed:** backend/database deployment; restore and runtime-role checks;
 budget/retention controls; worker execution; signup/email verification; HTTPS auth,
 cookie, cache, CSRF/logout checks; trusted demo workspace; real metadata-only Tally
-discovery and receipt replay; hosted Bill Entry review and duplicate reconciliation;
-interest-form SMTP acceptance; Windows 0.4.1 installer build/publication with checksum.
-Backend/operator suite: 193 tests plus 47 subtests. Web: 17 tests and lint. Native:
+discovery and receipt replay; hosted Bill Entry review, fresh append and duplicate reconciliation;
+interest-form SMTP acceptance; Windows 0.4.1 installer build/publication with checksum;
+custom-domain cutover and approved Vercel project retirement.
+Backend/operator suite: 197 tests plus 49 subtests. Web: 17 tests and lint. Native:
 35 Linux tests; Windows passes 34 with one privilege-dependent symlink test skipped.
 
-**Still required before marking MIN-123 Done:** fresh Tally append proof;
-finalized demo walkthrough; custom-domain
-website/interest cutover and Vercel retirement; the remaining MIN-122 device and
+**Still required before marking MIN-123 Done:** the remaining MIN-122 device and
 accessibility evidence. Current-PC protocol checks do not prove a clean-PC install.
+The user explicitly selected this PC for current verification and left the
+clean-PC and remote-server Tally client gates open.
 
 Use `apps/windows-app/tests/production-smoke.mjs` only with an explicit test company
 and private owner state, for real schema or workflow-reference receipt checks.
-Its explicit save phase is limited to the reviewed RC cement bill in Test Company,
+Its explicit save phase is limited to hash-allowlisted synthetic bills in Test Company,
 checks independent readback, and replays both the native save and server receipt.
-`infra/verify_production.py` launches the reviewed synthetic cement fixture and
+`infra/verify_production.py` launches only reviewed synthetic fixtures and
 records actual hosted results. Never substitute fake execution or seed_demo for
 production proof. Publish an unsigned **release candidate**, not a signed final
 release claim; the download page discloses its actual distribution status.
@@ -200,6 +228,11 @@ scheduling MIN-121 is separate.
    comments, slides or screen recordings. Select the release demo workspace.
 2. Install 0.4.1 from the corporate download page, connect this PC, and open only
    Test Company in Tally. Keep real customer companies closed during the demo.
+   This PC reports Tally Educational Mode: use synthetic fixtures dated on its
+   permitted dates (the verified fixtures use 1 or 2 October). Preserve actual
+   customer invoice dates; an unsupported date must remain held, never shifted
+   to get past a licence restriction. The rejected 8 October release test created
+   zero vouchers and is retained in the review history.
 3. Run Source Discovery for Tally, inspect table/column context, then export its
    JSON. Explain that the catalog belongs to this tenant and version; it contains
    no sampled business rows. Each client can have its own reviewed catalog.
@@ -214,6 +247,13 @@ scheduling MIN-121 is separate.
    touching customer records. Retain recovery state until the server acknowledges
    completion. Finish with known limits: unsigned RC, device/accessibility matrix,
    simple accounting Purchase mapping and unsupported complex allocations.
+
+The hosted walkthrough has exercised source confirmation/JSON output, normal
+owner login, extraction, clarification, browser review controls, duplicate
+reconciliation and fresh Tally save/readback. Use the completed task above as
+the fresh-save evidence; submitting its invoice again should report a duplicate.
+Native installation, disconnected-device and accessibility scenarios still need
+their separate MIN-122 evidence. Do not present those planned demo steps as done.
 
 ## Official references
 
