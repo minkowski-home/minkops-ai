@@ -1,0 +1,14 @@
+{
+  "393404a002017f01bb8cd4fa5c250e9b9c7a1d8072b0b7cc8ec9644eeeac0b5d": {
+    "tax": 7056, "date": "2026-10-01", "total": 32256,
+    "vendor": "RC Deccan Cement Traders", "subtotal": 25200,
+    "cost_code": null, "tax_ledger": "RC Input GST Mock",
+    "invoice_number": "RC26-CEM-041", "purchase_ledger": "RC Civil Materials Purchase"
+  },
+  "5d305ce2b1fd42e57a2725bb10eff6ff0a29b03d649231ef0c88f864649198c9": {
+    "tax": 8694, "date": "2026-10-02", "total": 56994,
+    "vendor": "RC Sahyadri Steel Supply", "subtotal": 48300,
+    "cost_code": null, "tax_ledger": "RC Input GST Mock",
+    "invoice_number": "RC/SS/26-019", "purchase_ledger": "RC Civil Materials Purchase"
+  }
+}

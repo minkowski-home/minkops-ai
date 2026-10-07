@@ -5,3 +5,10 @@ Combine tax components into a single allocation only when the bill and the
 operator's approved mapping identify the same tax ledger. Ambiguous allocations
 need clarification. The platform's monetary checks and native readback remain
 mandatory regardless of these client instructions.
+
+This mock client uses synthetic release documents solely in its isolated demo
+company. Their synthetic/non-commercial label describes the test fixture, not a
+missing field. For these fixtures the printed billing Ref is the invoice_number;
+a separately labelled weighbridge or delivery identifier must not replace it.
+Keep missing or conflicting references unresolved, and never apply this demo
+convention to another client's documents or relax approval/write safeguards.

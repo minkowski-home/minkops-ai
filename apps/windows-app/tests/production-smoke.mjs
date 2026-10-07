@@ -16,6 +16,7 @@ const phase = process.env.MINKOPS_RELEASE_PHASE || 'schema';
 assert.ok(['schema', 'references', 'save'].includes(phase));
 assert.ok(directory && company, 'Supply a private state directory and explicit test company');
 const credentials = JSON.parse(await readFile(join(directory, 'demo-owner.json'), 'utf8'));
+const reviewedBills = JSON.parse(await readFile(new URL('../../../infra/release-bill-fixtures.json', import.meta.url), 'utf8'));
 const origin = 'https://app.minkops.com';
 let cookie = '', csrf = '', pending = null, executedJob = null, lastReceipt = null;
 async function api(path, body, { method = body === undefined ? 'GET' : 'POST', worker = false } = {}) {
@@ -67,12 +68,12 @@ const worker = new CompanionWorker({
       assert.equal(company, 'Test Company');
       assert.equal(plan.company, company);
       assert.equal(plan.operation, 'append');
-      assert.deepEqual(plan.data, {
-        tax: 7056, date: '2026-10-01', total: 32256,
-        vendor: 'RC Deccan Cement Traders', subtotal: 25200, cost_code: null,
-        tax_ledger: 'RC Input GST Mock', invoice_number: 'RC26-CEM-041',
-        purchase_ledger: 'RC Civil Materials Purchase',
-      });
+      const reviewed = JSON.parse(await readFile(join(directory, 'release-bill-result.json'), 'utf8'));
+      const provenance = reviewed.config.file_provenance;
+      assert.equal(provenance.length, 1);
+      const expected = reviewedBills[provenance[0].sha256];
+      assert.ok(expected, 'Only reviewed release fixtures may be written');
+      assert.deepEqual(plan.data, expected);
       let imports = 0;
       const request = (url, options) => {
         if (options.body.includes('<TALLYREQUEST>Import Data</TALLYREQUEST>')) imports++;
@@ -86,7 +87,7 @@ const worker = new CompanionWorker({
       assert.equal(replay.outcome, 'duplicate');
       assert.equal(imports, beforeReplay, 'Replay must perform no second import');
       const vouchers = (await readTallyBills(plan)).filter(v =>
-        v.invoice_number === plan.data.invoice_number && v.vendor === plan.data.vendor && v.date === '20261001');
+        v.invoice_number === plan.data.invoice_number && v.vendor === plan.data.vendor && v.date === plan.data.date.replaceAll('-', ''));
       assert.equal(vouchers.length, 1);
       console.log(JSON.stringify({ productionTallyReadback: 'passed', outcome: result.outcome, matchingVouchers: 1, replayImports: 0 }));
       return result;

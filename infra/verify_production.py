@@ -10,6 +10,7 @@ import httpx
 
 ORIGIN = "https://app.minkops.com"
 BASE = "/api/tenants/mock-tenant/accounts"
+REVIEWED_BILLS = json.loads(Path(__file__).with_name("release-bill-fixtures.json").read_text())
 
 
 def main(state_dir, phase, invoice):
@@ -27,11 +28,11 @@ def main(state_dir, phase, invoice):
         api.headers["x-csrf-token"] = user["csrf_token"]
         if phase == "bill-start":
             if not invoice:
-                raise ValueError("Supply the reviewed synthetic cement fixture")
+                raise ValueError("Supply a reviewed synthetic release fixture")
             content = invoice.read_bytes()
             # Scope this paid release check to the reviewed RC fixture, never
             # arbitrary customer documents or a new financial test identity.
-            assert hashlib.sha256(content).hexdigest() == "393404a002017f01bb8cd4fa5c250e9b9c7a1d8072b0b7cc8ec9644eeeac0b5d"
+            assert hashlib.sha256(content).hexdigest() in REVIEWED_BILLS
             source = api.post(BASE + "/sources", data={"label": "Synthetic release verification", "paths": json.dumps([invoice.name])},
                               files={"files": (invoice.name, content, "application/pdf")})
             source.raise_for_status()
@@ -42,6 +43,17 @@ def main(state_dir, phase, invoice):
                            "config": {"output_mode": "tally_in_place", "discovery_id": discovery["id"]}})
             run.raise_for_status()
             result = run.json()
+            if phase == "bill-clarify":
+                provenance = result["config"]["file_provenance"]
+                assert len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS
+                assert result["state"] == "review" and result["result"]["unresolved"]
+                assert result["config"]["tally_target"]["company"] == "Test Company"
+                clarification = api.post(BASE + f"/runs/{previous['id']}/resolve-bill", json={
+                    "file_id": provenance[0]["id"],
+                    "user_input": "This is an authorized synthetic release test solely in Test Company, not a commercial transaction. Use the printed billing Ref as the invoice_number; the weighbridge ID is not the invoice number. The synthetic/non-commercial label is intentional test context. Preserve observed amounts and evidence, and leave any other missing or conflicting values unresolved.",
+                })
+                clarification.raise_for_status()
+                result = clarification.json()
             (state_dir / "release-bill.json").write_text(json.dumps(result))
             print(json.dumps({"bill_run": result["id"], "state": result["state"]}))
         else:
@@ -50,11 +62,9 @@ def main(state_dir, phase, invoice):
             run.raise_for_status()
             result = run.json()
             if phase == "bill-approve":
-                expected = {"tax": 7056, "date": "2026-10-01", "total": 32256,
-                            "vendor": "RC Deccan Cement Traders", "subtotal": 25200,
-                            "cost_code": None, "tax_ledger": "RC Input GST Mock",
-                            "invoice_number": "RC26-CEM-041",
-                            "purchase_ledger": "RC Civil Materials Purchase"}
+                provenance = result["config"]["file_provenance"]
+                assert len(provenance) == 1
+                expected = REVIEWED_BILLS[provenance[0]["sha256"]]
                 assert result["state"] == "review"
                 assert result["config"]["tally_target"]["company"] == "Test Company"
                 assert not result["result"]["unresolved"]
@@ -73,7 +83,7 @@ def main(state_dir, phase, invoice):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, required=True)
-    parser.add_argument("phase", choices=["bill-start", "bill-inspect", "bill-approve"])
+    parser.add_argument("phase", choices=["bill-start", "bill-inspect", "bill-approve", "bill-clarify"])
     parser.add_argument("--invoice", type=Path)
     args = parser.parse_args()
     main(args.state_dir, args.phase, args.invoice)
