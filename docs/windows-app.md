@@ -112,8 +112,14 @@ Configure an edge request limit of at most 42 MB on the base64 folder receipt
 route, with smaller limits elsewhere. Services/native adapters enforce 100
 supported files, 5 MB per file, 30 MB per snapshot and folder containment.
 Production distribution needs the organization's Windows signing certificate;
-without one, local builds are unsigned test installers. No production deployment
-or automatic updater is introduced.
+without one, builds are unsigned release candidates. The packaged profile uses
+`https://app.minkops.com`; release notes must disclose the unsigned status. No
+automatic updater is introduced.
+
+Run `npm ci` in this app before building a release. Its `.npmrc` packages the two
+local modules rather than depending on Windows junction traversal, and this
+app's lockfile pins their transitive dependencies. After editing either local
+module, reinstall before building: packaged copies do not update automatically.
 
 ## Progress and review
 

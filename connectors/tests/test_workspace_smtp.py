@@ -33,8 +33,10 @@ class FakeSmtp:
         self.calls.append(("quit",))
 
 
-def test_sends_fixed_recipient_and_public_alias_with_visitor_reply_to(monkeypatch):
+@pytest.mark.parametrize("host", ["smtp-relay.gmail.com", "smtp.gmail.com"])
+def test_sends_fixed_recipient_and_public_alias_with_visitor_reply_to(monkeypatch, host):
     _configure(monkeypatch)
+    monkeypatch.setenv("SMTP_HOST", host)
     captured = {}
 
     def fake_smtp(**kwargs):
@@ -61,7 +63,7 @@ def test_sends_fixed_recipient_and_public_alias_with_visitor_reply_to(monkeypatc
     assert message["Reply-To"] == "alex@example.test"
     assert "&lt;this&gt;" in message.get_body(preferencelist=("html",)).get_content()
     assert client.options == {
-        "hostname": "smtp-relay.gmail.com",
+        "hostname": host,
         "port": 587,
         "local_hostname": "minkops.com",
         "start_tls": True,
@@ -77,7 +79,7 @@ def test_sends_fixed_recipient_and_public_alias_with_visitor_reply_to(monkeypatc
 
 def test_requires_workspace_relay_configuration(monkeypatch):
     _configure(monkeypatch)
-    monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
 
     with pytest.raises(workspace_smtp.SmtpConfigurationError):
         asyncio.run(

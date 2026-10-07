@@ -1,170 +1,265 @@
 # Production deployment and MIN-123 closeout
 
-Prepared 7 October 2026. Target: **CAD 15/month for Minkops GCP hosting**, including
-product and corporate website. OpenAI usage is separate. This is a plan; the new
-product backend has not been deployed.
+Executed 7–8 October 2026. Target: **CAD 15/month incremental Minkops GCP hosting**,
+including the product and corporate website. OpenAI usage and Myndral's existing
+bill are separate. Deployment availability does not close every MIN-123 gate.
 
-## Observed account and recommended topology
+## Deployed topology
 
-Read-only authenticated inspection found minkowski-web-prod (four Cloud Run
-services, no VMs) and myndral-prod (five services, three jobs) on the open CAD
-billing account. Myndral uses PostgreSQL 16 myndral-db in us-central1:
-db-f1-micro, zonal, 10 GB SSD. minkops-interest-api already runs there; the
-corporate frontend remains on Vercel. No cloud configuration or DNS was changed.
-Local gcloud 588.0.0, uv and Firebase CLI 15.32.1 are installed.
+Dedicated project `minkops-ai-prod` (791824186738), CAD billing account
+`01CA76-B60F26-EF46E3`, region `us-central1`.
 
-Use the same managed pattern as Myndral:
-
-"Myndral-like" means replicating its service pattern and modest database scale.
-Sharing its SQL instance is an optional cost-saving recommendation, not a user
-requirement. A dedicated small SQL instance remains a valid option if actual CAD
-prices and measured variable usage leave room below the agreed monthly ceiling.
-
-| Component | Initial setting |
+| Component | Deployed configuration |
 | --- | --- |
-| Website and console | Two static Firebase Hosting sites; existing Vite builds |
-| Product API | Cloud Run request billing, min 0/max 1, 1 CPU, 512 MiB, concurrency 8 |
-| Website interest API | Existing service if same project; otherwise redeploy it in Hosting project |
-| Worker | On-demand bounded Cloud Run Job; one task, parallelism 1, 1 CPU/512 MiB |
-| Database | Separate Minkops DB and role on existing instance, only after capacity/recovery gates |
-| Definitions | Immutable image with core employees and additive client variants |
-| Credentials | Dedicated service accounts, Secret Manager, Cloud SQL connector; CI workload identity |
+| Corporate site | Firebase Hosting `minkops-ai-prod`; minkops.com, www redirect to apex |
+| Console | Firebase Hosting `minkops-ai-console`; app.minkops.com |
+| API | `minkops-solution-api`, request billing, min 0/max 1, 1 CPU/512 MiB, concurrency 2 |
+| Interest form | `minkops-interest-api`, min 0/max 1, 1 CPU/512 MiB, concurrency 8 |
+| Worker | `minkops-worker` Cloud Run Job, one task/parallelism 1, max retries 0, 1 CPU/512 MiB, 30-minute timeout |
+| Recovery | `minkops-worker-recovery` Scheduler, hourly, OAuth ops identity, no retry storm |
+| Database | Isolated `minkops` PostgreSQL 16 database on `myndral-prod:us-central1:myndral-db` |
+| Credentials | Separate API/worker/ops/interest service accounts, per-secret IAM, Cloud SQL connector |
 
-Prefer a dedicated Minkops project for IAM/cost separation, sharing SQL only if
-safe; cross-project SQL needs explicit connector IAM. Firebase rewrites require
-Cloud Run in the Hosting project, so redeploy the existing interest API there.
-Alternatively use myndral-prod with separate sites/services/roles. Select the
-project before provisioning; do not silently change Myndral settings.
+Temporary verification URLs: https://minkops-ai-prod.web.app and
+https://minkops-ai-console.web.app. Native release profile uses
+https://app.minkops.com. HTTPS is verified on all three custom hosts, including
+the www-to-apex redirect and console deep-link navigation.
 
-infra/solution.Dockerfile builds locked Python dependencies and repository
-definitions, running as a non-root user. infra/firebase.json supplies two Hosting
-routing templates; project/site targets still need assignment. API rewrites and
-SPA fallbacks are specified. No project or site has been created.
+Myndral-like means replicating its managed service pattern and modest scale.
+Sharing SQL was our cost-saving recommendation, not a user requirement. It avoids
+a second SQL baseline near the entire budget. Application databases, SQL login
+roles and cloud identities remain separate. Myndral's application credentials and
+deployment were not modified. Daily backups at 21:00 UTC and deletion protection
+were enabled on the shared SQL instance before provisioning Minkops.
 
-## Cost envelope and SQL gate
+## Capacity, recovery and cost controls
 
-Illustrative conversion: **CAD 1.40/USD**, not a live exchange-rate guarantee.
-Confirm actual CAD SKUs, taxes and current-month usage before deployment.
-Myndral's existing bill is separate from Minkops's incremental budget; fully
-allocated reporting must include a stated share of the SQL baseline.
+Seven-day SQL CPU maximum was 16.6%; memory components showed 89.75–91.58% free,
+with usage peaking at 11.84%. The misleading utilization=100% metric was not used
+to size the deployment. Existing data was about 77 MiB; backend series peaked at
+seven each. Runtime login `minkops_app` has a 16-connection limit and no DDL,
+superuser, role-creation or database-creation rights. `minkops_owner` is NOLOGIN;
+`minkops_migrate` is a separate controlled migration identity.
 
-| Scenario | Planning estimate |
+A full pre-provisioning backup completed. A logical restore with PostgreSQL
+client 16 compared all 15 migration checksums, 27 tables and the worker wake row.
+The subsequent native-context wake migration brings production to 16 checksummed
+migrations; its terminal-job trigger is verified in production.
+A new full Cloud SQL backup completed after that migration and the production
+workflow checks. The original restore proof remains the pre-release baseline.
+The temporary restored database and bootstrap SQL login were removed. Match the
+dump/restore client to production: client 18 emits settings unsupported by 16.
+Restore a logical backup into a new isolated database, compare counts/checksums,
+then deliberately cut over; do not overwrite the shared instance as a test.
+
+| Control | Applied setting |
 | --- | --- |
-| Shared SQL, small pilot | Target CAD 3–8 incremental/month, retaining budget margin |
-| New db-f1-micro + 10 GB SSD | About USD 9.37/CAD 13.12 per 730-hour month before backup/other charges; viable only with a verified very small variable-cost envelope |
-| Eligible free e2-micro + self-managed PostgreSQL | USD 3.65/CAD 5.11 public IPv4 baseline; plan CAD 6–10 with small backup/transfer, operational ownership required |
-| Continuous Cloud Run worker | Exceeds budget; do not deploy the current forever loop as always-on |
+| Project budget | CAD 15/month; notifications at 50%, 80%, 100% |
+| Cloud Run spend cap | CAD 10/month, this project and Cloud Run only, gross spend excluding credits |
+| Scaling | Two HTTP services each max 1, min 0; worker drains one global lane |
+| Artifact retention | Delete builds older than 30 days; keep three newest versions per package |
+| Hosting retention | Two prior live releases per site |
+| Application logs | 30-day retention |
 
-Free Cloud Run allocations are shared across projects on the billing account.
-Existing Myndral jobs already run regularly; album email had 253 executions.
-Do not assume an unused free pool. With no free allocation, 1,000 executions of
-60 seconds at 1 CPU/512 MiB cost about USD 1.14/CAD 1.60; three-minute executions
-cost about CAD 4.79. API runtime, images, logging, backups and outbound bytes add
-to this. Jobs have a one-minute billing minimum; minutely empty polling is costly.
+Small pilot estimate: CAD 3–8 incremental/month, with margin below CAD 15. This
+is an estimate, not an invoice guarantee. Cloud Run free allowances are shared
+across the billing account. An idle hourly job has a one-minute billing minimum:
+720 monthly executions without free allowances are about USD 0.82/CAD 1.15 at
+an illustrative CAD 1.40/USD. Paid workflow durations, request volume and database
+file snapshots add variable costs. Avoid always-on polling, a second SQL instance,
+VM/public IPv4, load balancer, Cloud NAT, Redis or Kubernetes at this scale.
 
-Firebase static Hosting includes 10 GB storage and 10 GB/month transfer; excess
-transfer costs USD 0.15/GB. API rewrites add Cloud Run usage. Choose static Hosting
-rather than App Hosting, paid HTTPS load balancers, Cloud NAT, Redis, Kubernetes
-or HA SQL. The VM fallback depends on free-tier eligibility and supported US
-regions; it is self-managed, lacks HA and needs residency/latency review.
+Firebase Hosting includes 10 GB storage and 10 GB/month transfer per project;
+additional transfer is USD 0.15/GB. The 102.8 MB installer uses roughly 10 GB per
+100 full downloads. CDN hits also count. Retained content, artifacts and SQL
+snapshots need growth review before opening broad customer traffic.
 
-Seven-day SQL hourly maxima: CPU ~16.6%, used data ~77 MiB, PostgreSQL backends
-up to seven **per reported series**. Memory utilization reported 100%; this
-alone does not distinguish cache from working memory. Inspect free/cache/usage
-and total connections, then load-test before sharing. Low CPU is not proof of
-spare memory. Backups and deletion protection are disabled: verify recovery before
-launch. Use a separate database/role, bounded connections and no Myndral credentials.
+The Cloud Run cap has enforcement delay and allows in-flight work to finish;
+Firebase, SQL, artifacts and other services are outside its coverage. The CAD 15
+budget is an alert, not a universal hard cutoff. Check actual spend before larger
+rollouts and pause incoming work as projected spend approaches the budget. Do not
+disable Myndral's billing account to enforce the Minkops budget.
 
-Set project-scoped CAD alerts at 5/10/13 and halt new workload at projected 15.
-Use a supported billing spend cap if available; verify service coverage and
-enforcement delay. Alerts and instance limits alone cannot guarantee a ceiling.
-Bound images/log retention and storage growth. Current billing budgets could not
-be verified because of the read-only quota-project setup.
+## Production execution and ownership
 
-## Ordered implementation and deployment
+The immutable backend image packages core employees and additive client variants.
+Current API and worker image is `solution:7556783`, digest
+`sha256:9b8ef3bfb755e06be35e66678b1c6dea38c5115c928bdd402749ca6f131db886`.
+API revision `minkops-solution-api-00005-s7p` serves 100% of traffic.
+Interest image is `interest:6ce25fb`. Every future deployment
+must use a distinct reviewed commit tag or digest and record the previous revision.
 
-1. **Adapt worker hosting before launch.** Current bootstrap runs forever.
-   Add a bounded drain preserving claims, hosted-session recovery, cleanup and
-   native-write reconciliation across exits. Enqueue coalesced durable wake-up
-   transactionally with runnable work; dispatch after commit, retry failed
-   dispatch and use a low-frequency recovery sweep. Include desktop receipts,
-   retries and cleanup triggers. Existing database locks prevent duplicate paid
-   calls. Test lost wake-up, crashes, timeout and no-work exit. This adaptation
-   is not implemented by the Source Discovery patch.
-2. **Confirm SQL/budget gates.** Inspect memory components and concurrency;
-   isolate DB/role; enable backups/protection under a reviewed change; prove
-   restore into an isolated DB and compare projected spend. If sharing is unsafe,
-   choose the bounded VM alternative or revise capacity/budget before provisioning.
-3. **Bootstrap production.** Select project, accounts/sites and workload identity;
-   create app secrets, verified admin/tenant membership and email delivery.
-   Set AUTH_DEV_MODE=0; never demo-seed production. Stop workers, migrate through
-   0012_schema_discovery and install trusted client bindings. Reinstall legacy
-   bindings to record the owning solution identity.
-4. **Deploy versioned image.** Run migrations/installation with controlled
-   credentials; deploy API and bounded worker with Cloud SQL connector.
-   Existing immutable file snapshots live in PostgreSQL: include their growth
-   in backups/capacity. Container disk is temporary. Add object storage only for
-   a measured retention need with matching ownership/transport tests.
-5. **Deploy both static builds.** Build console and corporate site from reviewed
-   revision; set corporate VITE_INTEREST_API_URL=/api/interest. Bind Hosting
-   targets. Verify API proxy, tenant isolation, CSRF, logout, email/password
-   flows and private,no-store caching. App sessions use __session, the cookie
-   Hosting forwards; this is not Firebase Auth.
-6. **Prove live operation.** Run controlled hosted workflows; verify offline-PC
-   waiting/resume, schema review, current references, approve/hold/reject/edit,
-   replay-safe readback and paid-environment cleanup. Measure job durations,
-   connections, usage and errors before accepting customer workload.
+Worker wake generations commit with workflow changes. Dispatch follows commit,
+coalesces under a lease, and can fail without losing durable work. A bounded drain
+preserves existing per-run locks/session recovery; a global lane prevents overlap.
+Idle acknowledgement is fenced against concurrent enqueue. Completion or failure
+of required native Tally references creates a new durable wake even if the run
+remains queued; repeated receipts do not create another generation. Hourly recovery handles
+lost dispatches. A successful empty execution was verified before live workflows.
 
-## Corporate website: retire Vercel
+The organization disallows allUsers IAM grants. Only the two public HTTP services
+disable the Cloud Run IAM invoker check; application session/tenant/CSRF checks
+remain active. The worker Job remains IAM-private. `AUTH_DEV_MODE=0` and secure
+cookies are explicit. Firebase forwards opaque `__session`; PostgreSQL owns auth.
+API responses use private,no-store. SMTP TLS is verified and the fixed EHLO name
+avoids a container-host greeting rejected by the relay.
 
-Inventory Vercel domains/redirects, environment variables, analytics and any
-non-repository functions. Deploy corporate Vite build to Firebase Hosting;
-verify routes, assets, themes, SEO metadata and interest delivery on its temporary
-URL. Preserve existing interest API validation/delivery and email credentials.
+The owner signed up through production email delivery and verified the account.
+The isolated `mock-tenant` received only its administrator membership and the two
+trusted mock-client workflows. No platform-admin role, fake display tasks or
+automatic customer folder grants were seeded. Generated credentials and pairing
+state reside only in the operator's private state directory, outside Git.
+Installed core Source Discovery is 0.6.1 and mock-client Bill Entry variant is
+1.0.2. Client guidance explains the synthetic demo, printed billing reference and
+reviewed RC supplier purchase/GST ledger mappings in Test Company;
+core instructions, tenant boundaries and financial write checks remain shared.
 
-Attach the corporate custom domain and managed HTTPS, then change required DNS
-only; preserve mail/MX/TXT records. Verify apex/www redirects, HTTPS, deep-link
-refresh and a real interest submission outside the developer machine. Retain
-Vercel only as needed for rollback during verification. The owner explicitly
-accepts migration downtime, so no prolonged dual deployment or zero-downtime
-cutover is required. Once the GCP route and form delivery are verified,
-remove its Git integration, credentials, project and paid plan. Replace its
-required CI checks with repository validation and explicit GCP deployment gates.
-Record rollback DNS, last-good image and Hosting release before removal.
-No Vercel or DNS changes were made during planning.
+Source catalogs are immutable tenant-owned PostgreSQL JSON snapshots. Bill Entry
+pins the reviewed catalog and separately prepares current company references;
+schema discovery never exports business records. The real Windows-to-GCP receipt
+returned 275 tables, zero records, completed review and accepted identical replay.
+Tally repeats some method names at different positions; ordinal column identity
+preserves that metadata instead of incorrectly rejecting it.
 
-## MIN-123 completion gates
+Hosted Bill Entry run `f3103344-1c14-40c9-a326-9e9e40aca14a` completed using the
+reviewed cement invoice. All nine extracted fields matched the fixture. The
+native 0.4.1 adapter normalized typed GUID/ALTERID XML values before company and
+ledger rechecks. Tally readback found exactly one existing matching voucher;
+save reconciliation and replay performed no new import. The server accepted the
+same completion receipt twice, and the OpenAI session was deleted successfully.
+This proves the existing-voucher path; fresh append evidence remains a separate
+test rather than being inferred from duplicate reconciliation. Scanned steel run
+`68a19c1f-9f34-49bd-9189-640c215cd794` also completed after normal clarification:
+all nine fields matched, exactly one existing voucher was read back, and both
+native replay and repeated server receipt were accepted without another import.
 
-Merge readiness and production release are separate. Close MIN-123 only after
-backend/website availability, worker wake/recovery, restored backup, budget
-controls, ownership and rollback are proved. Verify the issue's exact current
-acceptance text before updating status; this document does not close the issue.
+Fresh append run `301c95d5-78d6-4acc-9168-b765efe8a922` completed for synthetic
+invoice `RC26-CEM-GCP-1002-01`, dated 2 October. Independent pre-read found zero
+matching vouchers; all nine reviewed values matched, the native outcome was
+`saved`, independent post-read found exactly one matching voucher, replay performed
+zero additional imports and the server accepted the repeated completion receipt.
+The completed task is
+https://app.minkops.com/mock-tenant/tasks/3ef93004-5f56-4f23-8d60-33c466588809.
+The local Educational Mode date rejection is preserved separately, with zero writes.
 
-The current [MIN-123 description](https://linear.app/minkops/issue/MIN-123/deployment)
-also requires sweeping MIN-122, publishing the finalized installer for download
-on the marketing website, thorough manual testing and demo preparation. After
-production checks, publish a versioned 0.4.0 installer with checksum and release
-notes to a durable GCP download location; verify the website link on a fresh PC.
-Prepare an isolated demo tenant/account and synthetic fixtures, prove both Source
-Discovery and Bill Entry end to end, and record the meeting/demo checklist.
-Store release may wait. Do not seed synthetic data into customer tenants.
+## Repeatable operator deployment
 
-MIN-122 still needs clean Windows 10/11 x64 and production HTTPS verification.
-Rebuild companion 0.4.0; cover driver-present/missing, server-backed data through
-local Tally, offline/revoked PC, refreshed folder grant and JSON download.
-Repeat new header-only discovery and a reviewed hosted Tally/Excel write.
-Confirm signing/distribution expectations before external release.
-Historical RC/current-PC tests do not satisfy the fresh-PC matrix.
-Scheduling MIN-121 remains separate unless required by MIN-123 acceptance.
+All scripts use authenticated gcloud tokens in memory; no service-account keys.
+Use `uv sync --frozen --all-packages`, Node 24 with `npm ci`, gcloud, Docker and
+Cloud SQL Auth Proxy. Database restore additionally requires PostgreSQL 16 tools.
+
+1. `bootstrap_hosting.py`: budgets and Hosting sites. Firebase activation requires
+   the owner to review its Terms once; Google Analytics was disabled.
+2. `provision_database.py` through a loopback proxy on 5433: initial isolated roles,
+   database, migrations and runtime grants. Then `verify_database_restore.py`.
+   This is initial provisioning, not a routine application deploy command.
+3. `configure_runtime.py`: named Secret Manager versions and scoped IAM. Existing
+   OpenAI key reuse was explicitly authorized; never print its payload. Rotate by
+   creating a version and deliberately updating both API and worker references.
+4. Build/push reviewed images, then `deploy_runtime.py --image ... --interest-image ...`.
+   Inspect Ready/traffic and Job success, not only gcloud's exit status.
+5. Build corporate with `VITE_INTEREST_API_URL=/api/interest`; build console.
+   `deploy_hosting.py corporate --installer PATH` verifies the checked-in SHA/size
+   before releasing installer, checksum, notes and site together. Deploy console
+   separately. `configure_domains.py` reports Google-required records.
+6. `configure_retention.py` reapplies bounded retention. Keep rollback artifacts
+   before reducing retention; never purge shared SQL as routine cleanup.
+
+Deployments currently run under the authenticated owner account. Repository CI
+validates changes. A future unattended pipeline must use repository/branch-bound
+OIDC Workload Identity and an explicit production approval environment; no long-lived
+GitHub service-account key was installed as a shortcut.
+
+## Website cutover and rollback
+
+Vercel inventory found no project environment variables or non-repository
+functions for Minkops. Its Hobby project served `apps/corporate-website/frontend`.
+The unrelated `the-gauss-ledger` project must remain untouched.
+
+GoDaddy authoritative DNS now has A `@` → `199.36.158.100`, CNAME `www` →
+`minkops-ai-prod.web.app`, CNAME `app` → `minkops-ai-console.web.app` and TXT `@` →
+`hosting-site=minkops-ai-prod`. All existing MX, SPF, DKIM, DMARC and verification
+records were preserved. Old website records were A `216.198.79.1` and www CNAME
+`cname.vercel-dns.com`. Downtime is acceptable; no prolonged dual hosting is needed.
+
+Google-managed HTTPS, www redirect, deep-link refresh, installer hash and the
+interest form's SMTP acceptance were verified on the custom domain. The user
+approved permanent deletion of `minkops-ai`; Vercel confirmed its removal and the
+team retains only the unrelated `the-gauss-ledger` project. Both obsolete Vercel
+configuration files were removed from the repository. A previous Firebase Hosting
+release and Cloud Run revision provide rollback; the retired Vercel deployment
+can no longer provide DNS rollback.
+
+## MIN-123 and MIN-122 completion gates
+
+**Completed:** backend/database deployment; restore and runtime-role checks;
+budget/retention controls; worker execution; signup/email verification; HTTPS auth,
+cookie, cache, CSRF/logout checks; trusted demo workspace; real metadata-only Tally
+discovery and receipt replay; hosted Bill Entry review, fresh append and duplicate reconciliation;
+interest-form SMTP acceptance; Windows 0.4.1 installer build/publication with checksum;
+custom-domain cutover and approved Vercel project retirement.
+Backend/operator suite: 197 tests plus 49 subtests. Web: 17 tests and lint. Native:
+35 Linux tests; Windows passes 34 with one privilege-dependent symlink test skipped.
+
+**Still required before marking MIN-123 Done:** the remaining MIN-122 device and
+accessibility evidence. Current-PC protocol checks do not prove a clean-PC install.
+The user explicitly selected this PC for current verification and left the
+clean-PC and remote-server Tally client gates open.
+
+Use `apps/windows-app/tests/production-smoke.mjs` only with an explicit test company
+and private owner state, for real schema or workflow-reference receipt checks.
+Its explicit save phase is limited to hash-allowlisted synthetic bills in Test Company,
+checks independent readback, and replays both the native save and server receipt.
+`infra/verify_production.py` launches only reviewed synthetic fixtures and
+records actual hosted results. Never substitute fake execution or seed_demo for
+production proof. Publish an unsigned **release candidate**, not a signed final
+release claim; the download page discloses its actual distribution status.
+
+MIN-122 still needs fresh Windows 10/11 x64 install/launch, driver present/missing,
+server-backed Tally through its client, offline/revoked PC, folder refresh, JSON
+download, complete Excel/error screen-reader coverage and signing review. Evidence
+from the earlier 0.3.1 local UI sweep remains historical. Store release can wait;
+scheduling MIN-121 is separate.
+
+## Demo walkthrough
+
+1. Open https://app.minkops.com and sign in with the verified owner. Credentials
+   are in the private operator `demo-owner.json`; do not paste them into issue
+   comments, slides or screen recordings. Select the release demo workspace.
+2. Install 0.4.1 from the corporate download page, connect this PC, and open only
+   Test Company in Tally. Keep real customer companies closed during the demo.
+   This PC reports Tally Educational Mode: use synthetic fixtures dated on its
+   permitted dates (the verified fixtures use 1 or 2 October). Preserve actual
+   customer invoice dates; an unsupported date must remain held, never shifted
+   to get past a licence restriction. The rejected 8 October release test created
+   zero vouchers and is retained in the review history.
+3. Run Source Discovery for Tally, inspect table/column context, then export its
+   JSON. Explain that the catalog belongs to this tenant and version; it contains
+   no sampled business rows. Each client can have its own reviewed catalog.
+4. Launch Bill Entry with the reviewed RC invoice and catalog. Show the waiting
+   for PC/reference stage, hosted extraction, evidence, arithmetic and review.
+   Client allocation guidance overlays the core workflow; write safeguards remain
+   enforced by the shared platform and native adapter.
+5. Approve only the reviewed values. Show Tally destination readback and task
+   completion. Re-running the same invoice reconciles its existing voucher without
+   creating a duplicate. Keep the earlier failed identity check in the audit log.
+6. Demonstrate a held/rejected review and disconnected-PC recovery without
+   touching customer records. Retain recovery state until the server acknowledges
+   completion. Finish with known limits: unsigned RC, device/accessibility matrix,
+   simple accounting Purchase mapping and unsupported complex allocations.
+
+The hosted walkthrough has exercised source confirmation/JSON output, normal
+owner login, extraction, clarification, browser review controls, duplicate
+reconciliation and fresh Tally save/readback. Use the completed task above as
+the fresh-save evidence; submitting its invoice again should report a duplicate.
+Native installation, disconnected-device and accessibility scenarios still need
+their separate MIN-122 evidence. Do not present those planned demo steps as done.
 
 ## Official references
 
 - [Cloud Run pricing](https://cloud.google.com/run/pricing)
-- [Cloud SQL pricing](https://cloud.google.com/sql/pricing)
 - [Hosting quotas](https://firebase.google.com/docs/hosting/usage-quotas-pricing)
-- [Hosting/Cloud Run routing](https://firebase.google.com/docs/hosting/cloud-run)
-- [Hosting cookies/cache](https://firebase.google.com/docs/hosting/manage-cache)
-- [SQL memory diagnosis](https://docs.cloud.google.com/sql/docs/postgres/optimize-high-memory-usage)
-- [Free-tier eligibility](https://docs.cloud.google.com/free/docs/free-cloud-features)
-- [External IP pricing](https://cloud.google.com/vpc/network-pricing)
+- [Hosting routing/cookies](https://firebase.google.com/docs/hosting/cloud-run)
+- [SQL memory](https://docs.cloud.google.com/sql/docs/postgres/optimize-high-memory-usage)
 - [Billing spend caps](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+- [Artifact cleanup](https://docs.cloud.google.com/artifact-registry/docs/repositories/cleanup-policy)

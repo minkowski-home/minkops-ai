@@ -13,7 +13,10 @@ Source discovery proposes actual workbook/sheet/table mappings with header
 positions and semantic concepts. Bill entry recognizes the appropriate confirmed
 destination, extracts PDFs/images, supplies field evidence and reports unresolved
 routing. The application owns approvals, checks and verified in-place Excel
-writes. Tally requires a future adapter.
+writes. Registered-PC discovery collects Tally ODBC table/column metadata and
+header-only workbook projections. It exports no business records. The tenant
+owns its immutable catalog; consuming workflows pin a reviewed version and
+refresh their operational references separately.
 
 See [Accounts desk](../../../../docs/accounts-desk.md) for setup, ownership,
 recovery and supported workbook limits.

@@ -114,3 +114,4 @@ def cleanup_once(url, store: RunStore, *, close_session=hosted_close_session):
         connection.commit()
         if run:
             close_run(connection, store, run, close_session=close_session)
+        return bool(run)

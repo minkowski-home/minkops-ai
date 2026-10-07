@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi import HTTPException, Request
+from starlette.background import BackgroundTasks
 from psycopg.types.json import Jsonb
 from minkops_api.auth import Db, User, require_csrf, tenant_access
 from minkops_api.auth import router as core_router
@@ -27,6 +28,15 @@ async def private_api_cache(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "private, no-store"
+    if os.getenv("WORKER_JOB_RESOURCE") and request.method in {"POST", "PATCH", "DELETE"}:
+        from minkops_platform.worker_hosting import dispatch
+        from minkops_connectors.cloud_run import run_job
+
+        tasks = BackgroundTasks()
+        if response.background:
+            tasks.add_task(response.background)
+        tasks.add_task(dispatch, os.environ["DATABASE_URL"], run_job)
+        response.background = tasks
     return response
 
 

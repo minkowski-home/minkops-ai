@@ -43,6 +43,17 @@ const scalar = (v) => {
   return null;
 };
 
+function tallyReferenceScalar(value) {
+  if (typeof value === "string") return value;
+  // Tally annotates scalar XML elements with TYPE attributes. Keep their text
+  // exact (including identifier leading zeroes), and reject nested records.
+  if (value && typeof value === "object" && !Array.isArray(value) &&
+      Object.keys(value).every((key) => key === "#text" || key.startsWith("@_")) &&
+      (!Object.hasOwn(value, "#text") || typeof value["#text"] === "string"))
+    return value["#text"] ?? "";
+  throw new Error("Tally reference field is not a scalar.");
+}
+
 async function excelReaderBytes(bytes) {
   // OPC permits package-absolute relationship targets. ExcelJS 4.4 only resolves
   // relative table targets (upstream #1468). Normalize the reader's in-memory
@@ -291,16 +302,19 @@ export async function discoverTally(
         throw new Error(
           "Collection exceeds 10,000 records; narrow your selected categories.",
         );
+      records = records.map((r) => Object.fromEntries(
+        Object.entries(r)
+          .filter(([key]) => ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID"].includes(key))
+          .map(([key, value]) => [key, tallyReferenceScalar(value)]),
+      ));
       if (category === "company")
         records = records.filter(
           (r) =>
             r["@_NAME"] === company ||
-            r.NAME === company ||
-            r.NAME?.["#text"] === company,
+            r.NAME === company,
         );
       if (category === "company" && !records.length)
         throw new Error("Selected company details were not returned.");
-      records = records.map((r) => Object.fromEntries(Object.entries(r).filter(([key]) => ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID"].includes(key))));
       const fields = new Set();
       const walk = (v, p = "") => {
         if (v && typeof v === "object")

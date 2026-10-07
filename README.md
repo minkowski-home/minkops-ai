@@ -24,9 +24,9 @@ workflow implementation remains Git history, not a parallel methodology to
 preserve. Existing deterministic adapters and checks remain where they enforce
 real integration or correctness requirements.
 
-`platform-ai/bill-entry-architecture` is the consolidated development branch:
-the declarative/shared runtime plus the complete Bill Entry and Windows companion
-work. See [branch convergence and upgrade](docs/branch-convergence.md) for the
+`main` contains the consolidated workflow and Windows companion architecture;
+the earlier `platform-ai/bill-entry-architecture` branch was merged and removed.
+See [branch convergence and upgrade](docs/branch-convergence.md) for the
 retained source revisions, migration paths, verification, and recovery.
 
 
@@ -104,8 +104,10 @@ and workflow settings, task observations, and four selectable brand themes.
 `mock-tenant` exposes Source discovery and Bill entry as executable workflows,
 alongside the older image-to-Excel test. Agent results, reviews and verified local
 writes appear in task progress and timelines. The outbox has no production
-publisher yet; the app polls durable state. Deployment remains separate from
-local execution proof. Customer manifests in `solutions/` describe composition.
+publisher yet; the app polls durable state. Production uses Firebase Hosting,
+Cloud Run and an isolated PostgreSQL database. See [deployment and MIN-123 gates](docs/deployment-min-123.md)
+for verified hosting, cost controls and remaining device/demo checks.
+Customer manifests in `solutions/` describe composition.
 
 `apps/windows-app` supplies the Windows 10/11 x64 shell for that shared UI,
 tray execution, native folder grants, and client-PC Tally/Excel source discovery.

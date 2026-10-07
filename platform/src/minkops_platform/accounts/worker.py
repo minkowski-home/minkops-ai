@@ -56,4 +56,4 @@ def run_forever(url):
 
 def cleanup_once(url):
     """Retry terminal-run environment cleanup through the shared lifecycle."""
-    lifecycle.cleanup_once(url, STORE, close_session=close_session)
+    return lifecycle.cleanup_once(url, STORE, close_session=close_session)
