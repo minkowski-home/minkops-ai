@@ -811,5 +811,25 @@ kept names/types/nullability and every existing allocation/scope limit, and test
 the real PC-to-GCP completion path rather than relying on fabricated metadata.
 
 **Result:** Both regressions pass. The catalog retains repeated methods faithfully;
-malformed receipts cannot make two columns claim the same position. Production
-verification remains a release gate until the corrected image accepts the receipt.
+malformed receipts cannot make two columns claim the same position. The corrected
+Cloud Run image accepted the real Windows receipt and its identical replay:
+275 schema tables, zero business records, and a completed tenant catalog.
+
+## Normalize typed Tally identities at the connector boundary (7 October 2026)
+
+**Situation:** The first hosted Bill Entry run stopped before paid extraction:
+Tally's XML TYPE attributes turned company GUIDs into parser objects, preventing
+the workflow from pinning the observed company identity.
+
+**Task:** Restore exact identity checks without relaxing company/ledger write
+validation or exposing business data through Source Discovery.
+
+**Action:** Added a failing native regression using real typed XML shapes and
+malformed nested values. Normalize only approved operational reference fields at
+the connector boundary, preserving exact strings and leading zeroes. Reject
+nested records instead of stringifying or guessing identity. Publish the changed
+native adapter as a new installer version rather than overwriting its predecessor.
+
+**Result:** Typed GUID, parent and alteration identifiers pass the regression;
+malformed wrappers remain unavailable. Live workflow verification is recorded
+separately in the deployment checklist.
