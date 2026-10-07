@@ -21,6 +21,7 @@ summary = {}
 for metric in (
     "cpu/utilization",
     "memory/utilization",
+    "memory/components",
     "postgresql/num_backends",
     "disk/bytes_used",
 ):
@@ -51,6 +52,15 @@ for metric in (
             "maximum": max(values) if values else None,
             "mean_hourly_maximum": sum(values) / len(values) if values else None,
         }
+        if metric == "memory/components":
+            summary[metric] = {}
+            for series in data.get("timeSeries", []):
+                values = [float(next(iter(p["value"].values()))) for p in series.get("points", [])]
+                summary[metric][series["metric"]["labels"]["component"]] = {
+                    "minimum": min(values) if values else None,
+                    "maximum": max(values) if values else None,
+                    "mean_hourly_maximum": sum(values) / len(values) if values else None,
+                }
     except HTTPError as error:
         summary[metric] = {"unavailable": error.code}
 print(json.dumps(summary, indent=2))
