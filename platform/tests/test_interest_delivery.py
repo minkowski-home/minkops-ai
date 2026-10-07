@@ -35,6 +35,27 @@ def test_identical_submission_is_sent_once(monkeypatch, submission):
     assert len(calls) == 1
 
 
+def test_concurrent_identical_submissions_share_one_attempt(monkeypatch, submission):
+    calls = []
+
+    async def fake_send(**kwargs):
+        calls.append(kwargs)
+        await asyncio.sleep(0.01)
+        return "<test@minkops.com>"
+
+    monkeypatch.setattr(interest_delivery, "send_discovery_notification", fake_send)
+    guard = interest_delivery.DeliveryGuard()
+
+    async def run():
+        await asyncio.gather(
+            guard.send(submission, "same-key"),
+            guard.send(submission, "same-key"),
+        )
+
+    asyncio.run(run())
+    assert len(calls) == 1
+
+
 def test_ambiguous_smtp_acceptance_blocks_automatic_retry(monkeypatch, submission):
     calls = 0
 
