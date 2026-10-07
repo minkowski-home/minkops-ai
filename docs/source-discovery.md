@@ -8,7 +8,7 @@ registered PC while that companion runs in the tray.
 ## Connect a client's PC
 
 1. Install Minkops, sign in with a verified email/password account, open the
-   workspace's **Connections**, and select **Connect this PC**.
+   workspace's **Connected PCs**, and select **Connect this PC**.
 2. In **Source discovery**, select that PC. Connect an explicit Excel folder
    from the desktop app. Native paths and folder grants stay encrypted on the
    PC; the server stores source/device identities and authorized snapshots.

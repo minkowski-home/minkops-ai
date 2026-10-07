@@ -703,3 +703,25 @@ Desktop/mobile browser checks cover both completed outcomes, all four themes and
 installed client policy. The consolidated branch becomes the development home;
 no merge or PR changes staging/main. Production deployment, signing and a fresh
 device installation matrix remain separate.
+
+## 2026-10-07 — Keep integration fixtures out of customer-facing workspaces
+
+**Situation:** A local browser preview shared the database used for regression
+tests. Unique simulated desktop registrations accumulated as 91 misleading
+Accounts/Bill PC cards, even though only one physical PC had been connected.
+
+**Task:** Remove the misleading registrations while retaining history, and make
+the normal test path safe without relying on engineers remembering to seed a
+different database.
+
+**Action:** Before pytest collects modules, create a uniquely named database on
+the supplied server, migrate and seed it, and redirect both database URLs to it.
+Drop only that invocation's database at shutdown, including failures. Verify
+source records remain untouched and cleanup survives an exception. Back up the
+local preview database and revoke the identified synthetic registrations instead
+of deleting device or financial history. Label the existing page Connected PCs.
+
+**Result:** All 169 backend tests and 45 subtests pass in the disposable database;
+the supplied database's device count remains unchanged and no temporary database
+remains. Web tests, build and lint pass. The architecture and native execution
+contracts remain unchanged.

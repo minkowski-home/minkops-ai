@@ -97,3 +97,7 @@ instructions. Current refactor prompts match the benchmark, but the older
 worker does not honor the new complete bundle. Select one revision, preserve
 run/session records, and reconcile outstanding writes before rolling back.
 Local testing is separate from production deployment.
+
+Database-backed pytest runs now create and clean up their own database; see
+[isolated integration tests](../db/README.md#isolated-integration-tests). The
+supplied PostgreSQL role needs database-creation permission.

@@ -123,3 +123,7 @@ verification also ran the real hosted model: discovery found headers on row 4;
 three PDFs plus a scanned PNG appended four rows to the existing local register
 (16 → 20), preserved prior rows and reference files, and completed only after a
 verified browser receipt. This is local proof; no production deployment is implied.
+
+Database-backed pytest runs now create and clean up their own database; see
+[isolated integration tests](../db/README.md#isolated-integration-tests). The
+supplied PostgreSQL role needs database-creation permission.

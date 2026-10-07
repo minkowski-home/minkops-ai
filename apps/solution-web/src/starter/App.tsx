@@ -85,7 +85,7 @@ function Console() {
   const path = location.pathname;
   const title = path.includes("/employees/") ? "Employee" : path.endsWith("/employees") ? "Employees"
     : path.includes("/workflows/") ? "Workflow" : path.endsWith("/workflows") ? "Workflows"
-      : path.includes("/tasks/") ? "Task" : path.endsWith("/connections") ? "Connections" : path.endsWith("/access") ? "Access" : "Dashboard";
+      : path.includes("/tasks/") ? "Task" : path.endsWith("/connections") ? "Connected PCs" : path.endsWith("/access") ? "Access" : "Dashboard";
   const attentionCount = workspace.tasks.filter((task) => task.status === "attention").length;
 
   return <ConsoleShell title={title} tenantName={workspace.tenant.name} routeSlug={routeSlug}

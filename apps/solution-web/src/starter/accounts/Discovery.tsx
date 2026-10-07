@@ -229,7 +229,7 @@ export function DiscoveryLaunch({
       <label className="config-field">Sources to discover<select value={destinationMode} onChange={e=>setDestinationMode(e.target.value as typeof destinationMode)}><option value="excel">Excel</option><option value="tally">Tally</option><option value="both">Both · Excel and Tally</option></select></label>
       {!devices.length && (
         <p role="status">
-          Open the Windows app and connect this workspace in Connections first.
+          Open the Windows app and connect this workspace in Connected PCs first.
         </p>
       )}
       <div className="discovery-source-grid">

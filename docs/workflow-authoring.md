@@ -196,3 +196,7 @@ Set `TEST_DATABASE_URL` to an isolated migrated, demo-seeded database. These
 tests mutate fixtures. The native and web test/build commands remain documented
 in their existing guides. New business-system MCP bindings, scheduling, admin
 workflow creation UI, and customer-machine Python execution are separate work.
+
+Database-backed pytest runs now create and clean up their own database; see
+[isolated integration tests](../db/README.md#isolated-integration-tests). The
+supplied PostgreSQL role needs database-creation permission.

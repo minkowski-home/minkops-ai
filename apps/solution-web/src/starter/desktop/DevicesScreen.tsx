@@ -69,7 +69,7 @@ export function DevicesScreen({
     <section className="route-screen devices-screen">
       <header className="route-heading">
         <div>
-          <p className="eyebrow">Connections</p>
+          <p className="eyebrow">Connected PCs</p>
           <h2>Your PCs</h2>
           <p>
             Keep Minkops running on a connected PC to work with its Tally and local files.

@@ -45,7 +45,7 @@ directory. Original business files remain in the selected folder.
 
 Device credentials are hashed on the server, rotate on reconnect, expire after
 90 days and stop working on revocation or lost membership. Desktop logout stops
-its companion; web users can revoke a PC in Connections. An operation already
+its companion; web users can revoke a PC in Connected PCs. An operation already
 saving cannot be rolled back by logout or cancellation. Late domain receipts
 record what was actually applied without marking a cancelled run complete.
 
