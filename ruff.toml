@@ -1,5 +1,6 @@
 # Ruff configuration for Python linting and formatting
 # https://docs.astral.sh/ruff/
+line-length = 100
 
 [lint]
 # Enable common linting rules
@@ -41,9 +42,6 @@ quote-style = "double"
 
 # Indent with spaces
 indent-style = "space"
-
-# Line length
-line-length = 100
 
 [lint.per-file-ignores]
 # Ignore import errors in __init__.py files

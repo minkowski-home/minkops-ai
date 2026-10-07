@@ -1,1 +1,1 @@
-"""Reusable application services for Minkops."""
+"""Reusable Minkops application services."""

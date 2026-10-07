@@ -1,0 +1,5 @@
+{
+  "version": "1.0.0",
+  "defaults": {"output_mode": "tally_in_place"},
+  "instructions": "client-instructions.md"
+}

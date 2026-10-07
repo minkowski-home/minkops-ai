@@ -1,33 +1,15 @@
-# Operator Console — UI kit
+# Shared console preview
 
-A recreation of the Minkops solution web app (`apps/solution-web` in the `minkops-ai`
-repo), rebuilt on this design system. The console is where a tenant's operator
-watches their fleet, hands work to agents, and clears the human-interrupt queue.
+Open `index.html` through a local file server to inspect the current base app design. This static specimen reuses `design/styles.css`, `design/console.css`, and `design/login.css` from the connected app. `preview.css` contains only preview-specific adjustments, and `preview.js` provides local sample data.
 
-## Screens
+The preview includes sign-in/sign-up, Dashboard and resizable Activity pane, Employees and employee detail, Workflows and workflow detail, task progress, Access, sidebar collapse, and all four themes. Settings changes in this specimen last only until the page reloads. Sign-in is simulated; no credentials are sent. The Image to Excel test run is available only in the connected app.
 
-| File | What it is | Source |
-| --- | --- | --- |
-| `LoginScreen.jsx` | Split sign-in: graphite story panel + form | `src/pages/Login.tsx` |
-| `ConsoleShell.jsx` | Sidebar (collapsible), header, pane headers | `src/components/layout/{Sidebar,AppShell}.tsx` |
-| `AgentsPane.jsx` | Left pane — teams and individual agents with switches | `src/components/agents/AgentPanel.tsx` |
-| `TaskThread.jsx` | Centre pane — task chat + composer | `src/components/task/TaskPanel.tsx` |
-| `AttentionQueue.jsx` | Right pane — interrupts by priority | `src/components/interrupt/InterruptPanel.tsx` |
-| `AgentsScreen.jsx` | `/agents` — hire-an-agent catalogue | `README.md` planned-agents roster |
-| `PlaceholderScreen.jsx` | `/analytics`, `/settings` — routed but undesigned | — |
-| `ConsoleData.jsx` | Mock agents, messages, interrupts, user | `src/mock/*.ts` |
+The sample belongs to a mock tenant. It illustrates two employees, three workflows in active/paused/planned states, and three task states. It is not a production seed or a claim that these workflows execute. The real app enforces tenant access and saves settings through the API. A new PR Infra tenant has no employees or workflows.
 
-## Interactions that work
+Use this kit for visual review, and use the running app for end-to-end testing.
 
-Sign in → dashboard · collapse the sidebar · switch agents and the whole team
-on/off · select an agent row · type a task (Enter sends; an agent replies after
-a beat) · resolve / acknowledge / dismiss interrupts, with the header badge and
-priority pills recounting live · navigate to the agent catalogue.
-
-## Deliberately absent
-
-`/analytics` and `/settings` are real routes in the codebase with no screens
-shipped. They render an explicit "not designed yet" state rather than an
-invented dashboard. The original app also shipped a three-theme selector
-(light / dark / paper); this system replaces that with a single light theme, so
-the control is gone.
+`accounts.html` adds the Accounts desk launch, editable run configuration,
+searchable discovery mapping, bill evidence/review and verified local-save
+states. It imports the same `design/accounts.css` used by the app and supports
+Minkops Light, Minkops Dark, Slate Light and Slate Dark. Its buttons are disabled
+because execution belongs to the authenticated running app, not this specimen.

@@ -1,8 +1,19 @@
-<!-- @dsCard group="Brand" viewport="700x170" name="Wordmark lockups" subtitle="Type-set only — Minkops has no logo mark. Ember dot is the sole permitted companion." -->
-<link rel="stylesheet" href="../styles.css"><style>body{margin:0;padding:18px;background:var(--surface-page);color:var(--text-primary)}.lbl{font:var(--type-eyebrow);letter-spacing:var(--ls-eyebrow);text-transform:uppercase;color:var(--text-muted)}.hex{font:var(--type-mono);color:var(--text-muted)}.r{display:flex;gap:14px;flex-wrap:wrap}.l{display:flex;align-items:center;gap:9px;padding:16px 20px;border-radius:var(--radius-3)}.w{font:var(--fw-wordmark) 22px/1 var(--font-wordmark);letter-spacing:var(--ls-wordmark)}.dot{width:8px;height:8px;border-radius:50%;background:var(--brand-ember)}</style>
-<div class="r">
-<span class="l" style="border:1px solid var(--border-default)"><span class="dot"></span><span class="w">minkops</span></span>
-<span class="l" style="background:var(--surface-inverse)"><span class="dot"></span><span class="w" style="color:var(--text-inverse)">minkops</span></span>
-<span class="l" style="border:1px solid var(--border-default)"><span class="w">minkops</span><span class="hex" style="padding-left:10px;border-left:1px solid var(--border-default)">console</span></span>
+<!-- @dsCard group="Brand" viewport="700x270" name="Wordmark lockups" subtitle="Supplied orange and slate artwork, plus the compact typeset app wordmark." -->
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 18px; background: var(--surface-page); color: var(--text-primary); }
+  h2 { font: var(--type-title); margin-bottom: 12px; }
+  .samples { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+  figure { margin: 0; }
+  img { display: block; width: 155px; height: 155px; border: 1px solid var(--border-default); }
+  figcaption { margin-top: 8px; font: var(--type-label); color: var(--text-secondary); }
+  .app-mark { width: 190px; height: 155px; display: flex; align-items: center; padding: 14px; border: 1px solid var(--border-default); background: var(--surface-sunken); }
+  .wordmark { font: var(--fw-wordmark) 24px/1 var(--font-wordmark); letter-spacing: var(--ls-wordmark); }
+  .dot { display: inline-block; width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: var(--signal-live); }
+</style>
+<h2>Wordmark</h2>
+<div class="samples">
+  <figure><img src="../assets/logos/logo-orange.PNG" alt="Orange Minkops logo"><figcaption>Minkops variant</figcaption></figure>
+  <figure><img src="../assets/logos/logo-slate.PNG" alt="Slate Minkops logo"><figcaption>Slate variant</figcaption></figure>
+  <figure><div class="app-mark"><span><span class="dot"></span><span class="wordmark">minkops</span></span></div><figcaption>Compact app header</figcaption></figure>
 </div>
-<p class="hex" style="margin-top:14px">No mark, no icon, no gradient. Clear space = the cap height of the wordmark on all sides.</p>

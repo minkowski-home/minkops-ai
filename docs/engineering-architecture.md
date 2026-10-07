@@ -1,56 +1,95 @@
 # Engineering architecture
 
-## Core model
+## Current product boundary
 
-Minkops is organized around business workflows. A workflow is the unit that
-defines and executes a process from input through verified outcome. It can use
-ordinary Python, a model call, and concrete tools as needed.
+Skill-driven execution using the OpenAI-managed Codex harness and adequate
+authorized MCP/REST tools is the canonical workflow architecture. New workflows
+start with employee procedures, tool capabilities, and business contracts;
+custom implementation follows only demonstrated gaps or enforceable guarantees.
+The pre-refactor methodology is historical, with no parallel-maintenance
+requirement. Existing deterministic adapters, checks, and non-agent application
+services remain appropriate for their concrete integration and control roles.
 
-An **AI Employee** is a product catalog abstraction. It groups workflows and
-provides customer-facing name, description, and availability. It has no
-independent runtime, prompt, tool implementation, or business logic.
+OpenAI-hosted Agents API environments are the selected execution architecture.
+Self-hosted Codex executors are outside the current refactor. Hosted sandbox
+Python execution and browser-granted local file saves do not imply an agent
+running on the customer's machine. The four workflow methods and their current
+scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
 
-An **agent** is a bounded autonomous reasoning loop inside a workflow. Use one
-only when the workflow needs iterative reasoning and tool selection. A fixed
-sequence of steps is a workflow, not an agent.
+The Windows shell shares the web UI and adds an authenticated outbound companion
+for bounded native folder operations and a Tally connection check. Durable
+device/job controls live in `platform/`; native filesystem/Tally adapters live
+in `connectors/`. The companion does not host or replace the managed AI harness.
+See [Windows app architecture and recovery](windows-app.md).
 
-A **skill** is reusable procedural knowledge supplied to model calls. Keep
-instructions beside the first workflow that needs them. Extract a skill when
-multiple workflows reuse the same knowledge.
+Product development centers on `apps/`; workflow execution should maximize
+employee skills, prompts, OpenAI-provided capabilities, and adequate existing
+MCP/REST integrations. `platform/` supplies only shared control requirements
+that are justified by actual workflows. Preserve the dependency direction
+apps → platform → connectors, without recreating the managed harness or
+prebuilding a general workflow engine.
 
-A **tool** is a bounded callable operation. A **connector** implements access
-to an external system and can expose its tools. A separate capabilities layer
-is unnecessary until workflows need provider substitution, discovery, or
-permission grouping.
+`apps/solution-web` and `apps/solution-api` serve one shared application for
+every tenant. A signed-in user belongs to a tenant as an admin or member.
+Platform admins can manage any tenant; tenant admins manage their own. Other
+members can view settings. Work email domains provide a verified discovery
+hint, never automatic access. Invitations and approved join requests establish
+membership, including for personal email addresses.
 
-## Where things live
+Each tenant owns employees, workflows, tasks, and its settings. A workflow can
+reference multiple employees through `workflow_employees`; there is no agent
+team entity. Employees and workflows have small declarative JSON Schema
+contracts plus validated JSONB values. This supports different controls per
+client without adding a database column or handwritten form for every setting.
+The API authorizes each read and write against the requested tenant. Composite
+foreign keys prevent links across tenants.
 
-- `workflows/` — reusable Python workflow implementations. Keep a workflow
-  local to its application or solution until a second caller makes reuse real.
-- `solutions/<id>/` — client-specific workflow composition and configuration:
-  mappings, policies, prompts, employee catalog choices, and connector
-  declarations.
-- `connectors/` — implemented provider integrations and their concrete tools.
-- `platform/` — shared runtime infrastructure such as persistence, tenancy,
-  approvals, and job execution when those needs become concrete.
-- `apps/` — deployable product entry points; keep HTTP and UI concerns here.
-- `warehouse/` — the dbt warehouse and its own project lifecycle.
-- `packages/` — small shared contracts or assets that have multiple callers.
+The dashboard displays the signed-in user's name and observable work. The
+activity pane owns active tasks, attention requests, handoffs, and recent
+outcomes. Each task has a status, progress, short summary, and event timeline.
+The pane is adjustable on desktop. The four app themes use the locked brand
+palette in `design/tokens/` and a per-browser preference.
 
-Do not create directories for concepts without a concrete implementation or
-reuse need. In particular, AI Employees do not need backend folders; skills
-and agents are selective patterns rather than mandatory layers; and a handful
-of Python functions do not make a reusable module.
+## Definition installation and dispatch
 
-## Example target: PDF bill to Excel
+Repository-owned employee definitions and client bindings install atomically
+through the shared installation service and administrative CLI. Operator
+settings/statuses survive reinstall; incompatible schemas are rejected. Installed
+handler, presentation, policy, and capability declarations are separate from
+editable workflow preferences. A future admin UI can call the same services.
 
-The workflow receives a bill, extracts structured fields, validates them,
-checks for duplicates, applies the client's purchase-register mapping, obtains
-approval when policy requires it, writes the row through the Excel connector,
-and verifies the result. PR Infra's workbook columns and supplier rules live in
-`solutions/pr-infra/`. Invoice extraction instructions remain beside the
-workflow until another workflow reuses them. Supplier resolution becomes an
-agent only if it needs iterative evidence gathering.
+The shared launch service pins authorized resource IDs/hashes and the complete
+execution bundle. A handler registry selects ordinary Python application
+adapters independently of workflow keys. Accounts keeps its business checks,
+catalog review, and verified Excel write mechanics. The default skill handler
+supports reviewed proposals; no additional employee/workflow is enabled.
 
-The AI Employee shown in the console merely exposes this workflow alongside
-other available workflows.
+`workflow_runs` retains existing run rows and foreign-key relationships.
+`account_runs` is an updatable compatibility view, not another execution store.
+The current worker command delegates to shared dispatch and lifecycle code.
+Skills can bundle Python helpers; mandatory client policies run independently
+in trusted Python and before writes. The current file runtime still disables
+network access and does not provision business-system MCP tools.
+
+See [workflow authoring](workflow-authoring.md) for contracts, installation,
+extension points, and migration/rollback guidance.
+
+## Persistence and events
+
+`db/migrations/` is the versioned OLTP source of truth. Migrations are applied
+transactionally with a checksum, and changed migrations are rejected. The
+initial PostgreSQL schema starts clean: identity, membership, employees,
+workflows, task observations, and an event outbox. Writes to observable task
+state and settings insert outbox records in the same transaction. Accounts desk now has a durable database worker and OpenAI-hosted runtime.
+The app polls task state; there is no production outbox publisher or message
+broker yet. See [Accounts desk](accounts-desk.md) for run and write ownership.
+
+`warehouse/` is intentionally empty. It has no schema, dbt project, or
+pipeline; its design is reserved for separate work.
+
+## Test fixture
+
+`db/seed_demo.py` creates `mock-tenant` with sample employees, workflows, and
+tasks for manual testing. Its image-to-Excel route is a mock-tenant-only test
+workflow. PR Infra starts with zero employees and zero workflows. The two Accounts desk workflows are active for the mock tenant and execute
+against explicit folder grants. Local fixtures do not imply a production release.

@@ -1,62 +1,107 @@
-# Corporate website API
+# Corporate Website Backend
 
-This FastAPI service validates discovery form requests and exposes the health
-route used by Cloud Run. Transport and request handling live here; submission
-orchestration is in `platform/`, and Google Workspace SMTP is isolated in
-`connectors/`.
+Python + FastAPI backend for the corporate website. This app owns HTTP transport
+and bootstrap; submission orchestration lives in `platform/`, and the Google
+Workspace SMTP adapter lives in `connectors/`.
 
 ## Local development
 
-From the repository root:
+Run these commands from the repository root. The root `uv` workspace owns the
+shared lockfile and `.venv`:
 
 ```bash
-uv sync --project apps/corporate-website/api
-uv run --project apps/corporate-website/api uvicorn minkops_corporate_website_api.main:app --reload --port 5000
-uv run --project apps/corporate-website/api pytest
+uv sync --all-packages
+uv run --all-packages uvicorn minkops_corporate_website_api.main:app --reload --host 127.0.0.1 --port 5000
+uv run --all-packages pytest apps/corporate-website/api/tests
 ```
 
-The local form server proxies `/api` to `http://127.0.0.1:5000`. To submit a
-real message, configure the SMTP settings listed in the service deployment
-runbook; tests use a stub transport.
+The local form server proxies `/api` to `http://127.0.0.1:5000`. Tests use a
+stub transport.
 
-## Inquiry delivery
+## Discovery form delivery
 
-The public `POST /api/interest` endpoint sends to the fixed inbox
-`info@minkops.com`. Visitor addresses are used only as `Reply-To`; the recipient
-and public sender are fixed. Configure `SMTP_HOST=smtp-relay.gmail.com`,
-`SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL=info@minkops.com`,
-and `SMTP_FROM_NAME=Minkops`. The existing SMTP authentication values are
-injected from Secret Manager references and must not be copied into frontend
-configuration or image contents.
+The public form endpoint is `POST /api/interest`. It validates submitted fields,
+then sends a notification to the fixed recipient `info@minkops.com` through
+Google Workspace Gmail SMTP. The visitor's address is used only as `Reply-To`;
+the visitor cannot choose the recipient or sender. This service uses the
+existing Myndral SMTP configuration pattern without sharing or changing
+Myndral's service.
 
-The connector uses STARTTLS and `minkops.com` as its EHLO identity. Logs contain
-only delivery phase, exception class, a numeric SMTP response code, and a
-whitelisted reason category; they never include provider text, account
-addresses, credentials, or submitted content. Connection/TLS/authentication
-and explicit server refusals are confirmed pre-acceptance failures. A timeout
-or disconnect during message submission is ambiguous and suppresses automatic
-same-process retry.
+Configure these server-side environment variables in the API deployment, using
+the existing SMTP Secret Manager resource references for the first four values:
 
-For a no-email runtime check of relay reachability, TLS, and authentication, run
-`python -m minkops_connectors.smtp_diagnostics` in the configured service image.
+- `SMTP_HOST`: `smtp-relay.gmail.com` (Google Workspace SMTP relay).
+- `SMTP_PORT`: `587`.
+- `SMTP_USER` and `SMTP_PASSWORD`: existing Workspace SMTP authentication
+  configuration, injected by Secret Manager and never placed in frontend config.
+- `SMTP_FROM_EMAIL`: `info@minkops.com` (the public sender alias).
+- `SMTP_FROM_NAME`: `Minkops`.
 
-## Container build and Cloud Run deployment
+The API accepts mail settings only for the Workspace SMTP relay on port 587 and requires the
+public From alias. Its RFC `From` header and SMTP envelope sender use
+`info@minkops.com`; the visitor's email is Reply-To. An alias does not prove that
+every mail client or transport header hides the authenticated mailbox identity.
+Inspect raw delivered headers (including `From`, `Sender`, `Return-Path`, and
+authentication headers) before calling privacy verified. Use a dedicated
+public-domain mailbox if the Workspace alias leaks identity; do not change the
+current Workspace setup without the required owner decision.
 
-The Docker build uses the repository root as its context so it can package the
-API, platform service, and connector without copying unrelated applications:
+The API includes a honeypot, a five-request-per-ten-minute per-process limiter,
+and a bounded one-day in-process duplicate guard. Google Workspace SMTP has no
+provider idempotency key: accepted or ambiguous attempts are suppressed only in
+that process, not durably across restarts, instances, or overlapping revisions.
+A disconnect or timeout during message submission is ambiguous; the visitor is
+told not to retry automatically and to contact the fixed inbox so a person can
+check. Connection, TLS, authentication, and explicit SMTP rejection responses
+are reported as confirmed pre-acceptance failures. Adapter logs include only
+the phase, exception class, and numeric SMTP response code; they never include
+request bodies, credentials, provider response text, or account addresses.
+The relay connection uses `minkops.com` as its EHLO identity.
+
+The connector's no-message runtime check can distinguish relay reachability/TLS
+from authentication without sending a test email:
 
 ```bash
-docker build -f apps/corporate-website/api/Dockerfile -t minkops-interest-api .
+python -m minkops_connectors.smtp_diagnostics
 ```
 
-For Cloud Run, submit that same root context with
-`gcloud builds submit --project myndral-prod --region us-central1 --config apps/corporate-website/api/cloudbuild.yaml .`,
-then deploy the image to the dedicated `minkops-interest-api` service. Keep
-existing secret references in Secret Manager; never put SMTP credentials in the
-image, frontend bundle, or command-line output.
+The API returns `202` only after the Workspace SMTP server accepts the message;
+that alone does not prove the message reached or was read in the target inbox.
 
-The duplicate guard and rate limiter are process-local and best-effort. Cloud
-Run restarts or additional instances do not share their state, so they are not
-durable exactly-once or global abuse controls. If SMTP disconnects after a
-send attempt starts, the API reports an uncertain outcome and suppresses an
-automatic same-process retry rather than risking a duplicate.
+## Production hosting
+
+The frontend is a static Vite site on Vercel. The FastAPI endpoint is a separate
+Cloud Run service. The canonical production hosts (`minkops.com` and
+`www.minkops.com`) use a checked-in public Cloud Run URL in the frontend; it
+contains no credentials. Other deployment hosts can override it with
+`VITE_INTEREST_API_URL`. Local Vite development uses its `/api` proxy, and
+preview hosts do not default to the live inbox. The API CORS allowlist includes
+Minkops production and local development origins.
+
+### Cloud Run deployment
+
+Build from the repository root so the image packages only the API, platform
+service, and SMTP connector needed by this app:
+
+```bash
+gcloud builds submit \
+  --project myndral-prod \
+  --region us-central1 \
+  --config apps/corporate-website/api/cloudbuild.yaml \
+  .
+```
+
+Deploy the resulting image to the dedicated `minkops-interest-api` service;
+do not update the existing Myndral service or secret payloads. Bind the existing
+Secret Manager references to `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and
+`SMTP_PASSWORD`; set non-secret `SMTP_FROM_EMAIL=info@minkops.com` and
+`SMTP_FROM_NAME=Minkops`. The runtime service identity must already have access
+to the referenced secrets. Deployment uses references only and must not read or
+modify their values.
+
+Keep the Cloud Run instance cap at one while using the best-effort process-local
+duplicate guard. Scale-down, process restarts, and overlapping revisions can
+still forget prior submissions. If stronger cross-revision duplicate
+prevention becomes necessary, add a durable idempotency store before increasing
+the instance count. After deployment, verify a controlled message in the inbox
+and inspect its raw headers before marking the delivery issue complete.

@@ -1,1 +1,1 @@
-"""Adapters for external systems used by Minkops applications."""
+"""Reusable Minkops external-system connectors."""

@@ -1,12 +1,10 @@
 [project]
 name = "minkops-platform"
 version = "0.1.0"
-description = "Reusable application services for Minkops"
+description = "Reusable Minkops application services"
+readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["minkops-connectors"]
-
-[tool.uv.sources]
-minkops-connectors = { path = "../connectors", editable = true }
+dependencies = ["jsonschema>=4.25.0", "psycopg[binary]>=3.3.3", "openai>=3.19.0", "pyyaml>=6.0", "minkops-connectors"]
 
 [build-system]
 requires = ["hatchling"]
@@ -14,3 +12,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/minkops_platform"]
+
+[tool.uv.sources]
+minkops-connectors = { workspace = true }

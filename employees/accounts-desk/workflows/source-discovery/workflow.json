@@ -1,0 +1,42 @@
+{
+  "key": "source-discovery",
+  "version": "0.6.0",
+  "name": "Source discovery",
+  "description": "Discover approved source structures and reference data, with evidenced business mapping proposals.",
+  "owner": "accounts-desk",
+  "tenant_config_schema": "tenant-config.schema.json",
+  "run_config_schema": "run-config.schema.json",
+  "output_schema": "output.schema.json",
+  "instructions": "SKILL.md",
+  "tenant_defaults": {
+    "destination_mode": "tally",
+    "discovery_depth": "structure",
+    "max_files": 100
+  },
+  "run_defaults": {
+    "scope_paths": [
+      "."
+    ],
+    "exclusions": [],
+    "refresh_mode": "initial"
+  },
+  "agent_output_schema": "agent-output.schema.json",
+  "execution": {
+    "environment": "openai_hosted",
+    "model": "gpt-6-luna",
+    "python_packages": [
+      "openpyxl",
+      "pymupdf"
+    ],
+    "instructions": "execution-instructions.md",
+    "resources": [
+      "collection-config.schema.json"
+    ],
+    "result_path": "/workspace/outputs/result.json"
+  },
+  "handler": "accounts.discovery",
+  "presentation": "accounts-discovery",
+  "capabilities": [
+    "files.snapshot"
+  ]
+}

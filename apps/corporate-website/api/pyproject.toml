@@ -1,5 +1,5 @@
 [project]
-name = "corporate-website-backend"
+name = "corporate-website-api"
 version = "0.1.0"
 description = "FastAPI transport for the corporate website"
 readme = "README.md"
@@ -17,7 +17,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-minkops-platform = { path = "../../../platform", editable = true }
+minkops-platform = { workspace = true }
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

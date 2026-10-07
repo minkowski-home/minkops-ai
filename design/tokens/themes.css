@@ -1,0 +1,103 @@
+/* Theme variants reuse the locked brand colors and neutral ramp. */
+:root[data-theme="minkops-light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="minkops-dark"],
+:root[data-theme="slate-dark"] {
+  color-scheme: dark;
+  --text-primary: var(--n-0);
+  --text-secondary: var(--n-200);
+  --text-muted: var(--n-300);
+  --text-faint: var(--n-400);
+  --text-inverse: var(--n-0);
+  --text-inverse-muted: var(--n-300);
+  --surface-page: var(--n-900);
+  --surface-sunken: var(--n-800);
+  --surface-raised: var(--n-800);
+  --surface-inset: var(--n-700);
+  --surface-inverse: var(--n-700);
+  --surface-inverse-deep: var(--n-900);
+  --border-hairline: var(--n-700);
+  --border-default: var(--n-600);
+  --border-strong: var(--n-500);
+  --action-secondary-bg: var(--n-800);
+  --action-secondary-bg-hover: var(--n-700);
+  --action-secondary-fg: var(--n-0);
+  --action-secondary-border: var(--n-600);
+  --action-ghost-fg: var(--n-200);
+  --action-ghost-bg-hover: var(--n-700);
+  --action-disabled-bg: var(--n-700);
+  --action-disabled-fg: var(--n-400);
+  --signal-idle: var(--n-400);
+  --signal-off: var(--n-600);
+  --status-ok: color-mix(in srgb, var(--status-ok-base) 38%, var(--n-0));
+  --status-warn: color-mix(in srgb, var(--status-warn-base) 42%, var(--n-0));
+  --status-alert: color-mix(in srgb, var(--status-alert-base) 42%, var(--n-0));
+  --status-info: var(--n-300);
+  --status-alert-fill: color-mix(in srgb, var(--status-alert-base) 18%, var(--n-800));
+  --status-ok-fill: color-mix(in srgb, var(--status-ok-base) 18%, var(--n-800));
+  --status-warn-fill: color-mix(in srgb, var(--status-warn-base) 18%, var(--n-800));
+  --status-info-fill: var(--n-700);
+  --shadow-focus: 0 0 0 2px var(--n-900), 0 0 0 4px var(--focus-ring);
+}
+
+:root[data-theme="minkops-dark"] {
+  --text-accent: var(--brand-ember);
+  --text-link: var(--brand-ember);
+  --text-link-hover: var(--n-0);
+  --surface-accent-soft: var(--ember-tint-14);
+  --surface-selected: color-mix(in srgb, var(--brand-ember) 17%, var(--n-800));
+  --border-accent: var(--brand-ember);
+  --action-primary-bg: var(--brand-rust);
+  --action-primary-bg-hover: var(--rust-press);
+  --action-primary-fg: var(--n-0);
+  --action-danger-fg: var(--status-alert);
+  --signal-live: var(--brand-ember);
+  --focus-ring: var(--brand-ember);
+}
+
+:root[data-theme="slate-light"] {
+  color-scheme: light;
+  --text-accent: var(--brand-graphite);
+  --text-link: var(--brand-graphite);
+  --text-link-hover: var(--graphite-press);
+  --surface-page: var(--n-25);
+  --surface-sunken: var(--n-50);
+  --surface-raised: var(--n-0);
+  --surface-inset: var(--n-100);
+  --surface-inverse: var(--n-50);
+  --surface-accent-soft: var(--slate-tint-10);
+  --surface-selected: var(--slate-tint-20);
+  --text-inverse: var(--n-900);
+  --text-inverse-muted: var(--n-600);
+  --border-accent: var(--brand-slate);
+  --action-primary-bg: var(--brand-graphite);
+  --action-primary-bg-hover: var(--graphite-press);
+  --action-primary-fg: var(--n-0);
+  --signal-live: var(--brand-slate);
+  --focus-ring: var(--brand-slate);
+  --shadow-inset-active: inset 2px 0 0 var(--brand-slate);
+}
+
+:root[data-theme^="slate"] .console-wordmark,
+:root[data-theme^="slate"] .login-wordmark,
+:root[data-theme^="slate"] .login-wordmark:hover {
+  color: var(--brand-slate);
+}
+
+:root[data-theme="slate-dark"] {
+  --text-accent: var(--brand-slate);
+  --text-link: var(--brand-slate);
+  --text-link-hover: var(--n-0);
+  --surface-accent-soft: var(--slate-tint-10);
+  --surface-selected: var(--slate-tint-20);
+  --border-accent: var(--brand-slate);
+  --action-primary-bg: var(--brand-slate);
+  --action-primary-bg-hover: var(--n-300);
+  --action-primary-fg: var(--n-900);
+  --action-danger-fg: var(--status-alert);
+  --signal-live: var(--brand-slate);
+  --focus-ring: var(--brand-slate);
+  --shadow-inset-active: inset 2px 0 0 var(--brand-slate);
+}

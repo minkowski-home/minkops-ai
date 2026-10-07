@@ -1,0 +1,56 @@
+{
+  "name": "minkops-windows-app",
+  "version": "0.4.0",
+  "description": "Minkops desktop companion and shared console",
+  "author": "Minkops",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "test": "node --test tests/*.test.js ../../connectors/desktop/tests/*.test.js",
+    "test:http": "node tests/http-smoke.mjs",
+    "build": "node scripts/build.js",
+    "start": "npm run build && electron .",
+    "package:win": "npm run build && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "@minkops/desktop-connectors": "file:../../connectors/desktop",
+    "@minkops/desktop-runtime": "file:../../platform/desktop-runtime",
+    "electron": "42.11.10",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "com.minkops.desktop",
+    "productName": "Minkops",
+    "directories": {
+      "output": "release",
+      "app": "bundle"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "executableName": "Minkops",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false
+    }
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

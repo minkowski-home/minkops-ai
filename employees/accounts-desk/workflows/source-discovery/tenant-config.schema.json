@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "destination_mode": {
+      "type": "string",
+      "enum": ["excel", "tally", "both"],
+      "title": "Source systems"
+    },
+    "discovery_depth": {
+      "type": "string",
+      "enum": [
+        "structure",
+        "reference_data",
+        "business_mappings"
+      ],
+      "title": "Default discovery depth"
+    },
+    "max_files": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "title": "Default file limit"
+    }
+  },
+  "required": [
+    "discovery_depth",
+    "max_files"
+  ],
+  "additionalProperties": false
+}

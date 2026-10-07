@@ -1,0 +1,19 @@
+{
+  "name": "@minkops/desktop-connectors",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.5.0",
+    "jszip": "^3.10.1",
+    "yauzl": "^3.2.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

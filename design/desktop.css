@@ -1,0 +1,126 @@
+/* Shared web/native surfaces: status is always expressed in words and icons.
+   Stage changes come from durable events, never an animation or estimated ETA. */
+.task-progress {
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+  margin-bottom: 24px;
+  padding: 24px;
+  background: var(--surface-raised);
+}
+.task-stage-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: var(--rule-default);
+  color: var(--text-accent);
+  background: var(--surface-selected);
+}
+.task-stage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 0;
+  margin: 22px 0 0;
+  list-style: none;
+}
+.task-stage-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font: var(--type-label);
+}
+.task-stage-list li > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: var(--rule-default);
+  font: var(--type-mono);
+}
+.task-stage-list .is-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.task-stage-list .is-current > span {
+  border-color: var(--border-accent);
+  background: var(--surface-selected);
+}
+.task-stage-list .is-done {
+  color: var(--text-accent);
+}
+.timeline > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font: var(--type-label);
+  padding: 12px 0;
+}
+.device-connect-card,
+.device-card {
+  padding: 22px;
+  border: var(--rule-default);
+  background: var(--surface-raised);
+}
+.device-connect-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.device-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.device-card h3,
+.device-connect-card h3 {
+  font: var(--type-h3);
+}
+.device-card p,
+.device-connect-card p {
+  color: var(--text-secondary);
+  margin: 10px 0 18px;
+}
+.device-card .button + .button {
+  margin-left: 8px;
+}
+.accounts-review-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.accounts-review-summary span {
+  padding: 8px 12px;
+  border: var(--rule-default);
+  background: var(--surface-inset);
+  font: var(--type-label);
+}
+@media (max-width: 640px) {
+  .task-progress {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+  .task-stage-list {
+    gap: 12px;
+  }
+  .device-connect-card {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+
+.discovery-source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 20px 0; }
+.discovery-source-card { border: var(--rule-default); border-radius: var(--radius-card, 12px); padding: 20px; background: var(--surface-raised); }
+.discovery-source-card h4 { margin: 0 0 12px; }
+.discovery-source-card details { margin-top: 12px; }

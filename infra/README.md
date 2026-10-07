@@ -1,52 +1,36 @@
 # Infrastructure
 
-This folder will hold Terraform, Docker Compose, Kubernetes overlays, and GitHub automation that deploys the AI suite and other apps. Infrastructure manifests should reference the same shared policies described elsewhere in the repo and expose environment-specific overlays (dev/stage/prod) similar to the `env/` directory from Minkowski’s layout.
+`compose.yml` runs the local OLTP PostgreSQL database. The API and durable
+Accounts worker are separate processes sharing that database. OpenAI provisions
+the agent execution environment; Compose does not run a Codex executor.
 
-### Current
-The `docker-compose.yml` is for local/dev. It launches infra + one gateway/orchestrator:
-- `ai-suite/` (FastAPI)
-- Vector DBs
-- Relational DBs
-- Message Broker (optional)
-- etc.
+Accounts desk creates per-run `openai_hosted` Agents API sessions with
+`gpt-6-luna`, network access disabled, and required Python packages. Selected
+files are supplied as tenant-scoped immutable snapshots. API credentials stay
+outside agent-readable content. Results are persisted before hosted environment
+cleanup; workers retry pending cleanup and retain session IDs for audit.
 
-### For multiple orgs
-This is handled inside the app. Each request carries `org_id`. Shared KB client always filters/uses `org_id`. Agent availability is config/DB rule, not a separate service.
+The browser applies approved Excel writes through a granted local folder. This
+is a web adapter with synchronized snapshots, not fully local desktop execution.
+The registered Windows companion also reads schema metadata and reconciles
+approved Tally writes. Business reasoning remains in OpenAI-hosted environments;
+no customer-machine Codex executor is planned.
 
-#### Different orgs use different agent sets
-- Keep a per-org config table `org_agents` (with keys like `org_id`, `agent_id`, `enabled`, `config_json`)
-- The gateway checks `org_id` and only routes to enabled agents
+Build the production API image from the repository root:
 
-#### Per-org Knowleddge Base
-Per‑org KB is set up at org onboarding and then enforced on every ingest/query.
+```sh
+docker build -f infra/solution.Dockerfile -t minkops-solution:review .
+docker run --rm minkops-solution:review python -m minkops_api.install_workflows mock-client --validate-only
+```
 
-Minimal, practical setup:
+The same image contains worker packages, but the forever-loop bootstrap needs
+bounded execution before low-cost Cloud Run Job deployment. See
+[deployment, website migration and MIN-123 closeout](../docs/deployment-min-123.md)
+for the Myndral-style topology and CAD 15 hosting envelope. Assign Firebase
+project/site targets before using `firebase.json`. Audit scripts read resource
+metadata/metrics without retrieving secrets or customer database rows.
 
-Org signup creates a KB scope
-Create an org record in SQL: org_id, name, kb_namespace, plan
-Create a vector namespace/collection for that org
-Example: kb_namespace = "org_<org_id>"
-Ingestion always writes into that scope
-Ingest pipeline takes org_id
-It stores raw docs in object storage under orgs/<org_id>/...
-It writes embeddings into the vector DB namespace for that org
-Every chunk has metadata: {org_id, source, doc_type, doc_id}
-Retrieval always reads from that scope
-All queries require org_id
-The KB client resolves org_id -> namespace
-Query is run only against that namespace or with org_id filter
-That’s the core. The “how” depends on which vector store you pick:
-
-Option A: Single index, per‑org namespaces (common early)
-
-Vector DB supports namespaces/collections
-Namespace name = org_<org_id>
-Query = namespace=org_<org_id>
-Option B: One collection per org
-
-Create a collection per org
-Query hits only that collection
-Option C: Separate DB per org (strong isolation)
-
-Separate DB instance per org
-Most costly; used for enterprise compliance
+See [Accounts desk setup and limits](../docs/accounts-desk.md) and OpenAI's
+[hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted).
+Production deployment, worker supervision and database retention policy remain
+operational release work; local processes do not establish deployment health.

@@ -1,0 +1,49 @@
+<!-- @dsCard group="Operator Console" viewport="1280x800" name="Accounts desk" subtitle="Discovery review and in-place Excel entry" -->
+<!doctype html>
+<html lang="en" data-theme="minkops-light">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accounts desk design specimen</title>
+  <link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../../console.css">
+  <link rel="stylesheet" href="../../accounts.css"><link rel="stylesheet" href="preview.css">
+</head>
+<body>
+  <main class="console-content">
+    <header class="section-heading"><div><h1>Accounts desk</h1><p>Design specimen · synthetic records</p></div>
+      <label class="theme-picker">Theme<select id="theme"><option value="minkops-light">Minkops Light</option><option value="minkops-dark">Minkops Dark</option><option value="slate-light">Slate Light</option><option value="slate-dark">Slate Dark</option></select></label>
+    </header>
+    <section class="accounts-panel"><h3>Enter bills into Excel</h3><p>Read bills, review the entries, and update the right existing workbook.</p>
+      <div class="accounts-toolbar"><button class="button button-ghost" disabled>Connect local folder</button><button class="button button-ghost" disabled>Upload files</button></div>
+      <details open><summary>Accounts folder · 4 files · Local folder</summary><div class="accounts-file-list">
+        <label><input type="checkbox" checked> bills/materials.pdf</label><label><input type="checkbox" checked> bills/scanned-bill.png</label>
+      </div></details>
+      <details class="accounts-config"><summary>Run configuration</summary><div class="accounts-field-grid">
+        <label>Input types<select><option>PDFs and images</option><option>PDFs</option><option>Images</option></select></label>
+        <label>Review policy<select><option>Approve every output</option><option>Only exceptions</option></select></label>
+        <label>Output platform<select disabled><option>Excel · update existing sheets</option></select></label>
+      </div></details><button class="button button-primary" disabled>Run bill entry</button>
+    </section>
+    <section class="accounts-panel"><h3>Source discovery</h3><p>Confirm the purpose, field meanings and record keys for each sheet and table.</p>
+      <label class="config-field">Find a workbook, sheet or table<input type="search" placeholder="Search files, sheets or tables"></label>
+      <details open><summary>Purchases / Materials · 3 columns · Destination</summary><p class="quiet-state">accounts/records.xlsx</p>
+        <div class="accounts-field-grid"><label>Purpose<select><option>Bill-entry destination</option><option>Reference data</option><option>Ignore</option></select></label><label>Header row<input type="number" value="4"></label></div>
+        <div class="accounts-table"><table><thead><tr><th>Column</th><th>Value type</th><th>Business meaning</th><th>Required</th><th>Record key</th></tr></thead><tbody>
+          <tr><td>Supplier</td><td>String</td><td>vendor</td><td><input type="checkbox" checked aria-label="Require supplier"></td><td><input type="checkbox" checked aria-label="Supplier is key"></td></tr>
+          <tr><td>Document</td><td>String</td><td>invoice_number</td><td><input type="checkbox" checked aria-label="Require document"></td><td><input type="checkbox" checked aria-label="Document is key"></td></tr>
+          <tr><td>Gross</td><td>Number</td><td>total</td><td><input type="checkbox" checked aria-label="Require gross"></td><td><input type="checkbox" aria-label="Gross is key"></td></tr>
+        </tbody></table></div>
+      </details><details><summary>Suppliers · 8 columns · Reference data</summary><p>Reference mappings appear here.</p></details>
+      <button class="button button-primary" disabled>Confirm source mappings</button>
+    </section>
+    <section class="accounts-panel"><h3>Bill entry</h3><article class="accounts-bill"><h4>Bill 1 → Purchases / Materials</h4>
+      <p class="quiet-state">Destination: accounts/records.xlsx · Purchases / Materials</p><div class="accounts-field-grid">
+        <label>Supplier<input value="Example Materials"></label><label>Document<input value="EX-001"></label><label>Gross<input type="number" value="1180"></label>
+      </div><div class="accounts-findings"><strong>Needs review</strong><p>No purchase-order register was supplied. Matching is not established.</p></div>
+      <details><summary>Source evidence · 3 fields</summary><dl><dt>Gross · page 1</dt><dd>Total: 1,180</dd></dl></details></article>
+      <label class="accounts-check"><input type="checkbox">I reviewed and acknowledge the unresolved findings.</label><button class="button button-primary" disabled>Approve Excel entries</button>
+    </section>
+    <section class="accounts-panel"><h3>Bill entry</h3><p>Excel entries saved in place and verified.</p><details><summary>accounts/records.xlsx · Saved and verified</summary><ul><li>Purchases / Materials · row 17 · append</li></ul></details></section>
+  </main>
+  <script>document.getElementById('theme').addEventListener('change', function () { document.documentElement.dataset.theme = this.value; });</script>
+</body>
+</html>

@@ -1,73 +1,100 @@
-<!-- @dsCard group="Operator Console" viewport="1280x800" name="Operator console" subtitle="Sign in, hand work to agents, clear the attention queue" -->
-<!-- @startingPoint section="Console" subtitle="Full three-pane operator console" viewport="1280x800" -->
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Minkops Console</title>
-<link rel="stylesheet" href="../../styles.css">
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
-<script src="../../_ds_bundle.js"></script>
-<style>html,body{height:100%}body{margin:0;overflow:hidden}#root{height:100vh}</style>
-</head><body><div id="root"></div>
-<script type="text/babel" src="ConsoleData.jsx"></script>
-<script type="text/babel" src="ConsoleShell.jsx"></script>
-<script type="text/babel" src="AgentsPane.jsx"></script>
-<script type="text/babel" src="TaskThread.jsx"></script>
-<script type="text/babel" src="AttentionQueue.jsx"></script>
-<script type="text/babel" src="AgentsScreen.jsx"></script>
-<script type="text/babel" src="PlaceholderScreen.jsx"></script>
-<script type="text/babel" src="LoginScreen.jsx"></script>
-<script type="text/babel">
-const TITLES = { dashboard: "Dashboard", agents: "Agents", tasks: "Tasks", analytics: "Analytics", settings: "Settings" };
-
-function ConsoleApp() {
-  const [signedIn, setSignedIn] = React.useState(false);
-  const [route, setRoute] = React.useState("dashboard");
-  const [collapsed, setCollapsed] = React.useState(false);
-  const [agents, setAgents] = React.useState(window.AGENTS);
-  const [team, setTeam] = React.useState(window.TEAM);
-  const [selected, setSelected] = React.useState("agent-imel");
-  const [messages, setMessages] = React.useState(window.MESSAGES);
-  const [interrupts, setInterrupts] = React.useState(window.INTERRUPTS);
-
-  const toggleAgent = (id, enabled) => setAgents((prev) => prev.map((a) => a.id === id ? { ...a, enabled, status: enabled ? "idle" : "disabled" } : a));
-  const toggleTeam = (enabled) => {
-    setTeam((t) => ({ ...t, enabled }));
-    setAgents((prev) => prev.map((a) => a.team === team.name ? { ...a, enabled, status: enabled ? "idle" : "disabled" } : a));
-  };
-  const send = (content) => {
-    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    setMessages((prev) => [...prev, { id: "m" + Date.now(), role: "human", sender: "You", content, time: now }]);
-    setTimeout(() => setMessages((prev) => [...prev, {
-      id: "a" + Date.now(), role: "agent", sender: "Imel",
-      content: "Picked it up. I'll work it end to end and queue anything that needs your sign-off.", time: now
-    }]), 1600);
-  };
-  const drop = (id) => setInterrupts((prev) => prev.filter((i) => i.id !== id));
-  const ack = (id) => setInterrupts((prev) => prev.map((i) => i.id === id ? { ...i, status: "acknowledged" } : i));
-
-  if (!signedIn) return <LoginScreen onSignIn={() => setSignedIn(true)} />;
-
-  const pending = interrupts.filter((i) => i.status === "pending").length;
-  const activeCount = agents.filter((a) => a.enabled && a.status === "active").length;
-
-  return (
-    <div style={{ display: "flex", height: "100%", background: "var(--surface-page)" }}>
-      <ConsoleSidebar route={route} onRoute={setRoute} collapsed={collapsed}
-        onCollapse={() => setCollapsed((c) => !c)} onSignOut={() => setSignedIn(false)} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <ConsoleHeader title={TITLES[route]} interruptCount={pending} />
-        {route === "dashboard" || route === "tasks" ? (
-          <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-            <AgentsPane agents={agents} team={team} selectedId={selected} onSelect={setSelected}
-              onToggleAgent={toggleAgent} onToggleTeam={toggleTeam} />
-            <TaskThread messages={messages} activeCount={activeCount} onSend={send} />
-            <AttentionQueue interrupts={interrupts} onResolve={drop} onDismiss={drop} onAcknowledge={ack} />
-          </div>
-        ) : route === "agents" ? <AgentsScreen /> : <PlaceholderScreen route={route} />}
+<!-- @dsCard group="Operator Console" viewport="1280x800" name="Shared tenant console" subtitle="Employees, workflows, activity, and four themes" -->
+<!-- @startingPoint section="Console" subtitle="Shared tenant console preview" viewport="1280x800" -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minkops console preview</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <link rel="stylesheet" href="../../console.css">
+  <link rel="stylesheet" href="../../login.css">
+  <link rel="stylesheet" href="preview.css">
+  <script defer src="preview.js"></script>
+</head>
+<body>
+  <div id="auth" class="login-screen">
+    <section class="login-story">
+      <div class="login-story-top">
+        <span class="login-wordmark"><span class="wordmark-dot"></span>minkops</span>
+        <label class="theme-picker"><span>Theme</span><select aria-label="Theme" data-theme-picker>
+          <option value="minkops-light">Minkops Light</option><option value="minkops-dark">Minkops Dark</option>
+          <option value="slate-light">Slate Light</option><option value="slate-dark">Slate Dark</option>
+        </select></label>
       </div>
-    </div>
-  );
-}
+      <div><h1 id="auth-heading">Welcome back</h1><p id="auth-intro">Your workspace is ready when you are.</p></div>
+      <small>Useful work, clearly in view.</small>
+    </section>
+    <section class="login-form-panel">
+      <form id="auth-form">
+        <h2 id="auth-form-heading">Sign in</h2>
+        <label class="signup-only" hidden>Your name<input autocomplete="name" value="Demo Operator"></label>
+        <label>Email<input type="email" autocomplete="email" value="demo@example.com" required></label>
+        <label>Password<input type="password" autocomplete="current-password" value="preview-password" required></label>
+        <label class="signup-only" hidden>New workspace name <span class="optional">optional</span><input value="Mock tenant"></label>
+        <button class="button button-primary" id="auth-submit">Sign in</button>
+        <p id="auth-message" class="form-message" role="status" hidden></p>
+        <p><span id="auth-toggle-copy">New to Minkops?</span> <button type="button" class="preview-link" id="auth-toggle">Create an account</button></p>
+      </form>
+    </section>
+  </div>
 
-ReactDOM.createRoot(document.getElementById("root")).render(<ConsoleApp />);
-</script></body></html>
+  <div id="workspace" class="console-shell" hidden>
+    <aside class="console-sidebar" aria-label="Main navigation">
+      <div class="console-brand-row"><button class="console-wordmark" data-route="dashboard" aria-label="Minkops dashboard"><span class="wordmark-dot"></span><span>minkops</span></button>
+        <button class="icon-button sidebar-collapse" id="collapse-nav" aria-label="Collapse navigation"><span class="preview-icon preview-chevron-left"></span></button></div>
+      <nav class="console-nav">
+        <button class="console-nav-item is-active" data-route="dashboard"><span class="preview-nav-icon"></span><span>Dashboard</span><b>1</b></button>
+        <button class="console-nav-item" data-route="employees"><span class="preview-nav-icon"></span><span>Employees</span></button>
+        <button class="console-nav-item" data-route="workflows"><span class="preview-nav-icon"></span><span>Workflows</span></button>
+        <button class="console-nav-item" data-route="access"><span class="preview-nav-icon"></span><span>Access</span></button>
+      </nav>
+      <div class="console-account"><div class="human-avatar" aria-hidden="true">DO</div><div class="console-account-copy"><strong>Demo Operator</strong><span>demo@example.com</span></div>
+        <button class="icon-button account-logout" id="sign-out" aria-label="Sign out"><span class="preview-icon preview-logout"></span></button></div>
+    </aside>
+    <main class="console-main">
+      <header class="console-header"><h1 id="route-title">Dashboard</h1><div class="console-header-tools"><span class="tenant-label">Mock tenant</span>
+        <label class="theme-picker"><span>Theme</span><select aria-label="Theme" data-theme-picker>
+          <option value="minkops-light">Minkops Light</option><option value="minkops-dark">Minkops Dark</option>
+          <option value="slate-light">Slate Light</option><option value="slate-dark">Slate Dark</option>
+        </select></label></div></header>
+      <div class="console-view">
+        <section class="dashboard-workspace preview-screen" data-screen="dashboard" style="--pane-width:340px">
+          <div class="dashboard-main"><header class="launchpad-heading"><h2>Let’s start the day, Demo.</h2><p>Your work and decisions are in one place.</p></header>
+            <section class="dashboard-section"><div class="section-heading"><h3>Ready workflows</h3><p>Start with the work that is available today.</p></div>
+              <div class="workflow-launch-grid"><article class="workflow-launch-card"><div class="workflow-launch-card__mark"><span class="preview-icon preview-tasks"></span></div>
+                <div><h4>Image to Excel</h4><p>Test image extraction and spreadsheet output.</p></div>
+                <footer><button class="button button-ghost" data-workflow="image-to-excel-test">View details</button><button class="button button-primary" disabled title="Runs only in the connected app">Run test</button></footer>
+              </article></div>
+            </section>
+          </div>
+          <div class="pane-resizer" role="separator" aria-label="Resize activity pane" aria-orientation="vertical" aria-valuemin="260" aria-valuemax="500" aria-valuenow="340" tabindex="0"></div>
+          <aside class="attention-pane" aria-label="Activity"><div class="activity-heading"><h3>Activity</h3><p>What is happening now</p></div>
+            <section class="attention-section"><div class="pane-title"><span>Active tasks</span><span>1</span></div><div class="pane-items"><button class="pane-task" data-task="receipt"><span class="task-dot task-dot--running"></span><span><strong>Extract the latest receipt</strong><small>Image received. Fields are being checked.</small></span><span class="preview-icon preview-chevron-right"></span></button></div></section>
+            <section class="attention-section"><div class="pane-title"><span>Needs attention</span><span>1</span></div><div class="pane-items"><button class="pane-task" data-task="review"><span class="task-dot task-dot--attention"></span><span><strong>Review a low-confidence field</strong><small>The date needs a quick human check.</small></span><span class="preview-icon preview-chevron-right"></span></button></div></section>
+            <section class="attention-section"><div class="pane-title"><span>Handoffs</span><span>1</span></div><div class="pane-items"><button class="pane-task" data-task="handoff"><span class="task-dot task-dot--handoff"></span><span><strong>Hand off the approved sheet</strong><small>Waiting for the next owner.</small></span><span class="preview-icon preview-chevron-right"></span></button></div></section>
+            <section class="attention-section"><div class="pane-title"><span>Recent outcomes</span><span>0</span></div><p class="quiet-state">Nothing here right now.</p></section>
+          </aside>
+        </section>
+
+        <section class="route-screen preview-screen" data-screen="employees" hidden>
+          <header class="route-heading"><div><h2>Employees</h2><p>Active employees and their workflows.</p></div><span class="route-count">2 active</span></header>
+          <div class="employee-list"><button class="employee-card" data-employee="image-desk"><span class="employee-mark"><span class="preview-icon preview-employees"></span></span><span><h3>Image desk</h3><p>Receives images and prepares structured records.</p><span class="employee-workflows"><span>Active workflows</span><strong>Image to Excel</strong></span></span><span class="preview-icon preview-chevron-right"></span></button>
+            <button class="employee-card" data-employee="accounts-desk"><span class="employee-mark"><span class="preview-icon preview-employees"></span></span><span><h3>Accounts desk</h3><p>Keeps account records ready for review.</p><span class="employee-workflows"><span>Active workflows</span><strong>None yet</strong></span></span><span class="preview-icon preview-chevron-right"></span></button></div>
+        </section>
+        <section class="route-screen preview-screen" data-screen="employee-detail" hidden><button class="back-link preview-link" data-route="employees">Back to Employees</button><div id="employee-detail"></div></section>
+        <section class="route-screen preview-screen" data-screen="workflows" hidden>
+          <header class="route-heading"><div><h2>Workflows</h2><p>Work available now and what is being prepared.</p></div><span class="route-count">3 workflows</span></header>
+          <div class="list-controls"><label>Group by <select id="group-workflows"><option value="status">Status</option><option value="employee">Employee</option></select></label>
+            <label>Sort by <select id="sort-workflows"><option value="name">Name</option><option value="status">Status</option></select></label></div>
+          <div id="workflow-list"></div>
+        </section>
+        <section class="route-screen preview-screen" data-screen="workflow-detail" hidden><button class="back-link preview-link" data-route="workflows">Back to Workflows</button><div id="workflow-detail"></div></section>
+        <section class="route-screen preview-screen" data-screen="task-detail" hidden><button class="back-link preview-link" data-route="dashboard">Back to Dashboard</button><div id="task-detail"></div></section>
+        <section class="route-screen preview-screen" data-screen="access" hidden><header class="route-heading"><div><h2>Workspace access</h2><p>Tenant admins can invite people or approve requests. Members can view settings.</p></div></header>
+          <div class="empty-state"><h3>No pending requests</h3><p>New requests to join Mock tenant appear here.</p></div></section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

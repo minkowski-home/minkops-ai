@@ -1,0 +1,8 @@
+[tool.uv.workspace]
+members = [
+    "apps/solution-api",
+    "apps/corporate-website/api",
+    "db",
+    "platform",
+    "connectors",
+]
