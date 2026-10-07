@@ -20,6 +20,16 @@ from minkops_api.discovery import router as discovery_router
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def private_api_cache(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 app.include_router(core_router)
 app.include_router(workspace_router)
 app.include_router(accounts_router)

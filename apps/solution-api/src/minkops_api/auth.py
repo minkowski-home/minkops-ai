@@ -17,7 +17,14 @@ from pwdlib import PasswordHash
 
 router = APIRouter(prefix="/api")
 passwords = PasswordHash.recommended()
-SESSION_COOKIE = "minkops_session"
+# Firebase Hosting forwards only this cookie to Cloud Run. Its value remains
+# our opaque PostgreSQL session token; Google does not own user authentication.
+SESSION_COOKIE = "__session"
+LEGACY_SESSION_COOKIE = "minkops_session"
+
+
+def session_token(request: Request) -> str:
+    return request.cookies.get(SESSION_COOKIE) or request.cookies.get(LEGACY_SESSION_COOKIE, "")
 
 
 def database():
@@ -36,7 +43,7 @@ def digest(token: str) -> str:
 
 
 def session_user(request: Request, connection: Db) -> dict:
-    token = request.cookies.get(SESSION_COOKIE)
+    token = session_token(request)
     if not token:
         raise HTTPException(401, "Sign in required.")
     row = connection.execute(
@@ -55,7 +62,7 @@ User = Annotated[dict, Depends(session_user)]
 
 
 def require_csrf(request: Request) -> None:
-    token = request.cookies.get(SESSION_COOKIE, "")
+    token = session_token(request)
     sent = request.headers.get("x-csrf-token", "")
     expected = digest(f"{token}:csrf")
     if not token or not sent or not secrets.compare_digest(sent, expected):
@@ -211,7 +218,7 @@ def session_profile(request: Request, user: dict, connection: psycopg.Connection
         "id": str(user["id"]), "name": user["name"], "email": user["email"],
         "is_platform_admin": user["is_platform_admin"],
         "memberships": memberships,
-        "csrf_token": digest(f"{request.cookies[SESSION_COOKIE]}:csrf"),
+        "csrf_token": digest(f"{session_token(request)}:csrf"),
     }
 
 
@@ -236,9 +243,10 @@ def logout(request: Request, response: Response, connection: Db):
     require_csrf(request)
     connection.execute(
         "UPDATE sessions SET revoked_at = now() WHERE token_hash = %s",
-        (digest(request.cookies[SESSION_COOKIE]),),
+        (digest(session_token(request)),),
     )
     response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(LEGACY_SESSION_COOKIE, path="/")
     return {"message": "Signed out."}
 
 

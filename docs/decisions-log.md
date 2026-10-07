@@ -725,3 +725,27 @@ of deleting device or financial history. Label the existing page Connected PCs.
 the supplied database's device count remains unchanged and no temporary database
 remains. Web tests, build and lint pass. The architecture and native execution
 contracts remain unchanged.
+
+## 2026-10-07 — Separate schema context from operational references
+
+**Situation:** Discovery exported business rows and uploaded original workbooks
+while its purpose was reusable schema context. Bill Entry depended on stale
+catalog rows, and client-specific allocation guidance appeared in the core skill.
+
+**Task:** Preserve tenant-specific context and verified financial writes while
+making schema collection private, metadata-driven and production-compatible.
+
+**Action:** Use bounded ODBC metadata calls and fresh header-only workbook
+projections with independent server validation. Persist immutable tenant catalogs;
+pin their schema in consuming runs and request live references through a separate
+leased desktop job before paid execution. Refresh continuation context without
+replaying successful siblings. Add validated additive employee/workflow variants,
+keeping handlers and write policy core-owned. Use Firebase-compatible opaque
+session cookies and prevent shared API caching. Package locked dependencies and
+client definitions into a non-root deployment image; inspect cloud configuration
+read-only and document worker/recovery/budget gates before launch.
+
+**Result:** Backend, native and web regressions validate isolation, projected-byte
+privacy, current-reference gating, company identity and pinned core/client context.
+Current-PC ODBC metadata exposes 275 tables. Clean-PC/server-topology tests and
+bounded cloud worker deployment remain explicit production acceptance gates.
