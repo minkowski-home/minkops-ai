@@ -41,6 +41,9 @@ Codex executors are not part of the current refactor.
 
 The implementation provides reusable run controls and lifecycle boundaries,
 complete versioned workflow skill bundles, and business regression checks.
+Employee/client installation and workflow dispatch now use validated definitions
+and shared services. See [workflow authoring and installation](docs/workflow-authoring.md)
+for the CLI, Python extension points, and current integration boundaries.
 Skill-generated workbook editing is a later evaluated pilot. New execution
 methods are separate work. See
 [the architecture and evaluation guide](docs/workflow-refactor.md).

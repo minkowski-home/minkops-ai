@@ -16,6 +16,12 @@ a deployed database.
 
 The seed also registers the shared Source discovery and Bill entry definitions
 as active workflows owned by Accounts desk for the mock tenant only. Their initial database defaults
-come from `fixtures/mock_workflows.json`; rerunning registration preserves
+come from `solutions/mock-client/employees/accounts-desk/binding.json`; rerunning registration preserves
 operator settings. See `docs/workflow-registration.md` for the separate per-run
 contracts and the boundary between registration and execution.
+
+Migration 0009 promotes existing durable rows to `workflow_runs` and retains an
+updatable `account_runs` compatibility view for Accounts/native callers. It also
+backfills trusted execution bindings for current workflows without changing
+settings or status. See `docs/workflow-authoring.md` for the standalone
+installation CLI and rollout/recovery instructions.

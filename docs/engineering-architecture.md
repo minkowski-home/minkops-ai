@@ -50,6 +50,30 @@ outcomes. Each task has a status, progress, short summary, and event timeline.
 The pane is adjustable on desktop. The four app themes use the locked brand
 palette in `design/tokens/` and a per-browser preference.
 
+## Definition installation and dispatch
+
+Repository-owned employee definitions and client bindings install atomically
+through the shared installation service and administrative CLI. Operator
+settings/statuses survive reinstall; incompatible schemas are rejected. Installed
+handler, presentation, policy, and capability declarations are separate from
+editable workflow preferences. A future admin UI can call the same services.
+
+The shared launch service pins authorized resource IDs/hashes and the complete
+execution bundle. A handler registry selects ordinary Python application
+adapters independently of workflow keys. Accounts keeps its business checks,
+catalog review, and verified Excel write mechanics. The default skill handler
+supports reviewed proposals; no additional employee/workflow is enabled.
+
+`workflow_runs` retains existing run rows and foreign-key relationships.
+`account_runs` is an updatable compatibility view, not another execution store.
+The current worker command delegates to shared dispatch and lifecycle code.
+Skills can bundle Python helpers; mandatory client policies run independently
+in trusted Python and before writes. The current file runtime still disables
+network access and does not provision business-system MCP tools.
+
+See [workflow authoring](workflow-authoring.md) for contracts, installation,
+extension points, and migration/rollback guidance.
+
 ## Persistence and events
 
 `db/migrations/` is the versioned OLTP source of truth. Migrations are applied

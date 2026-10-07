@@ -1,7 +1,7 @@
 # Mock-client Accounts desk
 
 The local mock tenant installs the shared Source discovery and Bill entry
-definitions. Initial settings live in `db/fixtures/mock_workflows.json`; operator
+definitions. Initial settings live in this directory's `binding.json`; operator
 defaults are stored in PostgreSQL and are editable in the normal workflow UI.
 Client-specific mappings come from confirmed discovery, not source-code fields.
 

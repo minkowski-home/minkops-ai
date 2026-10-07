@@ -513,3 +513,44 @@ workbook.
 retained confirmation after the added bill row and expanded table. Discovery
 continues to expose named tables and the approved write contract uses the
 original workbook bytes.
+
+### 2026-10-07 — Separate installed workflow composition from durable execution
+
+**Situation:** Versioned skill bundles and hosted recovery were reusable, but
+employee registration lived in demo seeding and launch/worker/UI dispatch depended
+on two Accounts workflow names. Adding clients or procedures risked modifying
+shared execution code or weakening deterministic write guarantees.
+
+**Task:** Refactor the same app from Windows branch `c3b050c` into a repeatable
+installation and execution path, preserving current discovery, review, Excel
+writes, native receipts and recovery. Retain ordinary Python extension points
+without adding another employee or business workflow.
+
+**Action:** Introduce validated employee/client definitions and an atomic
+installation service/CLI with a genuine transactionally rolled-back dry run.
+Separate trusted execution bindings from editable settings. Pin handler, policy,
+resource IDs/hashes and complete skill bundles at launch. Dispatch ordinary
+Python handlers through the existing hosted lifecycle; keep Accounts business
+validation and write mechanics in its domain. Promote the existing run table to
+`workflow_runs`, preserve IDs/FKs and provide an updatable Accounts compatibility
+view. Extract shared resource lookup and run observations, add explicit client
+policy registration, and enforce review policies before writes independently of
+model behavior. Discover client manifests at build time and select existing
+product adapters from installed presentation metadata. Use isolated temporary
+definitions to test different identities/default execution without installing a
+second product workflow. Document authoring, extensions and rollout/recovery.
+
+**Result:** The isolated full Python suite passes 139 tests and 31 subtests;
+17 web and 20 native tests, web build/lint, native build, and changed-Python lint
+pass. Actual hosted discovery and bill extraction read a synthetic invoice for
+24, proceed through review and saved-byte verification, preserve a formula and
+an unrelated sheet, and clean up their sessions. Windows HTTP/native smoke
+verifies folder refresh, receipt replay after worker recreation, device revocation,
+and successful live Tally connection after Tally is started. Edge desktop/mobile
+checks cover current launch screens, a verified task, settings persistence,
+activity expansion and four themes with no runtime errors or horizontal overflow.
+Client threshold tests block auto-write, permit explicit approval and retain the
+run's policy after tenant changes. Existing separator encoding artifacts remain
+baseline UI debt. No production deployment, new business-system MCP integration,
+new employee/workflow, or later Bill entry/Tally financial-write branch changes
+are included. Future real workflows still need business-specific evaluations.

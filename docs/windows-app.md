@@ -61,6 +61,13 @@ request bounded work on an authorized connected PC.
 
 ## Build and run
 
+This architecture branch is based on `apps/windows-app` commit `c3b050c`.
+Its shared API/UI now uses installed workflow bindings and shared dispatch;
+native folder grants, discovery, receipts and tray execution keep their existing
+contracts. Apply migrations through `0009_workflow_bindings` before starting
+this revision. Later Bill entry/Tally financial-write branch work is not included.
+See [workflow authoring](workflow-authoring.md) for installation and recovery.
+
 Use Node 24 and the existing Python/uv workspace. From the repository root:
 
 ```sh

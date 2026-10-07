@@ -3,6 +3,12 @@
 A solution configures the shared Minkops product for one customer. Keep the
 existing top-level `solution.ts` manifest for the current shared console.
 
+`installation.json` selects an existing tenant and employee references; each
+selected employee's `binding.json` declares workflows, initial defaults/status,
+and trusted policies. The web build discovers solution manifests automatically.
+See [workflow authoring](../docs/workflow-authoring.md) for validation,
+installation, and the boundary between composition and resource authorization.
+
 Put employee-specific customer composition under
 `solutions/<client-id>/employees/<employee-id>/` when that employee is enabled
 for the customer. This is the place for enabled workflow references,
