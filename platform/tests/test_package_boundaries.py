@@ -39,14 +39,14 @@ class PackageBoundaryTests(TestCase):
                 if name.startswith("minkops_connectors"):
                     self.assertFalse(any(n.startswith("minkops_platform") for n in names), name)
 
-    def test_workflow_prompt_extraction_preserves_model_instructions(self):
+    def test_versioned_workflow_prompts_match_reviewed_schema_context_contract(self):
         from minkops_platform.accounts.agent import bill_prompt, discovery_prompt
 
         self.assertEqual(
             hashlib.sha256(discovery_prompt().encode()).hexdigest(),
-            "0ba4842051ebb9f2bbadabbfb4376edd541fb143949eb2b52768f34de8762fff",
+            "df060986608b53b347becf3eadc9def5ad45d7f52eb68ff9644345b19ec4844c",
         )
         self.assertEqual(
             hashlib.sha256(bill_prompt().encode()).hexdigest(),
-            "bf28461192057de397c8dcf6d3ff8223691c9167d506cb22f2e032ad7354a9c3",
+            "52eb3ca4733abbb762a978347fdef2f2f103beb3eb92445cbeeefee792c87ad6",
         )

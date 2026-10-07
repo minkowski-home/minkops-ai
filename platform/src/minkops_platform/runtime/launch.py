@@ -37,6 +37,13 @@ def installed_definition(binding, key):
     if not directory.resolve().is_relative_to(root.resolve()):
         raise ValueError("Installed workflow definition must stay inside employees.")
     definition = load_definition(directory)
+    if binding.get("solution"):
+        from minkops_platform.installation import load_solution
+
+        composition = load_solution(REPOSITORY_ROOT, binding["solution"])
+        if key not in composition.workflows or composition.bindings[key]["definition"] != relative:
+            raise ValueError("Installed client variant differs from its composition. Reinstall explicitly.")
+        definition = composition.workflows[key]
     if (
         definition.metadata["owner"] != parts[0]
         or definition.metadata.get("handler", "skill.proposal") != binding["handler"]

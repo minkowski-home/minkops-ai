@@ -1,6 +1,8 @@
 Read all pages of all selected PDF and image bills, including scans.
 Use provided PDF/image capabilities and installed pymupdf when helpful. Read the
-confirmed catalog and references in context.json. Pick the appropriate confirmed
+confirmed catalog, source_catalog schema context and workflow references in
+context.json. Schema describes available fields; it is not evidence of current
+supplier values or authorization to write. Pick the appropriate confirmed
 destination sheet for each bill using evidenced business meaning. Use its exact
 named table (table:null for a plain sheet). Route using client context, actual
 reference records and bill evidence rather than fixed file names or schemas.
@@ -18,7 +20,7 @@ an Excel file. Use its exact data keys. Match vendor, purchase_ledger and
 tax_ledger to the actual ledger list in config.tally_target. Read all pages to
 distinguish invoice vs PO/GRN, issued vs delivery dates, assessed base vs gross,
 and current amount due vs previous balances. Multiple tax components can be
-combined only when the bill and approved mock allocation evidence justify the
+combined only when the bill and approved client allocation evidence justify the
 same tax ledger. Leave cost_code null when it is only a reporting annotation;
 required Tally cost allocations must become unresolved. The application owns
 financial validation and XML writes. Human clarification, when present in

@@ -6,7 +6,8 @@ identity/membership, grants no file/tool access, and preserves operator settings
 
 import json
 import re
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -34,6 +35,15 @@ BINDING_SCHEMA = {
     "required": ["workflows"],
     "additionalProperties": False,
     "properties": {
+        "employee": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "name": {"type": "string", "minLength": 1},
+                "description": {"type": "string"},
+                "defaults": {"type": "object"},
+            },
+        },
         "workflows": {
             "type": "array",
             "items": {
@@ -45,9 +55,10 @@ BINDING_SCHEMA = {
                     "status": {"enum": ["active", "paused", "planned"]},
                     "defaults": {"type": "object"},
                     "policies": {"type": "array"},
+                    "variant": {"type": "string", "minLength": 1},
                 },
             },
-        }
+        },
     },
 }
 
@@ -80,6 +91,74 @@ class Installation:
     bindings: dict
 
 
+def client_variant(definition, directory, filename, solution_id):
+    """Add client guidance/resources to a core bundle; never replace executable contracts.
+
+    Client procedures are trusted repository content, but permission/approval
+    enforcement stays in the installed handler and deterministic policy layer.
+    Both versions and the exact composed bytes travel with each durable run.
+    """
+    from .runtime.bundles import read_resource, digest, validate_snapshot
+
+    variant = json.loads(read_resource(directory, filename))
+    validate(
+        {
+            "type": "object",
+            "required": ["version"],
+            "additionalProperties": False,
+            "properties": {
+                "version": {"type": "string", "pattern": r"^[0-9]+\.[0-9]+\.[0-9]+$"},
+                "instructions": {"type": "string", "minLength": 1},
+                "resources": {
+                    "type": "array",
+                    "uniqueItems": True,
+                    "maxItems": 30,
+                    "items": {"type": "string"},
+                },
+                "defaults": {"type": "object"},
+                "name": {"type": "string", "minLength": 1},
+                "description": {"type": "string"},
+            },
+        },
+        variant,
+    )
+    metadata = deepcopy(definition.metadata)
+    metadata["tenant_defaults"] = {**metadata["tenant_defaults"], **variant.get("defaults", {})}
+    validate(definition.tenant_schema, metadata["tenant_defaults"])
+    for field in ("name", "description"):
+        if field in variant:
+            metadata[field] = variant[field]
+    snapshot = deepcopy(definition.execution_snapshot)
+    if snapshot is None:
+        raise ValueError("Client variants require a core execution bundle.")
+    snapshot["variant"] = {
+        "solution": solution_id,
+        "core_version": metadata["version"],
+        "version": variant["version"],
+    }
+    snapshot["files"]["client/variant.json"] = json.dumps(variant, sort_keys=True)
+    for resource in variant.get("resources", []):
+        name = "client/" + resource
+        snapshot["files"][name] = read_resource(directory, resource)
+        snapshot["execution"]["resources"].append(name)
+    instructions = definition.instructions
+    if variant.get("instructions"):
+        addition = read_resource(directory, variant["instructions"])
+        if not addition.strip():
+            raise ValueError("Client instructions must not be empty.")
+        addition = "\n\n## Client procedure\n\n" + addition
+        instructions += addition
+        for path in {"SKILL.md", snapshot["execution"]["instructions"]}:
+            snapshot["files"][path] += addition
+    snapshot["sha256"] = digest(snapshot)
+    return replace(
+        definition,
+        metadata=metadata,
+        instructions=instructions,
+        execution_snapshot=validate_snapshot(snapshot),
+    )
+
+
 def load_solution(root: Path, solution_id: str) -> Installation:
     from .runtime.application import get_handler, validate_policies
 
@@ -110,10 +189,19 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             raise ValueError("Employee directory must match its key.")
         Draft202012Validator.check_schema(metadata["config_schema"])
         validate(metadata["config_schema"], metadata["defaults"])
-        employees.append(EmployeeDefinition(metadata))
         client_employee = owned_directory(solution / "employees", employee_key)
         binding = read_json(client_employee / "binding.json")
         validate(BINDING_SCHEMA, binding)
+        metadata = {
+            **metadata,
+            **binding.get("employee", {}),
+            "defaults": {
+                **metadata["defaults"],
+                **binding.get("employee", {}).get("defaults", {}),
+            },
+        }
+        validate(metadata["config_schema"], metadata["defaults"])
+        employees.append(EmployeeDefinition(metadata))
         for item in binding["workflows"]:
             key = item["key"]
             if key in workflows:
@@ -122,19 +210,24 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             from .solution_policy import bind_definition
 
             definition = bind_definition(definition, solution_id, repository_root=root)
+            if item.get("variant"):
+                variant_directory = owned_directory(client_employee / "workflows", key)
+                definition = client_variant(
+                    definition, variant_directory, item["variant"], solution_id
+                )
             if definition.metadata["owner"] != employee_key:
                 raise ValueError("Workflow must belong to its declared employee.")
             handler = definition.metadata.get("handler", "skill.proposal")
             get_handler(handler)
             policies = item.get("policies", [])
             validate_policies(policies)
-            validate(
-                definition.tenant_schema,
-                item.get("defaults", definition.metadata["tenant_defaults"]),
-            )
+            defaults = {**definition.metadata["tenant_defaults"], **item.get("defaults", {})}
+            validate(definition.tenant_schema, defaults)
             workflows[key] = definition
             bindings[key] = {
                 **item,
+                "defaults": defaults,
+                "solution": solution_id,
                 "definition": f"{employee_key}/workflows/{key}",
                 "handler": handler,
                 "presentation": definition.metadata.get("presentation", "proposal"),
@@ -204,7 +297,14 @@ def install(connection, installation: Installation, *, actor_email: str):
             )
             binding = {
                 k: spec[k]
-                for k in ("definition", "handler", "presentation", "policies", "capabilities")
+                for k in (
+                    "definition",
+                    "handler",
+                    "presentation",
+                    "policies",
+                    "capabilities",
+                    "solution",
+                )
             }
             cursor.execute(
                 "UPDATE workflows SET execution_binding=%s WHERE tenant_id=%s AND id=%s",

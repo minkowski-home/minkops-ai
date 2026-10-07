@@ -106,6 +106,24 @@ If the public solution ID differs from the tenant slug, set `tenantSlug` in its
 
 ## Trusted Python extensions
 
+Core employees and workflows remain in `employees/`. A client may add an
+`employee` object with name/description/default overrides to its binding and a
+workflow `variant` descriptor under
+`solutions/<client>/employees/<employee>/workflows/<workflow>/`. For example:
+
+```json
+{"version":"1.0.0","defaults":{"output_mode":"tally_in_place"},
+ "instructions":"client-instructions.md","resources":[]}
+```
+
+The workflow binding selects `"variant":"variant.json"`. Client instructions
+append to core guidance; resources stay within the client's directory. Default
+precedence is core, variant, then binding; existing operator settings are preserved.
+A variant cannot replace the core handler, schemas, execution model or mandatory
+write policy. Installation validates containment and hashes the combined bundle.
+Runs pin both versions so another client or later edit cannot alter pending work.
+Reinstall older bindings to record their owning solution.
+
 Use three extension locations:
 
 1. Workflow helpers under `employees/`, bundled explicitly for model execution.
@@ -172,7 +190,7 @@ compatible. `accounts_worker` is the existing bootstrap command over the shared
 dispatcher. Historical runs without handler bindings use the narrowly bounded
 legacy Accounts mapping; legacy unpinned queued runs still require relaunch.
 
-Apply every pending migration through `0011_complete_branch_convergence` before
+Apply every pending migration through `0012_schema_discovery` before
 starting this revision. See [branch convergence](branch-convergence.md). Stop
 workers while changing application revisions, preserve session/write records,
 and reconcile outstanding writes. An application rollback can use the retained
