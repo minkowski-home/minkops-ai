@@ -66,7 +66,17 @@ class WorkerWakeupTests(unittest.TestCase):
     def test_wakeup_is_transactional(self):
         with psycopg.connect(self.url) as c:
             before = c.execute("SELECT generation FROM worker_wakeup").fetchone()[0]
-            c.execute("UPDATE worker_wakeup SET generation=generation+1")
+            tenant = c.execute("INSERT INTO tenants(slug,name) VALUES(gen_random_uuid()::text,'Wakeup test') RETURNING id").fetchone()[0]
+            actor = c.execute("INSERT INTO users(email,name,password_hash) VALUES(gen_random_uuid()::text || '@example.com','Wakeup test','unused') RETURNING id").fetchone()[0]
+            task = c.execute("INSERT INTO tasks(tenant_id,title) VALUES(%s,'Wakeup test') RETURNING id", (tenant,)).fetchone()[0]
+            c.execute("INSERT INTO workflows(tenant_id,key,name) VALUES(%s,'source-discovery','Wakeup test')", (tenant,))
+            c.execute(
+                """INSERT INTO workflow_runs(tenant_id,task_id,actor_id,workflow_key,
+                   definition_version,request_key,request_hash,config,file_ids)
+                   VALUES(%s,%s,%s,'source-discovery','0.6.0',gen_random_uuid(),
+                          'test','{}','[]')""", (tenant, task, actor),
+            )
+            self.assertEqual(c.execute("SELECT generation FROM worker_wakeup").fetchone()[0], before + 1)
             c.rollback()
             self.assertEqual(
                 c.execute("SELECT generation FROM worker_wakeup").fetchone()[0], before

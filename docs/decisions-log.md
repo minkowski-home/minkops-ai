@@ -795,3 +795,21 @@ coalescing, concurrent-runner exclusion, idle-generation races and bounded exits
 The complete backend suite passes 186 tests and 47 subtests. Deployment keeps
 separate database roles and denies runtime DDL; the cloud rollout records live
 verification separately from these regression results.
+## Preserve real ODBC column identity during production discovery (7 October 2026)
+
+**Situation:** The first live GCP discovery receipt was rejected even though the
+Windows adapter collected 275 tables with metadata-only GetSchema calls. Tally
+repeats `$Category` at positions 18 and 78 in CostCentreBreakUp and AllCostCentre;
+our server assumed column names were unique.
+
+**Task:** Preserve the provider's full schema without weakening receipt validation
+or sampling business records to infer it.
+
+**Action:** Reproduced both the valid repeated-name case and an invalid repeated
+position with failing tests. Changed the validator to use ordinal column identity,
+kept names/types/nullability and every existing allocation/scope limit, and tested
+the real PC-to-GCP completion path rather than relying on fabricated metadata.
+
+**Result:** Both regressions pass. The catalog retains repeated methods faithfully;
+malformed receipts cannot make two columns claim the same position. Production
+verification remains a release gate until the corrected image accepts the receipt.

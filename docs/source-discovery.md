@@ -86,6 +86,9 @@ depths.
 Regressions cover metadata-only calls, projection privacy, receipt validation,
 live-reference gating, retry identity/pinning and tenant ownership. Real Windows
 ODBC returned 275 exposed tables on the current PC (Ledger: 400 columns).
+The provider repeats some method names at different ordinal positions, including
+`$Category` in CostCentreBreakUp and AllCostCentre. Catalogs preserve both columns
+using their ordinal identity; a repeated name is not proof of a corrupt schema.
 The historical 6 October installed RC predates this change. Rebuild 0.4.0 and
 verify clean Windows 10/11, driver-present/missing, remote-server topology and
 production HTTPS, then repeat hosted mapping and reviewed-write proof.
