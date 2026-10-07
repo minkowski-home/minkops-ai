@@ -70,6 +70,39 @@ class SchemaContextTests(unittest.TestCase):
             self.assertEqual(done.json()["result"], {"references_prepared": True})
         return done
 
+    def test_reference_readiness_wakes_after_initial_generation_was_acknowledged(self):
+        from minkops_platform.runtime.store import WorkflowRunStore
+
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                discovery = self.tally_discovery("company-1", schema=True, reuse_device=failed)
+                run, _ = self.launch("bill-entry", file_ids=[self.upload_bill()],
+                                     config={"output_mode": "tally_in_place", "discovery_id": discovery})
+                with psycopg.connect(URL, row_factory=dict_row) as c:
+                    self.assertNotIn(run["id"], [str(r["id"]) for r in WorkflowRunStore().candidates(c)])
+                    c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL")
+                calls = []
+
+                def dispatched():
+                    with psycopg.connect(URL, row_factory=dict_row) as c:
+                        calls.append([str(r["id"]) for r in WorkflowRunStore().candidates(c)])
+
+                with (patch.dict(os.environ, {"WORKER_JOB_RESOURCE": "projects/test/locations/us-central1/jobs/worker"}),
+                      patch("minkops_connectors.cloud_run.run_job", dispatched)):
+                    if failed:
+                        job = self.client.post("/api/desktop/worker/claim", headers=self.worker, json={}).json()
+                        response = self.client.post(f"/api/desktop/worker/jobs/{job['id']}/finish", headers=self.worker,
+                                                    json={"claim_token": job["claim_token"], "result": None, "error": "Tally offline"})
+                    else:
+                        response = self.finish_references()
+                    self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(len(calls), 1)
+                if failed:
+                    detail = self.client.get(f"/api/tenants/mock-tenant/accounts/runs/{run['id']}").json()
+                    self.assertEqual(detail["state"], "failed")
+                else:
+                    self.assertIn(run["id"], calls[0])
+
     def test_schema_run_waits_for_pc_before_paid_execution_and_pins_live_references(self):
         from minkops_platform.runtime.store import WorkflowRunStore
 

@@ -31,14 +31,21 @@ def secret(api, name, value, identities):
     print(f"Scoped secret ready: {name}")
 
 
+def ensure_service_accounts(api, identities):
+    base = f"https://iam.googleapis.com/v1/projects/{PROJECT}/serviceAccounts"
+    accounts = api.request(base).get("accounts", [])
+    existing = {item["email"] for item in accounts}
+    for name, email in identities.items():
+        if email not in existing:
+            api.request(base, {"accountId": f"minkops-{name}",
+                               "serviceAccount": {"displayName": f"Minkops {name}"}})
+
+
 def main():
     api = GoogleApi(PROJECT)
     identities = {name: f"minkops-{name}@{PROJECT}.iam.gserviceaccount.com"
                   for name in ("api", "worker", "ops", "interest")}
-    accounts = api.request(f"https://iam.googleapis.com/v1/projects/{PROJECT}/serviceAccounts").get("accounts", [])
-    if not any(item["email"] == identities["interest"] for item in accounts):
-        api.request(f"https://iam.googleapis.com/v1/projects/{PROJECT}/serviceAccounts",
-                    {"accountId": "minkops-interest", "serviceAccount": {"displayName": "Minkops website interest API"}})
+    ensure_service_accounts(api, identities)
     for name in ("api", "worker", "ops"):
         command("projects", "add-iam-policy-binding", SQL_PROJECT,
                 f"--member=serviceAccount:{identities[name]}", "--role=roles/cloudsql.client")

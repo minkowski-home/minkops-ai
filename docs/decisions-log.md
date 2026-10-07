@@ -833,3 +833,24 @@ native adapter as a new installer version rather than overwriting its predecesso
 **Result:** Typed GUID, parent and alteration identifiers pass the regression;
 malformed wrappers remain unavailable. Live workflow verification is recorded
 separately in the deployment checklist.
+
+## Wake bounded workers on native context readiness (7 October 2026)
+
+**Situation:** Review found a race hidden by slow Cloud Run cold starts: an idle
+worker could acknowledge a queued bill before the PC finished its references.
+Completing that job left the run queued and generated no new notification.
+
+**Task:** Make readiness durable and immediate without polling continuously,
+replaying paid work or modifying an already-applied migration.
+
+**Action:** Added an API regression that acknowledges the initial generation,
+then completes the actual native-reference protocol. A new checksum-protected
+migration emits a wake when a Tally context job first becomes terminal. Its
+trigger covers readiness independently of workflow-state transitions, while
+identical completion replay emits no extra notification. Also added fresh-project
+identity provisioning tests and idempotent creation for every runtime account.
+
+**Result:** The previously failing readiness regression and failure-path subtest
+pass; committed context is visible to the response-triggered dispatcher. The
+production migration was applied with the restricted migration identity. Existing
+coalescing, generation fencing and per-run locks continue to control concurrency.

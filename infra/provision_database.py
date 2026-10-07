@@ -68,7 +68,8 @@ def provision(project, instance, state_dir):
     runtime_url = make_conninfo(host="127.0.0.1", port=5433, dbname="minkops",
                                user="minkops_app", password=state["runtime_password"])
     with psycopg.connect(runtime_url) as connection:
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 15
+        expected_migrations = len(list((Path(__file__).resolve().parents[1] / "db/migrations").glob("*.sql")))
+        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == expected_migrations
         assert connection.execute("SELECT count(*) FROM users").fetchone()[0] == 0
         try:
             connection.execute("CREATE TABLE forbidden_runtime_ddl(id integer)")
