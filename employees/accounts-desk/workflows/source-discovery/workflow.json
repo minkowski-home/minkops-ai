@@ -1,8 +1,8 @@
 {
   "key": "source-discovery",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "name": "Source discovery",
-  "description": "Discover approved source structures and reference data, with evidenced business mapping proposals.",
+  "description": "Collect approved table schemas and workbook headers, then propose evidenced business mappings for review.",
   "owner": "accounts-desk",
   "tenant_config_schema": "tenant-config.schema.json",
   "run_config_schema": "run-config.schema.json",
