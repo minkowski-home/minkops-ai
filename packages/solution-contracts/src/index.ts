@@ -23,6 +23,8 @@ export interface SolutionNavigationItem {
 
 export interface SolutionManifest {
   id: string;
+  /** Optional when the customer-facing route differs from its tenant slug. */
+  tenantSlug?: string;
   displayName: string;
   enabledConnectors: readonly ConnectorId[];
   ui?: SolutionUiConfig;

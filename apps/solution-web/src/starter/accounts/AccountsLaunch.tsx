@@ -1,4 +1,5 @@
 import { DiscoveryLaunch } from './Discovery';
+import { presentationFor } from '../workflows/presentation';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Workflow } from '../api';
@@ -19,7 +20,7 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
   const [discoveryDepth,setDiscoveryDepth] = useState(String(workflow.config_values.discovery_depth ?? 'business_mappings'));
   const [refreshMode,setRefreshMode] = useState('initial');
   const [checks, setChecks] = useState(['vendor_match','duplicate','totals','cost_codes']);
-  const discovery = workflow.key === 'source-discovery';
+  const discovery = presentationFor(workflow) === 'accounts-discovery';
   const base = `/api/tenants/${tenant}/accounts`;
   const preferences = `${tenant}:${workflow.key}:selections:v1`;
 
@@ -115,7 +116,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     if (!user || busy) return;
     setBusy(true); setError('');
     const base = `/api/tenants/${tenant}/accounts`;
-    const discovery = workflow.key === 'source-discovery';
+    const discovery = presentationFor(workflow) === 'accounts-discovery';
     try {
       if (discovery) {
         const latest=await api<{device_id:string;config:Record<string,unknown>}|null>(`/api/tenants/${tenant}/discovery/latest`);
@@ -152,5 +153,5 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
 }
 
 export function AccountsLaunch(props:{tenant:string;routeSlug:string;workflow:Workflow}) {
-  return props.workflow.key==='source-discovery'?<DiscoveryLaunch {...props}/>:<LegacyAccountsLaunch {...props}/>;
+  return presentationFor(props.workflow)==='accounts-discovery'?<DiscoveryLaunch {...props}/>:<LegacyAccountsLaunch {...props}/>;
 }

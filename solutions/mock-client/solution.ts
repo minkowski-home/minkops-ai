@@ -6,6 +6,7 @@ import type { SolutionManifest } from "../../packages/solution-contracts/src";
  */
 export const solution: SolutionManifest = {
   id: "mock-client",
+  tenantSlug: "mock-tenant",
   displayName: "Starter workspace",
   enabledConnectors: ["email", "excel", "tally"],
   ui: {

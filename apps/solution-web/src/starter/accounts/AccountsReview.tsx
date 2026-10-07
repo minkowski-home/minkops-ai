@@ -78,7 +78,8 @@ function LegacyAccountsReview({ tenant, taskId }: { tenant: string; taskId: stri
     finally { setBusy(false); }
   }
   if (!run) return error ? <p role="alert">{error}</p> : null;
-  const discovery = run.workflow_key === 'source-discovery';
+  const binding = run.config.runtime_binding as { handler?: string } | undefined;
+  const discovery = binding ? binding.handler === 'accounts.discovery' : run.workflow_key === 'source-discovery';
   return <section className="accounts-panel" aria-label="Workflow result"><h3>{discovery ? 'Source discovery' : 'Bill entry'}</h3>
     {['queued','executing'].includes(run.state) && <p role="status">Accounts desk is working. You can leave this page and return to the task.</p>}
     {run.state === 'failed' && <p role="alert">{run.error} Start a new run from the workflow after resolving the issue.</p>}

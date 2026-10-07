@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
 import { useAuth } from "../contexts/AuthContext";
-import { AccountsLaunch, AccountsQuickRun } from "../accounts/AccountsLaunch";
-import { AccountsReview } from "../accounts/AccountsReview";
+import { WorkflowLaunch, WorkflowQuickRun, WorkflowReview } from "../workflows/WorkflowControls";
+import { presentationFor } from "../workflows/presentation";
 import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
   type WorkflowSort } from "../workspace/presentation";
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
@@ -174,7 +174,7 @@ export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
     <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
-    {["source-discovery", "bill-entry"].includes(item.key) && <AccountsLaunch key={item.id}
+    {presentationFor(item) && <WorkflowLaunch key={item.id}
       tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={item} />}
     <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
       canEdit={workspace.can_edit} onSaved={onSaved} />
@@ -230,7 +230,7 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
             <footer><Link className="button button-ghost" to={`/${routeSlug}/workflows/${workflow.id}`}>View details</Link>
               {workspace.tenant.slug === "mock-tenant" && workflow.key === "image-to-excel-test"
                 && <button className="button button-primary" onClick={() => onRunTest(workflow)}>Run test</button>}
-              {["source-discovery", "bill-entry"].includes(workflow.key) && <AccountsQuickRun
+              {presentationFor(workflow) && <WorkflowQuickRun
                 tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={workflow} />}
             </footer>
           </article>)}</div>
@@ -289,8 +289,9 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
   </section>;
   if (!detail) return <section className="route-screen"><p>Loading task…</p></section>;
-  const key = workspace.workflows.find((w) => w.id === detail.workflow_id)?.key;
-  const mode: ProgressMode = key === 'bill-entry' || key === 'source-discovery' ? key
+  const workflow = workspace.workflows.find((w) => w.id === detail.workflow_id);
+  const presentation = workflow ? presentationFor(workflow) : null;
+  const mode: ProgressMode = presentation === "accounts-bill" ? "bill-entry" : presentation === "accounts-discovery" ? "source-discovery"
     : !detail.workflow_id && detail.title === 'Check Tally connection' ? 'tally.probe'
       : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : 'simple';
   const progress = progressView(detail, mode);
@@ -307,7 +308,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
           <span aria-hidden="true">{index < progress.current || progress.finished ? <Icon name="check" size={14} /> : index + 1}</span>{stage}</li>)}</ol>
       </div>
     </div>
-    <AccountsReview key={id} tenant={workspace.tenant.slug} taskId={id} />
+    <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} />
     <details className="timeline"><summary>Activity details · {detail.events.length} updates</summary>
       {error && <p role="alert" className="form-message">The latest timeline could not load. {error} <button
         className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
