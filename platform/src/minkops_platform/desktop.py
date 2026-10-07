@@ -149,6 +149,26 @@ def enqueue_approved(connection, run, device_id, operation, write_id):
 
 
 def _observe(connection, job, state, summary, progress):
+    if job["operation"] == "tally.references":
+        from .runtime.store import WorkflowRunStore, run_for
+
+        run = run_for(connection, job["tenant_id"], job["input"]["run_id"])
+        if run["state"] != "queued":
+            return
+        store = WorkflowRunStore()
+        if state == "failed":
+            store.fail(connection, run, summary)
+        else:
+            store.observe(
+                connection,
+                run,
+                "queued",
+                "Preparing current Tally references on the connected PC."
+                if state == "executing"
+                else summary,
+                15,
+            )
+        return
     if job["operation"] == "sources.discover":
         # Discovery owns collection -> hosted mapping -> confirmation lifecycle.
         if state in ("queued", "executing"):
@@ -453,20 +473,24 @@ def _claimed_job(connection, device, job_id, claim_token):
 
 def plan(connection, device, job_id, claim_token):
     job = _claimed_job(connection, device, job_id, claim_token)
+    if job["state"] == "executing" and job["operation"] == "tally.references":
+        from .accounts.bills import context_plan
+
+        return context_plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "sources.discover":
         from . import discovery
 
         return discovery.plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "tally.save":
-        from .accounts.bills import tally_target
+        from .accounts.bills import recheck_target
         from .accounts.tally_writes import spec
 
         run, write = spec(connection, device, job["input"])
-        tally_target(
+        recheck_target(
             connection,
             {"id": device["tenant_id"]},
             {"id": device["owner_id"]},
-            run["config"]["tally_target"]["discovery_id"],
+            run["config"]["tally_target"],
         )
         return write["plan"]
     if job["state"] != "executing" or job["operation"] != "accounts.save":
@@ -582,6 +606,17 @@ def finish(connection, device, job_id, receipt):
             if result["verified"]
             else "This bill needs review; other bills continue."
         )
+    elif job["operation"] == "tally.references":
+        if not error:
+            from .accounts.bills import accept_context
+
+            try:
+                result = accept_context(connection, device, job, result)
+            except ServiceError as rejected:
+                # A rejected read is terminal and observable. Returning a 409
+                # would discard the PC receipt while leaving the job reclaimable.
+                error, result = str(rejected), None
+        summary = error or "Tally references prepared; bill extraction is queued."
     elif job["operation"] == "sources.discover":
         from . import discovery
 
@@ -605,5 +640,11 @@ def finish(connection, device, job_id, receipt):
             f"Tally is connected. {len(result['companies'])} compan{'y' if len(result['companies']) == 1 else 'ies'} available."
         )
     )
-    _observe(connection, updated, state, summary, 30 if error else 100)
+    _observe(
+        connection,
+        updated,
+        "queued" if job["operation"] == "tally.references" and not error else state,
+        summary,
+        30 if error or job["operation"] == "tally.references" else 100,
+    )
     return public_job(updated)

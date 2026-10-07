@@ -26,7 +26,7 @@ class TestDatabaseIsolation(unittest.TestCase):
                     connection.execute("SELECT count(*) FROM desktop_devices").fetchone()[0], 0
                 )
                 self.assertEqual(
-                    connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0], 13
+                    connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0], 14
                 )
             raise RuntimeError("simulated failure")
         with psycopg.connect(source) as connection:

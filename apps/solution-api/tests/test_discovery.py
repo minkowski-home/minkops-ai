@@ -42,6 +42,20 @@ class DiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 422, r.text)
 
+    def test_schema_registration_cannot_disguise_records_and_discovery_rejects_record_depth(self):
+        rejected = self.client.post(
+            f"/api/tenants/{self.slug}/accounts/sources",
+            headers=self.csrf,
+            data={"paths": '["books.xlsx"]', "schema_only": "true"},
+            files=[("files", ("books.xlsx", workbook()))],
+        )
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        _, body = self.start()
+        body["request_key"] = str(uuid.uuid4())
+        body["config"]["depth"] = "reference_data"
+        rejected = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+
     def test_excel_and_tally_collection_review_reuse_and_layout_change(self):
         from minkops_platform.accounts.worker import process
         from minkops_platform.resources import REPOSITORY_ROOT
@@ -85,9 +99,20 @@ class DiscoveryTests(unittest.TestCase):
             ).status_code,
             200,
         )
-        config = {"depth": "business_mappings", "excel_source_ids": [source["id"]], "tally": None}
+        config = {"depth": "structure", "excel_source_ids": [source["id"]], "tally": None}
 
         def scan(content):
+            # Native discovery sends a new header-only package. Bill Entry must
+            # refresh the original source independently before reading rows.
+            projected = load_workbook(BytesIO(content))
+            for sheet in projected:
+                for row in sheet:
+                    for cell in row:
+                        if cell.row != (2 if sheet.title == "Bills" else 1):
+                            cell.value = None
+            projected_bytes = BytesIO()
+            projected.save(projected_bytes)
+            content = projected_bytes.getvalue()
             response = self.client.post(
                 self.discovery + "/runs",
                 headers=self.csrf,
@@ -139,7 +164,26 @@ class DiscoveryTests(unittest.TestCase):
                                     "sha256": hashlib.sha256(content).hexdigest(),
                                     "status": "ready",
                                     "structure": {
-                                        "sheets": [{"sheet": s.title, "tables": []} for s in w]
+                                        "sheets": [
+                                            {
+                                                "sheet": s.title,
+                                                "tables": [],
+                                                "preview": [
+                                                    {
+                                                        "row": 2 if s.title == "Bills" else 1,
+                                                        "values": [
+                                                            c.value
+                                                            for c in s[
+                                                                2 if s.title == "Bills" else 1
+                                                            ]
+                                                        ],
+                                                    }
+                                                ],
+                                                "formulas": [],
+                                                "reference_rows": [],
+                                            }
+                                            for s in w
+                                        ]
                                     },
                                 }
                             ],
@@ -199,8 +243,9 @@ class DiscoveryTests(unittest.TestCase):
         second = scan(buf.getvalue())
         self.assertEqual(second["state"], "completed")
         self.assertTrue(second["ready"])
-        self.assertNotEqual(
-            second["catalog"]["excel_mappings"]["sheets"][0]["file_id"], mapping["file_ids"][0]
+        self.assertEqual(
+            second["catalog"]["excel_mappings"]["sheets"][0]["columns"],
+            proposal["sheets"][0]["columns"],
         )
         self.assertIn(
             "bill.pdf",
@@ -225,7 +270,7 @@ class DiscoveryTests(unittest.TestCase):
             "device_id": self.device["id"],
             "request_key": str(uuid.uuid4()),
             "config": {
-                "depth": "business_mappings",
+                "depth": "structure",
                 "excel_source_ids": [],
                 "tally": {"company": "Test", "port": 9000, "categories": ["ledgers", "units"]},
             },
@@ -246,13 +291,39 @@ class DiscoveryTests(unittest.TestCase):
                     "snapshot": {
                         "company": "Test",
                         "port": 9000,
+                        "schema_tables": [
+                            {
+                                "table": "Ledger",
+                                "columns": [
+                                    {
+                                        "name": "$Name",
+                                        "type": "VarChar",
+                                        "nullable": True,
+                                        "ordinal": 1,
+                                    }
+                                ],
+                            }
+                        ],
                         "collections": [
                             {
                                 "category": "ledgers",
                                 "status": "ready",
-                                "count": 1,
-                                "fields": ["NAME"],
-                                "records": [{"NAME": "Supplier"}],
+                                "count": 0,
+                                "fields": ["$Name"],
+                                "records": [],
+                                "schema": {
+                                    "source": "odbc_metadata",
+                                    "coverage": "exposed_top_level_methods",
+                                    "table": "Ledger",
+                                    "columns": [
+                                        {
+                                            "name": "$Name",
+                                            "type": "VarChar",
+                                            "nullable": True,
+                                            "ordinal": 1,
+                                        }
+                                    ],
+                                },
                             },
                             {"category": "units", "status": "unavailable", "error": "Unavailable"}
                             if partial
@@ -262,6 +333,12 @@ class DiscoveryTests(unittest.TestCase):
                                 "count": 0,
                                 "fields": [],
                                 "records": [],
+                                "schema": {
+                                    "source": "odbc_metadata",
+                                    "coverage": "not_exposed",
+                                    "table": "Unit",
+                                    "columns": [],
+                                },
                             },
                         ],
                     },
@@ -291,7 +368,7 @@ class DiscoveryTests(unittest.TestCase):
         download = self.client.get(self.discovery + f"/runs/{run['id']}/catalog.json")
         self.assertEqual(download.status_code, 200)
         self.assertIn("attachment", download.headers["content-disposition"])
-        self.assertEqual(download.json()["sources"][0]["snapshot"]["collections"][0]["count"], 1)
+        self.assertEqual(download.json()["sources"][0]["snapshot"]["collections"][0]["count"], 0)
 
     def test_confirmation_and_unchanged_refresh_reuse_review_with_idempotence(self):
         run, body = self.start()
@@ -312,9 +389,12 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(again["ready"])
         self.assertEqual(again["catalog"]["review"]["reused_from"], run["id"])
         from minkops_platform.discovery import require_ready
+
         with psycopg.connect(URL, row_factory=dict_row) as c:
             tenant = c.execute("SELECT id FROM tenants WHERE slug=%s", (self.slug,)).fetchone()
-            self.assertEqual(require_ready(c, tenant["id"], run["id"], ["tally"])["run_id"], run["id"])
+            self.assertEqual(
+                require_ready(c, tenant["id"], run["id"], ["tally"])["run_id"], run["id"]
+            )
 
     def test_scope_receipts_and_configuration_cannot_escape_the_requested_sources(self):
         run, _ = self.start()

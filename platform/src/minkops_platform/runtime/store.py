@@ -11,6 +11,9 @@ class WorkflowRunStore:
         return connection.execute("""SELECT * FROM workflow_runs WHERE
             NOT coalesce((config->>'batch')::boolean,false)
             AND (state='queued' OR (state='executing' AND updated_at < now()-interval '30 seconds'))
+            AND (NOT config ? 'tally_context_job_id' OR EXISTS
+                (SELECT 1 FROM desktop_jobs j WHERE j.tenant_id=workflow_runs.tenant_id
+                 AND j.id::text=config->>'tally_context_job_id' AND j.state IN ('completed','failed')))
             ORDER BY updated_at LIMIT 10""").fetchall()
 
     def get(self, connection, tenant_id, run_id):

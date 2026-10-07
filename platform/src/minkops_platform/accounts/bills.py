@@ -6,10 +6,12 @@ keys remain authoritative for backfills and externally created records.
 
 import hashlib
 import json
+from uuid import uuid4
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from minkops_platform.errors import ServiceError
+from psycopg.types.json import Jsonb
 
 
 def normalized(value):
@@ -152,6 +154,20 @@ def tally_target(connection, tenant, user, discovery_id):
         raise ServiceError("forbidden", "Use source discovery confirmed by your account.")
     desktop.owned_device(connection, tenant["id"], user["id"], row["device_id"])
     source = next(s["snapshot"] for s in catalog["sources"] if s["tool"] == "tally")
+    if "schema_tables" in source:
+        # Metadata is reusable context, not a supplier directory. Bill Entry
+        # collects its own bounded references through the registered PC.
+        return {
+            "device_id": str(row["device_id"]),
+            "company": source["company"],
+            "port": source["port"],
+            "discovery_id": str(discovery_id),
+            "schema_only": True,
+        }
+    return target_from_references(source, row["device_id"], discovery_id)
+
+
+def target_from_references(source, device_id, discovery_id):
     required = {"company", "ledgers", "voucher_types"}
     collections = {c["category"]: c for c in source["collections"]}
     if any(k not in collections or collections[k]["status"] != "ready" for k in required):
@@ -180,16 +196,101 @@ def tally_target(connection, tenant, user, discovery_id):
             "conflict", "A Purchase voucher type is required in the selected company."
         )
     return {
-        "device_id": str(row["device_id"]),
+        "device_id": str(device_id),
         "company": source["company"],
         "destination_key": f"company:{company_guid}"
         if company_guid
-        else f"device:{row['device_id']}:{source['company']}",
+        else f"device:{device_id}:{source['company']}",
         "port": source["port"],
         "ledgers": ledgers,
         "discovery_id": str(discovery_id),
         "references": {"company_guid": company_guid, "ledgers": ledger_versions},
     }
+
+
+def queue_tally_context(connection, run):
+    target = run["config"]["tally_target"]
+    job = connection.execute(
+        """INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
+        VALUES (%s,%s,%s,%s,'tally.references',%s,%s,%s) RETURNING id""",
+        (
+            run["tenant_id"],
+            target["device_id"],
+            run["actor_id"],
+            run["task_id"],
+            Jsonb({"run_id": str(run["id"])}),
+            uuid4(),
+            str(run["request_hash"]),
+        ),
+    ).fetchone()
+    connection.execute(
+        "UPDATE workflow_runs SET config=config || %s WHERE id=%s",
+        (Jsonb({"tally_context_job_id": str(job["id"])}), run["id"]),
+    )
+
+
+def context_plan(connection, device, job):
+    from .repository import run_for
+
+    run = run_for(connection, device["tenant_id"], job["input"]["run_id"])
+    target = run["config"]["tally_target"]
+    if (
+        str(target["device_id"]) != str(device["id"])
+        or run["actor_id"] != device["owner_id"]
+        or run["state"] != "queued"
+    ):
+        raise ServiceError("conflict", "This workflow is no longer preparing its source context.")
+    tally_target(
+        connection, {"id": device["tenant_id"]}, {"id": device["owner_id"]}, target["discovery_id"]
+    )
+    return {
+        "company": target["company"],
+        "port": target["port"],
+        "categories": ["company", "ledgers", "voucher_types"],
+        "depth": "reference_data",
+    }
+
+
+def accept_context(connection, device, job, result):
+    from minkops_platform.discovery import _validate_tally
+    from .repository import run_for
+    from .batch import create_children
+
+    plan = context_plan(connection, device, job)
+    _validate_tally(result, plan)
+    run = run_for(connection, device["tenant_id"], job["input"]["run_id"], True)
+    target = target_from_references(
+        result, device["id"], run["config"]["tally_target"]["discovery_id"]
+    )
+    expected_guid = run["config"]["tally_target"].get("expected_company_guid")
+    if expected_guid and target["references"]["company_guid"] != expected_guid:
+        raise ServiceError(
+            "conflict",
+            "The Tally company identity changed. Start a new bill run after checking the company.",
+        )
+    run["config"]["tally_target"] = target
+    connection.execute(
+        "UPDATE workflow_runs SET config=%s WHERE id=%s", (Jsonb(run["config"]), run["id"])
+    )
+    if run.get("parent_run_id"):
+        connection.execute(
+            "UPDATE workflow_runs SET config=config || %s WHERE tenant_id=%s AND id=%s",
+            (Jsonb({"tally_target": target}), run["tenant_id"], run["parent_run_id"]),
+        )
+    if len(run["file_ids"]) > 1:
+        create_children(connection, run)
+    return {"references_prepared": True}
+
+
+def recheck_target(connection, tenant, user, current):
+    discovered = tally_target(connection, tenant, user, current["discovery_id"])
+    if discovered.get("schema_only"):
+        if any(discovered[key] != current[key] for key in ("company", "port", "device_id")):
+            raise ServiceError(
+                "conflict", "Tally source identity changed. Refresh source discovery."
+            )
+        return current
+    return discovered
 
 
 def validate_tally(data, target):
@@ -265,7 +366,19 @@ def refreshed_tally_target(connection, tenant, user, current):
         ORDER BY created_at DESC LIMIT 1""",
         (tenant["id"], user["id"], current["device_id"], current["company"]),
     ).fetchone()
-    target = tally_target(connection, tenant, user, latest["id"] if latest else current["discovery_id"])
+    target = tally_target(
+        connection, tenant, user, latest["id"] if latest else current["discovery_id"]
+    )
+    if target.get("schema_only"):
+        if any(target[k] != current[k] for k in ("company", "port", "device_id")):
+            raise ServiceError(
+                "conflict",
+                "The Tally company identity changed. Start a new bill run after checking the company.",
+            )
+        return {**target, "expected_company_guid": current["references"]["company_guid"]}
     if target["destination_key"] != current["destination_key"]:
-        raise ServiceError("conflict", "The Tally company identity changed. Start a new bill run after checking the company.")
+        raise ServiceError(
+            "conflict",
+            "The Tally company identity changed. Start a new bill run after checking the company.",
+        )
     return target

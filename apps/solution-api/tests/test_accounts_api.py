@@ -213,7 +213,9 @@ class AccountsTests(unittest.TestCase):
             from psycopg.types.json import Jsonb
 
             definition = load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry')
-            c.execute("""UPDATE workflows SET config_schema=%s,
+            # This fixture exercises the unrestricted core variant. Dedicated
+            # client-composition tests retain the installed mock-client policy.
+            c.execute("""UPDATE workflows SET config_schema=%s,execution_binding=execution_binding-'solution',
                 config_values=jsonb_set(config_values,'{output_mode}','"excel_in_place"')
                 WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
                 (Jsonb(definition.tenant_schema),))

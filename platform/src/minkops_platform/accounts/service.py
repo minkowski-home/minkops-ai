@@ -117,9 +117,9 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
             catalog = run["config"]["catalog_snapshot"]
             tally = run["config"].get("tally_target")
             if tally:
-                run["config"]["tally_target"] = tally_target(
-                    connection, tenant, user, tally["discovery_id"]
-                )
+                from .bills import recheck_target
+
+                run["config"]["tally_target"] = recheck_target(connection, tenant, user, tally)
                 connection.execute(
                     "UPDATE account_runs SET config=%s WHERE id=%s",
                     (Jsonb(run["config"]), run["id"]),
@@ -419,6 +419,7 @@ def upload_source(
     source_id=None,
     *,
     refresh_extensions=None,
+    schema_only=False,
 ):
     try:
         if (
@@ -438,6 +439,12 @@ def upload_source(
                 raise ValueError("Only .xlsx, PDF, PNG, JPEG and WebP files are supported.")
             if not content or len(content) > 5_000_000:
                 raise ValueError("Each file must be nonempty and at most 5 MB.")
+            if schema_only:
+                from minkops_connectors.excel import schema_projection
+
+                if Path(name).suffix.lower() != ".xlsx":
+                    raise ValueError("Schema connections accept Excel headers only.")
+                schema_projection(content)
             if Path(name).suffix.lower() == ".xlsx":
                 open_workbook(content)
             elif Path(name).suffix.lower() == ".pdf" and not content.startswith(b"%PDF-"):
@@ -484,10 +491,10 @@ def upload_source(
     for path, content in zip(names, data, strict=True):
         saved.append(
             connection.execute(
-                """INSERT INTO account_files (tenant_id,source_id,path,sha256,content)
-            VALUES (%s,%s,%s,%s,%s) ON CONFLICT (tenant_id,source_id,path,sha256)
-            DO UPDATE SET current=true RETURNING id,path,sha256""",
-                (tenant["id"], source["id"], path, digest_bytes(content), content),
+                """INSERT INTO account_files (tenant_id,source_id,path,sha256,content,schema_only)
+            VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (tenant_id,source_id,path,sha256)
+            DO UPDATE SET current=true,schema_only=EXCLUDED.schema_only RETURNING id,path,sha256""",
+                (tenant["id"], source["id"], path, digest_bytes(content), content, schema_only),
             ).fetchone()
         )
     return {"id": source["id"], "label": source["label"], "writable": writable, "files": saved}

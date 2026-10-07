@@ -129,7 +129,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()
 
-    def tally_discovery(self, company_guid=None, *, extra_ledgers=(), reuse_device=False):
+    def tally_discovery(self, company_guid=None, *, extra_ledgers=(), reuse_device=False, schema=False):
         self.native = "/api/tenants/mock-tenant/desktop"
         if not reuse_device:
             self.device = self.client.post(
@@ -147,7 +147,7 @@ class BillEntryTests(unittest.TestCase):
                 "device_id": self.device["id"],
                 "request_key": str(uuid.uuid4()),
                 "config": {
-                    "depth": "business_mappings",
+                    "depth": "structure",
                     "excel_source_ids": [],
                     "tally": {"company": "Test", "port": 9000, "categories": categories},
                 },
@@ -185,6 +185,21 @@ class BillEntryTests(unittest.TestCase):
         }
         if company_guid:
             receipt["sources"][0]["snapshot"]["collections"][0]["records"][0]["GUID"] = company_guid
+        if schema:
+            self.reference_receipt = copy.deepcopy(receipt["sources"][0]["snapshot"])
+            snapshot = receipt["sources"][0]["snapshot"]
+            snapshot["schema_tables"] = []
+            for collection, table in zip(snapshot["collections"], ("Company", "Ledger", "VoucherType")):
+                columns = [{"name": "$Name", "type": "VarChar", "nullable": True, "ordinal": 1}]
+                snapshot["schema_tables"].append({"table": table, "columns": columns})
+                collection.update(count=0, fields=["$Name"], records=[], schema={
+                    "source": "odbc_metadata", "coverage": "exposed_top_level_methods", "table": table, "columns": columns,
+                })
+        else:
+            # Exercise backward compatibility for already queued pre-migration
+            # discoveries; new API requests cannot select record collection.
+            with psycopg.connect(URL) as c:
+                c.execute("UPDATE discovery_runs SET config=jsonb_set(config,'{depth}','\"business_mappings\"') WHERE id=%s", (launched.json()["id"],))
         r = self.client.post(
             f"/api/desktop/worker/jobs/{claim['id']}/finish",
             headers=self.worker,

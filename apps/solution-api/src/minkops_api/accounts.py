@@ -54,6 +54,7 @@ async def upload_source(
     paths: Annotated[str, Form()],
     label: str = Form("Uploaded files"),
     writable: bool = Form(False),
+    schema_only: bool = Form(False),
     source_id: Annotated[UUID | None, Form()] = None,
 ):
     require_csrf(request)
@@ -66,7 +67,8 @@ async def upload_source(
         raise HTTPException(422, str(error)) from error
     contents = [await file.read(5_000_001) for file in files]
     return _call(
-        service.upload_source, connection, tenant, user, names, contents, label, writable, source_id
+        service.upload_source, connection, tenant, user, names, contents, label, writable, source_id,
+        schema_only=schema_only,
     )
 
 

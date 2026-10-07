@@ -18,7 +18,7 @@ from .repository import catalog_contents, files_for, resolve_catalog
 
 
 def prepare_launch(connection, tenant, user, body, workflow, definition):
-    catalog_snapshot, target = None, None
+    catalog_snapshot, target, source_context = None, None, None
     ids = list(map(str, body["file_ids"]))
     if len(ids) != len(set(ids)):
         raise ServiceError("invalid", "Select each file only once.")
@@ -57,6 +57,15 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             if not discovery_id:
                 raise ServiceError("invalid", "Confirm Tally source discovery first.")
             target = tally_target(connection, tenant, user, discovery_id)
+            from minkops_platform.discovery import workflow_context
+
+            source_context = workflow_context(
+                connection,
+                tenant["id"],
+                discovery_id,
+                ["tally"],
+                tally_categories=["company", "ledgers", "voucher_types"],
+            )
             catalog_snapshot = tally_mapping(discovery_id)
             references = []
             selections.update(
@@ -75,7 +84,9 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             selections.get("output_mode", workflow["config_values"].get("output_mode"))
             != "tally_in_place"
         ):
-            catalog_snapshot, references = _excel_launch_catalog(connection, tenant, catalog_id)
+            catalog_snapshot, references, source_context = _excel_launch_catalog(
+                connection, tenant, catalog_id
+            )
             selections.update(
                 {
                     "file_ids": ids,
@@ -138,6 +149,8 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
     snapshots = {
         key: config.pop(key) for key in ("catalog_snapshot", "tally_target") if key in config
     }
+    if source_context:
+        snapshots["source_catalog_snapshot"] = source_context
     return LaunchInputs(files, ids, catalog_id, config, snapshots)
 
 
@@ -156,17 +169,18 @@ def _excel_launch_catalog(connection, tenant, catalog_id):
         "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
         (tenant["id"], str(catalog_id)),
     ).fetchone()
+    source_context = None
     if discovered:
-        from minkops_platform.discovery import require_ready
+        from minkops_platform.discovery import workflow_context
 
-        require_ready(connection, tenant["id"], discovered["id"], ["excel"])
+        source_context = workflow_context(connection, tenant["id"], discovered["id"], ["excel"])
     try:
         catalog_snapshot, references, _ = resolve_catalog(
             connection, tenant["id"], catalog_row["catalog"]
         )
     except ValueError as error:
         raise ServiceError("conflict", str(error)) from error
-    return catalog_snapshot, references
+    return catalog_snapshot, references, source_context
 
 
 class AccountsHandler:
@@ -223,14 +237,33 @@ class DiscoveryHandler(AccountsHandler):
 
 class BillHandler(AccountsHandler):
     def launched(self, connection, run):
+        if run["config"].get("tally_target", {}).get("schema_only"):
+            from .bills import queue_tally_context
+
+            queue_tally_context(connection, run)
+            return
         if len(run["file_ids"]) > 1:
             from .batch import create_children
 
             create_children(connection, run)
 
     def prepare(self, connection, run):
+        if run["config"].get("tally_context_job_id"):
+            job = connection.execute(
+                "SELECT state,error FROM desktop_jobs WHERE tenant_id=%s AND id=%s",
+                (run["tenant_id"], run["config"]["tally_context_job_id"]),
+            ).fetchone()
+            if not job or job["state"] != "completed":
+                raise ValueError(
+                    "Tally references could not be prepared. Check the connected PC and relaunch this bill."
+                )
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
+        if run["config"].get("source_catalog_snapshot"):
+            context["source_catalog"] = run["config"]["source_catalog_snapshot"]
+            context["config"] = {
+                k: v for k, v in run["config"].items() if k != "source_catalog_snapshot"
+            }
         context["catalog"] = run["config"]["catalog_snapshot"]
         refs, contents = (
             ([], {})

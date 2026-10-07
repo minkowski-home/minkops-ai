@@ -29,14 +29,15 @@ def create_child(connection, run, file_id, *, user_input=None):
     config = copy.deepcopy(run["config"])
     config.pop("batch", None)
     config.pop("retry_file_id", None)
+    config.pop("tally_context_job_id", None)
     if user_input:
         config["user_input"] = user_input
     config["file_ids"] = [file_id]
     config["review_mode"] = "all_outputs"
-    connection.execute(
+    child = connection.execute(
         """INSERT INTO account_runs
             (tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,request_hash,config,file_ids,catalog_id,parent_run_id)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
         (
             run["tenant_id"],
             run["task_id"],
@@ -50,7 +51,8 @@ def create_child(connection, run, file_id, *, user_input=None):
             run["catalog_id"],
             run["id"],
         ),
-    )
+    ).fetchone()
+    return child
 
 
 def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
@@ -78,21 +80,41 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
     else:
         if not user_input.strip():
             raise ServiceError("invalid", "Describe the correction or missing information.")
-        if run["config"].get("tally_target"):
+        original_target = run["config"].get("tally_target")
+        if original_target:
             from .bills import refreshed_tally_target
 
             run["config"]["tally_target"] = refreshed_tally_target(
                 connection, tenant, user, run["config"]["tally_target"]
             )
-            connection.execute(
-                "UPDATE account_runs SET config=%s WHERE id=%s",
-                (Jsonb(run["config"]), run_id),
-            )
+            if not run["config"]["tally_target"].get("schema_only"):
+                connection.execute(
+                    "UPDATE account_runs SET config=%s WHERE id=%s",
+                    (Jsonb(run["config"]), run_id),
+                )
         connection.execute(
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
         )
-        create_child(connection, run, file_id, user_input=user_input.strip())
+        child = create_child(connection, run, file_id, user_input=user_input.strip())
+        if child["config"].get("tally_target", {}).get("schema_only"):
+            from .bills import queue_tally_context
+            from ..discovery import workflow_context
+
+            # A continuation pins the refreshed catalog independently of siblings.
+            child["config"]["source_catalog_snapshot"] = workflow_context(
+                connection,
+                tenant["id"],
+                child["config"]["tally_target"]["discovery_id"],
+                ["tally"],
+                tally_categories=["company", "ledgers", "voucher_types"],
+            )
+            connection.execute(
+                "UPDATE account_runs SET config=%s WHERE id=%s",
+                (Jsonb(child["config"]), child["id"]),
+            )
+            queue_tally_context(connection, child)
+            run["config"]["tally_target"] = original_target
         connection.execute(
             "UPDATE account_runs SET config=config || jsonb_build_object('batch',true,'retry_file_id',%s::text) WHERE id=%s",
             (file_id, run_id),

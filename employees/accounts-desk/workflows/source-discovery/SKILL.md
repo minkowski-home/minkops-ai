@@ -30,7 +30,9 @@ header against the workbook before accepting confirmation.
 
 For registered-PC discovery, the native adapters first collect Tally masters
 and Excel structure under collection-config.schema.json. `context.local_discovery`
-contains those observations and reference records, collected on the client's PC.
+contains schema observations and header candidates collected on the client's PC.
+New discovery does not collect business records. Header-only workbook projections
+provide mapping context; current reference values belong to dependent workflows.
 Treat Tally fields as observed integration data, not confirmed business mappings.
 Company, source IDs and reference categories are explicitly selected. Use only
 the supplied scope. The server owns versioned JSON catalogs and partial results;

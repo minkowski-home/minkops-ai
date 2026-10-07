@@ -11,7 +11,7 @@ import json
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
-from minkops_connectors.excel import open_workbook
+from minkops_connectors.excel import open_workbook, schema_projection
 from psycopg.types.json import Jsonb
 
 from .accounts import service as accounts
@@ -44,6 +44,35 @@ CONFIG_SCHEMA = json.loads(
 
 def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def workflow_context(connection, tenant_id, run_id, tools, *, tally_categories=None):
+    """Pin reviewed schema context, bounded to a dependent workflow's tool scope.
+
+    Every client owns its catalog; core skills never read a global client schema.
+    Runtime directories/rows belong to the consuming workflow's authorization.
+    """
+    catalog = copy.deepcopy(require_ready(connection, tenant_id, run_id, tools))
+    catalog["sources"] = [s for s in catalog["sources"] if s["tool"] in tools]
+    for source in catalog["sources"]:
+        if source["tool"] != "tally":
+            continue
+        snapshot = source["snapshot"]
+        categories = set(tally_categories or CATEGORIES)
+        if not categories <= set(CATEGORIES):
+            raise ValueError("Unsupported Tally schema context.")
+        snapshot["collections"] = [
+            c for c in snapshot["collections"] if c["category"] in categories
+        ]
+        for collection in snapshot["collections"]:
+            collection["records"] = []
+            collection["count"] = 0
+        if "schema_tables" in snapshot and tally_categories is not None:
+            names = {c["schema"]["table"] for c in snapshot["collections"] if "schema" in c}
+            snapshot["schema_tables"] = [
+                t for t in snapshot["schema_tables"] if t["table"] in names
+            ]
+    return catalog
 
 
 def get_run(connection, tenant_id, run_id, lock=False):
@@ -114,12 +143,21 @@ def launch(connection, tenant, user, body):
     except ValidationError as error:
         raise ServiceError("invalid", "Choose valid Tally and Excel discovery options.") from error
     config = body["config"]
+    if config["depth"] != "structure":
+        raise ServiceError(
+            "invalid",
+            "Source Discovery collects schema and headers only. Workflows prepare their own runtime references.",
+        )
     mode = config.get("destination_mode")
-    observed_mode = "both" if config["tally"] and config["excel_source_ids"] else (
-        "tally" if config["tally"] else "excel"
+    observed_mode = (
+        "both"
+        if config["tally"] and config["excel_source_ids"]
+        else ("tally" if config["tally"] else "excel")
     )
     if mode and mode != observed_mode:
-        raise ServiceError("invalid", "Select the sources required by the chosen Excel, Tally or Both option.")
+        raise ServiceError(
+            "invalid", "Select the sources required by the chosen Excel, Tally or Both option."
+        )
     if not config["excel_source_ids"] and not config["tally"]:
         raise ServiceError("invalid", "Select at least one source.")
     fingerprint, previous = resolve_request(
@@ -261,12 +299,36 @@ def progress(connection, device, job, body):
 def _validate_tally(snapshot, config):
     if (
         not isinstance(snapshot, dict)
-        or set(snapshot) != {"company", "port", "collections"}
+        or set(snapshot)
+        != (
+            {"company", "port", "collections", "schema_tables"}
+            if config["depth"] == "structure"
+            else {"company", "port", "collections"}
+        )
         or snapshot["company"] != config["company"]
         or snapshot["port"] != config["port"]
         or not isinstance(snapshot["collections"], list)
     ):
         raise ServiceError("invalid", "Tally returned a different company or scope.")
+    if config["depth"] == "structure":
+        tables = snapshot["schema_tables"]
+        if not isinstance(tables, list) or len(tables) > 500:
+            raise ServiceError("invalid", "Invalid Tally metadata scope.")
+        names = []
+        for table in tables:
+            if (
+                not isinstance(table, dict)
+                or set(table) != {"table", "columns"}
+                or not isinstance(table["table"], str)
+                or not 1 <= len(table["table"]) <= 200
+            ):
+                raise ServiceError("invalid", "Invalid Tally metadata table.")
+            names.append(table["table"])
+            _validate_columns(table["columns"])
+        if len(names) != len(set(names)):
+            raise ServiceError("invalid", "Duplicate Tally metadata tables.")
+        if sum(len(t["columns"]) for t in tables) > 100000:
+            raise ServiceError("invalid", "Tally metadata exceeds the supported scope.")
     seen = []
     for c in snapshot["collections"]:
         if not isinstance(c, dict) or c.get("status") not in ("ready", "unavailable"):
@@ -274,7 +336,12 @@ def _validate_tally(snapshot, config):
         seen.append(c.get("category"))
         if c["status"] == "ready":
             if (
-                set(c) != {"category", "status", "count", "fields", "records"}
+                set(c)
+                != (
+                    {"category", "status", "count", "fields", "records", "schema"}
+                    if config["depth"] == "structure"
+                    else {"category", "status", "count", "fields", "records"}
+                )
                 or type(c["count"]) is not int
                 or not 0 <= c["count"] <= 10000
                 or not isinstance(c["fields"], list)
@@ -284,6 +351,27 @@ def _validate_tally(snapshot, config):
                 or len(c["records"]) != (0 if config["depth"] == "structure" else c["count"])
             ):
                 raise ServiceError("invalid", "Invalid Tally reference records.")
+            if config["depth"] == "structure":
+                schema = c["schema"]
+                if (
+                    c["count"] != 0
+                    or not isinstance(schema, dict)
+                    or set(schema) != {"source", "coverage", "table", "columns"}
+                    or schema["source"] != "odbc_metadata"
+                    or schema["coverage"] not in ("exposed_top_level_methods", "not_exposed")
+                    or not isinstance(schema["table"], str)
+                ):
+                    raise ServiceError("invalid", "Structure discovery cannot include records.")
+                _validate_columns(schema["columns"])
+                if c["fields"] != [col["name"] for col in schema["columns"]] or schema[
+                    "columns"
+                ] != next(
+                    (t["columns"] for t in tables if t["table"].lower() == schema["table"].lower()),
+                    [],
+                ):
+                    raise ServiceError(
+                        "invalid", "Tally metadata fields do not match the observed table."
+                    )
         elif (
             set(c) != {"category", "status", "error"}
             or not isinstance(c["error"], str)
@@ -292,6 +380,28 @@ def _validate_tally(snapshot, config):
             raise ServiceError("invalid", "Invalid Tally collection error.")
     if len(seen) != len(set(seen)) or set(seen) != set(config["categories"]):
         raise ServiceError("invalid", "Tally discovery omitted selected categories.")
+
+
+def _validate_columns(columns):
+    if (
+        not isinstance(columns, list)
+        or len(columns) > 2000
+        or any(
+            not isinstance(c, dict)
+            or set(c) != {"name", "type", "nullable", "ordinal"}
+            or not isinstance(c["name"], str)
+            or not 1 <= len(c["name"]) <= 300
+            or not isinstance(c["type"], str)
+            or len(c["type"]) > 100
+            or type(c["nullable"]) is not bool
+            or type(c["ordinal"]) is not int
+            or c["ordinal"] < 0
+            for c in columns
+        )
+    ):
+        raise ServiceError("invalid", "Invalid Tally column metadata.")
+    if len({c["name"] for c in columns}) != len(columns):
+        raise ServiceError("invalid", "Duplicate Tally metadata columns.")
 
 
 def _structure(files, mappings=None):
@@ -434,6 +544,18 @@ def collect(connection, device, job, result):
                     "structure",
                 }:
                     raise ServiceError("invalid", "Invalid workbook structure.")
+                if book["status"] == "ready" and row["config"]["depth"] == "structure":
+                    try:
+                        content, structure = schema_projection(
+                            originals[book["path"]], book["structure"]
+                        )
+                    except (KeyError, TypeError, ValueError) as error:
+                        raise ServiceError(
+                            "invalid", "Discovery must contain schema and headers only."
+                        ) from error
+                    originals[book["path"]] = content
+                    book["sha256"] = hashlib.sha256(content).hexdigest()
+                    book["structure"] = structure
             good = [b["path"] for b in books if b["status"] == "ready"]
             current = {}
             if good:
@@ -447,6 +569,7 @@ def collect(connection, device, job, result):
                     True,
                     bound["id"],
                     refresh_extensions=[".xlsx"],
+                    schema_only=row["config"]["depth"] == "structure",
                 )
                 current = {
                     f["path"]: f

@@ -53,6 +53,8 @@ def resolve_catalog(connection, tenant_id, catalog):
         ).fetchone()
         if not current:
             raise ValueError("A catalog source was removed. Refresh discovery.")
+        if current.get("schema_only"):
+            raise ValueError("Refresh the destination on its connected PC before Bill Entry.")
         if current["id"] != old["id"]:
             # Trace the complete verified chain, not just the last write.
             chain = connection.execute(
@@ -65,7 +67,7 @@ def resolve_catalog(connection, tenant_id, catalog):
                 reachable.update(
                     r["after_sha256"] for r in chain if r["before_sha256"] in reachable
                 )
-            if current["sha256"] not in reachable:
+            if not old.get("schema_only") and current["sha256"] not in reachable:
                 raise ValueError("Catalog sources changed outside Minkops. Refresh discovery.")
         replacements[str(old["id"])] = str(current["id"])
     for s in resolved["sheets"]:
