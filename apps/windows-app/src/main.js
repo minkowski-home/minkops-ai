@@ -28,6 +28,7 @@ import {
   replaceApproved,
   tallyProbe,
   inspectExcel,
+  excelSchemaBytes,
   discoverTally,
   commitTallyBill,
   saveCatalogSnapshot,
@@ -165,6 +166,7 @@ function startWorker() {
           folderFor: (id) => grantFor(id).root,
           inventory,
           inspectExcel,
+          excelSchemaBytes,
           discoverTally,
           onProgress: async (source_key, status, category = null) => {
             try {
@@ -182,6 +184,10 @@ function startWorker() {
       }
       if (job.operation === "files.refresh")
         return { files: await inventory(grantFor(job.input.source_id).root) };
+      if (job.operation === "tally.references") {
+        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
+        return discoverTally(plan);
+      }
       if (job.operation === "tally.save") {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
@@ -332,7 +338,7 @@ function setupBridge() {
       }
     }
   });
-  handle("desktop:pick-folder", async ({ tenant, sourceId }) => {
+  handle("desktop:pick-folder", async ({ tenant, sourceId, schemaOnly = false }) => {
     const user = await profile(tenant);
     if (state.device?.tenant !== tenant || state.device?.owner_id !== user.id)
       throw new Error(
@@ -352,7 +358,14 @@ function setupBridge() {
         user.id,
       );
     }
-    const files = await inventory(root);
+    let files = await inventory(root);
+    if (schemaOnly === true) {
+      files = await Promise.all(files.filter((f) => /\.xlsx$/i.test(f.path)).map(async (file) => ({
+        path: file.path,
+        content: (await excelSchemaBytes(Buffer.from(file.content, "base64"))).toString("base64"),
+      })));
+      if (!files.length) throw new Error("Choose a folder containing supported Excel workbooks.");
+    }
     const grantId = randomUUID();
     pendingGrants.set(grantId, {
       root,

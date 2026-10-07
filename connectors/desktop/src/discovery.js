@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import { posix } from "node:path";
 import { XMLParser, XMLBuilder, XMLValidator } from "fast-xml-parser";
 import { tallyProbe, boundedText } from "./index.js";
+import { tallySchema } from "./tally-schema.js";
 
 export const TALLY_COLLECTIONS = Object.freeze({
   company: ["Company", "COMPANY"],
@@ -152,6 +153,15 @@ export async function inspectExcel(bytes, depth = "business_mappings") {
         columns: table.columns.map((c) => c.name),
       };
     });
+    const headerRows = tables.length ? tables.map((t) => t.header_row) :
+      preview.filter((r) => r.values.filter((v) => typeof v === "string" && v.trim()).length >= 2).slice(0, 1).map((r) => r.row);
+    const headers = headerRows.map((index) => {
+      const values = [];
+      s.getRow(index).eachCell({ includeEmpty: true }, (cell, col) => {
+        values[col - 1] = typeof scalar(cell.value) === "string" ? scalar(cell.value) : null;
+      });
+      return { row: index, values };
+    });
     return {
       sheet: s.name,
       state: s.state,
@@ -159,17 +169,45 @@ export async function inspectExcel(bytes, depth = "business_mappings") {
       columns: s.columnCount,
       tables,
       merged_ranges: s.model.merges,
-      preview,
-      formulas,
-      reference_rows,
+      preview: depth === "structure" ? headers : preview,
+      formulas: depth === "structure" ? [] : formulas,
+      reference_rows: depth === "structure" ? [] : reference_rows,
     };
   });
-  return { format: "xlsx", sheets, defined_names: workbook.definedNames.model };
+  return { format: "xlsx", sheets, defined_names: depth === "structure" ? [] : workbook.definedNames.model };
+}
+
+/** Keep only candidate/table headers in bytes sent for business mapping. Local
+ * source bytes stay on the PC until a workflow explicitly refreshes its inputs.
+ * Untabled header candidates require the operator's normal mapping confirmation.
+ */
+export async function excelSchemaBytes(bytes) {
+  const observed = await inspectExcel(bytes, "structure");
+  const workbook = new ExcelJS.Workbook();
+  // Build a fresh package: clearing values in the original can retain comments,
+  // hyperlinks, images, cached formulas and document properties with client data.
+  for (const layout of observed.sheets) {
+    const sheet = workbook.addWorksheet(layout.sheet, { state: layout.state });
+    for (const header of layout.preview) {
+      header.values.forEach((value, index) => {
+        if (typeof value === "string") sheet.getCell(header.row, index + 1).value = value;
+      });
+    }
+    for (const table of layout.tables) {
+      const endRow = Number(table.range.split(":").at(-1).match(/\d+$/)[0]);
+      sheet.addTable({ name: table.name, ref: table.range.split(":")[0], headerRow: true,
+        columns: table.columns.map((name) => ({ name })),
+        rows: Array.from({ length: Math.max(0, endRow - table.header_row) }, () => table.columns.map(() => null)),
+      });
+    }
+    for (const range of layout.merged_ranges) sheet.mergeCells(range);
+  }
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 export async function discoverTally(
   config,
-  { request = fetch, onProgress = async () => {} } = {},
+  { request = fetch, onProgress = async () => {}, metadata = tallySchema } = {},
 ) {
   const { company, port = 9000, categories, depth } = config;
   if (
@@ -189,12 +227,39 @@ export async function discoverTally(
     throw new Error(
       "The selected company is not open in Tally. Open it and refresh discovery.",
     );
+  if (depth === "structure") {
+    let tables;
+    try {
+      tables = await metadata({ port });
+      if (!Array.isArray(tables) || tables.length > 500 || tables.some((t) =>
+        typeof t.table !== "string" || !t.table || t.table.length > 200 ||
+        !Array.isArray(t.columns) || t.columns.length > 2000 || t.columns.some((c) =>
+          typeof c.name !== "string" || !c.name || c.name.length > 300 ||
+          typeof c.type !== "string" || c.type.length > 100 || typeof c.nullable !== "boolean" ||
+          !Number.isInteger(c.ordinal) || c.ordinal < 0))) throw new Error("Invalid metadata.");
+    } catch {
+      tables = null;
+    }
+    const aliases = { groups: "Groups", cost_centres: "CostCentre", units: "Unit", currencies: "Currency" };
+    const collections = [];
+    for (const category of categories) {
+      await onProgress(category, "reading");
+      const table = aliases[category] || TALLY_COLLECTIONS[category][0];
+      const columns = tables?.find((t) => t.table.toLowerCase() === table.toLowerCase())?.columns || [];
+      collections.push(tables ? {
+        category, status: "ready", count: 0, records: [], fields: columns.map((c) => c.name),
+        schema: { source: "odbc_metadata", coverage: columns.length ? "exposed_top_level_methods" : "not_exposed", table, columns },
+      } : { category, status: "unavailable", error: "Enable Tally ODBC and its 64-bit driver on this PC, then retry structure discovery." });
+      await onProgress(category, tables ? "ready" : "unavailable");
+    }
+    return { company, port, collections, schema_tables: tables || [] };
+  }
   const collections = [];
   for (const category of categories) {
     await onProgress(category, "reading");
     const [type, tag] = TALLY_COLLECTIONS[category];
     try {
-      const xml = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsDiscovery</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsDiscovery" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>*</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+      const xml = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsDiscovery</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsDiscovery" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>Name,GUID,Parent,AlterID</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
       const response = await request(`http://127.0.0.1:${port}`, {
         method: "POST",
         body: xml,
@@ -235,6 +300,7 @@ export async function discoverTally(
         );
       if (category === "company" && !records.length)
         throw new Error("Selected company details were not returned.");
+      records = records.map((r) => Object.fromEntries(Object.entries(r).filter(([key]) => ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID"].includes(key))));
       const fields = new Set();
       const walk = (v, p = "") => {
         if (v && typeof v === "object")

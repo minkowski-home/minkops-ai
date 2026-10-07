@@ -36,7 +36,7 @@ export class CompanionWorker {
             claim_token: job.claim_token,
             result: null,
             error:
-              job.operation === "tally.probe"
+              ["tally.probe", "tally.references"].includes(job.operation)
                 ? "Tally is not responding. Open Tally, load your company, and try again."
                 : job.operation === "tally.save"
                   ? "Tally could not confirm this bill. Check the company and resume; existing vouchers will be reconciled before writing."

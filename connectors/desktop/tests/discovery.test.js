@@ -71,7 +71,7 @@ test("local Excel inspection preserves off-row headers, named tables, formulas a
   );
 });
 
-test("Tally discovery scopes company, preserves nested tax records, isolates failed categories", async () => {
+test("Tally workflow references scope company, exclude unrelated values, and isolate failed categories", async () => {
   const sent = [];
   const result = await discoverTally(
     {
@@ -96,10 +96,8 @@ test("Tally discovery scopes company, preserves nested tax records, isolates fai
     },
   );
   assert.equal(result.collections[0].records[0]["@_NAME"], "001");
-  assert.equal(
-    result.collections[0].records[0]["GSTDETAILS.LIST"].PARTYGSTIN,
-    "001234",
-  );
+  assert.equal(result.collections[0].records[0]["GSTDETAILS.LIST"], undefined);
+  assert.ok(sent.every((s) => !s.body.includes("<FETCH>*</FETCH>")));
   assert.equal(result.collections[1].status, "unavailable");
   assert.match(
     sent[1].body,

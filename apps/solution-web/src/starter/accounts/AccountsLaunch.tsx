@@ -130,7 +130,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       if (discovery) {
         const latest=await api<{device_id:string;config:Record<string,unknown>}|null>(`/api/tenants/${tenant}/discovery/latest`);
         if (!latest) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
-        const launched=await api<Run>(`/api/tenants/${tenant}/discovery/runs`,{method:'POST',body:JSON.stringify({device_id:latest.device_id,config:latest.config,request_key:crypto.randomUUID()})},user.csrf_token);
+        const launched=await api<Run>(`/api/tenants/${tenant}/discovery/runs`,{method:'POST',body:JSON.stringify({device_id:latest.device_id,config:{...latest.config,depth:'structure'},request_key:crypto.randomUUID()})},user.csrf_token);
         navigate(`/${routeSlug}/tasks/${launched.task_id}`); return;
       }
       const [sources,catalogs] = await Promise.all([api<Source[]>(base+'/sources'),api<SavedCatalog[]>(base+'/catalogs')]);

@@ -32,6 +32,7 @@ interface Collection {
   fields?: string[];
   records?: Record<string, unknown>[];
   error?: string;
+  schema?: { source: string; coverage: string; table: string; columns: {name:string;type:string}[] };
 }
 interface Book {
   path: string;
@@ -109,7 +110,7 @@ export function DiscoveryLaunch({
   const [company, setCompany] = useState("");
   const [port, setPort] = useState(9000);
   const [depth, setDepth] = useState(
-    String(workflow.config_values.discovery_depth ?? "business_mappings")
+    "structure"
   );
   const [selectedCategories, setCategories] = useState(categories.map((c) => c[0]));
   const [busy, setBusy] = useState(false);
@@ -139,7 +140,7 @@ export function DiscoveryLaunch({
     if (latest) {
       setSelected(latest.config.excel_source_ids);
       setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? (latest.config.excel_source_ids.length ? 'both' : 'tally') : 'excel'));
-      setDepth(latest.config.depth);
+      setDepth("structure");
       if (latest.config.tally) {
         setCompany(latest.config.tally.company);
         setPort(latest.config.tally.port);
@@ -158,7 +159,7 @@ export function DiscoveryLaunch({
     setBusy(true);
     setError("");
     try {
-      const s = await chooseFolder(tenant, user.csrf_token);
+      const s = await chooseFolder(tenant, user.csrf_token, undefined, true);
       await load();
       setSelected((v) => [...new Set([...v, s.id])]);
     } catch (e) {
@@ -279,7 +280,7 @@ export function DiscoveryLaunch({
         <section className="discovery-source-card">
           <h4>Excel</h4>
           <p>
-            Read worksheets, named tables, columns, formulas and reference data from
+            Read worksheets, named tables and candidate headers from
             selected folders.
           </p>
           <button
@@ -319,8 +320,6 @@ export function DiscoveryLaunch({
       <label className="config-field">
         What should we discover?
         <select value={depth} onChange={(e) => setDepth(e.target.value)}>
-          <option value="business_mappings">Everything needed for Bill Entry</option>
-          <option value="reference_data">Structure and reference data</option>
           <option value="structure">Structure only</option>
         </select>
       </label>
@@ -474,14 +473,13 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                 <details key={c.category}>
                   <summary>
                     {categories.find((k) => k[0] === c.category)?.[1] ?? c.category} ·{" "}
-                    {c.status === "ready" ? `${c.count} records` : "Needs attention"}
+                    {c.status === "ready" ? (c.schema ? `${c.fields?.length ?? 0} fields` : `${c.count} reference names`) : "Needs attention"}
                   </summary>
                   {c.error ? (
                     <p role="alert">{c.error}</p>
                   ) : (
                     <><p className="quiet-state">
-                      {c.fields?.length} observed fields. Reference identifiers and nested
-                      tax details are included in the catalog.
+                      {c.schema ? (c.schema.coverage === "not_exposed" ? "This category is not exposed through Tally ODBC metadata." : "Observed top-level methods. Nested XML structures and custom fields not exposed by ODBC are outside this metadata view.") : "Historical workflow reference context."}
                     </p><ul>{c.records?.slice(0,50).map((record,index)=>{
                       const name=record['@_NAME'] ?? record.NAME;
                       const label=typeof name==='string'?name:typeof name==='object'&&name?String((name as Record<string,unknown>)['#text']??''):'';

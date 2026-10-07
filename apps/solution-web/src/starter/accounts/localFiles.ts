@@ -67,16 +67,19 @@ async function onConnectedPC(tenant: string, deviceId: string, operation: string
   if (job.state !== 'completed') throw new Error('Waiting for your PC. Keep Minkops running there, then return to this task.');
 }
 
-export async function chooseFolder(tenant: string, csrf: string, existing?: Source): Promise<Source> {
+export async function chooseFolder(tenant: string, csrf: string, existing?: Source, schemaOnly = false): Promise<Source> {
   const native = desktopBridge();
   if (native) {
-    const chosen = await native.pickFolder(tenant, existing?.id);
+    if (schemaOnly && !native.schemaOnlyFolders) throw new Error('Update Minkops to version 0.4.0 or later for schema-only discovery.');
+    const chosen = await native.pickFolder(tenant, existing?.id, schemaOnly);
     if (!chosen) throw new Error('Folder selection cancelled.');
-    const source = await api<Source>(`/api/tenants/${tenant}/accounts/sources`, { method: 'POST',
-      body: nativeFilesForm(chosen.files, chosen.label, existing?.id) }, csrf);
+    const form = nativeFilesForm(chosen.files, chosen.label, existing?.id);
+    if (schemaOnly) form.append('schema_only', 'true');
+    const source = await api<Source>(`/api/tenants/${tenant}/accounts/sources`, { method: 'POST', body: form }, csrf);
     await native.bindFolder(tenant, source.id, chosen.grantId);
     return source;
   }
+  if (schemaOnly) throw new Error('Open Source Discovery in the Windows app to connect a folder without uploading records.');
   const picker = (window as PickerWindow).showDirectoryPicker;
   if (!picker) throw new Error('Use Chrome or Edge to connect a local folder for in-place Excel edits.');
   const folder = await picker.call(window, { mode: 'readwrite' });

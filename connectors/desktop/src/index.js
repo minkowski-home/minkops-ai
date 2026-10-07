@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises";
 import { join, dirname, basename, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-export { inspectExcel, discoverTally } from './discovery.js';
+export { inspectExcel, excelSchemaBytes, discoverTally } from './discovery.js';
 export { commitTallyBill, readTallyBills } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");

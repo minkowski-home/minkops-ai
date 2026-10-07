@@ -10,6 +10,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.formula.translate import Translator
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
+from openpyxl.worksheet.table import Table, TableColumn
 
 MAX_CELLS = 250_000
 
@@ -53,6 +54,115 @@ def inspect_workbook(content):
         }
         for s in open_workbook(content)
     ]
+
+
+def schema_projection(content, observed=None):
+    """Validate a header-only receipt and rebuild it without opaque package parts.
+
+    Untabled sheets have at most one declared candidate in the first ten rows;
+    named table headers are authoritative. Business interpretation is reviewed
+    separately. Never accept row samples, formulas, links or comments as schema.
+    """
+    original = open_workbook(content)
+    if observed is None:
+        observed = {
+            "sheets": [
+                {
+                    "sheet": s.title,
+                    "tables": [{"name": t.name, "range": t.ref} for t in s.tables.values()],
+                    "preview": [
+                        {"row": row[0].row, "values": [c.value for c in row]}
+                        for row in s
+                        if any(c.value is not None for c in row)
+                    ],
+                }
+                for s in original
+            ]
+        }
+    sheets = observed.get("sheets") if isinstance(observed, dict) else None
+    if (
+        not isinstance(sheets, list)
+        or len(sheets) > 100
+        or [s.get("sheet") for s in sheets if isinstance(s, dict)] != original.sheetnames
+    ):
+        raise ValueError("Schema must account for every worksheet.")
+    projected = Workbook()
+    projected.remove(projected.active)
+    layouts = []
+    for source, observation in zip(original, sheets, strict=True):
+        headers = observation.get("preview", [])
+        if not isinstance(headers, list) or any(
+            not isinstance(h, dict) or type(h.get("row")) is not int for h in headers
+        ):
+            raise ValueError("Invalid schema headers.")
+        declared = {h["row"] for h in headers}
+        tables = list(source.tables.values())
+        expected = {range_boundaries(t.ref)[1] for t in tables}
+        if tables:
+            if declared != expected or any(t.headerRowCount != 1 for t in tables):
+                raise ValueError("Schema headers must match named tables.")
+        elif len(headers) > 1 or any(not 1 <= row <= 10 for row in declared):
+            raise ValueError("Confirm a single candidate header in the first ten rows.")
+        target = projected.create_sheet(source.title)
+        target.sheet_state = source.sheet_state
+        for row in source:
+            for cell in row:
+                if cell.value is None:
+                    continue
+                if (
+                    cell.row not in declared
+                    or not isinstance(cell.value, str)
+                    or cell.data_type == "f"
+                    or cell.comment
+                    or cell.hyperlink
+                ):
+                    raise ValueError(
+                        "Source Discovery accepts headers only; refresh records through the workflow."
+                    )
+                target.cell(cell.row, cell.column, cell.value)
+        canonical_headers = [
+            {"row": r, "values": [c.value for c in target[r]]} for r in sorted(declared)
+        ]
+        if headers != canonical_headers:
+            raise ValueError("Declared headers do not match the schema workbook.")
+        canonical_tables = []
+        for table in tables:
+            columns = [c.name for c in table.tableColumns]
+            clean = Table(displayName=table.name, ref=table.ref)
+            clean.tableColumns = [
+                TableColumn(id=i + 1, name=name) for i, name in enumerate(columns)
+            ]
+            target.add_table(clean)
+            canonical_tables.append(
+                {
+                    "name": table.name,
+                    "range": table.ref,
+                    "header_row": range_boundaries(table.ref)[1],
+                    "columns": columns,
+                }
+            )
+        if {t["name"]: t["range"] for t in observation.get("tables", [])} != {
+            t.name: t.ref for t in tables
+        }:
+            raise ValueError("Schema tables do not match the workbook.")
+        for merged in source.merged_cells.ranges:
+            target.merge_cells(str(merged))
+        layouts.append(
+            {
+                "sheet": source.title,
+                "state": source.sheet_state,
+                "rows": source.max_row,
+                "columns": source.max_column,
+                "tables": canonical_tables,
+                "merged_ranges": [str(r) for r in source.merged_cells.ranges],
+                "preview": canonical_headers,
+                "formulas": [],
+                "reference_rows": [],
+            }
+        )
+    buffer = BytesIO()
+    projected.save(buffer)
+    return buffer.getvalue(), {"format": "xlsx", "sheets": layouts, "defined_names": []}
 
 
 def mapping_bounds(sheet, mapping):

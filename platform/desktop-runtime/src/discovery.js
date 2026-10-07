@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 
 export async function collectSources(
   plan,
-  { folderFor, inventory, inspectExcel, discoverTally, onProgress },
+  { folderFor, inventory, inspectExcel, discoverTally, excelSchemaBytes, onProgress },
 ) {
   const sources = [];
   let selectedBytes = 0,
@@ -46,7 +46,11 @@ export async function collectSources(
         selectedFiles += selected.length;
         const workbooks = [];
         for (const file of files.filter((f) => /\.xlsx$/i.test(f.path))) {
-          const bytes = Buffer.from(file.content, "base64");
+          let bytes = Buffer.from(file.content, "base64");
+          if (plan.config.depth === "structure") {
+            bytes = await excelSchemaBytes(bytes);
+            selected.find((s) => s.path === file.path).content = bytes.toString("base64");
+          }
           const book = {
             path: file.path,
             sha256: createHash("sha256").update(bytes).digest("hex"),
