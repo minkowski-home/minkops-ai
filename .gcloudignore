@@ -1,0 +1,11 @@
+.gcloudignore
+.git
+#!include:.gitignore
+.env
+.env.*
+**/.env
+**/.env.*
+**/.vercel
+**/node_modules
+.venv
+**/__pycache__

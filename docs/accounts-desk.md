@@ -1,4 +1,4 @@
-# Accounts desk: Excel workflows
+# Accounts desk: Excel and Tally workflows
 
 Source discovery and Bill entry execute through the shared tenant API, durable
 PostgreSQL worker and OpenAI-hosted Agents API. All model calls use `gpt-6-luna`.
@@ -20,7 +20,7 @@ never included in agent files or exposed to the browser.
    Codex recognizes the appropriate workbook/sheet/table from actual business
    context. No client filename, sheet name or invoice column schema is hardcoded
    in the executor. Ambiguous recognition becomes an unresolved review item and
-   prevents writes. Confirmed concepts enable selected deterministic checks;
+   holds that bill while other bills continue. Confirmed concepts enable selected deterministic checks;
    missing reference evidence stays visible rather than implying reconciliation.
 4. Review values, page evidence, findings and append/edit choice. Approval is
    required initially; tenant defaults and per-run options are editable.
@@ -32,8 +32,11 @@ never included in agent files or exposed to the browser.
 Minkops owns authorization, immutable inputs, approvals, validation and safe
 commits. OpenAI owns reasoning and its execution environment. This first web
 version synchronizes selected bytes to the API and hosted session; it is not
-fully local processing. A future desktop adapter can implement the same approved
-write contract using local execution or integrations. Tally is not implemented.
+fully local processing. The Windows companion implements the same approved
+write contract for granted folders, including requests started from the web.
+See [Windows setup and recovery](windows-app.md). MIN-118 provides confirmed
+Tally discovery; [MIN-119 bill entry](bill-entry.md) adds reviewed Purchase
+vouchers, duplicate alerts, correction handoff and exact destination readback.
 
 ## Run contracts and recovery
 
@@ -50,7 +53,7 @@ supporting scripts/references, model, packages, artifact path, and content
 digest. Runtime execution uses the pinned bundle even if checkout files change.
 Launch idempotency, worker recovery, raw-proposal persistence, and cleanup are
 shared platform controls; Accounts retains catalog, evidence, business, approval,
-and Excel-write semantics. No new executor or workbook-editing mode is enabled.
+and destination-write semantics. The hosted executor remains shared.
 Legacy queued runs without a complete bundle require explicit relaunch; saved
 active sessions can still be reconciled without replaying input.
 
@@ -120,3 +123,7 @@ verification also ran the real hosted model: discovery found headers on row 4;
 three PDFs plus a scanned PNG appended four rows to the existing local register
 (16 → 20), preserved prior rows and reference files, and completed only after a
 verified browser receipt. This is local proof; no production deployment is implied.
+
+Database-backed pytest runs now create and clean up their own database; see
+[isolated integration tests](../db/README.md#isolated-integration-tests). The
+supplied PostgreSQL role needs database-creation permission.

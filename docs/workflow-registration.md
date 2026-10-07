@@ -37,7 +37,10 @@ uv run --all-packages python db/seed_demo.py
 Set DATABASE_URL to the local development database as described in db/README.md.
 The seed changes the demo account password; supply DEMO_PASSWORD to retain a
 chosen local password. Never run the demo seed against a deployed database.
-`db/fixtures/mock_workflows.json` supplies initial database defaults only.
+`solutions/mock-client/employees/accounts-desk/binding.json` supplies initial
+installed defaults. `db/fixtures/mock_workflows.json` remains a contract-test
+fixture. See [workflow authoring](workflow-authoring.md) for installing employee
+definitions and client bindings without the demo seed.
 
 ## Run resolution
 

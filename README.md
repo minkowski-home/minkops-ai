@@ -24,6 +24,11 @@ workflow implementation remains Git history, not a parallel methodology to
 preserve. Existing deterministic adapters and checks remain where they enforce
 real integration or correctness requirements.
 
+`platform-ai/bill-entry-architecture` is the consolidated development branch:
+the declarative/shared runtime plus the complete Bill Entry and Windows companion
+work. See [branch convergence and upgrade](docs/branch-convergence.md) for the
+retained source revisions, migration paths, verification, and recovery.
+
 
 ### Workflow methods and current scope
 
@@ -35,12 +40,15 @@ Codex executors are not part of the current refactor.
 | Method | Current implementation | Development direction | Not introduced yet |
 | --- | --- | --- | --- |
 | REST/MCP | Preferred product direction; Accounts does not currently bind business-system MCPs to its sessions. | Let skills compose existing authorized tools; keep access and consequential-write policy enforceable. Add a binding only for a concrete workflow need. | New SaaS/Tally integrations or a general connector catalogue. |
-| Local execution | The browser saves approved Excel bytes to a granted folder; Codex runs Python in an OpenAI-hosted sandbox. | Preserve the browser write adapter and its verified in-place saves. Keep file access separate from skill instructions. | Customer-machine Python/terminal execution, a desktop executor, or self-hosted Agents API environments. |
+| Local execution | Browser-granted Excel saves and the Windows tray companion refresh selected folders, save approved Excel bytes and reconcile approved Tally Purchase vouchers. Web users can request bounded work on their connected PC. Codex Python runs in an OpenAI-hosted sandbox. | Keep native adapters bounded by explicit grants, approval and destination readback. | Customer-machine Python/terminal execution, general remote shells, or self-hosted Agents API environments. |
 | Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
 | Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
 
 The implementation provides reusable run controls and lifecycle boundaries,
 complete versioned workflow skill bundles, and business regression checks.
+Employee/client installation and workflow dispatch now use validated definitions
+and shared services. See [workflow authoring and installation](docs/workflow-authoring.md)
+for the CLI, Python extension points, and current integration boundaries.
 Skill-generated workbook editing is a later evaluated pilot. New execution
 methods are separate work. See
 [the architecture and evaluation guide](docs/workflow-refactor.md).
@@ -80,7 +88,8 @@ The [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overvi
 supplies the Codex harness for reasoning, tool use, session orchestration,
 compaction, and recovery. Accounts desk uses **OpenAI-hosted execution environments**
 with `gpt-6-luna`. Minkops persists tenant-scoped runs and approvals; the browser
-applies approved Excel changes directly to a granted local folder. See
+or registered Windows companion applies approved Excel changes to a granted local folder;
+the companion also reconciles approved mock-client Tally Purchase vouchers. See
 [the Accounts desk guide](docs/accounts-desk.md) for contracts and recovery.
 
 Use OpenAI-provided capabilities when appropriate, including web search and
@@ -97,6 +106,17 @@ alongside the older image-to-Excel test. Agent results, reviews and verified loc
 writes appear in task progress and timelines. The outbox has no production
 publisher yet; the app polls durable state. Deployment remains separate from
 local execution proof. Customer manifests in `solutions/` describe composition.
+
+`apps/windows-app` supplies the Windows 10/11 x64 shell for that shared UI,
+tray execution, native folder grants, and client-PC Tally/Excel source discovery.
+Bill entry uses that discovery with shared approve/hold/reject/edit review,
+independent parallel bill sessions and verified, idempotent destination saves.
+See [Bill entry setup and demo verification](docs/bill-entry.md).
+See [Source discovery setup and catalog contracts](docs/source-discovery.md).
+See [Windows app setup and recovery](docs/windows-app.md). The mock-client
+release candidate has been installed and visually checked on the current Windows
+PC, including shared web review and tray execution. Scheduling remains MIN-121;
+signing and broader Windows/device coverage remain distribution work.
 
 For a local manual test, start the OLTP database and run migrations and the
 demo seed as described in [db/README.md](db/README.md). Start the API with a

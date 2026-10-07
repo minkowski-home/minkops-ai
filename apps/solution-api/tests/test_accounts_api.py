@@ -17,6 +17,30 @@ URL = os.environ.get("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class AccountsTests(unittest.TestCase):
+    def test_hosted_cleanup_retries_are_bounded_without_claiming_false_success(self):
+        from minkops_platform.accounts.worker import STORE
+
+        run, _ = self.launch()
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute(
+                "UPDATE account_runs SET state='failed',session_id='cleanup-bound-test',updated_at='2000-01-01',config=config || '{\"cleanup_attempt_count\":9}'::jsonb WHERE id=%s",
+                (run["id"],),
+            )
+            claimed = STORE.claim_cleanup(c)
+            self.assertEqual(str(claimed["id"]), run["id"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute(
+                'UPDATE account_runs SET config=config || \'{"cleanup_attempt_at":"2000-01-01"}\'::jsonb WHERE id=%s',
+                (run["id"],),
+            )
+            claimed = STORE.claim_cleanup(c)
+            self.assertTrue(not claimed or str(claimed["id"]) != run["id"])
+            config = c.execute(
+                "SELECT config FROM account_runs WHERE id=%s", (run["id"],)
+            ).fetchone()["config"]
+            self.assertEqual(config["cleanup_attempt_count"], 10)
+            self.assertFalse(config.get("hosted_session_closed", False))
+
     def test_launch_pins_complete_definition_and_replay_keeps_the_original_bundle(self):
         from minkops_platform.runtime.bundles import validate_snapshot
 
@@ -26,9 +50,13 @@ class AccountsTests(unittest.TestCase):
         self.assertEqual(snapshot["definition_version"], run["definition_version"])
         self.assertEqual(snapshot["files"]["SKILL.md"], run["config"]["instructions_snapshot"])
         self.assertEqual(
-            json.loads(snapshot["files"]["agent-output.schema.json"]), run["config"]["agent_output_schema"]
+            json.loads(snapshot["files"]["agent-output.schema.json"]),
+            run["config"]["agent_output_schema"],
         )
-        with patch("minkops_platform.accounts.service.load_definition", side_effect=AssertionError("new checkout")):
+        with patch(
+            "minkops_platform.accounts.service.load_definition",
+            side_effect=AssertionError("new checkout"),
+        ):
             replay = self.client.post(self.base + "/runs", headers=self.csrf, json=body)
         self.assertEqual(replay.status_code, 202, replay.text)
         self.assertEqual(replay.json()["config"]["execution_snapshot"], snapshot)
@@ -57,7 +85,9 @@ class AccountsTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 process(c, row, executor=lambda *a, **k: received)
         with psycopg.connect(URL, row_factory=dict_row) as c:
-            saved = c.execute("SELECT result FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+            saved = c.execute(
+                "SELECT result FROM account_runs WHERE id=%s", (run["id"],)
+            ).fetchone()
             self.assertEqual(saved["result"], received)
 
     def test_legacy_unpinned_queued_run_fails_without_calling_the_agent(self):
@@ -65,7 +95,10 @@ class AccountsTests(unittest.TestCase):
 
         run, _ = self.launch()
         with psycopg.connect(URL, row_factory=dict_row) as c:
-            c.execute("UPDATE account_runs SET config=config-'execution_snapshot' WHERE id=%s", (run["id"],))
+            c.execute(
+                "UPDATE account_runs SET config=config-'execution_snapshot' WHERE id=%s",
+                (run["id"],),
+            )
             c.commit()
             row = c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
         executor = MagicMock()
@@ -73,7 +106,9 @@ class AccountsTests(unittest.TestCase):
             self.assertTrue(work_once(URL, executor=executor))
         executor.assert_not_called()
         with psycopg.connect(URL, row_factory=dict_row) as c:
-            row = c.execute("SELECT state,error FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
+            row = c.execute(
+                "SELECT state,error FROM account_runs WHERE id=%s", (run["id"],)
+            ).fetchone()
         self.assertEqual(row["state"], "failed")
         self.assertIn("execution bundle", row["error"])
 
@@ -171,6 +206,19 @@ class AccountsTests(unittest.TestCase):
         self.csrf = {"x-csrf-token": self.client.get("/api/auth/me").json()["csrf_token"]}
         self.base = "/api/tenants/mock-tenant/accounts"
         with psycopg.connect(URL) as c:
+            # Excel adapter regression cases intentionally use a generic tenant
+            # binding. Client-specific policy has separate rejection tests.
+            from minkops_platform.resources import REPOSITORY_ROOT
+            from minkops_platform.workflows import load_definition
+            from psycopg.types.json import Jsonb
+
+            definition = load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry')
+            # This fixture exercises the unrestricted core variant. Dedicated
+            # client-composition tests retain the installed mock-client policy.
+            c.execute("""UPDATE workflows SET config_schema=%s,execution_binding=execution_binding-'solution',
+                config_values=jsonb_set(config_values,'{output_mode}','"excel_in_place"')
+                WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
+                (Jsonb(definition.tenant_schema),))
             c.execute(
                 "UPDATE workflows SET status='active' WHERE key IN ('bill-entry','source-discovery') AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')"
             )
@@ -267,7 +315,13 @@ class AccountsTests(unittest.TestCase):
     def test_cancelled_save_accepts_late_receipt_without_claiming_completion(self):
         self.verify_flow(cancel=True)
 
-    def verify_flow(self, cancel=False):
+    def test_desktop_save_uses_domain_approval_and_verifies_actual_bytes(self):
+        self.verify_flow(desktop=True)
+
+    def test_desktop_cancel_blocks_new_save_but_accepts_late_verified_receipt(self):
+        self.verify_flow(desktop=True, cancel=True)
+
+    def verify_flow(self, cancel=False, desktop=False):
         cat_id = self.execute_discovery()
         bill = self.client.post(
             self.base + "/sources",
@@ -315,6 +369,52 @@ class AccountsTests(unittest.TestCase):
         write = response.json()["writes"][0]
         path = self.base + f"/runs/{run['id']}/writes/{write['id']}"
         content = self.client.get(path + "/content").content
+        if desktop:
+            import base64
+
+            native_base = "/api/tenants/mock-tenant/desktop"
+            device = self.client.post(
+                native_base + "/devices",
+                headers=self.csrf,
+                json={"name": "Accounts PC", "installation_id": str(uuid.uuid4())},
+            ).json()
+            worker_headers = {"Authorization": "Bearer " + device["credential"]}
+            bound = self.client.post(
+                native_base + f"/devices/{device['id']}/sources/{self.source['id']}",
+                headers=self.csrf,
+            )
+            self.assertEqual(bound.status_code, 200, bound.text)
+            payload = {
+                "device_id": device["id"],
+                "request_key": str(uuid.uuid4()),
+                "operation": "accounts.save",
+                "input": {"run_id": run["id"], "write_id": write["id"]},
+            }
+            job_response = self.client.post(native_base + "/jobs", headers=self.csrf, json=payload)
+            self.assertEqual(job_response.status_code, 202, job_response.text)
+            job = job_response.json()
+            claim = self.client.post(
+                "/api/desktop/worker/claim", headers=worker_headers, json={}
+            ).json()
+            progress = self.client.get("/api/tenants/mock-tenant/tasks/" + job["task_id"]).json()
+            self.assertEqual(progress["events"][-1]["event_type"], "local_saving")
+            self.assertEqual(progress["status"], "handoff")
+            route = f"/api/desktop/worker/jobs/{job['id']}"
+            plan_url = route + "/plan?claim_token=" + claim["claim_token"]
+            plan = self.client.get(plan_url, headers=worker_headers)
+            self.assertEqual(plan.status_code, 200, plan.text)
+            self.assertEqual(base64.b64decode(plan.json()["content"]), content)
+            # Expiring a financial save cannot silently dispatch it twice.
+            with psycopg.connect(URL) as c:
+                c.execute(
+                    "UPDATE desktop_jobs SET lease_until=now()-interval '1 second' WHERE id=%s",
+                    (job["id"],),
+                )
+            self.assertIsNone(
+                self.client.post(
+                    "/api/desktop/worker/claim", headers=worker_headers, json={}
+                ).json()
+            )
         # Cancellation releases the pending reservation and keeps a late
         # receipt honest if the browser saved before losing its connection.
         if cancel:
@@ -324,6 +424,23 @@ class AccountsTests(unittest.TestCase):
             self.assertEqual(cancelled.status_code, 200, cancelled.text)
             self.assertEqual(cancelled.json()["state"], "failed")
             self.assertEqual(self.client.get(path + "/content").status_code, 409)
+            if desktop:
+                self.assertEqual(self.client.get(plan_url, headers=worker_headers).status_code, 409)
+        if desktop:
+            receipt = {
+                "claim_token": claim["claim_token"],
+                "result": {"content": base64.b64encode(content).decode()},
+            }
+            invalid = {**receipt, "result": {"content": base64.b64encode(b"wrong").decode()}}
+            self.assertEqual(
+                self.client.post(
+                    route + "/finish", headers=worker_headers, json=invalid
+                ).status_code,
+                409,
+            )
+            for _ in range(2):
+                done = self.client.post(route + "/finish", headers=worker_headers, json=receipt)
+                self.assertEqual(done.status_code, 200, done.text)
         invalid = self.client.post(
             path + "/verify", headers=self.csrf, files={"file": ("records.xlsx", b"wrong")}
         )

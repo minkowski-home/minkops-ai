@@ -1,0 +1,78 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "depth",
+    "excel_source_ids",
+    "tally"
+  ],
+  "properties": {
+    "destination_mode": {"type": "string", "enum": ["excel", "tally", "both"]},
+    "depth": {
+      "enum": [
+        "structure",
+        "reference_data",
+        "business_mappings"
+      ]
+    },
+    "excel_source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true,
+      "maxItems": 10
+    },
+    "tally": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "company",
+            "port",
+            "categories"
+          ],
+          "properties": {
+            "company": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[^\u0000-\u001f]+$"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "categories": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "company",
+                  "groups",
+                  "ledgers",
+                  "voucher_types",
+                  "stock_items",
+                  "stock_groups",
+                  "units",
+                  "godowns",
+                  "cost_centres",
+                  "cost_categories",
+                  "currencies"
+                ]
+              },
+              "uniqueItems": true,
+              "minItems": 1,
+              "maxItems": 11
+            }
+          }
+        }
+      ]
+    }
+  }
+}

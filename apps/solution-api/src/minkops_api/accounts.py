@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -54,6 +54,7 @@ async def upload_source(
     paths: Annotated[str, Form()],
     label: str = Form("Uploaded files"),
     writable: bool = Form(False),
+    schema_only: bool = Form(False),
     source_id: Annotated[UUID | None, Form()] = None,
 ):
     require_csrf(request)
@@ -66,7 +67,8 @@ async def upload_source(
         raise HTTPException(422, str(error)) from error
     contents = [await file.read(5_000_001) for file in files]
     return _call(
-        service.upload_source, connection, tenant, user, names, contents, label, writable, source_id
+        service.upload_source, connection, tenant, user, names, contents, label, writable, source_id,
+        schema_only=schema_only,
     )
 
 
@@ -86,7 +88,7 @@ def source_content(slug: str, file_id: UUID, user: User, connection: Db):
 
 
 class Launch(BaseModel):
-    key: Literal["source-discovery", "bill-entry"]
+    key: str = Field(pattern="^[a-z][a-z0-9-]*$", max_length=100)
     request_key: UUID
     file_ids: list[UUID] = Field(min_length=1, max_length=45)
     catalog_id: UUID | None = None
@@ -96,6 +98,25 @@ class Launch(BaseModel):
 class Review(BaseModel):
     result: dict
     acknowledge_findings: bool = False
+
+
+class BillInput(BaseModel):
+    file_id: UUID
+    user_input: str = Field(default="", max_length=2000)
+    reject: bool = False
+
+
+@router.post("/runs/{run_id}/resolve-bill")
+def resolve_bill(
+    slug: str, run_id: UUID, body: BillInput, request: Request, user: User, connection: Db
+):
+    from minkops_platform.accounts.batch import resolve_bill as resolve
+
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    return _call(
+        resolve, connection, tenant, user, run_id, str(body.file_id), body.user_input, body.reject
+    )
 
 
 @router.post("/runs", status_code=202)

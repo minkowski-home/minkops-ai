@@ -16,6 +16,12 @@ Python execution and browser-granted local file saves do not imply an agent
 running on the customer's machine. The four workflow methods and their current
 scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
 
+The Windows shell shares the web UI and adds an authenticated outbound companion
+for bounded native folder operations and a Tally connection check. Durable
+device/job controls live in `platform/`; native filesystem/Tally adapters live
+in `connectors/`. The companion does not host or replace the managed AI harness.
+See [Windows app architecture and recovery](windows-app.md).
+
 Product development centers on `apps/`; workflow execution should maximize
 employee skills, prompts, OpenAI-provided capabilities, and adequate existing
 MCP/REST integrations. `platform/` supplies only shared control requirements
@@ -43,6 +49,30 @@ activity pane owns active tasks, attention requests, handoffs, and recent
 outcomes. Each task has a status, progress, short summary, and event timeline.
 The pane is adjustable on desktop. The four app themes use the locked brand
 palette in `design/tokens/` and a per-browser preference.
+
+## Definition installation and dispatch
+
+Repository-owned employee definitions and client bindings install atomically
+through the shared installation service and administrative CLI. Operator
+settings/statuses survive reinstall; incompatible schemas are rejected. Installed
+handler, presentation, policy, and capability declarations are separate from
+editable workflow preferences. A future admin UI can call the same services.
+
+The shared launch service pins authorized resource IDs/hashes and the complete
+execution bundle. A handler registry selects ordinary Python application
+adapters independently of workflow keys. Accounts keeps its business checks,
+catalog review, and verified Excel write mechanics. The default skill handler
+supports reviewed proposals; no additional employee/workflow is enabled.
+
+`workflow_runs` retains existing run rows and foreign-key relationships.
+`account_runs` is an updatable compatibility view, not another execution store.
+The current worker command delegates to shared dispatch and lifecycle code.
+Skills can bundle Python helpers; mandatory client policies run independently
+in trusted Python and before writes. The current file runtime still disables
+network access and does not provision business-system MCP tools.
+
+See [workflow authoring](workflow-authoring.md) for contracts, installation,
+extension points, and migration/rollback guidance.
 
 ## Persistence and events
 

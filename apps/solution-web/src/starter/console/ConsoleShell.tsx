@@ -46,6 +46,9 @@ export function ConsoleShell({ children, title, tenantName, routeSlug, pendingCo
           <Icon name={item.icon} size={18} /><span>{item.label}</span>
           {item.route === "dashboard" && pendingCount > 0 && <b>{pendingCount}</b>}
         </NavLink>)}
+        <NavLink to={`/${routeSlug}/connections`} className={({ isActive }) => `console-nav-item${isActive ? ' is-active' : ''}`}>
+          <Icon name="settings" size={18} /><span>Connected PCs</span>
+        </NavLink>
         {canEdit && <NavLink to={`/${routeSlug}/access`}
           className={({ isActive }) => `console-nav-item${isActive ? " is-active" : ""}`}>
           <Icon name="settings" size={18} /><span>Access</span>

@@ -1,11 +1,12 @@
 {
   "source-discovery": {
-    "discovery_depth": "reference_data",
+    "destination_mode": "tally",
+    "discovery_depth": "business_mappings",
     "max_files": 100
   },
   "bill-entry": {
     "review_mode": "all_outputs",
-    "output_mode": "excel_in_place",
+    "output_mode": "tally_in_place",
     "input_format": "mixed"
   }
 }

@@ -1,13 +1,10 @@
 import type { SolutionManifest } from "@minkops/solution-contracts";
-import { solution as mockClient } from "../../../../../solutions/mock-client/solution";
-import { solution as prInfra } from "../../../../../solutions/pr-infra/solution";
-
-/**
- * The public host ships a small manifest registry so a single deployment can
- * serve every solution. Authentication will eventually resolve the allowed
- * manifest from tenant membership rather than accepting an arbitrary URL.
- */
-const solutions: readonly SolutionManifest[] = [prInfra, mockClient];
+/** Build-time discovery includes repository solution manifests without app edits.
+ * Membership and server authorization remain authoritative for customer access. */
+const modules = import.meta.glob<{ solution: SolutionManifest }>(
+  "../../../../../solutions/*/solution.ts", { eager: true }
+);
+const solutions = Object.values(modules).map((module) => module.solution);
 
 export const DEFAULT_SOLUTION_ID = "pr-infra";
 

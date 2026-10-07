@@ -53,6 +53,23 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/auth/me").json()["memberships"][0]["role"], "admin")
         self.assertEqual(self.client.get("/api/auth/session").json()["name"], "Casey Morgan")
 
+    def test_hosting_proxy_cookie_and_private_api_cache_preserve_login_csrf_and_logout(self):
+        email = f"hosting-{self.suffix}@example.com"
+        self.verify(self.register(email))
+        login = self.login(email)
+        self.assertIn("__session=", login.headers["set-cookie"])
+        # Firebase Hosting forwards only __session. The backend keeps its own
+        # opaque PostgreSQL sessions and server-derived CSRF, not Firebase Auth.
+        for cookie in list(self.client.cookies.keys()):
+            if cookie != "__session":
+                self.client.cookies.delete(cookie)
+        profile = self.client.get("/api/auth/me")
+        self.assertEqual(profile.status_code, 200, profile.text)
+        self.assertEqual(profile.headers["cache-control"], "private, no-store")
+        signed_out = self.client.post("/api/auth/logout", headers={"x-csrf-token": profile.json()["csrf_token"]})
+        self.assertEqual(signed_out.status_code, 200, signed_out.text)
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
+
     def test_verified_domain_suggests_tenant_without_granting_access(self):
         slug = f"known-{self.suffix}"
         domain = f"{self.suffix}.example.org"

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, type SessionUser } from "../api";
+import { desktopBridge } from '../desktop/bridge';
 
 interface AuthContextValue {
   user: SessionUser | null;
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const logout = useCallback(async () => {
+    await desktopBridge()?.disconnect();
     if (user) await api("/api/auth/logout", { method: "POST" }, user.csrf_token);
     setUser(null);
   }, [user]);

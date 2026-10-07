@@ -1,0 +1,6 @@
+{
+  "bill-entry": {
+    "allowed_output_modes": ["tally_in_place"],
+    "description": "This workspace currently saves bills to Tally only."
+  }
+}

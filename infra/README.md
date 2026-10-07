@@ -12,10 +12,23 @@ cleanup; workers retry pending cleanup and retain session IDs for audit.
 
 The browser applies approved Excel writes through a granted local folder. This
 is a web adapter with synchronized snapshots, not fully local desktop execution.
-A desktop file-access adapter is a possible future integration, not part of the
-current refactor or a decision to replace OpenAI-hosted execution. Self-hosted
-execution is no longer the selected architecture for these workflows; no
-customer-machine Codex executor is planned in the current refactor.
+The registered Windows companion also reads schema metadata and reconciles
+approved Tally writes. Business reasoning remains in OpenAI-hosted environments;
+no customer-machine Codex executor is planned.
+
+Build the production API image from the repository root:
+
+```sh
+docker build -f infra/solution.Dockerfile -t minkops-solution:review .
+docker run --rm minkops-solution:review python -m minkops_api.install_workflows mock-client --validate-only
+```
+
+The same image contains worker packages, but the forever-loop bootstrap needs
+bounded execution before low-cost Cloud Run Job deployment. See
+[deployment, website migration and MIN-123 closeout](../docs/deployment-min-123.md)
+for the Myndral-style topology and CAD 15 hosting envelope. Assign Firebase
+project/site targets before using `firebase.json`. Audit scripts read resource
+metadata/metrics without retrieving secrets or customer database rows.
 
 See [Accounts desk setup and limits](../docs/accounts-desk.md) and OpenAI's
 [hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted).

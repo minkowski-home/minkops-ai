@@ -1,3 +1,5 @@
+import { getSolution } from "./solutions/registry";
+
 export interface Membership {
   slug: string;
   name: string;
@@ -18,6 +20,7 @@ export interface SettingSpec {
   title?: string;
   description?: string;
   enum?: (string | number)[];
+  "x-enabled-options"?: (string | number)[];
 }
 
 export interface ConfigSchema {
@@ -46,6 +49,9 @@ export interface Workflow {
   config_schema: ConfigSchema;
   config_values: Record<string, string | number | boolean>;
   config_version: number;
+  presentation?: string | null;
+  run_schema?: Record<string, unknown> | null;
+  run_defaults?: Record<string, unknown> | null;
 }
 
 export interface Task {
@@ -89,5 +95,5 @@ export async function api<T>(path: string, options: RequestInit = {}, csrf?: str
 }
 
 export function tenantSlug(routeSlug: string): string {
-  return routeSlug === "mock-client" ? "mock-tenant" : routeSlug;
+  return getSolution(routeSlug)?.tenantSlug ?? routeSlug;
 }

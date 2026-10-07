@@ -3,6 +3,11 @@
 An employee is the customer-facing home for a set of business workflows. Add
 an employee directory when there is an actual employee to offer.
 
+Use `employee.json` and versioned workflow definitions, then install explicit
+client references with the validated CLI. See
+[workflow authoring](../docs/workflow-authoring.md) for contracts and Python
+extension points. No employee-specific runtime loop is needed.
+
 Use `employees/<employee-id>/workflows/<workflow-id>/` for each workflow owned
 by that employee. Keep its business goal, inputs, expected output, completion
 checks, and evaluation examples together. Workflow instructions may guide an

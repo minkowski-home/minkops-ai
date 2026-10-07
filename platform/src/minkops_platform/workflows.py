@@ -50,6 +50,13 @@ DESCRIPTOR_SCHEMA = {
         "run_defaults": {"type": "object"},
         "agent_output_schema": {"type": "string", "minLength": 1},
         "execution": EXECUTION_SCHEMA,
+        "handler": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*$"},
+        "presentation": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+        "capabilities": {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "string", "minLength": 1},
+        },
     },
     "additionalProperties": False,
 }
@@ -96,7 +103,9 @@ def load_definition(directory: Path) -> WorkflowDefinition:
     validate(schemas[0], metadata["tenant_defaults"])
     partial_run_schema = {**schemas[1], "required": []}
     validate(partial_run_schema, metadata["run_defaults"])
-    agent_schema = json.loads(read_local('agent_output_schema')) if 'agent_output_schema' in metadata else None
+    agent_schema = (
+        json.loads(read_local("agent_output_schema")) if "agent_output_schema" in metadata else None
+    )
     if agent_schema is not None:
         Draft202012Validator.check_schema(agent_schema)
     snapshot = build_snapshot(directory, metadata) if "execution" in metadata else None
@@ -208,14 +217,15 @@ def register_workflow(
             validate(definition.tenant_schema, existing[1])
         workflow_id = cursor.execute(
             """INSERT INTO workflows
-               (tenant_id, key, name, description, status, config_schema, config_values)
-               VALUES (%s, %s, %s, %s, 'planned', %s, %s)
+               (tenant_id, key, name, description, status, config_schema, config_values, execution_binding)
+               VALUES (%s, %s, %s, %s, 'planned', %s, %s, %s)
                ON CONFLICT (tenant_id, key) DO UPDATE SET
                  name = EXCLUDED.name, description = EXCLUDED.description,
                  config_version = workflows.config_version +
                    CASE WHEN workflows.config_schema IS DISTINCT FROM EXCLUDED.config_schema
                         THEN 1 ELSE 0 END,
-                 config_schema = EXCLUDED.config_schema
+                 config_schema = EXCLUDED.config_schema,
+                 execution_binding = coalesce(workflows.execution_binding, EXCLUDED.execution_binding)
                RETURNING id""",
             (
                 tenant_id,
@@ -224,6 +234,15 @@ def register_workflow(
                 metadata["description"],
                 Jsonb(definition.tenant_schema),
                 Jsonb(defaults),
+                Jsonb(
+                    {
+                        "definition": f"{metadata['owner']}/workflows/{metadata['key']}",
+                        "handler": metadata.get("handler", "skill.proposal"),
+                        "presentation": metadata.get("presentation", "proposal"),
+                        "policies": [],
+                        "capabilities": metadata.get("capabilities", []),
+                    }
+                ),
             ),
         ).fetchone()[0]
         cursor.execute(

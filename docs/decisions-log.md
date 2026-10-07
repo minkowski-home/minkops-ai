@@ -46,6 +46,30 @@ guidance and update current architecture, solution, platform, connector, and
 infrastructure guidance. Retain the working apps, warehouse, and solution
 manifests. No Agents API integration or cloud deployment is claimed by this
 directory change.
+### 2026-10-03 — Keep website inquiry delivery inside the repository layers
+
+**Situation:** The corporate website's discovery form needed real server-side
+delivery, while its API package ships independently from the broader backend.
+Embedding SMTP construction and retry policy in the HTTP app would couple
+transport details to the external provider and make the delivery behavior hard
+to exercise separately.
+
+**Decision:** Keep request validation, CORS, HTTP errors, and request rate
+limiting in `apps/corporate-website/api`. Put the submission value, bounded
+best-effort duplicate control, and delivery orchestration in `platform/`; keep
+Workspace SMTP configuration, MIME construction, and network calls in
+`connectors/`. Package only these scoped modules into the standalone website
+container rather than importing unrelated platform features.
+
+SMTP does not offer an idempotency key for this flow. The process-local guard
+suppresses identical submissions while its state exists and records an
+uncertain result after an ambiguous send failure. This is not durable or
+cross-instance exactly-once delivery; visitors are told not to resubmit when
+acceptance cannot be confirmed.
+
+**Result:** API, orchestration, and transport behavior can be tested at their
+respective boundaries, and the website release does not need unrelated
+Accounts, authentication, or database packages.
 
 **Follow-up:** Production preflight exposed that the relay rejected the default
 localhost SMTP greeting before authentication. The connector now identifies
@@ -377,3 +401,375 @@ tests pass; both frontends pass TypeScript/Vite builds and lint. The dependency
 lock validates with uv sync --locked, and Git reports no whitespace errors.
 These are local integration checks; no new live model call, SMTP message,
 production deployment, or PR merge is claimed.
+
+### 2026-10-05 — Share the desktop product and separate local execution authority
+
+**Situation:** MIN-117 needed a Windows product capable of reaching local Tally
+and files, with web parity and future cross-device continuity. Duplicating the
+UI, account database or agent loop would create drift and fragment task history.
+Blindly retrying an interrupted financial write could duplicate entries.
+
+**Task:** Add the smallest useful native companion while preserving existing
+identity, approvals and verification, and make execution understandable to
+nontechnical users. Scheduling and UI testing were explicitly deferred.
+
+**Decision:** Serve one React UI in web and sandboxed Electron, with the existing
+verified email/password accounts. PostgreSQL owns tasks, selected file versions
+and receipts. A registered companion polls outbound HTTPS for an allowlist of
+bounded operations; Windows-encrypted local state holds only necessary grants,
+credentials, pending receipts and recovery backups. The OpenAI-hosted Codex
+harness remains the AI execution loop; no local shell or self-hosted agent is
+introduced. This also lets a future mobile client use the same durable runs.
+
+**Action:** Put device/job controls in `platform/`, reusable worker recovery in
+`platform/desktop-runtime`, native Tally/filesystem adapters in `connectors/`,
+and IPC/HTTP transport in `apps/`. Scope credentials to account/workspace and
+recheck membership and source ownership. Persist every request key, including
+requests joining an existing job. Automatically reclaim only read jobs; recover
+saves through explicit requests, native before/after hashes, encrypted backups,
+atomic replacement and existing Accounts byte verification. Late cancellation
+receipts record applied writes without changing the cancelled run to success.
+Native save events report waiting, saving and attention states; only the domain
+can complete a multi-workbook run. Shared progress uses observed business stages
+and actual counts, with evidence/activity expandable instead of simulated ETAs.
+
+**Result:** The full backend suite passes 111 tests and 27 subtests on a freshly
+migrated/seeded isolated PostgreSQL database. All 15 web and 13 native tests pass;
+native file tests also pass on Windows, including junction containment. A real
+HTTP/PostgreSQL/Windows smoke verifies folder refresh, lost-acknowledgement
+recovery and device revocation. A headless Windows Electron check confirms
+credential encryption. The x64 NSIS installer builds natively and its packaged
+bundles match the compiled source without unbundled workspace dependencies.
+The app's new dependency audit is clean. WSL packaging limitations were resolved
+with a Windows-local compiled build directory; the working repository and
+backend environment remain intact. Live Tally reads are unverified because the
+local service is stopped; the unavailable path is verified. The installer is
+unsigned, deployment is separate, and MIN-121/122 retain scheduling and UI/clean
+Windows 10/11 install checks as Todo. No paid model call or accounting write was
+made for this verification.
+
+### 2026-10-05 — Verify the live Tally XML contract before closing the desktop work
+
+**Situation:** Restarting Tally exposed a real response shape absent from the
+original fixtures: `<NAME TYPE="String">` becomes an object when XML attributes
+are preserved. The connection check reported `[object Object]` as a company name
+instead of the actual text, despite the service responding successfully.
+
+**Task:** Correct the native adapter and prove that the actual company name
+survives the full Windows-companion/API/task-result path.
+
+**Action:** Add a failing regression for typed names and attribute-only names,
+then explicitly extract scalar text or the typed element's `#text`. Reject
+unexpected nested name structures instead of string coercion. Add an optional
+expected-company assertion to the HTTP smoke, including durable task status and
+queued/executing/completed events. Rebuild the Windows installer with the fix.
+
+**Result:** Live read-only company export returns `Minkops Test`; the real
+Windows/HTTP/PostgreSQL journey persists that name and completes its task.
+Folder refresh, interrupted receipt recovery and revocation still pass. All 14
+native tests pass on Windows and Linux; the full backend regression suite passes
+111 tests and 27 subtests. No accounting write was made. UI and clean-install
+checks remain the separately deferred MIN-122 work.
+
+### 2026-10-05 — Make source discovery portable without moving the agent onto the client
+
+**Situation:** The next Bill Entry workflows need real Tally and Excel structure
+from a client's PC. A server cannot read that PC's loopback Tally service or
+private folders, while machine-specific paths and a second agent loop would
+break web/desktop parity and future cross-device continuity.
+
+**Task:** Build a configurable mock-client discovery MVP on MIN-117, with
+server-owned catalogs, explicit initial review, stable refreshes and observable
+partial results. Keep the default broad enough for Bill Entry and preserve the
+existing hosted business-mapping and financial-write contracts.
+
+**Action:** Add one bounded native collection operation, scoped to registered
+devices, explicit folder grants and fixed read-only Tally collections. Keep
+filesystem/XML adapters in connectors, durable orchestration in platform, and
+transport/UI in apps. Observe tables, shifted headers, typed reference values,
+formulas and nested Tally tax settings; validate workbook hashes and coverage
+against server bytes. Reuse the existing hosted mapping skill and task lifecycle
+rather than introduce a local agent. Store versioned JSON catalogs and offer an
+explicit download, with no automatic local copy. Fingerprint structural changes
+independently of ordinary Excel rows, remap approved mappings to current file
+versions, and require review when structure or reference mappings change.
+Incomplete catalogs retain successful observations but cannot be confirmed or
+used by dependent workflows. Partial scans avoid paid mapping; progress reports
+each source/category and renews bounded read claims. Rejected receipts become
+visible failures rather than endless reclaim loops.
+
+**Result:** The full backend suite passes 119 tests and 27 subtests; 20 native
+tests pass on Windows and Linux, and all 15 web tests, build and lint pass.
+Live Windows/API/PostgreSQL tests collect the actual Minkops Test company and
+all 11 configured reference categories, read a synthetic Excel workbook, run
+the real hosted mapping skill, confirm its three tables, retain confirmation
+on unchanged refresh, and recover from unavailable Tally and damaged workbook
+partial results. The 0.2.0 installer bundles these adapters; customer PCs need
+no repository, WSL or developer runtimes. A separate local demo database and
+shared UI support the meeting. One hosted sandbox setup failed; explicit retry
+succeeded, and the failed run retained its catalog. Cleanup of that failed
+session was still rejected by the provider; background retries are spaced and
+capped without falsely marking it closed. Visual and clean Windows 10/11 checks
+remain MIN-122 Todo, including packaged launch blocked by automatic review.
+Production deployment and scheduling remain separate.
+
+### 2026-10-05 — Preserve Excel discovery after approved workbook writes
+
+**Situation:** An additional interoperability test appended a dummy bill and
+expanded its named table using openpyxl, the application's approved writer.
+Native discovery then failed because ExcelJS 4.4 cannot resolve valid
+package-absolute table relationship targets (upstream issue 1468). Ordinary
+fixtures generated by ExcelJS did not reveal the failure.
+
+**Task:** Make the native reader compatible with our existing writer without
+dropping named tables, changing original bytes or requiring Python on clients.
+
+**Action:** First add a failing regression using absolute table targets. Resolve
+those internal relationship URIs to equivalent relative URIs in a bounded,
+in-memory ZIP copy before ExcelJS reads it. Preserve original bytes for hashes,
+uploads and approvals. Add JSZip as an explicit dependency; keep external
+relationships untouched. Invalid relationship XML is rejected. Verify identical
+table/header/value observations and unchanged input bytes, then repeat the real
+Windows discovery/confirmation/partial/recovery journey with the openpyxl-saved
+workbook.
+
+**Result:** Both native test suites and the real API refresh pass, including
+retained confirmation after the added bill row and expanded table. Discovery
+continues to expose named tables and the approved write contract uses the
+original workbook bytes.
+
+### 2026-10-07 — Separate installed workflow composition from durable execution
+
+**Situation:** Versioned skill bundles and hosted recovery were reusable, but
+employee registration lived in demo seeding and launch/worker/UI dispatch depended
+on two Accounts workflow names. Adding clients or procedures risked modifying
+shared execution code or weakening deterministic write guarantees.
+
+**Task:** Refactor the same app from Windows branch `c3b050c` into a repeatable
+installation and execution path, preserving current discovery, review, Excel
+writes, native receipts and recovery. Retain ordinary Python extension points
+without adding another employee or business workflow.
+
+**Action:** Introduce validated employee/client definitions and an atomic
+installation service/CLI with a genuine transactionally rolled-back dry run.
+Separate trusted execution bindings from editable settings. Pin handler, policy,
+resource IDs/hashes and complete skill bundles at launch. Dispatch ordinary
+Python handlers through the existing hosted lifecycle; keep Accounts business
+validation and write mechanics in its domain. Promote the existing run table to
+`workflow_runs`, preserve IDs/FKs and provide an updatable Accounts compatibility
+view. Extract shared resource lookup and run observations, add explicit client
+policy registration, and enforce review policies before writes independently of
+model behavior. Discover client manifests at build time and select existing
+product adapters from installed presentation metadata. Use isolated temporary
+definitions to test different identities/default execution without installing a
+second product workflow. Document authoring, extensions and rollout/recovery.
+
+**Result:** The isolated full Python suite passes 139 tests and 31 subtests;
+17 web and 20 native tests, web build/lint, native build, and changed-Python lint
+pass. Actual hosted discovery and bill extraction read a synthetic invoice for
+24, proceed through review and saved-byte verification, preserve a formula and
+an unrelated sheet, and clean up their sessions. Windows HTTP/native smoke
+verifies folder refresh, receipt replay after worker recreation, device revocation,
+and successful live Tally connection after Tally is started. Edge desktop/mobile
+checks cover current launch screens, a verified task, settings persistence,
+activity expansion and four themes with no runtime errors or horizontal overflow.
+Client threshold tests block auto-write, permit explicit approval and retain the
+run's policy after tenant changes. Existing separator encoding artifacts remain
+baseline UI debt. No production deployment, new business-system MCP integration,
+new employee/workflow, or later Bill entry/Tally financial-write branch changes
+are included. Future real workflows still need business-specific evaluations.
+### 2026-10-06 — Separate bill identity and approved intent from task execution
+
+**Situation:** MIN-119 needed parallel scanned-bill extraction on the existing
+Windows/web app. Replayed tasks, backfills and corrections could otherwise
+duplicate accounting records, and one unreadable bill could block an entire batch.
+
+**Task:** Keep source accuracy authoritative across hosted sessions, human review,
+registered-PC execution and restarts, while preserving platform/connector/app
+boundaries and the shared UI.
+
+**Action:** Use durable per-input hosted sessions under one review task, with
+independent failure handling and bounded worker concurrency. Derive bill identity
+from supplier/invoice/financial year or confirmed Excel business keys; reserve
+approved writes independently of task IDs. Scope Tally reservations by observed
+company GUID across PCs. Persist immutable approval plans and queue native jobs
+in the same transaction. Reconcile existing destination data before writing;
+hold different versions for explicit edits, compare extraction/read snapshots,
+and require exact saved-byte or ledger readback. Late cancelled Excel receipts
+retain audit evidence without replacing newer source metadata. Persist rejected
+inputs on batch children so sibling retries cannot resurrect old failures.
+
+**Result:** Parallel worker, duplicate/correction, partial failure, cross-PC
+reservation, stale review, cancellation and receipt regressions pass against
+PostgreSQL. Real gpt-6-luna sessions extracted complex raster bills into both
+Tally and inferred Excel contracts. Windows native saves and replayed receipts
+verified destination data; a provider-interrupted blank input was retried without
+repeating three successful sibling writes. Visual/installation QA stays MIN-122.
+
+### 2026-10-06 — Catch a Tally correction that silently became a creation
+
+**Situation:** Live testing of a synthetic Purchase correction showed that a
+MASTER ID selector without its original DATE could create another voucher,
+despite an apparent import success. Tally also assigned its own company GUID
+suffix instead of retaining the requested UUID on creation.
+
+**Task:** Prevent acknowledgements from masquerading as correct accounting data
+and implement an observed-identity correction contract.
+
+**Action:** Require the original DATE and MASTER ID for Alter, explicitly reject
+a CREATED response during correction, and re-export matching vouchers after
+every save. Verify a unique business identity, exact approved date and signed
+ledger amounts, and unchanged observed GUID during update. Add a failing native
+regression for the incorrect selector, then repeat the real Windows/Tally test.
+Remove only the duplicate synthetic test voucher after identifying its master ID.
+Guard complex existing inventory/bill/payment/cost allocations so the fixed mock
+Purchase contract cannot flatten financial structure it does not represent.
+
+**Result:** Live create, exact replay, correction handoff, approved Alter and
+unique readback pass. Protocol failures, ambiguous keys, changed fingerprints,
+wrong readbacks and unsupported allocations cannot be reported as saved.
+
+### 2026-10-06 — Keep client policy trusted while preserving reusable workflows
+
+**Situation:** The mock-client RC must save only to Tally, while the shared
+workflows retain Excel/Tally/Both choices and future client rules remain unknown.
+Editable preferences alone would let a caller bypass a disabled UI option.
+
+**Task:** Enforce the client restriction without embedding mock-client routing
+throughout the API, shared workflow or native adapters.
+
+**Action:** Bind repository-owned solution policy into the registered JSON Schema,
+retain the visible enum and annotate enabled choices. Validate settings and launch
+destinations against trusted registration. Preserve other clients' definitions
+when no policy exists and keep each run's versioned execution snapshot immutable.
+
+**Result:** Schema, authenticated launch and preference-override regressions pass;
+mock-client can save only to Tally. Source discovery remains independently
+configurable, and later client rules have an explicit composition boundary.
+
+### 2026-10-06 — Preserve financial approvals across periodic discovery
+
+**Situation:** A live bill approval was blocked by an unchanged periodic discovery
+even though its confirmed catalog and company identity were identical. Supplier
+remediation also needs newer masters without replaying already verified bills.
+
+**Task:** Allow safe refreshes while retaining immutable approvals, exact source
+identity and per-bill recovery.
+
+**Action:** Add failing database regressions, then accept an older pinned catalog
+only when the newer catalog is ready and its fingerprint is identical. For a
+supplier clarification, rebind only that retry to a confirmed catalog on the same
+PC/company GUID. Keep saved/duplicate siblings intact. Fix retry progress and
+review counts to exclude already checked bills, with regression coverage.
+
+**Result:** The installed app saves the remediated hire bill after a periodic
+refresh. A second five-input batch skips every duplicate after an independent
+reference clarification. Worker restart retains paid session identities, and
+original Test Company vouchers remain byte-equivalent after normalization.
+
+### 2026-10-06 — Make catalog export reliable in the installed Windows shell
+
+**Situation:** Visual RC testing found that Chromium's catalog download returned
+HTTP success but left an incomplete temporary file rather than the requested
+OneDrive artifact.
+
+**Task:** Produce a complete user-selected catalog without exposing arbitrary
+filesystem writes or renderer-controlled network requests.
+
+**Action:** Add bounded native IPC for an authenticated tenant/discovery ID, fetch
+the fixed authorized endpoint, show Save As and delegate file writing to the
+connector. Validate JSON extension, size and regular-file/parent containment;
+sync a temporary file and replace atomically. Add failure/containment regressions
+and verify the installed app's actual Windows picker/export.
+
+**Result:** A complete 537,848-byte catalog is saved in OneDrive. Native regression
+suites and live Windows export pass; the reusable adapter stays in connectors,
+while Electron owns only authenticated transport and the native dialog.
+### 2026-10-07 — Converge independently evolved workflow architecture and financial execution
+
+**Situation:** The shared declarative-workflow refactor and the complete Bill
+Entry RC had diverged from the same Windows baseline. Keeping only either tip
+would discard architecture or financial behavior; a mechanical replay restored
+the old Accounts-specific launch/store/worker. Both branches also published a
+different `0009`: Bill Entry required a table where the architecture exposed a
+compatibility view, so an architecture-first upgrade failed its foreign key.
+
+**Task:** Retain independent paid sessions, per-bill recovery, financial approvals,
+duplicate/correction/readback guarantees, native exports and client policy on one
+shared runtime. Upgrade existing databases without rewriting applied checksums,
+resetting history or abandoning pending financial intents. Preserve recoverable
+source revisions before retiring superseded development branches.
+
+**Action:** Replay all seven Bill Entry commits onto the architecture in a new
+consolidation branch, then move domain resource preparation/checks/finish behavior
+into registered Accounts handlers. Share launch identity, trusted snapshots,
+session lifecycle, durable store and child observations; retain Bill Entry's
+batch orchestrator and bounded native adapters. Apply client destination schema
+policy through installation and independently enforce pinned review policies
+before writes and after batch aggregation. Add two guarded schema bridges around
+the immutable branch migrations: temporarily restore the original table name
+inside the locked migration transaction, then restore the shared table/view.
+Preserve table OIDs, run IDs, paid-session identities, parent links, pending plans,
+company reservations, receipts and status. Test both predecessor upgrade paths,
+fresh/repeated migrations and reserved-input/hash rejection before paid calls.
+Archive exact original tips instead of forcing their history onto either branch.
+
+**Result:** The combined backend passes 168 tests and 45 subtests; all 17 web
+tests, production build and lint pass. Native suites pass 31 tests on Linux and
+30 on Windows with one privilege-dependent symlink case covered on Linux. A
+Windows-local unsigned x64 installer builds. Real hosted Excel discovery/bill
+extraction and saved-byte verification preserve formulas/unrelated sheets. A
+real two-bill hosted Tally batch recovers one ambiguous invoice through explicit
+clarification without replaying its successful sibling, then verifies native
+saves, receipt replay, duplicates and observed-identity corrections. All 10
+pre-existing company vouchers remain unchanged; paid environments close.
+Desktop/mobile browser checks cover both completed outcomes, all four themes and
+installed client policy. The consolidated branch becomes the development home;
+no merge or PR changes staging/main. Production deployment, signing and a fresh
+device installation matrix remain separate.
+
+## 2026-10-07 — Keep integration fixtures out of customer-facing workspaces
+
+**Situation:** A local browser preview shared the database used for regression
+tests. Unique simulated desktop registrations accumulated as 91 misleading
+Accounts/Bill PC cards, even though only one physical PC had been connected.
+
+**Task:** Remove the misleading registrations while retaining history, and make
+the normal test path safe without relying on engineers remembering to seed a
+different database.
+
+**Action:** Before pytest collects modules, create a uniquely named database on
+the supplied server, migrate and seed it, and redirect both database URLs to it.
+Drop only that invocation's database at shutdown, including failures. Verify
+source records remain untouched and cleanup survives an exception. Back up the
+local preview database and revoke the identified synthetic registrations instead
+of deleting device or financial history. Label the existing page Connected PCs.
+
+**Result:** All 169 backend tests and 45 subtests pass in the disposable database;
+the supplied database's device count remains unchanged and no temporary database
+remains. Web tests, build and lint pass. The architecture and native execution
+contracts remain unchanged.
+
+## 2026-10-07 — Separate schema context from operational references
+
+**Situation:** Discovery exported business rows and uploaded original workbooks
+while its purpose was reusable schema context. Bill Entry depended on stale
+catalog rows, and client-specific allocation guidance appeared in the core skill.
+
+**Task:** Preserve tenant-specific context and verified financial writes while
+making schema collection private, metadata-driven and production-compatible.
+
+**Action:** Use bounded ODBC metadata calls and fresh header-only workbook
+projections with independent server validation. Persist immutable tenant catalogs;
+pin their schema in consuming runs and request live references through a separate
+leased desktop job before paid execution. Refresh continuation context without
+replaying successful siblings. Add validated additive employee/workflow variants,
+keeping handlers and write policy core-owned. Use Firebase-compatible opaque
+session cookies and prevent shared API caching. Package locked dependencies and
+client definitions into a non-root deployment image; inspect cloud configuration
+read-only and document worker/recovery/budget gates before launch.
+
+**Result:** Backend, native and web regressions validate isolation, projected-byte
+privacy, current-reference gating, company identity and pinned core/client context.
+Current-PC ODBC metadata exposes 275 tables. Clean-PC/server-topology tests and
+bounded cloud worker deployment remain explicit production acceptance gates.
