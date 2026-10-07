@@ -85,6 +85,20 @@ class BranchUpgradeTests(unittest.TestCase):
                         VALUES (%s,%s,%s,'bill-entry','0.6.0',%s,'original','{"review_mode":"all_outputs"}','[]','review','paid-session','paid-turn','{"records":[]}') RETURNING *""",
                         (tenant, task, actor, uuid4()),
                     ).fetchone()
+                    pending_write = None
+                    if branch == "employees/bill-entry":
+                        device = connection.execute(
+                            """INSERT INTO desktop_devices(tenant_id,owner_id,installation_id,name,token_hash)
+                            VALUES (%s,%s,%s,'Historical PC','historical-token') RETURNING id""",
+                            (tenant, actor, uuid4()),
+                        ).fetchone()[0]
+                        pending_write = connection.execute(
+                            """INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
+                            VALUES (%s,%s,%s,'Test Company','historical-bill',0,
+                            '{"operation":"update","data":{"invoice_number":"HISTORY-1","total":118}}',
+                            'company:historical-guid') RETURNING *""",
+                            (tenant, run[0], device),
+                        ).fetchone()
                     before = connection.execute(
                         "SELECT version,checksum FROM schema_migrations ORDER BY version"
                     ).fetchall()
@@ -112,6 +126,25 @@ class BranchUpgradeTests(unittest.TestCase):
                 }
                 self.assertIn("parent_run_id", columns)
                 if branch:
+                    if pending_write:
+                        self.assertEqual(
+                            connection.execute(
+                                "SELECT * FROM account_tally_writes WHERE id=%s",
+                                (pending_write[0],),
+                            ).fetchone(),
+                            pending_write,
+                        )
+                        # The company/bill reservation must still serialize
+                        # financial intents after its FK target was renamed.
+                        with (
+                            self.assertRaises(psycopg.errors.UniqueViolation),
+                            connection.transaction(),
+                        ):
+                            connection.execute(
+                                """INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
+                                VALUES (%s,%s,%s,'Test Company','historical-bill',0,'{}','company:historical-guid')""",
+                                (tenant, run[0], device),
+                            )
                     # Added columns may change SELECT *, so compare stable state explicitly.
                     value = connection.execute(
                         "SELECT id,session_id,turn_id,state,config,result FROM workflow_runs WHERE id=%s",
