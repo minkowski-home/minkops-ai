@@ -929,3 +929,26 @@ and a reviewed mixed-company batch completed against real Windows Tally with
 independent duplicate-free readback. Controlled termination exposed native
 settings/licence handoffs, which are recorded as limitations rather than claims
 of unattended recovery. Production deployment remains paused under MIN-124.
+
+### 2026-10-10 — Decisions without accounting editors, with verifiable attention
+
+**Situation:** Review mixed automation with editable accounting values and
+correction prompts. Deferred bills could remain scattered in workflow tasks,
+while accepting a low-confidence scan could be mistaken for completed review.
+
+**Task:** Keep Minkops simple while preserving truthful automation, cross-workflow
+manual obligations and auditable authorization.
+
+**Action:** Introduce shared tenant-scoped attention events and concise one-click
+decisions; reject manual accounting value edits in the API as well as removing
+the UI. Keep external resolution checks read-only and pin the post-write native
+fingerprint for best-guess review. Separate explicit supplier creation from reads,
+verify company/master identities, then continue only the authorized bill. Preserve
+ordered native writes and bounded independent hosted sessions. Consolidate the
+final schema for new installs with immutable archived upgrade history for released
+databases, rather than discarding checksums or paid-session state.
+
+**Result:** Operators decide, original systems own manual corrections, and durable
+attention cannot disappear merely because a workflow finished or a record was
+viewed. Tests cover unchanged/changed destination evidence, wrong identities,
+actor audit and independent continuation. Production remains paused.

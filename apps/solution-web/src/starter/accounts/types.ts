@@ -8,5 +8,5 @@ export interface BillRecord { company_guid?:string|null; company_name?:string; c
 export interface BillResult { records: BillRecord[]; findings: string[]; unresolved?: { source_file_id: string; reason: string }[] }
 export interface WritePlan { id: string; source_id: string; path: string; before_sha256: string; after_sha256: string; verified_at: string | null; cancelled_at: string | null; changes: { sheet: string; table?: string | null; row: number; operation: string }[] }
 export interface TallyWrite { id:string; device_id:string; company:string; record_index:number; outcome:string|null; verified_at:string|null; finished_at:string|null; cancelled_at:string|null }
-export interface Run { id: string; task_id: string; workflow_key: string; state: string; result: Catalog | BillResult | null; config: Record<string, unknown>; writes: WritePlan[]; tally_writes?:TallyWrite[]; error: string | null }
+export interface Run { id: string; actor_id: string; task_id: string; workflow_key: string; state: string; result: Catalog | BillResult | null; config: Record<string, unknown>; writes: WritePlan[]; tally_writes?:TallyWrite[]; error: string | null }
 export interface SavedCatalog { id: string; catalog: Catalog; confirmed_at: string }

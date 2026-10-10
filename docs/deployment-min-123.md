@@ -116,7 +116,7 @@ core instructions, tenant boundaries and financial write checks remain shared.
 
 The following source-discovery and Bill Entry evidence describes the **deployed
 pre-refactor contract**, not `accounts/discovery-context`. Source Discovery 0.7.2,
-Bill Entry 0.8.1 and companion 0.5.1 require coordinated release and live
+Bill Entry 0.9.0 and companion 0.6.0 require coordinated release and live
 acceptance under [MIN-124](https://linear.app/minkops/issue/MIN-124). New runs use
 full company context, dated voucher evidence and structure-only Excel projections;
 they do not prepare separate Tally references. See [Source Discovery](source-discovery.md).

@@ -42,12 +42,15 @@ export function ConsoleShell({ children, title, tenantName, routeSlug, pendingCo
       <nav className="console-nav">
         {navigation.map((item) => <NavLink key={item.route} to={`/${routeSlug}/${item.route}`}
           className={({ isActive }) => `console-nav-item${isActive ? " is-active" : ""}`}
-          title={collapsed ? item.label : undefined}>
+          aria-label={item.label} title={collapsed ? item.label : undefined}>
           <Icon name={item.icon} size={18} /><span>{item.label}</span>
-          {item.route === "dashboard" && pendingCount > 0 && <b>{pendingCount}</b>}
         </NavLink>)}
-        <NavLink to={`/${routeSlug}/connections`} className={({ isActive }) => `console-nav-item${isActive ? ' is-active' : ''}`}>
+        <NavLink aria-label="Connected PCs" to={`/${routeSlug}/connections`} className={({ isActive }) => `console-nav-item${isActive ? ' is-active' : ''}`}>
           <Icon name="settings" size={18} /><span>Connected PCs</span>
+        </NavLink>
+        <NavLink aria-label="Attention items" to={`/${routeSlug}/attention`} className={({isActive})=>`console-nav-item${isActive?' is-active':''}`}>
+          <Icon name="tasks" size={18}/><span>Attention items</span>
+          {pendingCount>0 && <b>{pendingCount}</b>}
         </NavLink>
         {canEdit && <NavLink to={`/${routeSlug}/access`}
           className={({ isActive }) => `console-nav-item${isActive ? " is-active" : ""}`}>

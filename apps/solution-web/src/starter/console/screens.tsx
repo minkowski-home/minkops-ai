@@ -191,7 +191,7 @@ function TaskLinks({ title, tasks, routeSlug }: { title: string; tasks: Task[]; 
     {tasks.length ? <div className="pane-items">{tasks.map((task) => <Link
       className="pane-task" key={task.id} to={`/${routeSlug}/tasks/${task.id}`}>
       <span className={`task-dot task-dot--${task.status}`} />
-      <span><strong>{task.title}</strong><small>{task.summary}</small></span>
+      <span><strong>{task.title}</strong><small>{statusText[task.status] ?? 'Pending'}</small></span>
       <Icon name="chevronRight" size={15} />
     </Link>)}</div> : <p className="quiet-state">Nothing here right now.</p>}
   </section>;
@@ -301,7 +301,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
       <Status value={detail.status} /></header>
     <div className="task-progress">
       <div className={`task-stage-mark${progress.finished ? ' is-finished' : ''}`} aria-hidden="true"><Icon name={progress.finished ? 'check' : detail.status === 'failed' ? 'x' : 'tasks'} size={28} /></div>
-      <div className="task-stage-copy"><h3>{progress.label}</h3><p>{detail.summary}</p>
+      <div className="task-stage-copy"><h3>{progress.label}</h3>
         <ol className="task-stage-list" aria-label="Task stages">{progress.stages.map((stage, index) => <li key={stage}
           className={index < progress.current || progress.finished ? 'is-done' : index === progress.current ? 'is-current' : ''}
           aria-current={!progress.finished && index === progress.current ? 'step' : undefined}>
@@ -309,16 +309,9 @@ export function TaskDetail({ workspace, routeSlug, id }: {
       </div>
     </div>
     <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} />
-    <details className="timeline"><summary>Activity details · {detail.events.length} updates</summary>
-      {error && <p role="alert" className="form-message">The latest timeline could not load. {error} <button
+      {error && <p role="alert" className="form-message">Could not refresh <button
         className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
-      {loading && detail.events.length === 0 && <p className="quiet-state">Loading timeline…</p>}
-      {!loading && !error && detail.events.length === 0 && <p className="quiet-state">No activity recorded yet.</p>}
-      <ol>{detail.events.map((event) => <li key={event.id}>
-        <span className="timeline-point" /><div><strong>{event.summary}</strong>
-          <small>{new Date(event.created_at).toLocaleString()}</small>
-        </div></li>)}</ol>
-    </details>
+      {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}
   </section>;
 }
 

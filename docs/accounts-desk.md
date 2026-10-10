@@ -29,8 +29,10 @@ never included in agent files or exposed to the browser.
    in the executor. Ambiguous recognition becomes an unresolved review item and
    holds that bill while other bills continue. Confirmed concepts enable selected deterministic checks;
    missing reference evidence stays visible rather than implying reconciliation.
-4. Review values, page evidence, findings and append/edit choice. Approval is
-   required initially; tenant defaults and per-run options are editable.
+4. Review bill identifiers and concise status with one-click decisions.
+   Accounting entry/corrections happen in original systems; no values, correction
+   prompts or operation choices are editable in Minkops. Members can change
+   per-run options; only admins change saved tenant/employee defaults.
 5. The Excel adapter prepares only the approved destination edits. The browser
    checks the original hash, keeps a recovery copy, saves to the existing file,
    reads it back and submits a receipt. Only matching saved bytes complete the

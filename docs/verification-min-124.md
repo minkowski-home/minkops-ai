@@ -27,27 +27,37 @@ Conflicting guidance was reconciled in Accounts Desk, Source Discovery, Bill
 Entry and deployment documentation. The MIN-123 deployment record remains a
 historical record; it does not imply these new versions are deployed.
 
-Prepared versions: Source Discovery **0.7.2**, Bill Entry **0.8.1**, Windows
-companion **0.5.1**. The successful Tally discovery used 0.7.1 before the final
-Excel inventory instruction clarification; Excel discovery exercised 0.7.2.
+Prepared versions: Source Discovery **0.7.2**, Bill Entry **0.9.0**, Windows
+companion **0.6.0**. The earlier mixed-company and Excel proofs below used Bill
+Entry 0.8.1 and companion 0.5.1. Their Tally discovery used 0.7.1 and their Excel
+discovery used 0.7.2; retain that distinction when assessing release coverage.
+
+The current product contract removes accounting editors and correction prompts,
+adds shared auditable attention and native one-click supplier creation, and keeps
+best-guess review pending after saving. Runtime choices are available to tenant
+members; saved tenant/employee settings stay admin-only. Independent bill sessions
+retain four worker lanes and per-session context budgets. Fresh installs use one
+reconciled baseline; archived upgrades retain released SQL/checksums and paid runs.
 
 ## Automated and packaged checks
 
 | Check | Result |
 | --- | --- |
-| Python platform, API, connector, DB and infrastructure suite with real PostgreSQL | 207 passed, 47 subtests |
+| Python platform, API, connector, DB and infrastructure suite with real PostgreSQL | 221 passed, 48 subtests |
 | Web suite | 17 passed |
 | Web lint, TypeScript and Vite production build | Passed |
-| Native desktop connector suite on WSL | 56 passed |
-| Native desktop connector suite on Windows | 55 passed; one symlink test skipped because Windows symlink privilege was unavailable |
+| Native desktop connector suite on WSL | 60 passed |
+| Native desktop connector suite on Windows | 59 passed; one symlink test skipped because Windows symlink privilege was unavailable |
 | Windows HTTP smoke: real API/PostgreSQL, native folder refresh, restart/replay, device revocation | Passed |
-| Windows 0.5.1 NSIS package build | Passed |
-| Packaged executable login and local dashboard | Passed on Windows 11 Pro build 26200 |
+| Windows 0.6.0 NSIS package build | Passed |
+| Earlier 0.5.1 executable login and local dashboard | Passed on Windows 11 Pro build 26200 |
+| Current 0.6.0 executable launch / installed upgrade | Pending: automatic approval review rejected the executable launch as blocked by policy |
+| Current attention UI: Done persistence, grouping/sorting, pending refresh, 390px layout | Passed against local API/PostgreSQL; no horizontal overflow |
 
 The final local installer is
-`C:\Users\gauss\Documents\Codex\min124-windows\apps\windows-app\release\Minkops Setup 0.5.1.exe`.
-SHA-256: `23F35C3D3762BB202074E0DD3860B721F374211ABC2CB721FC62BC8848E8296B`.
-Building and launching it does not establish installed-upgrade compatibility.
+`C:\Users\gauss\Documents\Codex\min124-windows\apps\windows-app\release\Minkops Setup 0.6.0.exe`.
+SHA-256: `88C8FA93D7322910A7AF596D13531268973BC024BE8FD74615E9D5F0E872729C`.
+Building it does not establish launch or installed-upgrade compatibility.
 
 The native regression tests were first observed failing for the defects above,
 then passed after the fixes. They cover unexpected company trailers, formatting
@@ -55,6 +65,36 @@ whitespace, typed numeric loads, genuine reference changes versus padded IDs,
 and preservation of uncertain-import state across readiness failures.
 
 ## Live local workflows
+
+### Current decision contract (0.9.0 / 0.6.0 adapters)
+
+Confirmed Tally discovery 0.7.2: `b799c326-05ae-4129-85d7-9da31111b496`.
+Bill run `6bee543b-ab30-4016-b311-02a8164fe2ac` completed a reviewed, independently
+read-back voucher and receipt replay. Only Test Company was loaded for this run;
+it does not replace the earlier two-company proof. A new-supplier paid run
+`95dcff63-3efc-4b8c-94d9-b4a85e364700` retained complete evidenced bill values.
+The ordinary `attention.supplier` decision created a native Sundry Creditors
+master, verified its GUID/parent, continued that same bill and read back the 117
+voucher. Explicit attention Refresh then verified the external resolution.
+Both paid runs used gpt-6-luna; no values were entered through an app editor.
+
+Excel discovery `5d388c45-e708-441e-a6a8-5512bb8433c4` and Bill Entry 0.9.0
+`73200403-e8d7-406d-b2c8-0d839ba0a241` passed on a separate copy of the Excel-authored
+named-table fixture. The initial discovery proposed a reference role; that result
+is retained. A fresh explicit Excel configuration review confirmed the table's
+destination role through the normal mapping-confirmation API. This changes
+workflow configuration, not bill values. The native save appended
+`MIN124-EXCEL-7f914bac` once for 300, expanded A4:F5 to A4:F6, preserved the private
+original row and G5:G8 formulas, and replayed receipts without another write.
+Every discovery projection ZIP entry was checked for private row-canary absence.
+
+The automation ran through Minkops' API, hosted worker and production Windows
+adapters. Browser automation checked UI decisions only; it did not substitute for
+Minkops' extraction, Tally entry or native recovery implementation. The packaged
+0.6.0 shell itself has not been launched. Multilingual handwriting accuracy and
+the full live fault matrix remain unproven; automated mocks are not live proof.
+
+### Earlier discovery-context integration evidence
 
 Only synthetic, authorized fixtures were used. Existing server credentials were
 used for hosted Source Discovery and Bill Entry with **gpt-6-luna**. Model
@@ -154,17 +194,22 @@ requires one observed Tally instance with both numeric loads, an explicit
 These opt-in scripts modify only explicitly selected companies; fault stages
 deliberately terminate the observed native process.
 
-Run `scripts/verify_discovery_context_live.py` or
-`scripts/verify_discovery_excel_live.py` from WSL with `DATABASE_URL` ending in
+Run `scripts/verify_discovery_context_live.py`, `scripts/verify_bill_decisions_live.py`
+or `scripts/verify_discovery_excel_live.py` from WSL with `DATABASE_URL` ending in
 `/minkops_min124_live`, `AUTH_DEV_MODE=1`, the existing server key configured,
 `MINKOPS_WINDOWS_ROOT`, `MINKOPS_WINDOWS_NODE` (the executable's WSL path) and
 a separate `MINKOPS_LIVE_DATA` checkpoint directory for each flow. Do not use
 Python optimization: verification rejects `python -O`. `--resume-saves` on the
 Tally script explicitly reconciles approved interrupted saves. Do not erase
 checkpoints to retry a paid session implicitly.
+The decision proof uses a previously confirmed Tally checkpoint. For a separate
+Excel fixture, set `MINKOPS_EXCEL_FIXTURE_ROOT` to its Windows folder; the proof
+reviews the known table's destination role before confirmation.
 
 Raw local evidence is intentionally untracked: WSL
 `apps/solution-api/data/min124` and `apps/solution-api/data/min124-excel`, and
 Windows `C:\Users\gauss\Documents\Codex\min124-windows\evidence\min124`.
 Retain it for the remaining acceptance checks. Do not commit model credentials,
 device credentials, native company exports or private workbook rows.
+Current decision evidence/checkpoints are separately retained in
+`apps/solution-api/data/min124-philosophy` and `data/min124-philosophy-excel`.

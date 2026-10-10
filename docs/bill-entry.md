@@ -26,11 +26,12 @@ launch rejects another model. The model never writes financial systems.
    Multiple inputs create independent durable hosted sessions under one task.
    Four worker lanes process them concurrently; a provider failure affects only
    its bill. The parent aggregates persisted proposals and unresolved inputs.
-3. Review source evidence and values. Approve, hold, reject or edit each entry.
-   Good entries can be saved while other bills need clarification. Supply input
-   for an unresolved bill to retry only that input; completed sibling writes stay
-   intact. Tally requires review of every output. Excel retains its existing
-   optional exceptions-only policy and deterministic checks.
+3. Review concise bill identifiers and choose Write bill, Best guess write,
+   Create this ledger (when supported), or Do nothing. Accounting corrections
+   belong in Tally/Excel; Minkops has no value editor, correction prompt or
+   append/update selector. After external correction and discovery refresh,
+   Recheck bill retries only that unresolved input. Completed sibling writes stay
+   intact. Good bills can continue independently. See [shared attention](attention.md).
 4. All scans are persisted before approval. Approval commits immutable plans
    and queues serial native work grouped by company before returning.
    The tray companion can finish after the UI closes. Web and desktop use the
@@ -46,7 +47,7 @@ Existing external rows/vouchers and backfills are checked against destination
 data, rather than relying only on prior application history.
 
 Exact duplicates produce an alert and no additional row/voucher. A different
-version is held for explicit Edit. Excel corrections compare observed values
+version is held for an explicit one-click decision. Excel corrections compare observed values
 against extraction-time values and recheck current destination bytes. Tally
 corrections compare the complete fetched voucher fingerprint, then target its
 observed original date and MASTER ID. Another intervening edit requires another
@@ -114,7 +115,7 @@ so its Active/Needs Attention sections reflect executable workflow outcomes.
 
 Discovery is mandatory before dependent workflows, with manual refresh afterward.
 Its date range applies only to vouchers; all masters are exported comprehensively.
-New runs use Source Discovery 0.7.2, Bill Entry 0.8.1 and companion 0.5.1. The RC
+New runs use Source Discovery 0.7.2, Bill Entry 0.9.0 and companion 0.6.0. The RC
 evidence below predates this refactor. Repeat live acceptance and deployment under
 [MIN-124](https://linear.app/minkops/issue/MIN-124). No scheduling or new accounting
 layer is introduced. The existing native Purchase contract remains bounded.
@@ -151,7 +152,8 @@ The register uses obscure headers such as `Party.External`, `Txn.Base` and
 
 Only the explicitly selected test company should be used. Seed mock supplier,
 purchase and tax ledgers there before the live proof; do not overwrite existing
-masters. Apply all pending migrations through 0011 and seed the isolated demo database.
+masters. Run `db/migrate.py` against the isolated demo database to install or adopt
+the final baseline, then seed its demo composition.
 
 ## Verification
 
@@ -165,10 +167,11 @@ lint and existing web tests are run. The 6 October RC additionally verifies the
 installed Windows 0.3.1 app, folder picker, catalog Save As, four desktop themes,
 shared web review at the minimum desktop width, source previews, and tray/reopen
 execution. See `docs/windows-app.md` for distribution limitations.
-Completed bills keep their read-only values and expandable source evidence;
-general extraction notes are collapsed while per-bill review findings stay visible.
+That historical RC showed expandable evidence and findings. The current review
+shows concise identifiers and one-click decisions; detailed evidence and logs
+remain internal. See [attention](attention.md) and [current verification](verification-min-124.md).
 
-The current proof uses `minkops_mock_rc20261006`, with an independently migrated
+The 6 October proof used `minkops_mock_rc20261006`, with an independently migrated
 `minkops_min119_tests` database for regression tests. Initial extraction saves
 four unique bills and skips the steel copy. A complete second run skips all five
 inputs after an ambiguous steel reference is clarified independently; it creates

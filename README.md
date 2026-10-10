@@ -1,6 +1,22 @@
 # Minkops.ai
 
 ### Product Vision
+**Automation first; one-click decisions; manual work in the original tools.**
+Minkops completes what it can truthfully automate. It never becomes an accounting
+data-entry screen or a correction-prompt chat. Exceptions use short labels and
+clear bill/file/voucher/cell identifiers, with contextual buttons such as
+**Do nothing**, **Best guess write**, or **Create this ledger** when supported.
+Do nothing preserves an attention item without writing. A best-guess write stays
+pending human review even after a verified save. Manual changes happen in Tally,
+Excel or the original system. Detailed diagnostics stay in internal audit records.
+
+Attention is shared across workflows and employees, tenant-scoped and durable.
+Members with access can mark items Done or request Refresh; every action records
+its actor. Refresh completes items only from verified external resolution or
+an edit after Minkops' write. Viewing an unchanged record cannot prove review.
+Parallelize independent AI steps with bounded concurrency; preserve authorization,
+ordered writes, idempotency and recovery. See [attention and decisions](docs/attention.md).
+
 Minkops offers AI Employees that carry out practical business workflows in a
 customer's existing tools and processes.
 In simple terms, we are building something as close as possible to ChatGPT Work desktop app, except replace prompting with one-click workflows.

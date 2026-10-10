@@ -474,7 +474,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                       : "Needs attention"}
                   </summary>
                   {b.error ? (
-                    <p role="alert">{b.error}</p>
+                    <p role="alert">Source unavailable</p>
                   ) : (
                     b.structure?.sheets.map((sheet) => (
                       <p key={sheet.sheet}>
@@ -504,8 +504,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
       </div>
       {run.state === "failed" && (
         <p role="alert">
-          {run.mapping_run?.error ??
-            "Collection was interrupted. Check the task timeline, then run discovery again."}
+          Source unavailable. Run discovery again.
         </p>
       )}
       {run.state === "review" && edited && edited.sheets.length > 0 && (

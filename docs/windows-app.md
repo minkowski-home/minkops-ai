@@ -106,9 +106,9 @@ Versioned discovery packages are saved locally as described in
 The consolidated branch retains Windows baseline `c3b050c`, the shared workflow
 architecture, and Bill Entry's financial-write work through `3dc6552`. Its API/UI
 uses installed bindings and shared dispatch, including independent bill sessions,
-native Tally reconciliation, and verified Excel/Tally writes. Apply all pending
-migrations through `0011_complete_branch_convergence` before starting this
-revision. Either predecessor database can upgrade without resetting run history.
+native Tally reconciliation, and verified Excel/Tally writes. Run `db/migrate.py`
+before starting this revision. It installs the final baseline or adopts archived
+upgrade history. Either predecessor can upgrade without resetting run history.
 See [branch convergence](branch-convergence.md) for the tested paths.
 See [workflow authoring](workflow-authoring.md) for installation and recovery.
 
@@ -134,7 +134,7 @@ default is `https://app.minkops.com`. Packaged releases accept HTTPS only.
 Development can use localhost HTTP. The web host must serve existing `/api/`
 routes at the same origin; Vite already supports this through `VITE_API_TARGET`.
 A build does not deploy or prove that the default production host serves this
-branch. Apply all migrations through 0011 before using bill entry. Use normal
+branch. Install or adopt the final baseline before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
@@ -165,8 +165,9 @@ connection checks/refreshes have their own short stages. Events drive stages,
 with no simulated percentage or ETA. Failures remain at the last observed
 stage. Labels and outlined icons work independently of color or animation.
 
-Review shows actual sheet/entry counts and unclear destinations. Editable
-business values remain visible; source evidence and activity are expandable.
+Review shows actual sheet/entry counts, bill identifiers and short status.
+One-click decisions replace accounting editors and correction prompts. Manual
+changes belong in the original tools; detailed events remain internal audit data.
 All four themes and responsive layout are shared. Accounts alone decides when
 all workbooks are verified; one native job cannot complete a multi-workbook run.
 
@@ -194,7 +195,7 @@ nested names are rejected rather than converted into misleading object strings.
 
 On 6 October 2026 the unsigned 0.3.1 NSIS installer was installed successfully on
 Windows 11 Pro (build 26300) and launched against the shared production UI build. MIN-122's
-local sweep covers four themes, native folder selection, bounded JSON catalog
+historical sweep covered four themes, native folder selection, bounded JSON catalog
 Save As, missing-supplier Needs Attention, independent clarification, approve/
 hold/reject/edit controls, duplicate alerts, source previews and web/desktop task
 synchronization. Closing the main window leaves the native worker in the tray;
