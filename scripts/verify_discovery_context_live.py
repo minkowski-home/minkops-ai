@@ -102,7 +102,7 @@ def finish_job(operation, root=None):
     return result
 
 
-def discovery(config=None, root=None):
+def discovery(config=None, root=None, mapping_review=None):
     config = config or {"depth": "client_context", "excel_source_ids": [],
                         "tally": {"port": 9000, "period": {"from": "2026-10-01", "to": "2026-10-02"}}}
     if "discovery_id" not in state:
@@ -122,7 +122,8 @@ def discovery(config=None, root=None):
         assert scan["mapping_run"]["state"] == "review", scan["mapping_run"]
         if not config["excel_source_ids"]:
             assert scan["mapping_run"]["result"]["sheets"] == []
-        scan = api("post", path + "/confirm", headers=csrf, json={})
+        confirmation = {"excel_mappings": mapping_review(scan["mapping_run"]["result"])} if mapping_review else {}
+        scan = api("post", path + "/confirm", headers=csrf, json=confirmation)
     assert scan["ready"] and scan["catalog"]["format_version"] == "2"
     state["catalog"] = scan["catalog"]
     checkpoint()
@@ -174,6 +175,8 @@ def bills(scan, resume_saves=False):
         children = connection.execute("SELECT id FROM account_runs WHERE parent_run_id=%s", (state["batch_id"],)).fetchall()
     for child in children:
         hosted(child["id"])
+    if not children:
+        hosted(state['batch_id'])
     path = base + f"/accounts/runs/{state['batch_id']}"
     run = api("get", path)
     (DATA / "bill-review.json").write_text(json.dumps(run, default=str, indent=2))
@@ -205,7 +208,7 @@ def bills(scan, resume_saves=False):
                    if v["invoice_number"] == invoice["invoice"]]
         assert len(matches) == 1 and matches[0]["vendor"] == "MIN124 Shared Supplier"
     (DATA / "bill-receipts.json").write_text(json.dumps(run, default=str, indent=2))
-    print("Live confirmed discovery, inferred mixed-company batch, reviewed native writes and replay passed.", flush=True)
+    print(f"Live confirmed discovery, inferred {len(expected)}-company batch, reviewed native writes and replay passed.", flush=True)
 
 
 def connect():

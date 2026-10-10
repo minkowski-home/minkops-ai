@@ -289,3 +289,4 @@ export async function replaceApproved(root, spec, approved, backup) {
     if (runningWrites.get(target) === operation) runningWrites.delete(target);
   }
 }
+export { inspectTallyAttention } from "./tally.js";

@@ -5,8 +5,10 @@ directory. This installs the core Bill Entry definition only in that local DB;
 the mock-client composition is restored afterwards. No production changes.
 """
 import base64
+import copy
 import io
 import json
+import os
 import uuid
 import zipfile
 
@@ -17,7 +19,7 @@ from minkops_platform.workflows import load_definition, register_workflow
 
 import verify_discovery_context_live as proof
 
-ROOT = proof.NATIVE_ROOT + r"\apps\solution-api\data\min124"
+ROOT = os.environ.get("MINKOPS_EXCEL_FIXTURE_ROOT", proof.NATIVE_ROOT + r"\apps\solution-api\data\min124")
 FILE = ROOT + r"\register.xlsx"
 
 
@@ -41,7 +43,15 @@ def main():
         state["source_id"] = source["id"]
         api("post", proof.base + f"/desktop/devices/{state['device_id']}/sources/{source['id']}", headers=proof.csrf)
         proof.checkpoint()
-    scan = proof.discovery({"depth": "client_context", "excel_source_ids": [state["source_id"]], "tally": None}, ROOT)
+    # Workbook roles are operator configuration, not accounting data entry.
+    # Explicitly review this fixture's intended destination before confirmation.
+    def review_mapping(result):
+        reviewed = copy.deepcopy(result)
+        for sheet in reviewed['sheets']:
+            if sheet['sheet'] == 'Bills' and sheet['table'] == 'MIN124Bills':
+                sheet['role'] = 'destination'
+        return reviewed
+    scan = proof.discovery({"depth": "client_context", "destination_mode": "excel", "excel_source_ids": [state["source_id"]], "tally": None}, ROOT, review_mapping)
     mapping = scan["mapping_run"]["result"]["sheets"][0]
     assert mapping["table"] == "MIN124Bills" and mapping["header_row"] == 4
     assert mapping["role"] == "destination"

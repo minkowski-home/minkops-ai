@@ -33,6 +33,7 @@ import {
   discoverClientContext,
   saveDiscoveryPackage,
   recoveringTallyRequest,
+  inspectTallyAttention,
   tallyCompanyNumber,
   captureTallyProcess,
   tallyProcessRunning,
@@ -262,6 +263,16 @@ function startWorker() {
       }
       if (job.operation === "files.refresh")
         return { files: await inventory(grantFor(job.input.source_id).root) };
+      if (job.operation === "attention.refresh" || job.operation === "attention.supplier") {
+        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
+        if (plan.tool === "excel") {
+          const files = await inventory(grantFor(plan.source_id).root);
+          const file = files.find(f => f.path === plan.path);
+          if (!file) throw new Error("Original workbook unavailable.");
+          return {content: file.content};
+        }
+        return inspectTallyAttention(plan, {request: tallyRequest, createSupplier: job.operation === "attention.supplier"});
+      }
       if (job.operation === "tally.references") {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,

@@ -9,6 +9,7 @@ import {
   readTallyBills,
   inspectExcel,
   commitTallyBill,
+  inspectTallyAttention,
   inventory,
   replaceApproved,
 } from "../connectors/desktop/src/index.js";
@@ -30,6 +31,7 @@ else if (input.operation === "inspect")
   result = await inspectExcel(await readFile(input.path));
 else if (input.operation === "refresh") result = { files: await inventory(input.root) };
 else if (input.operation === "save") result = await commitTallyBill(input.plan);
+else if (input.operation === "attention") result = await inspectTallyAttention(input.plan, { createSupplier: input.create_supplier === true });
 else if (input.operation === "collect")
   result = await collectSources(input.plan, {
     folderFor: () => input.root,

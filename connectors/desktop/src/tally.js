@@ -30,6 +30,33 @@ const referenceDigest = (field, value) => digest(
     ? value.trim() : value,
 );
 const unsupported = Symbol("unsupported allocations");
+
+/** Fixed native attention operations. Renderer cannot supply XML or endpoints. */
+export async function inspectTallyAttention(plan, {request = fetch, createSupplier = false} = {}) {
+  const snapshot = await discoverTally({company: plan.company, port: plan.port,
+    depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+  const companies = snapshot.collections.find(c => c.category === "company")?.records ?? [];
+  if (companies.length !== 1 || text(companies[0].GUID) !== plan.company_guid)
+    throw new Error("Tally company changed.");
+  let ledgers = snapshot.collections.find(c => c.category === "ledgers")?.records ?? [];
+  const matches = ledgers.filter(m => text(m["@_NAME"] ?? m.NAME) === plan.vendor);
+  if (createSupplier && !matches.length) {
+    if (typeof plan.vendor !== "string" || !plan.vendor.trim() || plan.vendor.length > 200 || /[\x00-\x1f]/.test(plan.vendor))
+      throw new Error("Invalid supplier name.");
+    const body = `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>All Masters</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><LEDGER NAME="${xml(plan.vendor)}" ACTION="Create"><NAME>${xml(plan.vendor)}</NAME><PARENT>Sundry Creditors</PARENT><ISBILLWISEON>No</ISBILLWISEON></LEDGER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
+    // Losing an import acknowledgement never permits another import in this
+    // attempt. The next explicit action starts with the same exact master read.
+    await exchange(plan.company, plan.port, body, request);
+    const after = await discoverTally({company: plan.company, port: plan.port, depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+    const observed = after.collections.find(c => c.category === "company")?.records ?? [];
+    if (observed.length !== 1 || text(observed[0].GUID) !== plan.company_guid)
+      throw new Error("Tally company changed.");
+    ledgers = after.collections.find(c => c.category === "ledgers")?.records ?? [];
+  }
+  const bills = (await readTallyBills(plan, {request})).filter(v =>
+    v.vendor === plan.vendor && v.invoice_number === plan.invoice_number);
+  return {company_guid: plan.company_guid, ledgers, current: bills.length === 1 ? bills[0] : null};
+}
 const populated = (v) =>
   typeof v === "object" && v !== null
     ? Object.values(v).some(populated)
