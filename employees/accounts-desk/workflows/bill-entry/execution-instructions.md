@@ -38,8 +38,10 @@ null; the application generates business identity. Do not write workbooks.
 Distinguish invoice vs PO/GRN, issue vs delivery dates, gross vs discounted base,
 and current payable vs previous balances. Office copies and repeated totals are
 not extra bills. Never invent or silently substitute source values. Do not claim
-PO/receipt reconciliation without actual records. Human clarification in
-config.user_input supplements evidence; disclose corrections in findings.
+PO/receipt reconciliation without actual records. Manual corrections belong in
+original systems, not an in-app value editor or correction prompt. Preserve the
+input identifier and uncertain field in internal findings; the product supplies
+concise one-click decisions and shared attention.
 
 Write /workspace/outputs/result.json with records, findings and unresolved:
 {"records":[{"source_file_id":"supplied input ID","destination_file_id":"catalog destination ID",
@@ -60,3 +62,11 @@ company by company. The application owns validation, approvals, duplicate checks
 XML, recovery and exact readback. Tally owns accounting and bookkeeping. Never
 write Tally from the hosted session or claim success from an acknowledgement.
 An unknown import result requires destination reconciliation before another import.
+For a new supplier with no discovered ledger, retain a complete candidate record
+when the bill supports every mandatory value and the other ledgers are known.
+Use the supplier's evidenced printed name, mark the missing ledger in findings
+and unresolved, and hold the record. This enables an explicit native Create this
+ledger decision; it never authorizes creating masters or saving a voucher here.
+Likewise retain a complete supported low-confidence interpretation with findings
+for the Best guess write decision. Never invent missing amounts, dates, company
+identity or unsupported accounting fields merely to make a candidate complete.

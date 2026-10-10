@@ -86,6 +86,10 @@ def observe(connection, run, state, summary, progress):
     # publishes the aggregate task, so one child cannot complete its siblings.
     if run.get("parent_run_id"):
         return
+    if state == "failed":
+        from minkops_platform.attention import record, audit
+        item = record(connection, run, f"run:{run['id']}", run.get("workflow_key", "Workflow"), "Needs attention")
+        audit(connection, item, None, "failed", summary)
     observe_task(
         connection,
         tenant_id=run["tenant_id"],

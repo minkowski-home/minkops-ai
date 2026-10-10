@@ -127,7 +127,10 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
             raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
         files += references
-    if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
+    is_bill = definition.metadata["handler"] == "accounts.bill"
+    reference_files = files[len(ids):] if is_bill else []
+    sessions = [[f, *reference_files] for f in files[:len(ids)]] if is_bill else [files]
+    if any(len(session) > 45 or sum(len(f["content"]) for f in session) > 8_000_000 for session in sessions):
         raise ServiceError(
             "invalid",
             "Select a smaller scope: up to 45 files and 8 MB including references per run.",
@@ -187,7 +190,8 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
 
         assets, _ = context_assets(source_context)
         files += assets
-        if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
+        sessions = [[f, *reference_files, *assets] for f in files[:len(ids)]] if is_bill else [files]
+        if any(len(session) > 45 or sum(len(f["content"]) for f in session) > 8_000_000 for session in sessions):
             raise ServiceError(
                 "invalid",
                 "Complete discovery context exceeds hosted input limits. Reduce the voucher period or hand off; master records cannot be sampled.",
@@ -362,6 +366,12 @@ class BillHandler(AccountsHandler):
 
     def finish(self, connection, store, run, context, domain, result):
         from .service import prepare_writes
+        if not run.get("parent_run_id"):
+            from .attention import flag
+            for issue in result.get("unresolved", []):
+                record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
+                              {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
+                flag(connection, run, record)
 
         store.observe(
             connection,

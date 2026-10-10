@@ -93,7 +93,7 @@ class BillEntryTests(unittest.TestCase):
             headers=self.csrf,
             json={
                 "file_id": bill,
-                "user_input": "Supplier created. Use New supplier.",
+                "user_input": "",
                 "reject": False,
             },
         )
@@ -134,7 +134,7 @@ class BillEntryTests(unittest.TestCase):
         response = self.client.post(
             self.base + f"/runs/{run['id']}/resolve-bill",
             headers=self.csrf,
-            json={"file_id": bill, "user_input": "Continue", "reject": False},
+            json={"file_id": bill, "user_input": "", "reject": False},
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("scope changed", response.text)
@@ -466,8 +466,13 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(held["result"]["records"][0]["status"], "held")
         edited = held["result"]
         edited["records"][0]["operation"] = "update"
-        resumed = self.approve(held, edited)
-        _, _, correction = self.tally_job(resumed)
+        denied = self.client.post(self.base + f"/runs/{held['id']}/approve", headers=self.csrf,
+            json={"result": edited, "acknowledge_findings": True})
+        self.assertEqual(denied.status_code,422)
+        response = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
+            headers=self.csrf,json={"action":"guess"})
+        self.assertEqual(response.status_code,200,response.text)
+        _, _, correction = self.tally_job(response.json())
         self.assertEqual(correction["expected"]["fingerprint"], "a" * 64)
 
     def test_batch_failed_bill_does_not_discard_successful_sibling(self):
@@ -529,8 +534,10 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(held["state"], "review")
         edited = held["result"]
         edited["records"][0]["operation"] = "update"
-        resumed = self.approve(held, edited)
-        self.assertEqual(resumed["state"], "writing")
+        response = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
+            headers=self.csrf,json={"action":"guess"})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()["state"], "writing")
 
     def test_parallel_workers_keep_independent_bill_sessions_and_single_parent_task(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -768,7 +775,7 @@ class BillEntryTests(unittest.TestCase):
         resumed = self.client.post(
             self.base + f"/runs/{root['id']}/resolve-bill",
             headers=self.csrf,
-            json={"file_id": bad, "user_input": "Invoice number is MOCK-2. See page 2."},
+            json={"file_id": bad},
         )
         self.assertEqual(resumed.status_code, 200, resumed.text)
         with psycopg.connect(URL, row_factory=dict_row) as c:
@@ -778,7 +785,7 @@ class BillEntryTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual(len(retry), 1)
         self.assertEqual(retry[0]["file_ids"], [bad])
-        self.assertIn("MOCK-2", retry[0]["config"]["user_input"])
+        self.assertNotIn("user_input", retry[0]["config"])
         result = self.tally_result(root, bad)
         result["records"][0]["data"]["invoice_number"] = "MOCK-2"
         self.process(retry[0], result)
@@ -824,7 +831,11 @@ class BillEntryTests(unittest.TestCase):
         self.process(first, self.excel_result(bill, 24))
         second, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
         self.process(second, self.excel_result(bill, 13))
-        updated = self.approve(second, self.excel_result(bill, 13, operation="update"))
+        self.approve(second, self.excel_result(bill, 13))
+        corrected = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{second['id']}/{bill}",
+            headers=self.csrf,json={"action":"guess"})
+        self.assertEqual(corrected.status_code,200,corrected.text)
+        updated = corrected.json()
         write = updated["writes"][0]
         route = self.base + f"/runs/{second['id']}/writes/{write['id']}"
         saved = self.client.get(route + "/content").content
@@ -832,12 +843,17 @@ class BillEntryTests(unittest.TestCase):
             route + "/verify", headers=self.csrf, files={"file": ("records.xlsx", saved)}
         )
         self.assertEqual(response.status_code, 200, response.text)
-        held = self.approve(first, self.excel_result(bill, 24, operation="update"))
+        corrected = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{first['id']}/{bill}",
+            headers=self.csrf,json={"action":"guess"})
+        self.assertEqual(corrected.status_code,200,corrected.text)
+        held = corrected.json()
         self.assertEqual(held["state"], "review")
         self.assertEqual(held["writes"], [])
         self.assertEqual(held["result"]["records"][0]["current_excel"]["Amount"], 13)
-        resumed = self.approve(held, held["result"])
-        self.assertEqual(resumed["state"], "writing")
+        resumed = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
+            headers=self.csrf,json={"action":"guess"})
+        self.assertEqual(resumed.status_code,200,resumed.text)
+        self.assertEqual(resumed.json()["state"], "writing")
 
     def test_late_cancelled_excel_receipt_retains_newer_observed_source_bytes(self):
         from io import BytesIO
@@ -907,7 +923,7 @@ class BillEntryTests(unittest.TestCase):
         retry = self.client.post(
             route,
             headers=self.csrf,
-            json={"file_id": ids[1], "user_input": "Retry this bill only."},
+            json={"file_id": ids[1]},
         )
         self.assertEqual(retry.status_code, 200, retry.text)
         with psycopg.connect(URL, row_factory=dict_row) as c:

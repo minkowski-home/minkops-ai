@@ -90,6 +90,8 @@ def prepare(connection, run, result, *, approved=False):
         except ValueError as error:
             record["status"] = "held"
             record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
+            from .attention import flag
+            flag(connection, run, record)
         except UniqueViolation:
             record["status"] = "held"
             record["findings"].append(
@@ -99,6 +101,10 @@ def prepare(connection, run, result, *, approved=False):
 
 
 def complete_run(connection, run, result):
+    from .attention import flag
+    for record in result["records"]:
+        if record.get("status") == "held":
+            flag(connection, run, record)
     pending_excel = connection.execute(
         "SELECT count(*) AS n FROM account_writes WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL AND cancelled_at IS NULL",
         (run["tenant_id"], run["id"]),
@@ -238,13 +244,24 @@ def accept(connection, device, payload, receipt):
             )
     if current:
         record["current"] = current
+    from .attention import flag
+    if outcome in ("correction", "attention"):
+        item = flag(connection, run, record, title="Review in Tally")
+        from ..attention import audit
+        audit(connection,item,run['actor_id'],outcome,receipt.get('message','Existing voucher needs review.'))
+    # Best-guess review starts after verified write, using exact native identity.
+    if current and outcome in ("saved", "duplicate"):
+        from .attention import written
+        written(connection, run, record)
+        connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
+            (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":
         record["findings"].append(
             "Exact duplicate already exists; no additional voucher was created."
         )
     elif outcome in ("correction", "attention"):
         record["findings"].append(
-            "Existing bill differs. Review values and select Edit before approving."
+            "Review in Tally."
             if outcome == "correction"
             else str(receipt.get("message", "Tally write needs attention."))[:300]
         )

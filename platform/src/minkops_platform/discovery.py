@@ -126,6 +126,10 @@ def detail(connection, row):
 
 
 def _observe(connection, row, state, summary, progress):
+    if state == 'failed':
+        from .attention import record, audit
+        item = record(connection,row,f"discovery:{row['id']}","Source discovery","Source unavailable")
+        audit(connection,item,None,'failed',summary)
     observe_task(
         connection,
         tenant_id=row["tenant_id"],
@@ -712,6 +716,9 @@ def collect(connection, device, job, result):
             )
             unchanged = False
             catalog["review"].update(status="required", reused_from=None)
+    if partial:
+        from .attention import record
+        record(connection,row,f"discovery:{row['id']}","Source discovery","Incomplete discovery")
     state = "completed" if unchanged else "review"
     mapping_id = None
     if unchanged and remapped:

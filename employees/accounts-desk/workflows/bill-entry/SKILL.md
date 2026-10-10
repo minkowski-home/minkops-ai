@@ -59,6 +59,12 @@ choose any discovered company using buyer identity and evidenced client context;
 a shared supplier name alone is insufficient. Save company_guid and explain the
 selection in company_evidence on every proposed record. Ambiguity is unresolved.
 All scans are persisted for review before native writes. Approved writes are
+authorized through concise one-click decisions. Manual accounting edits happen
+in original systems. Do nothing preserves a shared attention item without a
+write; best-guess writes require subsequent human review even after readback.
+Never ask users to type correction prompts or enter accounting fields in Minkops.
+Independent bills use bounded parallel sessions; destination writes retain their
+native ordering, authorization and reconciliation requirements. Approved writes are
 processed company by company with independent receipts and reconciliation.
 After a Tally crash, an unknown import result requires reconciliation before
 another import; never claim a successful save from an acknowledgement alone.

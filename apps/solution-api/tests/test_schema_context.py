@@ -23,6 +23,24 @@ class SchemaContextTests(unittest.TestCase):
     process = bills.BillEntryTests.process
     tally_result = bills.BillEntryTests.tally_result
 
+    def test_hundreds_of_bills_launch_independent_sessions_with_complete_lookup_per_bill(self):
+        discovery = self.tally_discovery('company-scale')
+        original = self.upload_bill('scale.pdf')
+        with psycopg.connect(URL) as c:
+            copies = c.execute("""INSERT INTO account_files(tenant_id,source_id,path,sha256,content)
+                SELECT tenant_id,source_id,'scale-'||n||'.pdf',sha256,content
+                FROM account_files CROSS JOIN generate_series(1,119) n WHERE id=%s RETURNING id""",(original,)).fetchall()
+        inputs = [original,*[str(row[0]) for row in copies]]
+        run,_ = self.launch('bill-entry',file_ids=inputs,config={'output_mode':'tally_in_place','discovery_id':discovery})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            children=c.execute('SELECT * FROM workflow_runs WHERE parent_run_id=%s',(run['id'],)).fetchall()
+            self.assertEqual(len(children),120)
+            self.assertEqual({row['file_ids'][0] for row in children},set(inputs))
+            self.assertTrue(all(len(row['file_ids'])==1 for row in children))
+            self.assertTrue(all(row['config']['tally_target']['discovery_id']==discovery for row in children))
+            self.assertTrue(all(row['config']['source_catalog_snapshot'] for row in children))
+            self.assertEqual(len({row['task_id'] for row in children}),1)
+
     def test_metadata_only_catalog_requires_complete_rediscovery(self):
         discovery = self.tally_discovery("company-1", schema=True)
         response = self.client.post(
@@ -113,7 +131,7 @@ class SchemaContextTests(unittest.TestCase):
         response = self.client.post(
             self.base + f"/runs/{run['id']}/resolve-bill",
             headers=self.csrf,
-            json={"file_id": bill, "user_input": "Continue", "reject": False},
+            json={"file_id": bill, "user_input": "", "reject": False},
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("Company scope changed", response.text)

@@ -149,6 +149,8 @@ def enqueue_approved(connection, run, device_id, operation, write_id):
 
 
 def _observe(connection, job, state, summary, progress):
+    if job["operation"].startswith("attention."):
+        return  # Attention events have their own durable lifecycle and audit.
     if job["operation"] == "tally.references":
         from .runtime.store import WorkflowRunStore, run_for
 
@@ -195,11 +197,23 @@ def _observe(connection, job, state, summary, progress):
     # complete a multi-workbook run or turn a cancellation back into success.
     if job["operation"] in ("accounts.save", "tally.save"):
         run = connection.execute(
-            "SELECT state FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
+            "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
             (job["tenant_id"], job["input"]["run_id"]),
         ).fetchone()
         if run["state"] != "writing":
             return
+        if state == "failed":
+            from .accounts.attention import flag
+            from .attention import audit
+            records = run['result']['records']
+            if job['operation'] == 'tally.save':
+                index = connection.execute('SELECT record_index FROM account_tally_writes WHERE tenant_id=%s AND id=%s',
+                    (job['tenant_id'],job['input']['write_id'])).fetchone()['record_index']
+                records = [records[index]]
+            for record in records:
+                if record.get('status') == 'writing':
+                    item = flag(connection,run,record,title='Save interrupted')
+                    audit(connection,item,job['actor_id'],'failed',summary)
         event = {
             "queued": "local_waiting",
             "executing": "local_saving",
@@ -432,7 +446,7 @@ def claim(connection, device):
     connection.execute("UPDATE desktop_devices SET last_seen_at=now() WHERE id=%s", (device["id"],))
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('accounts.save','tally.save') AND lease_until<now()))
+           (state='executing' AND operation NOT IN ('accounts.save','tally.save','attention.supplier') AND lease_until<now()))
            ORDER BY CASE WHEN operation='tally.save' THEN
              (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
              ELSE '' END, created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
@@ -475,6 +489,9 @@ def _claimed_job(connection, device, job_id, claim_token):
 
 def plan(connection, device, job_id, claim_token):
     job = _claimed_job(connection, device, job_id, claim_token)
+    if job["state"] == "executing" and job["operation"].startswith("attention."):
+        from .attention import plan as attention_plan
+        return attention_plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "tally.references":
         from .accounts.bills import context_plan
 
@@ -548,7 +565,11 @@ def finish(connection, device, job_id, receipt):
     ):
         raise ServiceError("conflict", "This local task is no longer running.")
     summary = error
-    if result is not None and job["operation"] == "files.refresh":
+    if job["operation"].startswith("attention."):
+        from .attention import accept as accept_attention
+        result = accept_attention(connection, device, job, result, error)
+        summary = "Attention item checked."
+    elif result is not None and job["operation"] == "files.refresh":
         if (
             set(result) != {"files"}
             or not isinstance(result["files"], list)

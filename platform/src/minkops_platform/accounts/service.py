@@ -122,7 +122,8 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     raise ValueError(
                         "Application-generated entry IDs cannot be changed in bill review."
                     )
-                old["data"], old["operation"] = edited["data"], edited["operation"]
+                if any(edited["data"].get(k) != old["data"].get(k) for k in set(edited["data"]) | set(old["data"])) or edited["operation"] != old["operation"]:
+                    raise ValueError("Edit accounting values in the original system, not Minkops.")
             catalog = run["config"]["catalog_snapshot"]
             tally = run["config"].get("tally_target")
             if tally:
@@ -382,6 +383,9 @@ def verify_write(connection, tenant, run_id, write_id, content):
             index = change.get("record_index")
             if index is not None:
                 result["records"][index]["status"] = "saved"
+                from .attention import excel_baseline, written
+                excel_baseline(connection, run, result["records"][index], content)
+                written(connection, run, result["records"][index])
         if run["state"] == "writing":
             from .tally_writes import complete_run
 

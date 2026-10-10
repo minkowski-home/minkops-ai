@@ -90,7 +90,7 @@ def source_content(slug: str, file_id: UUID, user: User, connection: Db):
 class Launch(BaseModel):
     key: str = Field(pattern="^[a-z][a-z0-9-]*$", max_length=100)
     request_key: UUID
-    file_ids: list[UUID] = Field(min_length=1, max_length=45)
+    file_ids: list[UUID] = Field(min_length=1, max_length=1000)
     catalog_id: UUID | None = None
     config: dict = Field(default_factory=dict)
 

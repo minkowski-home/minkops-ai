@@ -78,8 +78,8 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
         run["result"]["findings"].append(f"Operator rejected input {file_id}; it was not written.")
         complete_run(connection, run, run["result"])
     else:
-        if not user_input.strip():
-            raise ServiceError("invalid", "Describe the correction or missing information.")
+        if user_input.strip():
+            raise ServiceError("invalid", "Edit the original system, refresh discovery, then retry.")
         original_target = run["config"].get("tally_target")
         if original_target:
             from .bills import refreshed_tally_target
@@ -96,7 +96,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
         )
-        child = create_child(connection, run, file_id, user_input=user_input.strip())
+        child = create_child(connection, run, file_id)
         if "companies" in child["config"].get("tally_target", {}):
             from ..discovery import workflow_context
             from .client_context import context_assets
@@ -146,7 +146,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             connection,
             run,
             "queued",
-            "Reading the clarified bill. Previously verified entries are preserved.",
+            "Rechecking the bill. Previously verified entries are preserved.",
             30,
         )
     return public_run(connection, run_for(connection, tenant["id"], run_id))
@@ -222,6 +222,11 @@ def reconcile_once(url):
             # The parent review carries the same immutable client policy as its
             # independent children; aggregation cannot discard a review gate.
             result = enforce_policies(parent["config"], result)
+            from .attention import flag
+            for issue in result.get("unresolved", []):
+                record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
+                              {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
+                flag(connection, parent, record)
             connection.execute(
                 "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), parent["id"])
             )

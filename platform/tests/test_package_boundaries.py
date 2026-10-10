@@ -11,6 +11,8 @@ class PackageBoundaryTests(TestCase):
     def test_shared_services_import_without_web_application_dependencies(self):
         for name in (
             "minkops_platform.desktop",
+            "minkops_platform.attention",
+            "minkops_platform.accounts.attention",
             "minkops_platform.accounts.service",
             "minkops_platform.accounts.repository",
             "minkops_platform.accounts.checks",
@@ -48,5 +50,5 @@ class PackageBoundaryTests(TestCase):
         )
         self.assertEqual(
             hashlib.sha256(bill_prompt().encode()).hexdigest(),
-            "f6e755eafee15efae475288bde9512a075e46934c1c14c0e66b9b44e5130ea26",
+            "64d8652a942656c3216af9208dccdb787affbab2264ae4500d19bca647ef4236",
         )
