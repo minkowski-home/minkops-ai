@@ -53,6 +53,13 @@ Skill-generated workbook editing is a later evaluated pilot. New execution
 methods are separate work. See
 [the architecture and evaluation guide](docs/workflow-refactor.md).
 
+Accounts Source Discovery now collects reusable full Tally masters, period-scoped
+vouchers and reviewed client notes, with Excel confined to headers and formula
+structure. Bill Entry pins this context, scans all selected bills, and saves
+approved native entries by company. Tally retains bookkeeping; Minkops controls
+entry, review and recovery. See [Source Discovery](docs/source-discovery.md) and
+[pending Windows deployment](https://linear.app/minkops/issue/MIN-124).
+
 ### Where development belongs
 
 Most product development belongs in `apps/`: workflow launch/configuration,

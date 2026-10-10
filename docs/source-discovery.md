@@ -1,95 +1,88 @@
-# Source Discovery: reviewed client schema context
+# Source Discovery: reusable client context
 
-Source Discovery 0.6.0 collects structure and headers. It does not export business
-records, balances, tax values, formulas, comments, hyperlinks or named constants.
-The new header-only folder grant requires Windows companion 0.4.0.
+Source Discovery 0.7.0 and Windows companion 0.5.0 collect a versioned package
+before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
+readable, but a new Tally bill run requires a complete, confirmed version 2
+package from its connected PC. No scheduled collection is introduced.
 
-Pair a PC with the production HTTPS console, grant an explicit Excel folder,
-and select Tally, Excel or both. For Tally, open the requested company, enable
-its HTTP/ODBC services and install the matching **64-bit Tally ODBC driver/DSN**.
-The adapter accepts only company and port, connects to loopback, and accepts no
-caller-provided hostname, SQL, XML, TDL or script.
+## Collection and interpretation
 
-## Tally client/server coverage
+Tally discovery lists every company currently loaded through the local HTTP
+service; it is independent of Bill Entry's company choice. Load all companies
+that should be available before discovery. The fixed connector accepts a
+loopback port and an inclusive voucher period, never caller XML, TDL, scripts,
+hostnames or SQL. ODBC is no longer required for this core path.
 
-The adapter calls ODBC GetSchema('Tables') and GetSchema('Columns') for each exposed
-table, without querying records. The HTTP company probe checks availability.
-The catalog contains all tables exposed by this installation's ODBC provider and
-column metadata. Coverage is explicitly exposed_top_level_methods or not_exposed;
-this does not promise every nested method or custom UDF. See
-[Tally's ODBC exposure boundary](https://help.tallysolutions.com/odbc-integrations/).
+For each company it exports full identity, native **List of Accounts** with **All Masters** and no date
+filter, and detailed **DayBook** vouchers in 31-day date chunks. Native nested
+fields, custom master types, identifiers and leading zeroes remain intact.
+Collection never samples records. Date filters apply only to vouchers. The report
+identifiers follow [Tally’s XML samples](https://help.tallysolutions.com/sample-xml/);
+**All Masters** alone is an import report.
+Cancelled/optional voucher coverage, customisation completeness and counts must
+be verified on the actual installation before release; native export support is
+not established by an offline fixture. See
+[MIN-124](https://linear.app/minkops/issue/MIN-124).
 
-Server-backed data is compatible in principle: a local Tally client can open
-server-backed company data and expose its own integration service.
-[Company access](https://help.tallysolutions.com/tally-prime-server/application-configuration-tallyprime-server/accessing-company-data-from-tallyprime-server/)
-and [XML integration](https://help.tallysolutions.com/xml-integration/) document
-those capabilities. This is an inference; the customer's exact LAN topology
-still needs an acceptance test. If integration exists only on the server, run
-the companion on that authorized integration PC. Arbitrary remote connections
-are outside this connector's scope.
+The hosted discovery skill inspects those saved records and proposes only obscure
+conventions or exceptions as subjective notes. Each note identifies its company,
+actual collected master/voucher evidence and whether it is observed or inferred.
+Notes may be empty. Routine vendor/item relationships remain in the actual voucher
+files for later lookup, rather than becoming hundreds of prose rules. Confirmation
+validates note references and accepts the package and any Excel mappings.
 
-## Excel headers and catalog ownership
+Excel discovery projects selected `.xlsx` workbooks into fresh packages containing
+sheets, table/header definitions and formula text. Cached formula results,
+business rows, comments, links, images and named constants are excluded. Formula
+text may itself contain literals; it is part of the authorized structural input.
+Formulas are never evaluated. Plain-sheet header candidates require review.
+Formula/layout changes invalidate automatic reuse of the mappings. Unsupported
+formula representations or collection failures require attention.
 
-The companion projects selected .xlsx files into fresh header-only workbooks
-before upload. Named-table headers/ranges are authoritative; a plain sheet's
-candidate header in the first ten rows requires review. Backend validation rejects
-non-header values and canonicalizes bytes. Sheet names, table columns/ranges and
-merges remain; original bytes and local paths stay on the PC. Browser-only folder
-selection cannot substitute original workbooks for this native discovery grant.
+## Persistence and downstream access
 
-Immutable JSON catalogs live in PostgreSQL discovery_runs.catalog, scoped by
-tenant, operator, registered device and source. Confirmed destination mappings
-live in the tenant's account_catalogs. Optional JSON download exports the catalog;
-it is not a global configuration file.
+PostgreSQL holds the tenant/operator/device-scoped immutable catalog and reviewed
+notes. The connected PC also creates atomic, hashed packages under its per-user
+Minkops app-data directory: `discovery/<tenant>/collected/<run-id>` immediately,
+and `discovery/<tenant>/confirmed/<run-id>` after confirmation. While connected,
+it archives every confirmed version in order, including versions confirmed while
+it was offline. Each directory contains `manifest.json`, `catalog.json`,
+`context.json`, and separate company masters/voucher JSON files. Local files are
+restricted to the user's account; credentials and folder grants remain encrypted
+separately. A visible Connected PCs error reports an archive failure.
 
-Production uses durable PostgreSQL. Core definitions ship under employees/ in
-the immutable image; additive client instructions/defaults ship under solutions/.
-Client observations belong in the tenant database, not core definitions or
-container disk. Every client installs its own bindings and collects its own
-catalogs. See [workflow authoring](workflow-authoring.md).
+The server copy is intentional: it reuses durable storage, access controls and
+hosted file delivery rather than adding a second synchronization system. No DWH,
+accounting ledger or balance model is introduced. Optional catalog JSON export
+remains available through the existing Save As flow.
 
-## Consuming workflows
+Bill Entry pins the confirmed package at launch. A compact manifest supplies
+company identities and lookup paths; full masters and vouchers enter authorized,
+immutable JSON input files, split at record boundaries. They need not remain in
+the model's conversational context. The existing Purchase mapping supplies a
+bounded extraction schema and its prompt explains field meanings. Bill Entry
+performs no discovery or reference export of its own. Native writes still check
+current company and master identities immediately before import.
 
-Dependent workflows resolve a confirmed, complete compatible catalog and pin
-relevant JSON context in their run. Bill Entry selects company, ledger and
-voucher-type schema for Tally, or reviewed Excel mappings. Context arrives
-automatically; arbitrary uploaded JSON is not a launch input. Its fixed Purchase
-adapter and independent write checks remain authoritative. Schema improves
-interpretation; it does not create an unrestricted write adapter or authorize
-financial writes.
+## Bounds and failure behavior
 
-Bill Entry separately queues a bounded tally.references job to read current
-company identity, ledger names/parents and voucher types from the paired PC.
-Paid execution waits for it. These operational references belong to the bill
-run, never the schema catalog. Continuation refreshes references and pins the
-refreshed schema independently of successful siblings; a changed company GUID
-blocks it. Writes still require approval and readback. Header-only Excel
-registrations require an authorized real-file refresh before destination writes.
+Native Tally collection supports 1–50 loaded companies, a period up to 3,660 days,
+32 MB per HTTP response and 64 MB overall collection/validated snapshot. Excel
+retains 5 MB/workbook, 100 sheets, 10,000 rows, 500 columns, 250,000 cells/sheet
+and 50 MB expanded ZIP bounds. These are parser limits, not permission to upload
+business rows.
 
-## Bounds, compatibility and verification
+The existing hosted input budget remains 45 files / 8 MB combined, including
+lookup JSON and bills, with 4 MB per file. Oversized complete exports remain
+saved, but interpretation is visibly partial and dependent workflows are blocked.
+Reduce the voucher period or hand off when masters alone exceed the budget;
+masters must never be sampled to fit. Partial company collection preserves the
+successful data but cannot authorize Bill Entry.
 
-Tally metadata is capped at 500 tables, 2,000 columns/table, 100,000 columns total,
-16 MB helper output and a 60-second metadata timeout. The old **3 MB / 10,000
-records** bound applies only to runtime reference exports, not Source Discovery.
+Legacy pinned runs retain their original contract, including their old reference
+preparation path where applicable. New runs use version 2. Retry may adopt a
+newer confirmed package on the same PC only if the discovered company GUID set
+is unchanged. Completed sibling entries retain their receipts and plans.
 
-Excel parser bounds: 5 MB/workbook, 100 sheets, 10,000 rows and 250,000 cells/sheet,
-500 columns and 50 MB expanded ZIP. These protect local allocation; those rows
-are not uploaded. Hosted mapping retains its 45-workbook / 8 MB input budget.
-Narrow unsupported selections explicitly.
-
-Unavailable sources yield visible partial scans; successful schema remains
-downloadable. Partial or unreviewed catalogs block consuming workflows. Tenant
-ownership, device revocation, leases, replay and hashes are enforced outside the
-model. Legacy catalogs remain readable; new launches reject record-collection
-depths.
-
-Regressions cover metadata-only calls, projection privacy, receipt validation,
-live-reference gating, retry identity/pinning and tenant ownership. Real Windows
-ODBC returned 275 exposed tables on the current PC (Ledger: 400 columns).
-The provider repeats some method names at different ordinal positions, including
-`$Category` in CostCentreBreakUp and AllCostCentre. Catalogs preserve both columns
-using their ordinal identity; a repeated name is not proof of a corrupt schema.
-The historical 6 October installed RC predates this change. Rebuild 0.4.0 and
-verify clean Windows 10/11, driver-present/missing, remote-server topology and
-production HTTPS, then repeat hosted mapping and reviewed-write proof.
-See [deployment and MIN-123 closeout](deployment-min-123.md).
+Tally error diagnosis, bounded restart and uncertain-import reconciliation are
+shared native capabilities; see [Windows recovery](windows-app.md).

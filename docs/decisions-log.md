@@ -873,3 +873,32 @@ wrong companies and mismatched fixture values, and added the optimized run to CI
 **Result:** Normal and optimized checks reject unsafe reviews before `/approve`;
 the valid clarification path still submits through the ordinary tenant API.
 Production fixture/hash, owner and company limits no longer disappear under `-O`.
+
+## Pin reusable client context and reconcile uncertain native imports (10 October 2026)
+
+**Situation:** Schema-only discovery and per-bill reference exports repeated work,
+missed nested client conventions and forced each run into one company. A Tally
+process can exit during an import, making its acknowledgement insufficient proof
+of either success or failure.
+
+**Task:** Reuse complete discovery evidence, scan mixed-company bills before
+saving, and recover native failures without introducing another accounting layer
+or weakening existing approval, identity and duplicate safeguards.
+
+**Action:** Kept core interpretation in versioned skills/configuration. Added
+bounded native full-master and period-voucher exports, verified report identifiers
+against primary Tally documentation, immutable local packages
+and authorized hosted lookup files. Pinned company GUIDs and extraction context
+per run, separated company routing from business fields, and grouped approved
+plans by company. Retained the existing Purchase adapter and receipts. Shared
+native recovery observes a trusted Tally process, records local diagnostics and
+restarts only a disappeared instance once. Reads may retry; imports with an
+unknown outcome enter read-only reconciliation and never automatic replay.
+
+**Result:** Offline regressions exercise nested records, period and identity
+validation, context pinning, mixed-company duplicate isolation, locked-company
+conflicts, import acknowledgement loss and restart fencing. Desktop/mobile launch
+checks show the new controls without browser errors. Existing financial recovery
+checks remain in place. Installation-specific export completeness, numeric `/LOAD`
+support, Windows crashes and deployment are explicitly pending in MIN-124;
+offline tests do not establish live compatibility.

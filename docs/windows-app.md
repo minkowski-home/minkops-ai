@@ -5,17 +5,17 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.4.0 is required for schema-only discovery grants. Tally metadata needs
-the local 64-bit Tally ODBC driver/DSN in addition to its HTTP service. Existing
-0.3.1 installed-RC evidence below is historical; repeat production HTTPS and clean
-Windows 10/11 acceptance with the rebuilt installer before publishing it.
+Companion 0.5.0 is required for version 2 discovery packages and shared Tally
+recovery. Core Tally discovery now uses HTTP/XML exports and needs no ODBC driver.
+Installed-RC evidence below is historical. Production deployment and Windows
+acceptance remain pending in [MIN-124](https://linear.app/minkops/issue/MIN-124).
 
 ## Local capabilities
 
 | Operation | Desktop | Web with a connected PC | Authority |
 | --- | --- | --- | --- |
 | Check Tally | Yes | Yes | Fixed, read-only company export to `127.0.0.1:9000` |
-| Discover Tally and Excel | Yes | Yes | Selected company/port/categories and explicitly granted local folders; server-owned versioned catalog |
+| Discover Tally and Excel | Yes | Yes | All loaded companies, voucher period and explicitly granted folders; versioned client context |
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
 | Save approved Excel entries | Yes | Yes | Accounts approval, before/after hashes, backup, atomic replacement and saved-byte verification |
@@ -24,8 +24,8 @@ Windows 10/11 acceptance with the rebuilt installer before publishing it.
 
 This version adds bounded native operations, not customer-machine agent hosting
 or a general remote shell. See [source discovery](source-discovery.md) for MIN-118.
-Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Tally must be
-open, with its HTTP server enabled on port 9000. A company listing is a connection
+Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Initially open Tally with its HTTP server enabled on port 9000; discovery must
+see every company the run may use. A company listing is a connection
 check, not verification of financial writes.
 
 Close hides the app in its tray; **Quit Minkops** stops the companion. Queued
@@ -64,6 +64,42 @@ The companion polls outbound HTTPS every four seconds. It opens no inbound
 server and needs no browser loopback exception, firewall port or router
 forwarding. Future mobile clients can use the same server-owned tasks and
 request bounded work on an authorized connected PC.
+
+## Tally diagnostics and crash recovery
+
+All companion Tally operations use the same bounded recovery transport. HTTP/XML
+failures are recorded in local `tally-diagnostics/<job-id>.json` with the protocol
+error and available recent Windows Application crash events. Review offers **Open
+Tally error details**. Raw request XML, credentials and documents are not logged
+to the server. Windows may not report the original crash cause; diagnostics are
+evidence, not a promise of a complete postmortem.
+
+Automatic recovery requires a previously observed, identifiable Tally executable
+and proof that no Tally instance remains. A live or uncertain instance is never
+replaced. Restart occurs at most once per native job. Only numeric `/LOAD` company
+arguments are replayed; no arbitrary startup scripts, TDL or remote executable
+paths are accepted from workflow inputs. Observed company numbers can supplement
+the original startup arguments. If unavailable, Tally's existing startup settings
+apply. Company GUID/master checks still guard every write. TallyPrime support,
+company-number export and authentication screens require live verification.
+
+[Tally's ERP 9 reference](https://help.tallysolutions.com/article/DeveloperReference/tdlreference/release_1_5.htm/)
+documents `/LOAD:<Company Number>`; a GUID is not that number. TallyPrime also
+supports [startup company selection](https://help.tallysolutions.com/tally/set-up-company-tally/).
+This refactor uses a numeric argument only when observed locally, and never
+assumes arbitrary company GUIDs can be loaded through the command line.
+
+Recovery waits for read-only company availability. Reads may retry once after
+restart. Imports never retry automatically after a lost acknowledgement or
+failure response: fresh read-only reconciliation checks whether the exact approved
+bill exists. Matching data produces a duplicate receipt, a different version is
+held, and a missing bill requires review/Resume. Login/load failure also becomes
+a handoff. Consequential lease expiry and persisted receipt replay retain the
+existing safeguards. External writers can race read/import; Tally offers no
+transaction spanning those separate requests, so ambiguity remains a handoff.
+
+Versioned discovery packages are saved locally as described in
+[source discovery](source-discovery.md), alongside the authoritative server copy.
 
 ## Build and run
 

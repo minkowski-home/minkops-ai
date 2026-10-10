@@ -1,4 +1,4 @@
-<!-- @dsCard group="Operator Console" viewport="1280x800" name="Accounts desk" subtitle="Discovery review and in-place Excel entry" -->
+<!-- @dsCard group="Operator Console" viewport="1280x800" name="Accounts desk" subtitle="Client context and company-aware bill review" -->
 <!doctype html>
 <html lang="en" data-theme="minkops-light">
 <head>
@@ -22,6 +22,14 @@
         <label>Review policy<select><option>Approve every output</option><option>Only exceptions</option></select></label>
         <label>Output platform<select disabled><option>Excel · update existing sheets</option></select></label>
       </div></details><button class="button button-primary" disabled>Run bill entry</button>
+    </section>
+    <section class="accounts-panel"><h3>Discover Tally sources</h3><p>Collect complete masters for all loaded companies and recent vouchers, then review obscure client conventions.</p>
+      <div class="accounts-field-grid"><label>Vouchers from<input type="date" value="2026-07-01"></label><label>Vouchers through<input type="date" value="2026-10-10"></label></div>
+      <p class="quiet-state">All masters are included regardless of these dates. Excel discovery includes sheets, headers and formula text.</p><button class="button button-primary" disabled>Discover sources</button>
+    </section>
+    <section class="accounts-panel"><h3>Enter bills into Tally</h3><p>Read all selected bills, review their company and ledger, then save entries company by company.</p>
+      <div class="accounts-field-grid"><label>Company selection<select><option>Infer from each bill · any discovered company</option><option>Use one company for this run</option></select></label></div>
+      <article class="accounts-bill"><h4>Bill 1 → Example Company</h4><p>Company: Example Company · Buyer registration matches the bill</p><p>Vendor: Example Materials · Entry awaits review</p></article><button class="button button-primary" disabled>Approve entries</button>
     </section>
     <section class="accounts-panel"><h3>Source discovery</h3><p>Confirm the purpose, field meanings and record keys for each sheet and table.</p>
       <label class="config-field">Find a workbook, sheet or table<input type="search" placeholder="Search files, sheets or tables"></label>

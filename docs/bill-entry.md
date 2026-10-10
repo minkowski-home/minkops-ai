@@ -11,10 +11,13 @@ launch rejects another model. The model never writes financial systems.
 1. Connect the Windows PC and grant the destination folder. Run Source discovery
    and confirm Excel header mappings, then explicitly refresh the real workbook
    before using it as a destination. For Tally, confirm the selected company's
-   metadata catalog; launch separately reads current company, ledger and Purchase
-   references on the paired PC before paid execution. Each run pins its relevant
-   tenant schema JSON automatically; uploading arbitrary JSON is not required.
-2. Upload/select PDFs and images. Excel, Tally and Both remain visible configuration
+   complete version 2 context package. Each run pins company identities, full
+   masters, recent vouchers and reviewed notes as authorized JSON inputs; Bill
+   Entry has no schema search or reference collection job.
+2. Choose one locked company for the run, or let each bill route to any company
+   in discovery using buyer identity and evidenced client context. The scan saves
+   its company GUID and selection evidence; uncertain routing requires handoff.
+   Upload/select PDFs and images. Excel, Tally and Both remain visible configuration
    choices. Mock-client's trusted solution policy enables only Tally for Bill entry;
    disabled choices cannot be enabled by changing preferences or launch payloads.
    Source discovery independently supports Excel, Tally and Both.
@@ -28,7 +31,8 @@ launch rejects another model. The model never writes financial systems.
    for an unresolved bill to retry only that input; completed sibling writes stay
    intact. Tally requires review of every output. Excel retains its existing
    optional exceptions-only policy and deterministic checks.
-4. Approval commits immutable plans and queues native work before returning.
+4. All scans are persisted before approval. Approval commits immutable plans
+   and queues serial native work grouped by company before returning.
    The tray companion can finish after the UI closes. Web and desktop use the
    same API, review component and task state. A browser-only Excel folder still
    needs an open page and its local permission.
@@ -108,16 +112,20 @@ No live Excel data or writes are included in this RC.
 The three display-only seed tasks are backed up and removed from the RC database
 so its Active/Needs Attention sections reflect executable workflow outcomes.
 
-Discovery is intended for installation and periodic/schema-change refreshes.
-Current discovery is schema/header-only. Runtime reference records belong to
-individual bill runs, and client allocation guidance is an additive variant over
-the core workflow. The RC evidence below predates that change and must be repeated
-with companion 0.4.0 before release.
-An identical confirmed refresh preserves pinned approval catalogs; pending,
-partial or changed catalogs still require review. Supplier remediation may bind
-the affected retry to newer confirmed masters on the same PC/company GUID.
-Full catalogs are exported as JSON through the native Save As dialog; credentials
-and folder grants remain PC-local. DWH storage is not introduced yet.
+Discovery is mandatory before dependent workflows, with manual refresh afterward.
+Its date range applies only to vouchers; all masters are exported comprehensively.
+New runs use Source Discovery 0.7.0, Bill Entry 0.8.0 and companion 0.5.0. The RC
+evidence below predates this refactor. Repeat live acceptance and deployment under
+[MIN-124](https://linear.app/minkops/issue/MIN-124). No scheduling or new accounting
+layer is introduced. The existing native Purchase contract remains bounded.
+
+Tally HTTP/XML errors produce local diagnostics with available Windows crash events.
+If a known Tally process disappears, the companion may restart it once using its
+observed executable and safe numeric `/LOAD` arguments, then wait for companies.
+Reads may repeat once; an uncertain import is never automatically resent. Read-only
+reconciliation distinguishes an already-applied bill, a conflicting version and
+an absent bill requiring review/Resume. If restart, login or readback cannot be
+established, the run remains unresolved. See [Windows recovery](windows-app.md).
 
 The following generator and live scripts describe the earlier development proof.
 Do not run them against this preserved Test Company: their fixed fixture IDs
