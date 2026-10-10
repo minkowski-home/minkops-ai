@@ -15,7 +15,7 @@ from minkops_platform.runtime.bundles import validate_snapshot
 class ClientVariantTests(TestCase):
     def test_client_procedure_is_additive_pinned_and_isolated_from_core(self):
         with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             shutil.copytree(REPOSITORY_ROOT / "employees", root / "employees")
             shutil.copytree(REPOSITORY_ROOT / "solutions/mock-client", root / "solutions/client-a")
             directory = root / "solutions/client-a/employees/accounts-desk"
@@ -50,7 +50,7 @@ class ClientVariantTests(TestCase):
 
     def test_variant_cannot_replace_handlers_schemas_or_escape_its_client_layer(self):
         with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             shutil.copytree(REPOSITORY_ROOT / "employees", root / "employees")
             shutil.copytree(REPOSITORY_ROOT / "solutions/mock-client", root / "solutions/client-a")
             directory = root / "solutions/client-a/employees/accounts-desk"

@@ -45,6 +45,18 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 "Both destinations require a combined verified write contract. Choose Excel or Tally.",
             )
     catalog_id = body["catalog_id"]
+    if definition.metadata["handler"] == "accounts.discovery" and selections.get(
+        "discovery_run_id"
+    ):
+        from minkops_platform.discovery import get_run
+
+        row = get_run(connection, tenant["id"], selections["discovery_run_id"])
+        if row["actor_id"] != user["id"] or not row["catalog"] or row["catalog"]["partial"]:
+            raise ServiceError(
+                "conflict", "Complete your native discovery before interpreting context."
+            )
+        source_context = row["catalog"]
+        selections["source_ids"] = source_ids or [str(row["id"])]
     if definition.metadata["handler"] == "accounts.discovery":
         if any(Path(f["path"]).suffix.lower() != ".xlsx" for f in files):
             raise ServiceError("invalid", "Discovery currently accepts Excel workbooks only.")
@@ -67,6 +79,22 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 tally_categories=["company", "ledgers", "voucher_types"],
             )
             catalog_snapshot = tally_mapping(discovery_id)
+            if "companies" not in target:
+                raise ServiceError(
+                    "conflict",
+                    "Refresh Source Discovery to collect complete company context before a new bill run.",
+                )
+            target["company_mode"] = selections.get("company_mode", "infer")
+            target["locked_company_guid"] = selections.get("locked_company_guid")
+            if target["company_mode"] == "locked":
+                from .client_context import select_target
+
+                try:
+                    select_target({}, target)
+                except ValueError as error:
+                    raise ServiceError("invalid", str(error)) from error
+            elif target["locked_company_guid"] is not None:
+                raise ServiceError("invalid", "Automatic company selection cannot lock a company.")
             references = []
             selections.update(
                 {
@@ -150,7 +178,20 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         key: config.pop(key) for key in ("catalog_snapshot", "tally_target") if key in config
     }
     if source_context:
-        snapshots["source_catalog_snapshot"] = source_context
+        snapshots[
+            "local_discovery_snapshot"
+            if definition.metadata["handler"] == "accounts.discovery"
+            else "source_catalog_snapshot"
+        ] = source_context
+        from .client_context import context_assets
+
+        assets, _ = context_assets(source_context)
+        files += assets
+        if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
+            raise ServiceError(
+                "invalid",
+                "Complete discovery context exceeds hosted input limits. Reduce the voucher period or hand off; master records cannot be sampled.",
+            )
     return LaunchInputs(files, ids, catalog_id, config, snapshots)
 
 
@@ -207,28 +248,45 @@ class DiscoveryHandler(AccountsHandler):
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
         if run["config"].get("local_discovery_snapshot"):
-            context["local_discovery"] = run["config"]["local_discovery_snapshot"]
+            from .client_context import context_assets
+
+            assets, manifest = context_assets(run["config"]["local_discovery_snapshot"])
+            files += assets
+            context["local_discovery"] = manifest
+            context["config"] = {
+                k: v for k, v in run["config"].items() if k != "local_discovery_snapshot"
+            }
         context["inventory"] = [
             {"file_id": str(f["id"]), "sheets": inspect_workbook(bytes(f["content"]))}
             for f in files
+            if f["path"].endswith(".xlsx")
         ]
         context["files"] = [{"id": str(f["id"]), "path": f["path"]} for f in files]
         return files, context, {}
 
     def validate(self, run, files, context, domain, result):
         validate_catalog(
-            result, {str(f["id"]): bytes(f["content"]) for f in files}, review_proposal=True
+            result,
+            {str(f["id"]): bytes(f["content"]) for f in files if f["path"].endswith(".xlsx")},
+            review_proposal=True,
         )
         # Missing sheets must be visible; don't silently call a partial scan complete.
         expected = {
             (str(f["id"]), s["sheet"], t["name"] if t else None)
             for f in files
+            if f["path"].endswith(".xlsx")
             for s in inspect_workbook(bytes(f["content"]))
             for t in (s["tables"] or [None])
         }
         actual = {(s["file_id"], s["sheet"], s.get("table")) for s in result["sheets"]}
         if expected != actual:
             raise ValueError("Discovery did not account for every selected worksheet.")
+        if run["config"].get("local_discovery_snapshot"):
+            from .client_context import validate_notes
+
+            validate_notes(
+                result.get("context_notes", []), run["config"]["local_discovery_snapshot"]
+            )
         return result
 
     def finish(self, connection, store, run, context, domain, result):
@@ -260,7 +318,11 @@ class BillHandler(AccountsHandler):
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
         if run["config"].get("source_catalog_snapshot"):
-            context["source_catalog"] = run["config"]["source_catalog_snapshot"]
+            from .client_context import context_assets
+
+            assets, manifest = context_assets(run["config"]["source_catalog_snapshot"])
+            files += assets
+            context["source_catalog"] = manifest
             context["config"] = {
                 k: v for k, v in run["config"].items() if k != "source_catalog_snapshot"
             }

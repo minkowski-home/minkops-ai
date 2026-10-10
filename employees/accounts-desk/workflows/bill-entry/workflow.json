@@ -1,6 +1,6 @@
 {
   "key": "bill-entry",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "name": "Bill entry",
   "description": "Enter reviewed PDF and image bills into connected Excel or Tally with verified, repeatable writes.",
   "owner": "accounts-desk",
@@ -20,7 +20,9 @@
       "duplicate",
       "totals",
       "cost_codes"
-    ]
+    ],
+    "company_mode": "infer",
+    "locked_company_guid": null
   },
   "agent_output_schema": "agent-output.schema.json",
   "execution": {

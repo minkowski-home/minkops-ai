@@ -44,3 +44,21 @@ discovered ledger names. The adapter owns XML, bill identity, duplicate checks,
 correction handoff and saved-voucher readback. Never send writes from the hosted
 session. When cost allocations or statutory details exceed the supported
 contract, leave the bill unresolved instead of inventing an accounting entry.
+
+For format_version 2 discovery, use the supplied reusable manifest, masters,
+recent vouchers and context notes. Do not discover schema or fetch reference
+lists yourself. The supported native Purchase mapping defines what fields to
+extract and their meanings; richer discovered structures do not expand write
+capabilities. Look up actual historical voucher records for unclear handwriting
+or stock-item names. History supplies candidates, never replacement amounts or
+tax evidence. Unsupported inventory/allocation structures require handoff.
+
+Company mode is locked or infer. Locked mode uses the user-selected company GUID
+for every bill; contradictory buyer evidence requires handoff. Infer mode may
+choose any discovered company using buyer identity and evidenced client context;
+a shared supplier name alone is insufficient. Save company_guid and explain the
+selection in company_evidence on every proposed record. Ambiguity is unresolved.
+All scans are persisted for review before native writes. Approved writes are
+processed company by company with independent receipts and reconciliation.
+After a Tally crash, an unknown import result requires reconciliation before
+another import; never claim a successful save from an acknowledgement alone.

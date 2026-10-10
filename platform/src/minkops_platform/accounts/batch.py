@@ -97,6 +97,29 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             (tenant["id"], run_id, Jsonb([file_id])),
         )
         child = create_child(connection, run, file_id, user_input=user_input.strip())
+        if "companies" in child["config"].get("tally_target", {}):
+            from ..discovery import workflow_context
+            from .client_context import context_assets
+
+            catalog = workflow_context(
+                connection, tenant["id"], child["config"]["tally_target"]["discovery_id"], ["tally"]
+            )
+            child["config"]["source_catalog_snapshot"] = catalog
+            assets, _ = context_assets(catalog)
+            # Only this continuation gets newer evidence; completed siblings retain
+            # their original snapshot and verified company destinations.
+            child["config"]["authorized_bindings"] = [
+                b
+                for b in child["config"]["authorized_bindings"]
+                if not b["resource_id"].startswith("discovery-")
+            ] + [
+                {"capability": "files.snapshot", "resource_id": a["id"], "sha256": a["sha256"]}
+                for a in assets
+            ]
+            connection.execute(
+                "UPDATE account_runs SET config=%s WHERE id=%s",
+                (Jsonb(child["config"]), child["id"]),
+            )
         if child["config"].get("tally_target", {}).get("schema_only"):
             from .bills import queue_tally_context
             from ..discovery import workflow_context

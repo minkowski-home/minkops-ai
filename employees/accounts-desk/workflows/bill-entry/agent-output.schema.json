@@ -85,6 +85,17 @@
             "items": {
               "type": "string"
             }
+          },
+          "company_guid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "company_evidence": {
+            "type": "string",
+            "maxLength": 2000
           }
         }
       }

@@ -433,7 +433,9 @@ def claim(connection, device):
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
            (state='executing' AND operation NOT IN ('accounts.save','tally.save') AND lease_until<now()))
-           ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
+           ORDER BY CASE WHEN operation='tally.save' THEN
+             (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
+             ELSE '' END, created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
         (device["id"],),
     ).fetchone()
     if not row:

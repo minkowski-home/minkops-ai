@@ -1,6 +1,6 @@
 {
   "workflows": [
-    {"key": "source-discovery", "status": "active", "defaults": {"discovery_depth": "structure", "max_files": 100}},
+    {"key": "source-discovery", "status": "active", "defaults": {"discovery_depth": "client_context", "max_files": 100}},
     {"key": "bill-entry", "status": "active", "variant": "variant.json", "defaults": {"review_mode": "all_outputs", "output_mode": "tally_in_place", "input_format": "mixed"}}
   ]
 }

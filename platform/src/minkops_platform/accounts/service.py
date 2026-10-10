@@ -62,6 +62,13 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
             destinations = {
                 s["file_id"] for s in body["result"]["sheets"] if s["role"] == "destination"
             }
+            if run["config"].get("local_discovery_snapshot"):
+                from .client_context import validate_notes
+
+                validate_notes(
+                    body["result"].get("context_notes", []),
+                    run["config"]["local_discovery_snapshot"],
+                )
             if require_destination and not destinations:
                 raise ValueError("Confirm at least one bill-entry destination.")
             if any(not f["writable"] for f in files if str(f["id"]) in destinations):
@@ -101,6 +108,8 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "sheet",
                     "table",
                     "evidence",
+                    "company_guid",
+                    "company_evidence",
                 ):
                     if edited.get(field) != old.get(field):
                         raise ValueError(

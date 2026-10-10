@@ -7,12 +7,20 @@
     "tally"
   ],
   "properties": {
-    "destination_mode": {"type": "string", "enum": ["excel", "tally", "both"]},
+    "destination_mode": {
+      "type": "string",
+      "enum": [
+        "excel",
+        "tally",
+        "both"
+      ]
+    },
     "depth": {
       "enum": [
         "structure",
         "reference_data",
-        "business_mappings"
+        "business_mappings",
+        "client_context"
       ]
     },
     "excel_source_ids": {
@@ -69,6 +77,39 @@
               "uniqueItems": true,
               "minItems": 1,
               "maxItems": 11
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "port",
+            "period"
+          ],
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "period": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "from",
+                "to"
+              ],
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "to": {
+                  "type": "string",
+                  "format": "date"
+                }
+              }
             }
           }
         }

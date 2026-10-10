@@ -97,3 +97,27 @@ def progress(job_id: UUID, body: Observation, device: Device, connection: Db):
 
         raise HTTPException(409, "Discovery is not collecting sources.")
     return call(discovery.progress, connection, device, job, body.model_dump(mode="json"))
+
+
+@router.get("/api/desktop/discovery/package")
+def local_package(device: Device, connection: Db, response: Response, after_id: UUID | None = None):
+    """Only the registered device's own confirmed catalog can be archived locally."""
+    response.headers["Cache-Control"] = "private, no-store"
+    row = connection.execute(
+        """SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s
+        AND confirmed_at IS NOT NULL AND state='completed'
+        AND (%s::uuid IS NULL OR (confirmed_at,id) > (SELECT confirmed_at,id FROM discovery_runs
+          WHERE id=%s AND tenant_id=%s AND actor_id=%s AND device_id=%s))
+        ORDER BY confirmed_at,id LIMIT 1""",
+        (
+            device["tenant_id"],
+            device["owner_id"],
+            device["id"],
+            after_id,
+            after_id,
+            device["tenant_id"],
+            device["owner_id"],
+            device["id"],
+        ),
+    ).fetchone()
+    return row["catalog"] if row else None

@@ -50,7 +50,7 @@ def workflow_context(connection, tenant_id, run_id, tools, *, tally_categories=N
     """Pin reviewed schema context, bounded to a dependent workflow's tool scope.
 
     Every client owns its catalog; core skills never read a global client schema.
-    Runtime directories/rows belong to the consuming workflow's authorization.
+    Full client-context packages retain their native records for lookup.
     """
     catalog = copy.deepcopy(require_ready(connection, tenant_id, run_id, tools))
     catalog["sources"] = [s for s in catalog["sources"] if s["tool"] in tools]
@@ -58,6 +58,8 @@ def workflow_context(connection, tenant_id, run_id, tools, *, tally_categories=N
         if source["tool"] != "tally":
             continue
         snapshot = source["snapshot"]
+        if "companies" in snapshot:
+            continue
         categories = set(tally_categories or CATEGORIES)
         if not categories <= set(CATEGORIES):
             raise ValueError("Unsupported Tally schema context.")
@@ -100,6 +102,7 @@ def detail(connection, row):
     catalog = copy.deepcopy(row["catalog"])
     if catalog and mapping and mapping["result"]:
         catalog["excel_mappings"] = mapping["result"]
+        catalog["context_notes"] = mapping["result"].get("context_notes", [])
     return {
         **{
             k: row[k]
@@ -143,11 +146,23 @@ def launch(connection, tenant, user, body):
     except ValidationError as error:
         raise ServiceError("invalid", "Choose valid Tally and Excel discovery options.") from error
     config = body["config"]
-    if config["depth"] != "structure":
+    if config["depth"] not in ("structure", "client_context"):
         raise ServiceError(
             "invalid",
-            "Source Discovery collects schema and headers only. Workflows prepare their own runtime references.",
+            "Choose structure or complete client context discovery.",
         )
+    if config["depth"] == "client_context" and config["tally"]:
+        from datetime import date
+
+        tally = config["tally"]
+        if set(tally) != {"port", "period"}:
+            raise ServiceError(
+                "invalid",
+                "Complete discovery reads all loaded companies; specify only port and voucher period.",
+            )
+        start, end = map(date.fromisoformat, (tally["period"]["from"], tally["period"]["to"]))
+        if start > end or (end - start).days > 3660:
+            raise ServiceError("invalid", "Choose an ordered voucher period of at most ten years.")
     mode = config.get("destination_mode")
     observed_mode = (
         "both"
@@ -243,7 +258,11 @@ def plan(connection, device, job):
     ]
     if row["config"]["tally"]:
         sources.append(
-            {"key": "tally", "tool": "tally", "label": row["config"]["tally"]["company"]}
+            {
+                "key": "tally",
+                "tool": "tally",
+                "label": row["config"]["tally"].get("company", "All loaded companies"),
+            }
         )
     return {"config": row["config"], "sources": sources}
 
@@ -264,7 +283,10 @@ def progress(connection, device, job, body):
     }
     if observation["category"] and (
         body["source_key"] != "tally"
-        or observation["category"] not in row["config"]["tally"]["categories"]
+        or (
+            row["config"]["depth"] != "client_context"
+            and observation["category"] not in row["config"]["tally"]["categories"]
+        )
     ):
         raise ServiceError("invalid", "Invalid discovery category.")
     observations = [
@@ -297,6 +319,14 @@ def progress(connection, device, job, body):
 
 
 def _validate_tally(snapshot, config):
+    if config["depth"] == "client_context":
+        from .accounts.client_context import validate_snapshot
+
+        try:
+            validate_snapshot(snapshot, config)
+        except (ValueError, TypeError, KeyError) as error:
+            raise ServiceError("invalid", str(error)) from error
+        return
     if (
         not isinstance(snapshot, dict)
         or set(snapshot)
@@ -430,6 +460,11 @@ def _structure(files, mappings=None):
                 {
                     "sheet": s.title,
                     "columns": s.max_column,
+                    "formulas": [
+                        {"cell": cell.coordinate, "formula": cell.value}
+                        for cell in s._cells.values()
+                        if cell.data_type == "f"
+                    ],
                     "tables": [
                         {
                             "name": t.name,
@@ -494,7 +529,9 @@ def collect(connection, device, job, result):
             _validate_tally(
                 source["snapshot"], {**row["config"]["tally"], "depth": row["config"]["depth"]}
             )
-            partial |= any(c["status"] != "ready" for c in source["snapshot"]["collections"])
+            partial |= source["snapshot"].get("partial", False) or any(
+                c["status"] != "ready" for c in source["snapshot"].get("collections", [])
+            )
             catalog_sources.append(source)
         else:
             if (
@@ -547,7 +584,10 @@ def collect(connection, device, job, result):
                     "structure",
                 }:
                     raise ServiceError("invalid", "Invalid workbook structure.")
-                if book["status"] == "ready" and row["config"]["depth"] == "structure":
+                if book["status"] == "ready" and row["config"]["depth"] in (
+                    "structure",
+                    "client_context",
+                ):
                     try:
                         content, structure = schema_projection(
                             originals[book["path"]], book["structure"]
@@ -572,7 +612,7 @@ def collect(connection, device, job, result):
                     True,
                     bound["id"],
                     refresh_extensions=[".xlsx"],
-                    schema_only=row["config"]["depth"] == "structure",
+                    schema_only=row["config"]["depth"] in ("structure", "client_context"),
                 )
                 current = {
                     f["path"]: f
@@ -639,7 +679,10 @@ def collect(connection, device, job, result):
     )
     unchanged = previous and not partial and previous["fingerprint"] == signature
     catalog = {
-        "format_version": "1",
+        "format_version": "2" if config["depth"] == "client_context" else "1",
+        "context_notes": copy.deepcopy(previous["catalog"].get("context_notes", []))
+        if unchanged
+        else [],
         "collected_at": connection.execute("SELECT now() AS time").fetchone()["time"].isoformat(),
         "run_id": str(row["id"]),
         "device_id": str(row["device_id"]),
@@ -652,6 +695,23 @@ def collect(connection, device, job, result):
         },
         "excel_mappings": remapped if unchanged else None,
     }
+    if config["depth"] == "client_context" and not partial:
+        from .accounts.client_context import context_assets
+
+        try:
+            assets, _ = context_assets(catalog)
+            if (
+                len(assets) + len(excel_files) > 45
+                or sum(len(f["content"]) for f in assets + excel_files) > 8_000_000
+            ):
+                raise ValueError("Complete collection exceeds hosted interpretation limits.")
+        except ValueError:
+            partial = catalog["partial"] = True
+            catalog["context_error"] = (
+                "Complete collection exceeds hosted interpretation limits. Reduce the voucher period or hand off; masters cannot be sampled."
+            )
+            unchanged = False
+            catalog["review"].update(status="required", reused_from=None)
     state = "completed" if unchanged else "review"
     mapping_id = None
     if unchanged and remapped:
@@ -661,7 +721,10 @@ def collect(connection, device, job, result):
             (row["tenant_id"], row["actor_id"], "0.4.0", Jsonb(remapped)),
         ).fetchone()
         catalog["excel_catalog_id"] = str(linked["id"])
-    elif excel_files and not partial:
+    elif (excel_files or config["depth"] == "client_context") and not partial:
+        connection.execute(
+            "UPDATE discovery_runs SET catalog=%s WHERE id=%s", (Jsonb(catalog), row["id"])
+        )
         mapped = accounts.launch_run(
             connection,
             {"id": row["tenant_id"]},
@@ -671,7 +734,7 @@ def collect(connection, device, job, result):
                 "request_key": str(uuid4()),
                 "file_ids": [str(f["id"]) for f in excel_files],
                 "catalog_id": None,
-                "config": {"discovery_depth": config["depth"]},
+                "config": {"discovery_depth": "structure", "discovery_run_id": str(row["id"])},
             },
             task_id=row["task_id"],
         )
@@ -744,6 +807,9 @@ def confirm(connection, tenant, user, run_id, body):
         )
         catalog["excel_catalog_id"] = str(approved["catalog_id"])
         catalog["excel_mappings"] = mappings
+        from .accounts.client_context import validate_notes
+
+        catalog["context_notes"] = validate_notes(mappings.get("context_notes", []), catalog)
     files = files_for(
         connection,
         tenant["id"],

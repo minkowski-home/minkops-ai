@@ -1,8 +1,8 @@
 {
   "key": "source-discovery",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "name": "Source discovery",
-  "description": "Collect approved table schemas and workbook headers, then propose evidenced business mappings for review.",
+  "description": "Collect complete Tally masters, recent vouchers, workbook headers and formulas, and reviewed client context.",
   "owner": "accounts-desk",
   "tenant_config_schema": "tenant-config.schema.json",
   "run_config_schema": "run-config.schema.json",
@@ -10,7 +10,7 @@
   "instructions": "SKILL.md",
   "tenant_defaults": {
     "destination_mode": "tally",
-    "discovery_depth": "structure",
+    "discovery_depth": "client_context",
     "max_files": 100
   },
   "run_defaults": {
@@ -30,7 +30,8 @@
     ],
     "instructions": "execution-instructions.md",
     "resources": [
-      "collection-config.schema.json"
+      "collection-config.schema.json",
+      "context-note.schema.json"
     ],
     "result_path": "/workspace/outputs/result.json"
   },

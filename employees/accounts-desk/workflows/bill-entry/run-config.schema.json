@@ -20,7 +20,10 @@
       ],
       "title": "Output platform and write mode"
     },
-    "discovery_id": { "type": "string", "format": "uuid" },
+    "discovery_id": {
+      "type": "string",
+      "format": "uuid"
+    },
     "source_ids": {
       "type": "array",
       "items": {
@@ -76,6 +79,21 @@
     },
     "schema_version": {
       "type": "string",
+      "minLength": 1
+    },
+    "company_mode": {
+      "type": "string",
+      "enum": [
+        "locked",
+        "infer"
+      ],
+      "title": "Company selection"
+    },
+    "locked_company_guid": {
+      "type": [
+        "string",
+        "null"
+      ],
       "minLength": 1
     }
   },

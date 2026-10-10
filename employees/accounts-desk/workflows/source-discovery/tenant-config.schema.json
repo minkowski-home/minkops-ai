@@ -10,6 +10,7 @@
     "discovery_depth": {
       "type": "string",
       "enum": [
+        "client_context",
         "structure",
         "reference_data",
         "business_mappings"
