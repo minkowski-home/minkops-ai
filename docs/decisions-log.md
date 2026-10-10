@@ -902,3 +902,30 @@ checks show the new controls without browser errors. Existing financial recovery
 checks remain in place. Installation-specific export completeness, numeric `/LOAD`
 support, Windows crashes and deployment are explicitly pending in MIN-124;
 offline tests do not establish live compatibility.
+
+## Reconcile native XML representations without weakening financial guards (10 October 2026)
+
+**Situation:** MIN-124 live testing found that Tally's detailed exports differ
+from compact reference collections: message indentation creates text nodes,
+DayBook appends company metadata, and numeric company/AlterID fields contain
+padding and typed wrappers. Valid exports were rejected and unchanged ledgers
+looked stale. A restart licence handoff also hid an import's ambiguity flag.
+
+**Task:** Accept the installation's native representation while retaining full
+evidence, company identity checks, genuine stale-master rejection and the rule
+that an unknown import must never be replayed automatically.
+
+**Action:** Reproduced each protocol failure before fixing it. Ignore only
+message-level formatting whitespace; validate DayBook's ancillary company
+trailer against the just-discovered GUID/name. Normalize only numeric startup
+arguments and numeric AlterID comparisons, leaving original discovery records
+and other identity fields intact. Preserve write uncertainty when restart or
+readiness fails. Clarified versioned hosted contracts for company-scoped notes,
+Excel inventory coverage and company routing outside business-field evidence.
+
+**Result:** Regression tests reject mismatched company trailers, actual master
+changes, arbitrary startup arguments and import replay. Paid gpt-6-luna discovery
+and a reviewed mixed-company batch completed against real Windows Tally with
+independent duplicate-free readback. Controlled termination exposed native
+settings/licence handoffs, which are recorded as limitations rather than claims
+of unattended recovery. Production deployment remains paused under MIN-124.

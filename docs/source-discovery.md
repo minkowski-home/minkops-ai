@@ -1,6 +1,6 @@
 # Source Discovery: reusable client context
 
-Source Discovery 0.7.0 and Windows companion 0.5.0 collect a versioned package
+Source Discovery 0.7.2 and Windows companion 0.5.1 collect a versioned package
 before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.

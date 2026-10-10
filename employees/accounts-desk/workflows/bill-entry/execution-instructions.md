@@ -51,6 +51,9 @@ Write /workspace/outputs/result.json with records, findings and unresolved:
 Omit company fields for Excel. Every selected input must have records or an
 unresolved explanation, including extraction failures. Append by default; edits
 require explicit user review. Record field evidence for every extracted value.
+Each evidence.field must name an exact column in the supplied destination mapping.
+Company routing is separate metadata: put buyer evidence in company_evidence,
+never in the field-evidence array as company_guid or company_evidence.
 
 All scans are persisted before approval; approved native entries are processed
 company by company. The application owns validation, approvals, duplicate checks,

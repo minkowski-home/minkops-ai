@@ -10,15 +10,22 @@ never included in agent files or exposed to the browser.
 1. Connect a local folder in Chrome/Edge, then select the relevant Excel files.
    Browser directory handles stay in IndexedDB. Only supported files from the
    chosen folder are synchronized, with immutable tenant-scoped provenance.
-2. Source discovery uses the managed Codex harness to inspect actual workbooks,
-   including headers below row 1, sheet contents and named tables. Codex proposes
-   business meanings, purposes and record keys. Review uses searchable,
-   collapsible mappings; confirmation creates a versioned catalog.
+2. Source discovery collects workbook sheet/header/table definitions and formula
+   text through the connected PC. Fresh workbook projections exclude business
+   rows and cached results. The managed Codex harness proposes business meanings,
+   purposes and record keys from this structure; unclear headers require review.
+   For Tally, it collects all loaded companies' undated masters and detailed
+   vouchers for the selected inclusive period. Hosted interpretation proposes
+   only evidenced obscure conventions and exceptions. Confirmation creates a
+   versioned client-context package; see [Source Discovery](source-discovery.md).
 3. Launch Bill entry with multiple PDFs/images and the confirmed catalog.
    After setup, the dashboard runs saved file selections with tenant defaults in
    one click; workflow details expose configuration and per-run overrides.
-   Codex recognizes the appropriate workbook/sheet/table from actual business
-   context. No client filename, sheet name or invoice column schema is hardcoded
+   Codex recognizes the appropriate workbook/sheet/table from confirmed mappings
+   and bill evidence. Refresh the real workbook before selecting an Excel
+   destination; discovery projections are not writable business snapshots.
+   Tally bill runs pin a complete, confirmed version 2 package and either lock a
+   company or infer it from buyer evidence. No client filename, sheet name or invoice column schema is hardcoded
    in the executor. Ambiguous recognition becomes an unresolved review item and
    holds that bill while other bills continue. Confirmed concepts enable selected deterministic checks;
    missing reference evidence stays visible rather than implying reconciliation.
@@ -111,15 +118,20 @@ is rejected. Browser permissions and an open Chrome/Edge page are required for
 local saves; hosted extraction continues while the page is closed.
 
 Sources are limited to 100 supported files, 5 MB per file and 30 MB per refresh.
-Runs allow up to 45 files and 8 MB including workbook references; hosted uploads
+Runs allow up to 45 files and 8 MB including workbook references, full Tally
+lookup files and bills; individual lookup files are limited to 4 MB. Oversized
+complete native discovery remains saved but visibly partial for hosted
+interpretation, blocking dependent workflows. Hosted uploads
 also enforce provider limits. Manual uploads work for bill inputs and reference
 inspection; writable destinations require a connected folder.
 
 Offline tests replace only the paid agent boundary and cover real database/auth,
 tenant isolation, approval, cancellation, receipt replay, schema validation,
 safe workbook updates and local commit conflicts. Run API tests with
-TEST_DATABASE_URL pointing to a migrated, demo-seeded test database. Browser
-verification also ran the real hosted model: discovery found headers on row 4;
+TEST_DATABASE_URL pointing to a PostgreSQL server role with database-creation
+permission; pytest creates and seeds its own isolated database. Historical browser
+verification ran the real hosted model before the client-context refactor:
+discovery found headers on row 4;
 three PDFs plus a scanned PNG appended four rows to the existing local register
 (16 → 20), preserved prior rows and reference files, and completed only after a
 verified browser receipt. This is local proof; no production deployment is implied.

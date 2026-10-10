@@ -114,7 +114,7 @@ so its Active/Needs Attention sections reflect executable workflow outcomes.
 
 Discovery is mandatory before dependent workflows, with manual refresh afterward.
 Its date range applies only to vouchers; all masters are exported comprehensively.
-New runs use Source Discovery 0.7.0, Bill Entry 0.8.0 and companion 0.5.0. The RC
+New runs use Source Discovery 0.7.2, Bill Entry 0.8.1 and companion 0.5.1. The RC
 evidence below predates this refactor. Repeat live acceptance and deployment under
 [MIN-124](https://linear.app/minkops/issue/MIN-124). No scheduling or new accounting
 layer is introduced. The existing native Purchase contract remains bounded.
