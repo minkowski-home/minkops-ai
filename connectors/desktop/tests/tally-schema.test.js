@@ -25,7 +25,8 @@ test("Excel projection retains off-row table headers without data or package att
   const metadata = await inspectExcel(projection, "structure");
   assert.deepEqual(metadata.sheets[0].preview[0], { row: 42, values: [null, "Invoice", "Supplier"] });
   assert.deepEqual(metadata.sheets[0].reference_rows, []);
-  assert.deepEqual(metadata.sheets[0].formulas, []);
+  assert.deepEqual(metadata.sheets[0].formulas, [{cell:"D43",formula:'"private formula"'}]);
+  assert.equal(result.getWorksheet("Bills").getCell("D43").value.result, undefined);
 });
 
 test("structure discovery uses metadata without exporting business objects", async () => {

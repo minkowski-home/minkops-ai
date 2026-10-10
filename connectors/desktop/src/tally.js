@@ -133,7 +133,7 @@ function equal(record, data) {
   );
 }
 
-export async function commitTallyBill(plan, { request = fetch } = {}) {
+export async function commitTallyBill(plan, { request = fetch, reconciliationOnly = false } = {}) {
   const { data, company, port = 9000, remote_id, operation, expected } = plan;
   if (
     !/^[a-f0-9-]{36}$/.test(remote_id) ||
@@ -245,6 +245,7 @@ export async function commitTallyBill(plan, { request = fetch } = {}) {
       message:
         "Existing voucher has allocations this bill mapping cannot preserve. Correct it in Tally, then reconcile.",
     };
+  if (reconciliationOnly) return {outcome:"attention",message:"Tally restarted after an uncertain write. The approved version is not present; review and Resume saves to reconcile before importing."};
   const entry = (ledger, amount) =>
     `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${amount < 0 ? "Yes" : "No"}</ISDEEMEDPOSITIVE><AMOUNT>${(amount / 100).toFixed(2)}</AMOUNT></ALLLEDGERENTRIES.LIST>`;
   const guid = current?.guid || remote_id;

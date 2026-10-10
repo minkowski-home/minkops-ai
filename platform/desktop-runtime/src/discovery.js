@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 
 export async function collectSources(
   plan,
-  { folderFor, inventory, inspectExcel, discoverTally, excelSchemaBytes, onProgress },
+  { folderFor, inventory, inspectExcel, discoverTally, discoverClientContext, excelSchemaBytes, onProgress },
 ) {
   const sources = [];
   let selectedBytes = 0,
@@ -12,7 +12,7 @@ export async function collectSources(
     await onProgress(source.key, "reading");
     try {
       if (source.tool === "tally") {
-        const snapshot = await discoverTally(
+        const snapshot = plan.config.depth === "client_context" ? await discoverClientContext(plan.config.tally, {onProgress: (company, status) => onProgress(source.key, status, company)}) : await discoverTally(
           { ...plan.config.tally, depth: plan.config.depth },
           {
             onProgress: (category, status) =>
@@ -47,7 +47,7 @@ export async function collectSources(
         const workbooks = [];
         for (const file of files.filter((f) => /\.xlsx$/i.test(f.path))) {
           let bytes = Buffer.from(file.content, "base64");
-          if (plan.config.depth === "structure") {
+          if (["structure", "client_context"].includes(plan.config.depth)) {
             bytes = await excelSchemaBytes(bytes);
             selected.find((s) => s.path === file.path).content = bytes.toString("base64");
           }
@@ -59,7 +59,7 @@ export async function collectSources(
             workbooks.push({
               ...book,
               status: "ready",
-              structure: await inspectExcel(bytes, plan.config.depth),
+              structure: await inspectExcel(bytes, "structure"),
             });
           } catch {
             workbooks.push({

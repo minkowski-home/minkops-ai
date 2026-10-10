@@ -13,6 +13,8 @@ import {
 import { join, dirname, basename, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, excelSchemaBytes, discoverTally } from './discovery.js';
+export { recoveringTallyRequest, captureTallyProcess, tallyProcessRunning, restartTallyProcess, waitForTally, tallyCrashEvents } from './tally-recovery.js';
+export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
 export { commitTallyBill, readTallyBills } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -30,8 +32,8 @@ export async function saveCatalogSnapshot(path, snapshot) {
   if (extname(path).toLowerCase() !== ".json")
     throw new Error("Choose a JSON file.");
   const bytes = Buffer.from(JSON.stringify(snapshot, null, 2));
-  if (bytes.length > 8_000_000)
-    throw new Error("Catalog exceeds the 8 MB export limit.");
+  if (bytes.length > 64_000_000)
+    throw new Error("Catalog exceeds the 64 MB export limit.");
   try {
     const existing = await lstat(path);
     if (!existing.isFile() || existing.isSymbolicLink())

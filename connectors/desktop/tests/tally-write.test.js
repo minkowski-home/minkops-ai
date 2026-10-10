@@ -181,3 +181,13 @@ test("changed discovered company prevents any financial import", async () => {
   );
   assert.ok(io.calls.every((body) => !body.includes("Import Data")));
 });
+
+test('post-crash reconciliation cannot import a missing bill or repeat an applied one', async () => {
+  for (const existing of [false,true]) {
+    const io=fake([exportReply(existing?[voucher()]:[])]);
+    const result=await commitTallyBill(plan,{...io,reconciliationOnly:true});
+    assert.equal(result.outcome,existing?'duplicate':'attention');
+    assert.equal(io.calls.length,1);
+    assert.ok(!io.calls.some(body=>body.includes('Import Data')));
+  }
+});

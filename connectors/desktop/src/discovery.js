@@ -47,14 +47,20 @@ function tallyReferenceScalar(value) {
   if (typeof value === "string") return value;
   // Tally annotates scalar XML elements with TYPE attributes. Keep their text
   // exact (including identifier leading zeroes), and reject nested records.
-  if (value && typeof value === "object" && !Array.isArray(value) &&
-      Object.keys(value).every((key) => key === "#text" || key.startsWith("@_")) &&
-      (!Object.hasOwn(value, "#text") || typeof value["#text"] === "string"))
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every(
+      (key) => key === "#text" || key.startsWith("@_"),
+    ) &&
+    (!Object.hasOwn(value, "#text") || typeof value["#text"] === "string")
+  )
     return value["#text"] ?? "";
   throw new Error("Tally reference field is not a scalar.");
 }
 
-async function excelReaderBytes(bytes) {
+async function excelReaderBytes(bytes, structureOnly = false) {
   // OPC permits package-absolute relationship targets. ExcelJS 4.4 only resolves
   // relative table targets (upstream #1468). Normalize the reader's in-memory
   // copy; hashes, uploads and approved writes keep the original bytes.
@@ -66,6 +72,21 @@ async function excelReaderBytes(bytes) {
   const builder = new XMLBuilder({ ignoreAttributes: false });
   let changed = false;
   for (const [name, entry] of Object.entries(zip.files)) {
+    if (
+      structureOnly &&
+      !entry.dir &&
+      (/^xl\/tables\/.*\.xml$/.test(name) ||
+        /^xl\/worksheets\/.*\.xml$/.test(name))
+    ) {
+      const xml = await entry.async("string");
+      if (
+        /<(?:calculatedColumnFormula|totalsRowFormula)\b/.test(xml) ||
+        /<f\b[^>]*\bt=["'](?:array|dataTable)["']/.test(xml)
+      )
+        throw new Error(
+          "Unsupported table or array formula; discovery needs attention.",
+        );
+    }
     if (entry.dir || !name.endsWith(".rels") || !name.includes("/_rels/"))
       continue;
     const xml = await entry.async("string");
@@ -118,7 +139,9 @@ export async function inspectExcel(bytes, depth = "business_mappings") {
     }),
   );
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(await excelReaderBytes(bytes));
+  await workbook.xlsx.load(
+    await excelReaderBytes(bytes, depth === "structure"),
+  );
   if (workbook.worksheets.length > 100)
     throw new Error("Workbook has too many worksheets.");
   const sheets = workbook.worksheets.map((s) => {
@@ -148,7 +171,7 @@ export async function inspectExcel(bytes, depth = "business_mappings") {
         preview.push({ row: index, values });
       }
       row.eachCell((cell) => {
-        if (cell.formula && formulas.length < 100)
+        if (cell.formula)
           formulas.push({ cell: cell.address, formula: cell.formula });
       });
     });
@@ -164,12 +187,21 @@ export async function inspectExcel(bytes, depth = "business_mappings") {
         columns: table.columns.map((c) => c.name),
       };
     });
-    const headerRows = tables.length ? tables.map((t) => t.header_row) :
-      preview.filter((r) => r.values.filter((v) => typeof v === "string" && v.trim()).length >= 2).slice(0, 1).map((r) => r.row);
+    const headerRows = tables.length
+      ? tables.map((t) => t.header_row)
+      : preview
+          .filter(
+            (r) =>
+              r.values.filter((v) => typeof v === "string" && v.trim())
+                .length >= 2,
+          )
+          .slice(0, 1)
+          .map((r) => r.row);
     const headers = headerRows.map((index) => {
       const values = [];
       s.getRow(index).eachCell({ includeEmpty: true }, (cell, col) => {
-        values[col - 1] = typeof scalar(cell.value) === "string" ? scalar(cell.value) : null;
+        values[col - 1] =
+          typeof scalar(cell.value) === "string" ? scalar(cell.value) : null;
       });
       return { row: index, values };
     });
@@ -181,11 +213,15 @@ export async function inspectExcel(bytes, depth = "business_mappings") {
       tables,
       merged_ranges: s.model.merges,
       preview: depth === "structure" ? headers : preview,
-      formulas: depth === "structure" ? [] : formulas,
+      formulas,
       reference_rows: depth === "structure" ? [] : reference_rows,
     };
   });
-  return { format: "xlsx", sheets, defined_names: depth === "structure" ? [] : workbook.definedNames.model };
+  return {
+    format: "xlsx",
+    sheets,
+    defined_names: depth === "structure" ? [] : workbook.definedNames.model,
+  };
 }
 
 /** Keep only candidate/table headers in bytes sent for business mapping. Local
@@ -201,16 +237,25 @@ export async function excelSchemaBytes(bytes) {
     const sheet = workbook.addWorksheet(layout.sheet, { state: layout.state });
     for (const header of layout.preview) {
       header.values.forEach((value, index) => {
-        if (typeof value === "string") sheet.getCell(header.row, index + 1).value = value;
+        if (typeof value === "string")
+          sheet.getCell(header.row, index + 1).value = value;
       });
     }
     for (const table of layout.tables) {
       const endRow = Number(table.range.split(":").at(-1).match(/\d+$/)[0]);
-      sheet.addTable({ name: table.name, ref: table.range.split(":")[0], headerRow: true,
+      sheet.addTable({
+        name: table.name,
+        ref: table.range.split(":")[0],
+        headerRow: true,
         columns: table.columns.map((name) => ({ name })),
-        rows: Array.from({ length: Math.max(0, endRow - table.header_row) }, () => table.columns.map(() => null)),
+        rows: Array.from(
+          { length: Math.max(0, endRow - table.header_row) },
+          () => table.columns.map(() => null),
+        ),
       });
     }
+    for (const formula of layout.formulas)
+      sheet.getCell(formula.cell).value = { formula: formula.formula };
     for (const range of layout.merged_ranges) sheet.mergeCells(range);
   }
   return Buffer.from(await workbook.xlsx.writeBuffer());
@@ -242,25 +287,70 @@ export async function discoverTally(
     let tables;
     try {
       tables = await metadata({ port });
-      if (!Array.isArray(tables) || tables.length > 500 || tables.some((t) =>
-        typeof t.table !== "string" || !t.table || t.table.length > 200 ||
-        !Array.isArray(t.columns) || t.columns.length > 2000 || t.columns.some((c) =>
-          typeof c.name !== "string" || !c.name || c.name.length > 300 ||
-          typeof c.type !== "string" || c.type.length > 100 || typeof c.nullable !== "boolean" ||
-          !Number.isInteger(c.ordinal) || c.ordinal < 0))) throw new Error("Invalid metadata.");
+      if (
+        !Array.isArray(tables) ||
+        tables.length > 500 ||
+        tables.some(
+          (t) =>
+            typeof t.table !== "string" ||
+            !t.table ||
+            t.table.length > 200 ||
+            !Array.isArray(t.columns) ||
+            t.columns.length > 2000 ||
+            t.columns.some(
+              (c) =>
+                typeof c.name !== "string" ||
+                !c.name ||
+                c.name.length > 300 ||
+                typeof c.type !== "string" ||
+                c.type.length > 100 ||
+                typeof c.nullable !== "boolean" ||
+                !Number.isInteger(c.ordinal) ||
+                c.ordinal < 0,
+            ),
+        )
+      )
+        throw new Error("Invalid metadata.");
     } catch {
       tables = null;
     }
-    const aliases = { groups: "Groups", cost_centres: "CostCentre", units: "Unit", currencies: "Currency" };
+    const aliases = {
+      groups: "Groups",
+      cost_centres: "CostCentre",
+      units: "Unit",
+      currencies: "Currency",
+    };
     const collections = [];
     for (const category of categories) {
       await onProgress(category, "reading");
       const table = aliases[category] || TALLY_COLLECTIONS[category][0];
-      const columns = tables?.find((t) => t.table.toLowerCase() === table.toLowerCase())?.columns || [];
-      collections.push(tables ? {
-        category, status: "ready", count: 0, records: [], fields: columns.map((c) => c.name),
-        schema: { source: "odbc_metadata", coverage: columns.length ? "exposed_top_level_methods" : "not_exposed", table, columns },
-      } : { category, status: "unavailable", error: "Enable Tally ODBC and its 64-bit driver on this PC, then retry structure discovery." });
+      const columns =
+        tables?.find((t) => t.table.toLowerCase() === table.toLowerCase())
+          ?.columns || [];
+      collections.push(
+        tables
+          ? {
+              category,
+              status: "ready",
+              count: 0,
+              records: [],
+              fields: columns.map((c) => c.name),
+              schema: {
+                source: "odbc_metadata",
+                coverage: columns.length
+                  ? "exposed_top_level_methods"
+                  : "not_exposed",
+                table,
+                columns,
+              },
+            }
+          : {
+              category,
+              status: "unavailable",
+              error:
+                "Enable Tally ODBC and its 64-bit driver on this PC, then retry structure discovery.",
+            },
+      );
       await onProgress(category, tables ? "ready" : "unavailable");
     }
     return { company, port, collections, schema_tables: tables || [] };
@@ -302,16 +392,18 @@ export async function discoverTally(
         throw new Error(
           "Collection exceeds 10,000 records; narrow your selected categories.",
         );
-      records = records.map((r) => Object.fromEntries(
-        Object.entries(r)
-          .filter(([key]) => ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID"].includes(key))
-          .map(([key, value]) => [key, tallyReferenceScalar(value)]),
-      ));
+      records = records.map((r) =>
+        Object.fromEntries(
+          Object.entries(r)
+            .filter(([key]) =>
+              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID"].includes(key),
+            )
+            .map(([key, value]) => [key, tallyReferenceScalar(value)]),
+        ),
+      );
       if (category === "company")
         records = records.filter(
-          (r) =>
-            r["@_NAME"] === company ||
-            r.NAME === company,
+          (r) => r["@_NAME"] === company || r.NAME === company,
         );
       if (category === "company" && !records.length)
         throw new Error("Selected company details were not returned.");
