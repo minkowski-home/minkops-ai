@@ -23,6 +23,12 @@ const norm = (v) => String(v).trim().toLowerCase();
 const year = (s) => Number(s.slice(0, 4)) - (Number(s.slice(4, 6)) < 4 ? 1 : 0);
 const digest = (v) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
+// Detailed XML pads numeric AlterID text; reference collections trim it. Only
+// normalize that numeric field, retaining exact ledger GUIDs and parent names.
+const referenceDigest = (field, value) => digest(
+  field === "ALTERID" && typeof value === "string" && /^\s*\d+\s*$/.test(value)
+    ? value.trim() : value,
+);
 const unsupported = Symbol("unsupported allocations");
 const populated = (v) =>
   typeof v === "object" && v !== null
@@ -188,7 +194,7 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
         !pinned ||
         ["GUID", "PARENT", "ALTERID"].some(
           (k) =>
-            pinned[k] != null && digest(actual[0][k]) !== digest(pinned[k]),
+            pinned[k] != null && referenceDigest(k, actual[0][k]) !== referenceDigest(k, pinned[k]),
         )
       )
         throw new Error(

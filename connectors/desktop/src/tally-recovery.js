@@ -6,6 +6,20 @@ import { dirname } from "node:path";
 import { XMLParser } from "fast-xml-parser";
 import { boundedText } from "./index.js";
 
+/** Tally emits COMPANYNUMBER as typed numeric text with leading whitespace.
+ * Normalize only this startup argument; discovery retains the original XML data.
+ */
+export function tallyCompanyNumber(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (Object.keys(value).some((key) => key !== "#text" && !key.startsWith("@_")))
+      return null;
+    value = value["#text"];
+  }
+  return typeof value === "string" && /^\d{1,10}$/.test(value.trim())
+    ? value.trim()
+    : null;
+}
+
 export function recoveringTallyRequest({
   request = fetch,
   capture,
@@ -56,8 +70,15 @@ export function recoveringTallyRequest({
       });
       if (!restarted && observed && running === false) {
         restarted = true;
-        await restart(observed);
-        await ready(url, observed);
+        try {
+          await restart(observed);
+          await ready(url, observed);
+        } catch (recoveryError) {
+          // A licence/readiness handoff does not establish whether the import
+          // applied. Preserve its uncertainty through this secondary failure.
+          if (write) recoveryError.tallyAmbiguous = true;
+          throw recoveryError;
+        }
         if (!write) {
           // The restart fence makes a second failure terminal, while retaining diagnosis.
           return transport(url, {

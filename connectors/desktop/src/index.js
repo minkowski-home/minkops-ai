@@ -13,7 +13,7 @@ import {
 import { join, dirname, basename, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, excelSchemaBytes, discoverTally } from './discovery.js';
-export { recoveringTallyRequest, captureTallyProcess, tallyProcessRunning, restartTallyProcess, waitForTally, tallyCrashEvents } from './tally-recovery.js';
+export { recoveringTallyRequest, tallyCompanyNumber, captureTallyProcess, tallyProcessRunning, restartTallyProcess, waitForTally, tallyCrashEvents } from './tally-recovery.js';
 export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
 export { commitTallyBill, readTallyBills } from './tally.js';
 

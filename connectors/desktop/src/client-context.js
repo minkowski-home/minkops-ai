@@ -66,7 +66,7 @@ export async function discoverClientContext(
     throw new Error("Load between one and 50 authorised companies in Tally.");
   const companies = [];
   let totalBytes = 0;
-  async function exportData(company, id, period = null, identity = false) {
+  async function exportData(company, id, period = null, identity = false, companyGuid = null) {
     const variables =
       `<SVCURRENTCOMPANY>${escape(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>` +
       (period
@@ -113,9 +113,28 @@ export async function discoverClientContext(
     for (const message of array(data.TALLYMESSAGE)) {
       for (const [type, values] of Object.entries(message ?? {})) {
         if (type.startsWith("@_")) continue;
+        // Native exports indent mixed XML content. Preserve record text exactly,
+        // but do not mistake the message's formatting whitespace for a master.
+        if (type === "#text" && typeof values === "string" && !values.trim())
+          continue;
         for (const record of array(values)) {
           if (!record || typeof record !== "object")
             throw new Error("Incomplete export record.");
+          // DayBook appends remote-company metadata after its vouchers. It is
+          // not a voucher; accept only the trailer for the identity just read.
+          if (period && type === "COMPANY") {
+            const remote = array(record["REMOTECMPINFO.LIST"]);
+            if (
+              remote.length !== 1 ||
+              scalar(remote[0].NAME) !== companyGuid ||
+              scalar(remote[0].REMOTECMPNAME) !== company ||
+              Object.keys(record).some((key) =>
+                key !== "REMOTECMPINFO.LIST" && !key.startsWith("@_") &&
+                !(key === "#text" && typeof record[key] === "string" && !record[key].trim()),
+              )
+            ) throw new Error("Voucher export company identity mismatch.");
+            continue;
+          }
           records.push({ type, data: record });
         }
       }
@@ -146,7 +165,7 @@ export async function discoverClientContext(
           to: end.toISOString().slice(0, 10),
         };
         await onProgress(company, "reading");
-        const records = await exportData(company, "DayBook", period);
+        const records = await exportData(company, "DayBook", period, false, item.company_guid);
         for (const record of records) {
           const value = scalar(record.data.DATE);
           if (

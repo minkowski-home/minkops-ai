@@ -191,3 +191,24 @@ test('post-crash reconciliation cannot import a missing bill or repeat an applie
     assert.ok(!io.calls.some(body=>body.includes('Import Data')));
   }
 });
+
+test("native numeric AlterID formatting is equivalent but actual master changes block imports", async () => {
+  const references = {company_guid:"company-guid", ledgers:Object.fromEntries(
+    ["Supplier","Purchases","Tax"].map(name=>[name,{GUID:name+"-guid",PARENT:"Group",ALTERID:" 12"}]))};
+  for (const actualId of ["12","13"]) {
+    const io = fake([
+      exportReply(['<COMPANY NAME="Test"/>']),
+      exportReply(['<COMPANY NAME="Test"><GUID>company-guid</GUID></COMPANY>']),
+      exportReply(["Supplier","Purchases","Tax"].map(name=>
+        `<LEDGER NAME="${name}"><GUID>${name}-guid</GUID><PARENT>Group</PARENT><ALTERID TYPE="Number"> ${actualId}</ALTERID></LEDGER>`)),
+      exportReply(),
+      "<RESPONSE><CREATED>1</CREATED><ERRORS>0</ERRORS></RESPONSE>",
+      exportReply([voucher()]),
+    ]);
+    if (actualId === "12") assert.equal((await commitTallyBill({...plan,references},io)).outcome,"saved");
+    else {
+      await assert.rejects(commitTallyBill({...plan,references},io),/ledger changed/);
+      assert.ok(io.calls.every(body=>!body.includes("Import Data")));
+    }
+  }
+});

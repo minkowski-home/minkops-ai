@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { recoveringTallyRequest } from "../src/tally-recovery.js";
+import { recoveringTallyRequest, tallyCompanyNumber } from "../src/tally-recovery.js";
+
+test("observed numeric company loads accept Tally typed whitespace without accepting arbitrary arguments", () => {
+  assert.equal(tallyCompanyNumber({ "#text": " 100000", "@_TYPE": "Number" }), "100000");
+  assert.equal(tallyCompanyNumber(" 00123 "), "00123");
+  for (const value of [undefined, "company-guid", "1 /TDL:evil", "12345678901", { nested: "100000" }, { "#text": "100000", nested: "unexpected" }])
+    assert.equal(tallyCompanyNumber(value), null);
+});
 
 test("a failed read restarts only a disappeared process, then repeats the read once", async () => {
   let attempts = 0,
@@ -71,6 +78,18 @@ test("a live or unknown process never causes a second instance or request replay
     );
     assert.equal(restarts, 0);
   }
+});
+test("an import stays ambiguous when restart readiness requires a handoff", async () => {
+  let attempts=0,restarts=0;
+  const request=recoveringTallyRequest({
+    request:async()=>{attempts++;throw new Error("lost acknowledgement");},
+    capture:async()=>({exe:"known"}),isRunning:async()=>false,
+    restart:async()=>{restarts++;},ready:async()=>{throw new Error("Complete login");},
+    diagnose:async()=>{},
+  });
+  await assert.rejects(request("http://127.0.0.1:9000",{body:"<TALLYREQUEST>Import Data</TALLYREQUEST>"}),
+    error=>error.tallyAmbiguous===true && /Complete login/.test(error.message));
+  assert.equal(attempts,1);assert.equal(restarts,1);
 });
 test("XML errors are diagnosed even when fetch resolves; imports are never resent", async () => {
   let attempts = 0,

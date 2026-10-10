@@ -33,6 +33,7 @@ import {
   discoverClientContext,
   saveDiscoveryPackage,
   recoveringTallyRequest,
+  tallyCompanyNumber,
   captureTallyProcess,
   tallyProcessRunning,
   restartTallyProcess,
@@ -232,8 +233,8 @@ function startWorker() {
         });
         for (const source of result.sources)
           for (const company of source.snapshot?.companies ?? []) {
-            const number = company.identity?.COMPANYNUMBER;
-            if (typeof number === "string" && /^\d{1,10}$/.test(number)) {
+            const number = tallyCompanyNumber(company.identity?.COMPANYNUMBER);
+            if (number !== null) {
               state.tally_company_numbers ??= {};
               state.tally_company_numbers[company.company_guid] = number;
             }

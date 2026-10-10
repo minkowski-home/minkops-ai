@@ -202,3 +202,42 @@ test("an empty native voucher export is a complete empty period, never empty mas
   assert.equal(result.companies[0].vouchers.count, 0);
   assert.equal(result.companies[0].masters.count, 3);
 });
+
+test("indented native exports ignore formatting text but never discard unexpected content", async () => {
+  for (const content of ["\r\n    ", "unexpected export content"]) {
+    const base = transport([]);
+    const result = await discoverClientContext(
+      { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
+      {
+        request: async (url, options) => {
+          const response = await base(url, options);
+          return new Response((await response.text()).replaceAll(
+            "<TALLYMESSAGE>", `<TALLYMESSAGE>${content}`,
+          ));
+        },
+      },
+    );
+    assert.equal(result.partial, content.trim() !== "");
+    if (!result.partial) assert.equal(result.companies[0].masters.count, 3);
+  }
+});
+
+test("DayBook company trailers are checked against the discovered identity", async () => {
+  for (const guid of ["A-guid", "different-guid"]) {
+    const base = transport([]);
+    const snapshot = await discoverClientContext(
+      { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
+      {
+        request: async (url, options) => {
+          const response = await base(url, options);
+          let text = await response.text();
+          if (options.body.includes("<ID>DayBook</ID>") && options.body.includes("<SVCURRENTCOMPANY>A</SVCURRENTCOMPANY>"))
+            text = text.replace("</REQUESTDATA>", `<TALLYMESSAGE><COMPANY><REMOTECMPINFO.LIST MERGE="Yes"><NAME>${guid}</NAME><REMOTECMPNAME>A</REMOTECMPNAME><REMOTECMPSTATE>Rajasthan</REMOTECMPSTATE></REMOTECMPINFO.LIST></COMPANY></TALLYMESSAGE></REQUESTDATA>`);
+          return new Response(text);
+        },
+      },
+    );
+    assert.equal(snapshot.partial, guid !== "A-guid");
+    if (!snapshot.partial) assert.equal(snapshot.companies[0].vouchers.count, 1);
+  }
+});
