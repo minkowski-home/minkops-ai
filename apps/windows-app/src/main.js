@@ -30,6 +30,14 @@ import {
   inspectExcel,
   excelSchemaBytes,
   discoverTally,
+  discoverClientContext,
+  saveDiscoveryPackage,
+  recoveringTallyRequest,
+  captureTallyProcess,
+  tallyProcessRunning,
+  restartTallyProcess,
+  waitForTally,
+  tallyCrashEvents,
   commitTallyBill,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
@@ -151,23 +159,64 @@ function startWorker() {
     request,
     execute: async (job) => {
       if (state.device !== identity) throw new Error("PC connection changed.");
+      const tallyRequest = recoveringTallyRequest({
+        capture: async () => {
+          const observed = await captureTallyProcess().catch(() => null);
+          if (observed) {
+            observed.loads = [
+              ...new Set([
+                ...observed.loads,
+                ...Object.values(state.tally_company_numbers ?? {}),
+              ]),
+            ];
+            state.tally_startup = observed;
+            await persist();
+          }
+          return observed ?? state.tally_startup ?? null;
+        },
+        isRunning: tallyProcessRunning,
+        restart: restartTallyProcess,
+        ready: waitForTally,
+        diagnose: async (diagnostic) => {
+          const root = join(app.getPath("userData"), "tally-diagnostics");
+          await mkdir(root, { recursive: true });
+          const record = {
+            ...diagnostic,
+            observed: undefined,
+            job_id: job.id,
+            collected_at: new Date().toISOString(),
+            windows_events: await tallyCrashEvents(),
+          };
+          await writeFile(
+            join(root, `${job.id}.json`),
+            JSON.stringify(record, null, 2),
+            { mode: 0o600 },
+          );
+        },
+      });
       if (
         job.operation === "tally.probe" &&
         !Object.keys(job.input || {}).length
       )
-        return tallyProbe();
+        return tallyProbe({ request: tallyRequest });
       const grantFor = (sourceId) =>
         binding(identity.tenant, sourceId, { id: identity.owner_id });
       if (job.operation === "sources.discover") {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        return collectSources(plan, {
+        const result = await collectSources(plan, {
           folderFor: (id) => grantFor(id).root,
           inventory,
           inspectExcel,
           excelSchemaBytes,
-          discoverTally,
+          discoverTally: (config, options) =>
+            discoverTally(config, { ...options, request: tallyRequest }),
+          discoverClientContext: (config, options) =>
+            discoverClientContext(config, {
+              ...options,
+              request: tallyRequest,
+            }),
           onProgress: async (source_key, status, category = null) => {
             try {
               await request(`/api/desktop/worker/jobs/${job.id}/progress`, {
@@ -181,18 +230,56 @@ function startWorker() {
             }
           },
         });
+        for (const source of result.sources)
+          for (const company of source.snapshot?.companies ?? []) {
+            const number = company.identity?.COMPANYNUMBER;
+            if (typeof number === "string" && /^\d{1,10}$/.test(number)) {
+              state.tally_company_numbers ??= {};
+              state.tally_company_numbers[company.company_guid] = number;
+            }
+          }
+        await persist();
+        await saveDiscoveryPackage(
+          join(
+            app.getPath("userData"),
+            "discovery",
+            identity.tenant,
+            "collected",
+          ),
+          {
+            format_version: "2",
+            run_id: job.input.discovery_run_id,
+            device_id: identity.id,
+            sources: result.sources,
+            partial: result.sources.some(
+              (s) => s.status !== "ready" || s.snapshot?.partial,
+            ),
+            context_notes: [],
+          },
+        );
+        return result;
       }
       if (job.operation === "files.refresh")
         return { files: await inventory(grantFor(job.input.source_id).root) };
       if (job.operation === "tally.references") {
-        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
-        return discoverTally(plan);
+        const plan = await request(
+          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
+        );
+        return discoverTally(plan, { request: tallyRequest });
       }
       if (job.operation === "tally.save") {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        return commitTallyBill(plan);
+        try {
+          return await commitTallyBill(plan, { request: tallyRequest });
+        } catch (error) {
+          if (!error.tallyAmbiguous) throw error;
+          return commitTallyBill(plan, {
+            request: tallyRequest,
+            reconciliationOnly: true,
+          });
+        }
       }
       if (job.operation !== "accounts.save")
         throw new Error("Unsupported local operation.");
@@ -233,16 +320,47 @@ function startWorker() {
       ).catch(() => {});
     },
   });
+  state.discovery_archived ??= {};
   const tick = () =>
-    void worker.tick().catch((error) => {
-      // No tokens, documents, paths or raw protocol responses in console logs.
-      if (error.status === 401 && state.device === identity) {
-        state.device = null;
-        state.pending = null;
-        clearInterval(timer);
-        void persist();
-      }
-    });
+    void worker
+      .tick()
+      .then(async () => {
+        if (state.device !== identity) return;
+        try {
+          const after = state.discovery_archived[identity.id];
+          const catalog = await request(
+            "/api/desktop/discovery/package" +
+              (after ? `?after_id=${after}` : ""),
+          );
+          if (catalog) {
+            await saveDiscoveryPackage(
+              join(
+                app.getPath("userData"),
+                "discovery",
+                identity.tenant,
+                "confirmed",
+              ),
+              catalog,
+            );
+            state.discovery_archived[identity.id] = catalog.run_id;
+            await persist();
+          }
+          state.discovery_archive_error = null;
+        } catch (error) {
+          state.discovery_archive_error =
+            "The local discovery copy could not be refreshed. Keep Minkops open to retry.";
+          throw error;
+        }
+      })
+      .catch((error) => {
+        // No tokens, documents, paths or raw protocol responses in console logs.
+        if (error.status === 401 && state.device === identity) {
+          state.device = null;
+          state.pending = null;
+          clearInterval(timer);
+          void persist();
+        }
+      });
   timer = setInterval(tick, 4000);
   tick();
 }
@@ -277,7 +395,11 @@ function setupBridge() {
     await saveCatalogSnapshot(selected.filePath, catalog);
     return true;
   });
+  handle("desktop:tally-diagnostics", async () => {
+    await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
+  });
   handle("desktop:status", async () => ({
+    discovery_archive_error: state.discovery_archive_error ?? null,
     version: app.getVersion(),
     name: hostname(),
     device: state.device
@@ -338,48 +460,60 @@ function setupBridge() {
       }
     }
   });
-  handle("desktop:pick-folder", async ({ tenant, sourceId, schemaOnly = false }) => {
-    const user = await profile(tenant);
-    if (state.device?.tenant !== tenant || state.device?.owner_id !== user.id)
-      throw new Error(
-        "Connect this PC in Connections before choosing a folder.",
-      );
-    const selected = await dialog.showOpenDialog(window, {
-      title: "Choose a folder for Minkops",
-      properties: ["openDirectory"],
-    });
-    if (selected.canceled) return null;
-    const root = await realpath(selected.filePaths[0]);
-    if (sourceId) {
-      if (!uuid(sourceId)) throw new Error("Invalid source.");
-      validateFolderReconnect(
-        state.bindings[`${tenant}:${sourceId}`],
+  handle(
+    "desktop:pick-folder",
+    async ({ tenant, sourceId, schemaOnly = false }) => {
+      const user = await profile(tenant);
+      if (state.device?.tenant !== tenant || state.device?.owner_id !== user.id)
+        throw new Error(
+          "Connect this PC in Connections before choosing a folder.",
+        );
+      const selected = await dialog.showOpenDialog(window, {
+        title: "Choose a folder for Minkops",
+        properties: ["openDirectory"],
+      });
+      if (selected.canceled) return null;
+      const root = await realpath(selected.filePaths[0]);
+      if (sourceId) {
+        if (!uuid(sourceId)) throw new Error("Invalid source.");
+        validateFolderReconnect(
+          state.bindings[`${tenant}:${sourceId}`],
+          root,
+          user.id,
+        );
+      }
+      let files = await inventory(root);
+      if (schemaOnly === true) {
+        files = await Promise.all(
+          files
+            .filter((f) => /\.xlsx$/i.test(f.path))
+            .map(async (file) => ({
+              path: file.path,
+              content: (
+                await excelSchemaBytes(Buffer.from(file.content, "base64"))
+              ).toString("base64"),
+            })),
+        );
+        if (!files.length)
+          throw new Error(
+            "Choose a folder containing supported Excel workbooks.",
+          );
+      }
+      const grantId = randomUUID();
+      pendingGrants.set(grantId, {
         root,
-        user.id,
-      );
-    }
-    let files = await inventory(root);
-    if (schemaOnly === true) {
-      files = await Promise.all(files.filter((f) => /\.xlsx$/i.test(f.path)).map(async (file) => ({
-        path: file.path,
-        content: (await excelSchemaBytes(Buffer.from(file.content, "base64"))).toString("base64"),
-      })));
-      if (!files.length) throw new Error("Choose a folder containing supported Excel workbooks.");
-    }
-    const grantId = randomUUID();
-    pendingGrants.set(grantId, {
-      root,
-      tenant,
-      owner_id: user.id,
-      files: files.map((file) => ({
-        path: file.path,
-        sha256: createHash("sha256")
-          .update(Buffer.from(file.content, "base64"))
-          .digest("hex"),
-      })),
-    });
-    return { grantId, label: basename(root), files };
-  });
+        tenant,
+        owner_id: user.id,
+        files: files.map((file) => ({
+          path: file.path,
+          sha256: createHash("sha256")
+            .update(Buffer.from(file.content, "base64"))
+            .digest("hex"),
+        })),
+      });
+      return { grantId, label: basename(root), files };
+    },
+  );
   handle("desktop:bind-folder", async ({ tenant, sourceId, grantId }) => {
     const user = await profile(tenant);
     const grant = pendingGrants.get(grantId);

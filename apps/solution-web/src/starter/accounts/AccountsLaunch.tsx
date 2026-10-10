@@ -7,7 +7,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { chooseFolder, refreshFolder, supportsLocalFolder } from './localFiles';
 import type { Run, Source, SavedCatalog } from './types';
 
-interface NativeCatalog { id:string; ready:boolean; config:{tally:{company:string}|null} }
+interface NativeCatalog { id:string; ready:boolean; device_id:string; config:{tally:{company?:string}|null};catalog?:{format_version?:string;sources:{tool:string;snapshot?:{companies?:{company:string;company_guid:string}[]}}[]} }
+const discoveredCompanies = (catalog:NativeCatalog|null) => catalog?.catalog?.sources.flatMap(s=>s.tool==='tally' ? s.snapshot?.companies ?? [] : []) ?? [];
 
 function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug: string; workflow: Workflow }) {
   const { user } = useAuth(); const navigate = useNavigate();
@@ -17,6 +18,8 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
   const [catalogId, setCatalogId] = useState('');
   const [outputMode,setOutputMode] = useState(String(workflow.config_values.output_mode ?? 'excel_in_place'));
   const [nativeCatalog,setNativeCatalog] = useState<NativeCatalog|null>(null);
+  const [companyMode,setCompanyMode] = useState<'locked'|'infer'>('infer');
+  const [lockedCompanyGuid,setLockedCompanyGuid] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [inputFormat, setInputFormat] = useState(String(workflow.config_values.input_format ?? 'mixed'));
   const [reviewMode, setReviewMode] = useState(String(workflow.config_values.review_mode ?? 'all_outputs'));
@@ -28,7 +31,7 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
   const enabledOutputs = workflow.config_schema.properties.output_mode?.['x-enabled-options'];
   const base = `/api/tenants/${tenant}/accounts`;
   const preferences = `${tenant}:${workflow.key}:selections:v1`;
-  useEffect(()=>{let active=true;void api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`).then(c=>{if(active)setNativeCatalog(c);}).catch((e:Error)=>{if(active)setError(e.message);});return()=>{active=false;};},[tenant]);
+  useEffect(()=>{let active=true;void api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`).then(c=>{if(active){setNativeCatalog(c);setLockedCompanyGuid(discoveredCompanies(c)[0]?.company_guid??'');}}).catch((e:Error)=>{if(active)setError(e.message);});return()=>{active=false;};},[tenant]);
 
   async function refresh() {
     const [loadedSources, loadedCatalogs] = await Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs')]);
@@ -69,11 +72,11 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
     setBusy(true); setError('');
     try {
       localStorage.setItem(preferences, JSON.stringify(sources.flatMap((s) => s.files.filter((f) => selected.includes(f.id)).map((f) => `${s.id}:${f.path}`))));
-      if (!discovery) localStorage.setItem(`${tenant}:bill-entry:target:v1`,JSON.stringify({output_mode:outputMode,catalog_id:catalogId,discovery_id:nativeCatalog?.id}));
+      if (!discovery) localStorage.setItem(`${tenant}:bill-entry:target:v1`,JSON.stringify({output_mode:outputMode,catalog_id:catalogId,discovery_id:nativeCatalog?.id,company_mode:companyMode,locked_company_guid:companyMode==='locked'?lockedCompanyGuid:null}));
       const run = await api<Run>(base + '/runs', { method: 'POST', body: JSON.stringify({
         key: workflow.key, request_key: crypto.randomUUID(), file_ids: selected,
         catalog_id: discovery || outputMode==='tally_in_place' ? null : catalogId,
-        config: discovery ? { max_files: maxFiles, discovery_depth:discoveryDepth, refresh_mode:refreshMode } : { input_format: inputFormat, review_mode: outputMode==='tally_in_place'?'all_outputs':reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id}:{}) },
+        config: discovery ? { max_files: maxFiles, discovery_depth:discoveryDepth, refresh_mode:refreshMode } : { input_format: inputFormat, review_mode: outputMode==='tally_in_place'?'all_outputs':reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id,company_mode:companyMode,locked_company_guid:companyMode==='locked'?lockedCompanyGuid:null}:{}) },
       }) }, user.csrf_token);
       navigate(`/${routeSlug}/tasks/${run.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not start workflow.'); }
@@ -106,13 +109,14 @@ function LegacyAccountsLaunch({ tenant, routeSlug, workflow }: { tenant: string;
         <label>Review policy<select disabled={outputMode==='tally_in_place'} value={outputMode==='tally_in_place'?'all_outputs':reviewMode} onChange={(e) => setReviewMode(e.target.value)}><option value="all_outputs">Approve every output</option><option value="only_exceptions">Only exceptions</option></select></label>
         <label>Output platform<select value={outputMode} onChange={e=>setOutputMode(e.target.value)}>{[['excel_in_place','Excel · update existing sheets'],['tally_in_place','Tally · purchase vouchers'],['both_in_place','Both · Excel and Tally']].map(([value,label])=><option key={value} value={value} disabled={Boolean(enabledOutputs && !enabledOutputs.includes(value))}>{label}</option>)}</select></label>
         {enabledOutputs && <p className="quiet-state">This workspace saves bills to Tally only. Excel destinations are disabled.</p>}
-        {outputMode==='tally_in_place'?<p role="status">{nativeCatalog?.ready&&nativeCatalog.config.tally?`Confirmed Tally company: ${nativeCatalog.config.tally.company}`:'Confirm Tally company, ledgers and voucher types in Source discovery first.'}</p>:
+        {outputMode==='tally_in_place'?<p role="status">{nativeCatalog?.ready&&discoveredCompanies(nativeCatalog).length?`${discoveredCompanies(nativeCatalog).length} discovered companies available`:'Run and confirm complete Tally Source Discovery first.'}</p>:
         <label>Confirmed sources<select value={catalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{catalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} · {c.catalog.sheets.length} sheets</option>)}</select></label>}
+        {outputMode==='tally_in_place'&&<><label>Company selection<select value={companyMode} onChange={e=>setCompanyMode(e.target.value as 'locked'|'infer')}><option value="infer">Infer from each bill · any discovered company</option><option value="locked">Use one company for this run</option></select></label>{companyMode==='locked'&&<label>Company for all bills<select value={lockedCompanyGuid} onChange={e=>setLockedCompanyGuid(e.target.value)}><option value="">Choose a company</option>{discoveredCompanies(nativeCatalog).map(c=><option key={c.company_guid} value={c.company_guid}>{c.company}</option>)}</select></label>}</>}
         {outputMode!=='tally_in_place'&&<fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>}
       </>}
     </div></details>
     {error && <p role="alert" className="form-message">{error}</p>}
-    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (!discovery && (outputMode==='tally_in_place'? !nativeCatalog?.ready||!nativeCatalog.config.tally : !catalogId))} onClick={() => void launch()}>{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
+    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (!discovery && (outputMode==='tally_in_place'? !nativeCatalog?.ready||!discoveredCompanies(nativeCatalog).length||(companyMode==='locked'&&!lockedCompanyGuid) : !catalogId))} onClick={() => void launch()}>{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
     <span className="quiet-state"> {selected.length} files selected</span>
   </section>;
 }
@@ -130,11 +134,11 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       if (discovery) {
         const latest=await api<{device_id:string;config:Record<string,unknown>}|null>(`/api/tenants/${tenant}/discovery/latest`);
         if (!latest) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
-        const launched=await api<Run>(`/api/tenants/${tenant}/discovery/runs`,{method:'POST',body:JSON.stringify({device_id:latest.device_id,config:{...latest.config,depth:'structure'},request_key:crypto.randomUUID()})},user.csrf_token);
+        const launched=await api<Run>(`/api/tenants/${tenant}/discovery/runs`,{method:'POST',body:JSON.stringify({device_id:latest.device_id,config:latest.config,request_key:crypto.randomUUID()})},user.csrf_token);
         navigate(`/${routeSlug}/tasks/${launched.task_id}`); return;
       }
       const [sources,catalogs] = await Promise.all([api<Source[]>(base+'/sources'),api<SavedCatalog[]>(base+'/catalogs')]);
-      let target:{output_mode?:string;catalog_id?:string;discovery_id?:string}={};
+      let target:{output_mode?:string;catalog_id?:string;discovery_id?:string;company_mode?:string;locked_company_guid?:string|null}={};
       try { target=JSON.parse(localStorage.getItem(`${tenant}:bill-entry:target:v1`)??'{}') as typeof target; } catch { /* Setup is authoritative. */ }
       const tally=target.output_mode==='tally_in_place';
       let selections: string[] = [];
@@ -146,13 +150,12 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
         navigate(`/${routeSlug}/workflows/${workflow.id}`); return;
       }
       if (tally) {
-        type NativeSelection = NativeCatalog & {device_id:string;catalog:{sources:{tool:string;snapshot?:{collections:{category:string;records:Record<string,unknown>[]}[]}}[]}|null};
         const [selectedTarget,latest] = await Promise.all([
-          api<NativeSelection>(`/api/tenants/${tenant}/discovery/runs/${target.discovery_id}`),
-          api<NativeSelection|null>(`/api/tenants/${tenant}/discovery/latest`),
+          api<NativeCatalog>(`/api/tenants/${tenant}/discovery/runs/${target.discovery_id}`),
+          api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`),
         ]);
-        const companyGuid=(catalog:NativeSelection)=>catalog.catalog?.sources.find(s=>s.tool==='tally')?.snapshot?.collections.find(c=>c.category==='company')?.records[0]?.GUID;
-        if (!latest?.ready || latest.device_id!==selectedTarget.device_id || latest.config.tally?.company!==selectedTarget.config.tally?.company || companyGuid(latest)!==companyGuid(selectedTarget)) {
+        const identities=(catalog:NativeCatalog|null)=>discoveredCompanies(catalog).map(c=>c.company_guid).sort().join('|');
+        if (!latest?.ready || !identities(latest) || latest.device_id!==selectedTarget.device_id || identities(latest)!==identities(selectedTarget)) {
           navigate(`/${routeSlug}/workflows/${workflow.id}`);return;
         }
         target.discovery_id=latest.id;
@@ -167,7 +170,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       if (!files.length) throw new Error('Your saved selection is unavailable. Open workflow details to select files.');
       const loaded = await api<Run>(base+'/runs', {method:'POST',body:JSON.stringify({
         key:workflow.key,request_key:crypto.randomUUID(),file_ids:files,catalog_id:tally ? null : target.catalog_id??catalogs[0].id,
-        config:tally?{output_mode:'tally_in_place',discovery_id:target.discovery_id}:{output_mode:'excel_in_place'},
+        config:tally?{output_mode:'tally_in_place',discovery_id:target.discovery_id,company_mode:target.company_mode??'infer',locked_company_guid:target.locked_company_guid??null}:{output_mode:'excel_in_place'},
       })},user.csrf_token);
       navigate(`/${routeSlug}/tasks/${loaded.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Open workflow details to reconnect your folder.'); }

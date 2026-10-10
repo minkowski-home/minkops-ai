@@ -23,7 +23,7 @@ interface Config {
   destination_mode?: 'excel' | 'tally' | 'both';
   depth: string;
   excel_source_ids: string[];
-  tally: { company: string; port: number; categories: string[] } | null;
+  tally: { company?: string; port: number; categories?: string[]; period?: {from:string;to:string} } | null;
 }
 interface Collection {
   category: string;
@@ -55,7 +55,7 @@ interface DiscoveredSource {
   status: string;
   error?: string;
   workbooks?: Book[];
-  snapshot?: { company: string; collections: Collection[] };
+  snapshot?: { company: string; collections: Collection[]; companies?: {company:string;status:string;error?:string;company_guid?:string;masters?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]};vouchers?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]}}[] };
 }
 interface DiscoveryRun {
   id: string;
@@ -67,6 +67,8 @@ interface DiscoveryRun {
   observations: { key: string; status: string; category?: string }[];
   mapping_run: Run | null;
   catalog: {
+    context_error?:string;
+    context_notes?: {company_guid:string;observation:string;certainty:string;evidence_ids:string[]}[];
     partial: boolean;
     sources: DiscoveredSource[];
     review: { status: string; reused_from: string | null };
@@ -107,12 +109,10 @@ export function DiscoveryLaunch({
     (workflow.config_values.destination_mode ?? 'tally') as 'excel' | 'tally' | 'both'
   );
   const tally = destinationMode !== 'excel';
-  const [company, setCompany] = useState("");
+  const [periodFrom, setPeriodFrom] = useState(new Date(Date.now()-90*86400000).toISOString().slice(0,10));
+  const [periodTo, setPeriodTo] = useState(new Date().toISOString().slice(0,10));
   const [port, setPort] = useState(9000);
-  const [depth, setDepth] = useState(
-    "structure"
-  );
-  const [selectedCategories, setCategories] = useState(categories.map((c) => c[0]));
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const base = `/api/tenants/${tenant}`;
@@ -140,11 +140,11 @@ export function DiscoveryLaunch({
     if (latest) {
       setSelected(latest.config.excel_source_ids);
       setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? (latest.config.excel_source_ids.length ? 'both' : 'tally') : 'excel'));
-      setDepth("structure");
+
       if (latest.config.tally) {
-        setCompany(latest.config.tally.company);
+        if (latest.config.tally.period) {setPeriodFrom(latest.config.tally.period.from);setPeriodTo(latest.config.tally.period.to);}
         setPort(latest.config.tally.port);
-        setCategories(latest.config.tally.categories);
+
       }
     }
   }
@@ -173,14 +173,15 @@ export function DiscoveryLaunch({
     setBusy(true);
     setError("");
     try {
+      if (desktopBridge() && !desktopBridge()?.discoveryPackages) throw new Error("Update Minkops to version 0.5.0 for complete discovery packages.");
       const config: Config = {
         destination_mode: destinationMode,
-        depth,
+        depth: "client_context",
         excel_source_ids: destinationMode === 'tally' ? [] : selected.filter((id) =>
           bindings.some((b) => b.source_id === id && b.device_id === deviceId)
         ),
         tally: tally
-          ? { company: company.trim(), port, categories: selectedCategories }
+          ? { port, period: {from:periodFrom,to:periodTo} }
           : null
       };
       const run = await api<DiscoveryRun>(
@@ -239,16 +240,10 @@ export function DiscoveryLaunch({
           <p>Read company settings and the masters used for Bill Entry.</p>
           {tally && (
             <>
-              <label className="config-field">
-                Open company name
-                <input
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="Exact company name in Tally"
-                />
-              </label>
-              <details>
-                <summary>Connection and reference lists</summary>
+              <p>Reads every company loaded in Tally. All masters are collected in full.</p>
+              <label className="config-field">Vouchers from<input type="date" value={periodFrom} onChange={e=>setPeriodFrom(e.target.value)} /></label>
+              <label className="config-field">Vouchers through<input type="date" value={periodTo} min={periodFrom} onChange={e=>setPeriodTo(e.target.value)} /></label>
+              <details><summary>Connection</summary>
                 <label className="config-field">
                   Tally port
                   <input
@@ -259,20 +254,6 @@ export function DiscoveryLaunch({
                     onChange={(e) => setPort(Number(e.target.value))}
                   />
                 </label>
-                {categories.map(([key, label]) => (
-                  <label className="accounts-check" key={key}>
-                    <input
-                      type="checkbox"
-                      checked={selectedCategories.includes(key)}
-                      onChange={(e) =>
-                        setCategories((v) =>
-                          e.target.checked ? [...v, key] : v.filter((k) => k !== key)
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
               </details>
             </>
           )}
@@ -281,7 +262,7 @@ export function DiscoveryLaunch({
           <h4>Excel</h4>
           <p>
             Read worksheets, named tables and candidate headers from
-            selected folders.
+            selected folders, including formula definitions.
           </p>
           <button
             className="button button-ghost"
@@ -317,14 +298,8 @@ export function DiscoveryLaunch({
           )}
         </section>
       </div>
-      <label className="config-field">
-        What should we discover?
-        <select value={depth} onChange={(e) => setDepth(e.target.value)}>
-          <option value="structure">Structure only</option>
-        </select>
-      </label>
       <p className="quiet-state">
-        Reads happen on the chosen PC. Results are saved securely in your workspace. Up to
+        Reads happen on the chosen PC. A versioned copy is saved on your PC and in your workspace. Up to
         45 Excel workbooks / 8 MB per run; select a focused folder.
       </p>
       {error && (
@@ -340,7 +315,7 @@ export function DiscoveryLaunch({
           !deviceId ||
           (!tally && !selectedFolders.length) ||
           (destinationMode === 'both' && !selectedFolders.length) ||
-          (tally && (!company.trim() || !selectedCategories.length))
+          (tally && (!periodFrom || !periodTo || periodFrom > periodTo))
         }
         onClick={() => void launch()}
       >
@@ -407,7 +382,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
     finally {setBusy(false);}
   }
   if (!run) return error ? <p role="alert">{error}</p> : null;
-  const sources =
+  const collectedSources =
     run.catalog?.sources ??
     ([
       ...run.config.excel_source_ids.map((key) => ({
@@ -417,6 +392,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
       })),
       ...(run.config.tally ? [{ key: "tally", tool: "tally", status: "waiting" }] : [])
     ] as DiscoveredSource[]);
+  const sources: DiscoveredSource[] = collectedSources.flatMap(s => s.snapshot?.companies ? s.snapshot.companies.map((c,index)=>({key:`${s.key}-${index}`,tool:'tally',status:c.status,error:c.error,snapshot:{company:c.company,collections:[{category:'masters',status:c.masters?.status??'unavailable',count:c.masters?.count,records:c.masters?.records.map(r=>r.data)},{category:'vouchers',status:c.vouchers?.status??'unavailable',count:c.vouchers?.count,records:c.vouchers?.records.map(r=>r.data)}]}})) : [s]);
   const pending = ["queued", "executing"].includes(run.state);
   return (
     <section className="accounts-panel" aria-label="Discovered sources">
@@ -440,6 +416,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
               ? "Keep Minkops running on the selected PC. You can leave this page and come back."
               : "Check the sources and proposed mappings before confirming."}
       </p>
+      {run.catalog?.context_error&&<p role="alert">{run.catalog.context_error}</p>}
       <div className="discovery-source-grid">
         {sources.map((s) => {
           const observed = run.observations.filter((o) => o.key === s.key);
@@ -473,13 +450,13 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                 <details key={c.category}>
                   <summary>
                     {categories.find((k) => k[0] === c.category)?.[1] ?? c.category} ·{" "}
-                    {c.status === "ready" ? (c.schema ? `${c.fields?.length ?? 0} fields` : `${c.count} reference names`) : "Needs attention"}
+                    {c.status === "ready" ? (c.schema ? `${c.fields?.length ?? 0} fields` : `${c.count} records`) : "Needs attention"}
                   </summary>
                   {c.error ? (
                     <p role="alert">{c.error}</p>
                   ) : (
                     <><p className="quiet-state">
-                      {c.schema ? (c.schema.coverage === "not_exposed" ? "This category is not exposed through Tally ODBC metadata." : "Observed top-level methods. Nested XML structures and custom fields not exposed by ODBC are outside this metadata view.") : "Historical workflow reference context."}
+                      {c.schema ? (c.schema.coverage === "not_exposed" ? "This category is not exposed through Tally ODBC metadata." : "Observed top-level methods. Nested XML structures and custom fields not exposed by ODBC are outside this metadata view.") : "Complete collected records are available for downstream lookup."}
                     </p><ul>{c.records?.slice(0,50).map((record,index)=>{
                       const name=record['@_NAME'] ?? record.NAME;
                       const label=typeof name==='string'?name:typeof name==='object'&&name?String((name as Record<string,unknown>)['#text']??''):'';
@@ -531,7 +508,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
             "Collection was interrupted. Check the task timeline, then run discovery again."}
         </p>
       )}
-      {run.state === "review" && edited && (
+      {run.state === "review" && edited && edited.sheets.length > 0 && (
         <>
           <label className="config-field">
             Find a workbook, sheet or table
@@ -551,6 +528,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
           />
         </>
       )}
+      {run.catalog?.context_notes?.length ? <details><summary>Client conventions and edge cases</summary><ul>{run.catalog.context_notes.map((note,index)=><li key={index}>{run.catalog?.sources.flatMap(source=>source.snapshot?.companies??[]).find(company=>company.company_guid===note.company_guid)?.company??note.company_guid}: {note.observation} · {note.certainty}<p className="quiet-state">Evidence: {note.evidence_ids.join(", ")}</p></li>)}</ul></details> : null}
       <div className="accounts-toolbar">
         {run.state === "review" && (
           <button

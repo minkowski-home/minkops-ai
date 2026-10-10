@@ -1,3 +1,4 @@
+import { desktopBridge } from "../desktop/bridge";
 import { CatalogReview } from './CatalogReview';
 import { DiscoveryReview } from './Discovery';
 import { useEffect, useRef, useState } from 'react';
@@ -132,6 +133,7 @@ function LegacyAccountsReview({ tenant, taskId }: { tenant: string; taskId: stri
       <BillReview result={run.result as BillResult} catalog={run.config.catalog_snapshot as Catalog} provenance={run.config.file_provenance as {id:string;path:string}[]} destinationLabel={(run.config.tally_target as {company?:string}|undefined)?.company} base={base} onChange={()=>{}} />
     </details>}
     {!discovery && (run.result as BillResult | null)?.records.filter(r=>r.status==='duplicate').map((r,i)=><p role="status" key={i}>Duplicate skipped: {provenanceName(run,r.source_file_id)}</p>)}
+    {run.config.tally_target && desktopBridge()?.openTallyDiagnostics ? <button className="button button-ghost" onClick={()=>void desktopBridge()?.openTallyDiagnostics?.()}>Open Tally error details</button> : null}
     {(run.tally_writes ?? []).map(write=><p key={write.id}>{write.company} · {write.cancelled_at?'Cancelled':write.outcome ?? 'Waiting for your PC'}</p>)}
     {run.writes.map((write) => <details key={write.id}><summary>{write.path} · {write.verified_at ? 'Saved and verified' : write.cancelled_at ? 'Cancelled' : 'Pending local save'}</summary>
       <ul>{write.changes.map((change,i) => <li key={i}>{change.sheet}{change.table ? ` / ${change.table}` : ''} · row {change.row} · {change.operation}</li>)}</ul></details>)}
@@ -153,7 +155,8 @@ function BillReview({ result, catalog, provenance, destinationLabel, base, onCha
       {record.current&&<details><summary>Observed Tally values</summary><p>{record.current.vendor} · {record.current.invoice_number} · {record.current.date}</p><dl>{record.current.entries.map((entry,i)=><div key={i}><dt>{entry.ledger}</dt><dd>{(entry.amount/100).toFixed(2)}</dd></div>)}</dl></details>}
       {!['saved','duplicate','rejected'].includes(record.status??'') && <label className="config-field">Review decision<select value={record.decision??'approve'} onChange={e=>{const next=structuredClone(result);next.records[index].decision=e.target.value as 'approve'|'hold'|'reject';onChange(next);}}><option value="approve">Approve</option><option value="hold">Hold for correction</option><option value="reject">Reject</option></select></label>}
       <p><a href={`${base}/files/${record.source_file_id}/content`} target="_blank" rel="noreferrer">View source: {provenance.find((f) => f.id===record.source_file_id)?.path ?? `Bill ${index+1}`}</a></p>
-      <p className="quiet-state">Destination: {destinationLabel ?? provenance.find((f) => f.id===record.destination_file_id)?.path} · {record.sheet}{record.table ? ` / ${record.table}` : ''}</p>
+      <p className="quiet-state">Destination: {record.company_name ?? destinationLabel ?? provenance.find((f) => f.id===record.destination_file_id)?.path} · {record.sheet}{record.table ? ` / ${record.table}` : ''}</p>
+      {record.company_guid&&<p className="quiet-state">Company: {record.company_name ?? record.company_guid}. {record.company_evidence}</p>}
       <label className="config-field">Entry action<select disabled={readonly} value={record.operation} onChange={(e) => { const next=structuredClone(result); next.records[index].operation=e.target.value as 'append'|'update'; onChange(next); }}><option value="append">Append a new entry</option><option value="update">Edit the entry matching its confirmed keys</option></select></label>
       <div className="accounts-field-grid">{Object.entries(record.data).map(([key,value]) => {
         const type = columns.find((c) => c.name===key)?.type;

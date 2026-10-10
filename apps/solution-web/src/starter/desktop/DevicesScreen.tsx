@@ -106,6 +106,7 @@ export function DevicesScreen({
         </p>
       )}
       <div className="device-grid">
+        {native?.discovery_archive_error && <p role="alert" className="form-message">{native.discovery_archive_error}</p>}
         {mine.map((device) => {
           const expired = Date.parse(device.expires_at) < Date.now();
           const online =
