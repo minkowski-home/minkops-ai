@@ -16,7 +16,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
 from google_api import GoogleApi
-from db.migrate import migrate
+from db.migrate import migrate, MIGRATIONS, sources
 
 
 def provision(project, instance, state_dir):
@@ -68,8 +68,8 @@ def provision(project, instance, state_dir):
     runtime_url = make_conninfo(host="127.0.0.1", port=5433, dbname="minkops",
                                user="minkops_app", password=state["runtime_password"])
     with psycopg.connect(runtime_url) as connection:
-        expected_migrations = len(list((Path(__file__).resolve().parents[1] / "db/migrations").glob("*.sql")))
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == expected_migrations
+        applied = dict(connection.execute("SELECT version,checksum FROM schema_migrations").fetchall())
+        assert all(applied.get(version) == checksum for version, (_, checksum) in sources(MIGRATIONS).items())
         assert connection.execute("SELECT count(*) FROM users").fetchone()[0] == 0
         try:
             connection.execute("CREATE TABLE forbidden_runtime_ddl(id integer)")

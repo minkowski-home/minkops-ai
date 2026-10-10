@@ -1,8 +1,9 @@
 # Shared architecture with the complete Bill Entry application
 
-Use `platform-ai/bill-entry-architecture` for continued development. It combines
-the shared architecture with Bill Entry's functionality; there is no second
-Accounts queue, hosted lifecycle, or client-specific registration path.
+This records the historical `platform-ai/bill-entry-architecture` consolidation,
+subsequently merged into `main`. Current discovery/attention work continues on
+`accounts/discovery-context`; follow README for the current product contract.
+There is one Accounts queue, hosted lifecycle and installation path.
 
 ## Retained source revisions
 
@@ -33,8 +34,9 @@ Bill Entry; Excel remains available to client compositions that permit it.
    revision change. Preserve paid-session IDs, pending intents and receipts;
    do not relaunch outstanding work simply to change branches.
 2. Run `uv run --all-packages python db/migrate.py` with the intended
-   `DATABASE_URL`. Apply **all pending files**, including the convergence
-   bridges, through `0011_complete_branch_convergence`.
+   `DATABASE_URL`. The runner verifies archived checksums, applies missing
+   convergence bridges, and adopts the final baseline without rebuilding data.
+   See [baseline and preserved upgrades](../db/README.md).
 3. Validate and dry-run the intended client installation using the authoring
    CLI, then install with a verified administrator. Preserve existing settings
    and status. If a destination preference conflicts with client policy, change
