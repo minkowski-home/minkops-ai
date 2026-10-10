@@ -129,3 +129,51 @@ test("a second read failure is diagnosed without another restart", async () => {
   assert.equal(restarts, 1);
   assert.equal(diagnostics, 2);
 });
+
+test("unknown JSON or action requests are never replayed after acknowledgement loss", async () => {
+  for (const body of [
+    JSON.stringify({ tallyrequest: "Import" }),
+    "<TALLYREQUEST>Export</TALLYREQUEST><TYPE>Function</TYPE>",
+  ]) {
+    let attempts = 0;
+    const request = recoveringTallyRequest({
+      request: async () => {
+        attempts++;
+        throw new Error("lost");
+      },
+      capture: async () => ({ exe: "known" }),
+      isRunning: async () => false,
+      restart: async () => {},
+      ready: async () => {},
+      diagnose: async () => {},
+    });
+    await assert.rejects(
+      request("http://127.0.0.1:9000", { body }),
+      /Reconcile/,
+    );
+    assert.equal(attempts, 1);
+  }
+});
+
+test("JSON failure responses are diagnosed without replay", async () => {
+  let attempts = 0,
+    diagnostics = 0;
+  const request = recoveringTallyRequest({
+    request: async () => {
+      attempts++;
+      return Response.json({ status: "0" });
+    },
+    capture: async () => null,
+    diagnose: async () => {
+      diagnostics++;
+    },
+  });
+  await assert.rejects(
+    request("http://127.0.0.1:9000", {
+      body: JSON.stringify({ tallyrequest: "Import" }),
+    }),
+    /Reconcile/,
+  );
+  assert.equal(attempts, 1);
+  assert.equal(diagnostics, 1);
+});

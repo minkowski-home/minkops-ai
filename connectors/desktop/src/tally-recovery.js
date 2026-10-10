@@ -18,12 +18,21 @@ export function recoveringTallyRequest({
     observed;
   return async function transport(url, options) {
     observed ??= await capture();
-    const write = /<TALLYREQUEST>\s*(?:Import|Execute)/i.test(options.body);
+    // Retry only a known read. Unclassified requests, including new JSON/action
+    // contracts, must never become replayable merely by omitting an Import tag.
+    const write =
+      !/<TALLYREQUEST>\s*Export(?:\s*Data)?\s*<\/TALLYREQUEST>/i.test(
+        options.body,
+      ) || /<TYPE>\s*(?:Function|Action)\s*<\/TYPE>/i.test(options.body);
     try {
       const response = await request(url, options);
       const body = await boundedText(response, 32_000_000);
+      const json = body.trimStart().startsWith("{") ? JSON.parse(body) : null;
       if (
-        /<LINEERROR\b|<ERRORS>\s*[1-9]|<STATUS>\s*0\s*<\/STATUS>/i.test(body)
+        /<LINEERROR\b|<ERRORS>\s*[1-9]|<STATUS>\s*0\s*<\/STATUS>/i.test(body) ||
+        (json &&
+          (String(json.status) === "0" ||
+            Number(json.data?.import_result?.errors) > 0))
       ) {
         const diagnostic = new Error("Tally rejected the request.");
         diagnostic.tallyLineError =
