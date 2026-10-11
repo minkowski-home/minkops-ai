@@ -30,8 +30,13 @@ that input in unresolved. Save the company decision for later native entry.
 Use the supplied destination file ID, sheet Purchase and table:null.
 
 Buyer identity is a logical business match, not letter-for-letter name equality.
-Compare the buyer (not supplier) against the discovered company's full master
-and confirmed context. Matching GSTIN is strong evidence despite spacing,
+Compare the buyer (not supplier) against the discovered company's full masters
+and confirmed context. Before declaring a company identifier missing, inspect
+its supplied masters files: modern Tally may keep GST registration in a TAXUNIT
+record (GSTREGNUMBER or TAXREGISTRATION), not the COMPANY identity fields.
+Use only tax units belonging to that discovered company; supplier ledger GSTINs
+are not buyer evidence. Preserve any effective-date limitations separately from
+the legal identity comparison. Matching GSTIN is strong evidence despite spacing,
 punctuation, abbreviations (Pvt. Ltd. / Private Limited), a trading/display name,
 or minor spelling differences. If GSTIN is absent, require corroborating legal
 name, address or confirmed alias evidence that identifies exactly one company;
