@@ -11,6 +11,10 @@ records adoption of the baseline. It never runs baseline CREATE statements over 
 existing schema. Unknown history or changed checksums fail the entire transaction.
 An advisory lock serializes migration runners. No production database reset is needed.
 
+The baseline's one formatting-only cleanup moved dump-style ALTER statements into
+dependency-ordered CREATE definitions. The runner accepts the exact original/new
+checksum pair, preserving existing history; any other baseline edit still fails.
+
 The archive is a **compatibility artifact**, not an active fresh-install migration
 chain. Never edit or remove it while a supported installation can need it. New
 changes go in new ordered files under `migrations/`; never squash again after this

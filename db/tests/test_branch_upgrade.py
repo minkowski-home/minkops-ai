@@ -6,6 +6,7 @@ import os
 import unittest
 from pathlib import Path
 from uuid import uuid4
+from unittest.mock import patch
 
 import psycopg
 from psycopg import sql
@@ -21,7 +22,7 @@ spec.loader.exec_module(migrations)
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class BranchUpgradeTests(unittest.TestCase):
     def test_fresh_and_both_branch_upgrades_preserve_runs_checksums_and_view_writes(self):
-        for branch in (None, "platform-ai/workflow-architecture", "employees/bill-entry", "current"):
+        for branch in (None, "platform-ai/workflow-architecture", "employees/bill-entry", "current", "baseline"):
             with self.subTest(branch=branch):
                 self.check_upgrade(branch)
 
@@ -55,6 +56,8 @@ class BranchUpgradeTests(unittest.TestCase):
                     names.extend(directory / name for name in suffix)
                     if branch == "current":
                         names = sorted(directory.glob("*.sql"))
+                    if branch == "baseline":
+                        names = sorted(migrations.MIGRATIONS.glob("*.sql"))
                     for name in names:
                         source = name.read_bytes()
                         if name.name in retained:
@@ -67,6 +70,13 @@ class BranchUpgradeTests(unittest.TestCase):
                         connection.execute(
                             "INSERT INTO schema_migrations(version,checksum) VALUES (%s,%s)",
                             (Path(name).stem, hashlib.sha256(source).hexdigest()),
+                        )
+                    if branch == "baseline":
+                        # The original dump-style baseline has the same schema.
+                        # Existing installations must retain its recorded checksum.
+                        connection.execute(
+                            "UPDATE schema_migrations SET checksum=%s WHERE version=%s",
+                            ("8add6cd28e9b81bc0ad179dfe20a160617f91e998163de03c3451a67ed478ba5", migrations.BASELINE),
                         )
                     tenant = connection.execute(
                         "INSERT INTO tenants(slug,name) VALUES ('history','History') RETURNING id"
@@ -106,6 +116,19 @@ class BranchUpgradeTests(unittest.TestCase):
                     ).fetchall()
             migrations.migrate(scoped)
             migrations.migrate(scoped)
+            if branch == "baseline":
+                original_sources = migrations.sources
+
+                def changed_sources(directory):
+                    result = original_sources(directory)
+                    if directory == migrations.MIGRATIONS:
+                        source, _ = result[migrations.BASELINE]
+                        result[migrations.BASELINE] = (source, "unverified-baseline-edit")
+                    return result
+
+                with patch.object(migrations, "sources", changed_sources):
+                    with self.assertRaisesRegex(RuntimeError, "Applied migration changed"):
+                        migrations.migrate(scoped)
             with psycopg.connect(scoped) as connection:
                 self.assertEqual(
                     connection.execute(
@@ -209,6 +232,10 @@ class BranchUpgradeTests(unittest.TestCase):
             JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname=%s AND c.relname<>'schema_migrations' ORDER BY c.relname,k.conname""",
             "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname=%s AND tablename<>'schema_migrations' ORDER BY indexname",
+            """SELECT c.relname,format_type(s.seqtypid,NULL),s.seqstart,s.seqincrement,
+            s.seqmax,s.seqmin,s.seqcache,s.seqcycle FROM pg_sequence s
+            JOIN pg_class c ON c.oid=s.seqrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=%s ORDER BY c.relname""",
             """SELECT c.relname,pg_get_viewdef(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname=%s AND c.relkind='v' ORDER BY c.relname""",
             """SELECT c.relname,t.tgname,pg_get_triggerdef(t.oid) FROM pg_trigger t
@@ -223,7 +250,8 @@ class BranchUpgradeTests(unittest.TestCase):
 
     def test_unknown_or_changed_history_rolls_back_without_baseline_adoption(self):
         for version,checksum,expected in [('unknown_future','hash','Unknown migration'),
-                (next(iter(migrations.sources(migrations.ARCHIVE))),'changed','Applied migration changed')]:
+                (next(iter(migrations.sources(migrations.ARCHIVE))),'changed','Applied migration changed'),
+                (migrations.BASELINE, 'changed', 'Applied migration changed')]:
             schema='upgrade_'+uuid4().hex
             scoped=make_conninfo(URL,options=f'-csearch_path={schema},public')
             with psycopg.connect(URL,autocommit=True) as c:

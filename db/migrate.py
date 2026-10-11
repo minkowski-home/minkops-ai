@@ -10,6 +10,12 @@ import psycopg
 MIGRATIONS = Path(__file__).resolve().with_name("migrations")
 ARCHIVE = Path(__file__).resolve().parent / "archive/pre-baseline"
 BASELINE = "0001_baseline"
+# One verified formatting-only rewrite. Match BOTH digests so future edits to
+# this migration still fail closed, including on installations of the old form.
+BASELINE_FORMAT_CHECKSUMS = (
+    "8add6cd28e9b81bc0ad179dfe20a160617f91e998163de03c3451a67ed478ba5",
+    "87bf2818223328eb68b93ee3fd4c00149d1aca4aa5d61fad85c65f7fbdbf1e6f",
+)
 
 
 def sources(directory):
@@ -45,7 +51,11 @@ def migrate(url: str) -> None:
             for version, checksum in applied.items():
                 if version not in known:
                     raise RuntimeError(f"Unknown migration history: {version}")
-                if checksum != known[version][1]:
+                equivalent_baseline = (
+                    version == BASELINE
+                    and (checksum, known[version][1]) == BASELINE_FORMAT_CHECKSUMS
+                )
+                if checksum != known[version][1] and not equivalent_baseline:
                     raise RuntimeError(f"Applied migration changed: {version}.sql")
             if BASELINE not in applied and applied:
                 # Converge either released branch with its original SQL/checksums.

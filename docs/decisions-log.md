@@ -952,3 +952,22 @@ databases, rather than discarding checksums or paid-session state.
 attention cannot disappear merely because a workflow finished or a record was
 viewed. Tests cover unchanged/changed destination evidence, wrong identities,
 actor audit and independent continuation. Production remains paused.
+
+## Preserve migration integrity during baseline readability cleanup (11 October 2026)
+
+**Situation:** The reconciled baseline retained dump-style ALTER statements for
+tables created in the same file. Folding them into CREATE statements changes the
+checksum, which would block already adopted installations despite an equivalent schema.
+
+**Task:** Improve readability without rebuilding existing databases, changing
+constraint identities or weakening detection of unverified migration edits.
+
+**Action:** Inline constraints and identities, order tables by foreign-key
+dependencies, and recognize only the exact original/new baseline digest pair.
+Preserve recorded history; continue rejecting unknown versions and all other
+checksum changes. Extend upgrade regressions to cover original baseline adoption,
+repeated migration, sequence settings and attempted unverified baseline edits.
+
+**Result:** Fresh and legacy schemas remain equivalent, including constraints,
+indexes, sequences, triggers and the updatable view. Existing rows and original
+checksums survive; migration changes outside the verified pair still fail closed.
