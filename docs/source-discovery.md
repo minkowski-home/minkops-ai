@@ -1,6 +1,6 @@
 # Source Discovery: reusable client context
 
-Source Discovery 0.7.2 and Windows companion 0.6.0 collect a versioned package
+Source Discovery 0.7.2 and Windows companion 0.6.4 collect a versioned package
 before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.
@@ -14,15 +14,15 @@ loopback port and an inclusive voucher period, never caller XML, TDL, scripts,
 hostnames or SQL. ODBC is no longer required for this core path.
 
 For each company it exports full identity, native **List of Accounts** with **All Masters** and no date
-filter, and detailed **DayBook** vouchers in 31-day date chunks. Native nested
+filter, and detailed **Voucher Register** vouchers in 31-day date chunks. Native nested
 fields, custom master types, identifiers and leading zeroes remain intact.
 Collection never samples records. Date filters apply only to vouchers. The report
 identifiers follow [Tally’s XML samples](https://help.tallysolutions.com/sample-xml/);
 **All Masters** alone is an import report.
-Cancelled/optional voucher coverage, customisation completeness and counts must
-be verified on the actual installation before release; native export support is
-not established by an offline fixture. See
-[MIN-124](https://linear.app/minkops/issue/MIN-124).
+Installation-specific customisations and counts require native export comparison.
+The released Windows/Tally checks, including live UDF and batch preservation,
+inclusive periods and empty exports, are recorded in
+[MIN-124 verification](verification-min-124.md).
 
 The hosted discovery skill inspects those saved records and proposes only obscure
 conventions or exceptions as subjective notes. Each note identifies its company,

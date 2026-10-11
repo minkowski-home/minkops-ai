@@ -5,10 +5,11 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.5.0 is required for version 2 discovery packages and shared Tally
+Companion 0.6.4 is the current release for version 2 discovery packages and shared Tally
 recovery. Core Tally discovery now uses HTTP/XML exports and needs no ODBC driver.
-Installed-RC evidence below is historical. Production deployment and Windows
-acceptance remain pending in [MIN-124](https://linear.app/minkops/issue/MIN-124).
+Installed-RC evidence below is historical. Current production, installed-upgrade
+and live Tally/Excel evidence is in [MIN-124 verification](verification-min-124.md).
+Windows 10 device testing was deferred by the owner; compatibility is retained.
 
 ## Local capabilities
 

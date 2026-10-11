@@ -74,7 +74,7 @@ vouchers and reviewed client notes, with Excel confined to headers and formula
 structure. Bill Entry pins this context, scans all selected bills, and saves
 approved native entries by company. Tally retains bookkeeping; Minkops controls
 entry, review and recovery. See [Source Discovery](docs/source-discovery.md) and
-[pending Windows deployment](https://linear.app/minkops/issue/MIN-124).
+[production release verification](docs/verification-min-124.md).
 
 ### Where development belongs
 

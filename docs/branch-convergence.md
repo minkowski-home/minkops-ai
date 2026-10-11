@@ -1,8 +1,8 @@
 # Shared architecture with the complete Bill Entry application
 
 This records the historical `platform-ai/bill-entry-architecture` consolidation,
-subsequently merged into `main`. Current discovery/attention work continues on
-`accounts/discovery-context`; follow README for the current product contract.
+subsequently merged into `main`. Discovery/attention release work is recorded in
+[MIN-124 verification](verification-min-124.md); follow README for the current product contract.
 There is one Accounts queue, hosted lifecycle and installation path.
 
 ## Retained source revisions
