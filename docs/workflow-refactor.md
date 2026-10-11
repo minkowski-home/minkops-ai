@@ -24,7 +24,9 @@ terminal executor, computer use, or generic replacement database tables.
 ## Reusable boundaries
 
 - `platform/run_controls`: request identity and transactional task/event/outbox
-  observations; callers retain transaction ownership and tenant authorization.
+  observations, operator-owned pause/resume/stop intent and durable resume wake-ups;
+  callers retain transaction ownership and tenant authorization. Control intent
+  stays separate from execution facts so late receipts cannot resurrect a stop.
 - `platform/runtime/lifecycle`: worker locking, state reload after locking,
   session/turn persistence, raw proposals before schema validation, cleanup,
   and no automatic replay of ambiguous session creation.

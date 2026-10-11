@@ -5,6 +5,29 @@ before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.
 
+## Review and progress
+
+Setup keeps PC selection, source choice and the voucher date range compact.
+Results use searchable company/folder rows, eight per page, with master totals
+and counts by type; record names remain in the saved catalog. Unique master
+counts come from the existing server lookup summary. Older exports without that
+summary are explicitly labeled exported masters, rather than claiming uniqueness.
+
+The four checkpoints distinguish waiting, active, done, required input and stopped
+states. A phase meter measures verified native reads (company identity, full
+master export, voucher date chunks and final scope check) or inspected workbooks.
+One activity line replaces its previous text. Failed exports never advance the
+count, and the meter is not an ETA or permission to reuse a catalog. Hosted
+interpretation and older companions without measurements show indeterminate
+activity. Only verified catalog confirmation marks the workflow finished.
+
+The optional bounded `progress` object travels through the existing companion
+observation endpoint. Measurements replace durable observation state without a
+task event per export chunk. Roll out the API accepting this optional field
+before a companion that sends it; older companions remain supported. Transient
+browser poll failures preserve the last results, show interrupted updates and
+retry with bounded backoff. Motion respects the reduced-motion preference.
+
 ## Collection and interpretation
 
 Source Discovery always uses `client_context`; depth and category selectors are
@@ -116,3 +139,24 @@ is unchanged. Completed sibling entries retain their receipts and plans.
 
 Tally error diagnosis, bounded restart and uncertain-import reconciliation are
 shared native capabilities; see [Windows recovery](windows-app.md).
+
+## Pause, resume and stop
+
+The operator can pause/resume or stop an active run from its task page. Controls
+are shared with Bill Entry, installed proposal workflows and local jobs. Pause
+blocks subsequent dispatch and approval; native discovery waits between verified
+reads and keeps its claim alive. A hosted turn or destination save already underway
+may finish. Its result and receipt remain authoritative. Resume wakes the cloud
+worker and continues the existing durable run without resubmitting paid inputs.
+
+Stop is irreversible: queued work and unsaved plans are cancelled, while completed
+saves and late verified receipts remain recorded. Business items that still need
+handling stay in shared attention. Explicit attention refreshes can still verify
+the original destination. A stopped task cannot approve writes or become active
+because an old receipt arrives. Start a new run for further automation.
+
+Deploy migration `0004_task_execution_controls` with the API and hosted worker,
+then the web client and companion together. Older companions honor dispatch gates
+but cannot pause discovery between reads; their current collection may finish.
+Polling exposes company/count summaries; full records remain in downloads and
+the immutable execution package.

@@ -1158,3 +1158,53 @@ unopened companies, stopped services, blocked closing/login and migration replay
 A live read of the Oct 1–2 period includes all three companies, with Pradeepraj
 Infra's 170 masters, and reports a complete package. Production deployment and
 companion rollout remain separate from this branch push.
+
+## Measure discovery work without inventing completion (11 October 2026)
+
+**Situation:** Discovery presented expanding record-name lists and four static
+checkpoints. Large company scopes became hard to review, and a failed browser
+poll could silently leave the screen frozen. Bulk Tally exports cannot truthfully
+report per-ledger processing or predict hosted interpretation duration.
+
+**Task:** Make discovery readable at scale and visibly active while preserving
+immutable evidence, catalog confirmation and the product's truthful automation rule.
+
+**Action:** Reuse server-derived master counts in searchable, paginated company
+rows. Add optional bounded phase measurements along the existing connector →
+desktop runtime → authenticated API path. Count verified native reads and workbook
+inspections, including the final company-scope check; failed reads earn no credit.
+Replace a single durable activity observation rather than adding an event per
+export chunk. Keep unknown-duration work indeterminate, confirmation separate,
+and source/company transitions auditable. Resume browser polling after transient
+failures with capped backoff and explicit stale-state feedback.
+
+**Result:** Regression coverage checks 13-company pagination, legacy counts,
+partial results, rejected measurements, API claim fencing and unchanged completion
+gates. Browser verification exercises source selection, review, reconnect recovery,
+four themes, mobile layouts and reduced motion using isolated fixtures. Live Tally
+and deployment verification remain separate from that UI evidence.
+
+## Separate operator controls from execution facts (11 October 2026)
+
+**Situation:** Workflows span hosted turns, parallel bill children, read-only native
+collection and verified destination saves. Cancelling by changing a visible status
+would allow stale workers to restart work, lose receipts, or repeat uncertain writes.
+
+**Task:** Provide shared Pause/Resume and Stop controls with truthful feedback and
+auditable operator intent, preserving the existing runtime and financial safeguards.
+
+**Action:** Add one bounded task control field independent of domain run states.
+Fence worker selection, approval and new browser plans; serialize hosted dispatch
+and finishing against the run locks used by controls. Pause native discovery at read
+boundaries while renewing its existing claim. Stop cancels unsaved intents, retains
+verified and late receipts, and sends remaining business items to shared attention.
+Use the existing task timeline/outbox for actor audit and wake the cloud worker on
+resume, even after it acknowledged an idle queue. Unknown-duration work remains
+indeterminate and a stopped task never acquires a fictional completion percentage.
+
+**Result:** PostgreSQL integration covers concurrent duplicate actions, operator
+authorization, resume wake-up, hosted work stopped before review, blocked approvals
+and late Excel/Tally receipts. Native tests cover pause/resume boundaries, offline
+pause retention and stop propagation. Browser checks exercise controls and verify
+paused/stopped animation feedback. Production rollout requires the migration and
+coordinated API/worker/client versions; already issued operations may finish.
