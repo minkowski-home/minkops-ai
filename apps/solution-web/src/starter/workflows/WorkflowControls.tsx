@@ -85,7 +85,7 @@ function ProposalReview({ tenant, taskId }: { tenant: string; taskId: string }) 
     finally { setBusy(false); }
   }
   return <section className="accounts-panel">{error && <p role="alert">{error}</p>}
-    {run?.result && <pre>{JSON.stringify(run.result, null, 2)}</pre>}
+    {typeof run?.result?.summary === 'string' && <p>{run.result.summary.slice(0,160)}</p>}
     {run?.state === "review" && <button className="button button-primary" disabled={busy} onClick={() => void approve()}>Approve result</button>}
   </section>;
 }

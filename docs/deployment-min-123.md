@@ -114,7 +114,15 @@ Installed core Source Discovery is 0.6.1 and mock-client Bill Entry variant is
 reviewed RC supplier purchase/GST ledger mappings in Test Company;
 core instructions, tenant boundaries and financial write checks remain shared.
 
-Source catalogs are immutable tenant-owned PostgreSQL JSON snapshots. Bill Entry
+The following source-discovery and Bill Entry evidence describes the **deployed
+pre-refactor contract**, not `accounts/discovery-context`. Source Discovery 0.7.2,
+Bill Entry 0.9.0 and companion 0.6.0 require coordinated release and live
+acceptance under [MIN-124](https://linear.app/minkops/issue/MIN-124). New runs use
+full company context, dated voucher evidence and structure-only Excel projections;
+they do not prepare separate Tally references. See [Source Discovery](source-discovery.md).
+Production remains at the historical revisions below until that release is approved.
+
+Source catalogs were immutable tenant-owned PostgreSQL JSON snapshots. Bill Entry
 pins the reviewed catalog and separately prepares current company references;
 schema discovery never exports business records. The real Windows-to-GCP receipt
 returned 275 tables, zero records, completed review and accepted identical replay.
@@ -213,9 +221,11 @@ Use `apps/windows-app/tests/production-smoke.mjs` only with an explicit test com
 and private owner state, for real schema or workflow-reference receipt checks.
 Its explicit save phase is limited to hash-allowlisted synthetic bills in Test Company,
 checks independent readback, and replays both the native save and server receipt.
-`infra/verify_production.py` launches only reviewed synthetic fixtures and
-records actual hosted results. Never substitute fake execution or seed_demo for
-production proof. Publish an unsigned **release candidate**, not a signed final
+`scripts/verify_production.py` launches only reviewed synthetic fixtures and
+records actual hosted results. Its `bill-retry` phase retries original evidence
+after corrections in the original system and refreshed discovery; it replaces
+the obsolete correction-text `bill-clarify` phase. Never substitute fake execution
+or seed_demo for production proof. Publish an unsigned **release candidate**, not a signed final
 release claim; the download page discloses its actual distribution status.
 
 MIN-122 still needs fresh Windows 10/11 x64 install/launch, driver present/missing,
@@ -236,11 +246,14 @@ scheduling MIN-121 is separate.
    customer invoice dates; an unsupported date must remain held, never shifted
    to get past a licence restriction. The rejected 8 October release test created
    zero vouchers and is retained in the review history.
-3. Run Source Discovery for Tally, inspect table/column context, then export its
-   JSON. Explain that the catalog belongs to this tenant and version; it contains
-   no sampled business rows. Each client can have its own reviewed catalog.
-4. Launch Bill Entry with the reviewed RC invoice and catalog. Show the waiting
-   for PC/reference stage, hosted extraction, evidence, arithmetic and review.
+3. After the MIN-124 release, run Source Discovery for all authorised loaded Tally
+   companies and the selected inclusive voucher period. Review identities, master
+   and voucher counts and any evidenced subjective notes, then confirm/export
+   the versioned package. Tally context contains complete native business records;
+   Excel discovery contains structure and formula text without business rows.
+4. Launch Bill Entry with the reviewed RC invoice and confirmed context package.
+   Select locked-company or inferred-company mode. Show hosted extraction,
+   buyer/company evidence, arithmetic and review before any native write.
    Client allocation guidance overlays the core workflow; write safeguards remain
    enforced by the shared platform and native adapter.
 5. Approve only the reviewed values. Show Tally destination readback and task

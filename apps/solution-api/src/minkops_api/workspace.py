@@ -66,6 +66,8 @@ def workspace(slug: str, user: User, connection: Db):
         "employees": employees_for(connection, tenant["id"]),
         "workflows": workflows_for(connection, tenant["id"]),
         "tasks": tasks_for(connection, tenant["id"]),
+        "attention_count": connection.execute("SELECT count(*) AS n FROM attention_items WHERE tenant_id=%s AND status='pending'",
+                                              (tenant["id"],)).fetchone()["n"],
     }
 
 

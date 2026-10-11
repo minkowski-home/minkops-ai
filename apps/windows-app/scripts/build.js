@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { mkdir, readFile, writeFile, cp } from "node:fs/promises";
+import { resolve } from "node:path";
 await build({
   entryPoints: ["src/main.js"],
   outfile: "dist/main.cjs",
@@ -8,6 +9,13 @@ await build({
   format: "cjs",
   target: "node22",
   external: ["electron"],
+  // npm file dependencies can be copies on Windows. Bundle the current workspace
+  // sources, while resolving third-party dependencies from this app's lockfile.
+  alias: {
+    "@minkops/desktop-connectors": resolve("../../connectors/desktop/src/index.js"),
+    "@minkops/desktop-runtime": resolve("../../platform/desktop-runtime/src/worker.js"),
+  },
+  nodePaths: [resolve("node_modules")],
 });
 await build({
   entryPoints: ["src/preload.js"],

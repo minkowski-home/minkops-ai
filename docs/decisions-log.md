@@ -873,3 +873,160 @@ wrong companies and mismatched fixture values, and added the optimized run to CI
 **Result:** Normal and optimized checks reject unsafe reviews before `/approve`;
 the valid clarification path still submits through the ordinary tenant API.
 Production fixture/hash, owner and company limits no longer disappear under `-O`.
+
+## Pin reusable client context and reconcile uncertain native imports (10 October 2026)
+
+**Situation:** Schema-only discovery and per-bill reference exports repeated work,
+missed nested client conventions and forced each run into one company. A Tally
+process can exit during an import, making its acknowledgement insufficient proof
+of either success or failure.
+
+**Task:** Reuse complete discovery evidence, scan mixed-company bills before
+saving, and recover native failures without introducing another accounting layer
+or weakening existing approval, identity and duplicate safeguards.
+
+**Action:** Kept core interpretation in versioned skills/configuration. Added
+bounded native full-master and period-voucher exports, verified report identifiers
+against primary Tally documentation, immutable local packages
+and authorized hosted lookup files. Pinned company GUIDs and extraction context
+per run, separated company routing from business fields, and grouped approved
+plans by company. Retained the existing Purchase adapter and receipts. Shared
+native recovery observes a trusted Tally process, records local diagnostics and
+restarts only a disappeared instance once. Reads may retry; imports with an
+unknown outcome enter read-only reconciliation and never automatic replay.
+
+**Result:** Offline regressions exercise nested records, period and identity
+validation, context pinning, mixed-company duplicate isolation, locked-company
+conflicts, import acknowledgement loss and restart fencing. Desktop/mobile launch
+checks show the new controls without browser errors. Existing financial recovery
+checks remain in place. Installation-specific export completeness, numeric `/LOAD`
+support, Windows crashes and deployment are explicitly pending in MIN-124;
+offline tests do not establish live compatibility.
+
+## Reconcile native XML representations without weakening financial guards (10 October 2026)
+
+**Situation:** MIN-124 live testing found that Tally's detailed exports differ
+from compact reference collections: message indentation creates text nodes,
+DayBook appends company metadata, and numeric company/AlterID fields contain
+padding and typed wrappers. Valid exports were rejected and unchanged ledgers
+looked stale. A restart licence handoff also hid an import's ambiguity flag.
+
+**Task:** Accept the installation's native representation while retaining full
+evidence, company identity checks, genuine stale-master rejection and the rule
+that an unknown import must never be replayed automatically.
+
+**Action:** Reproduced each protocol failure before fixing it. Ignore only
+message-level formatting whitespace; validate DayBook's ancillary company
+trailer against the just-discovered GUID/name. Normalize only numeric startup
+arguments and numeric AlterID comparisons, leaving original discovery records
+and other identity fields intact. Preserve write uncertainty when restart or
+readiness fails. Clarified versioned hosted contracts for company-scoped notes,
+Excel inventory coverage and company routing outside business-field evidence.
+
+**Result:** Regression tests reject mismatched company trailers, actual master
+changes, arbitrary startup arguments and import replay. Paid gpt-6-luna discovery
+and a reviewed mixed-company batch completed against real Windows Tally with
+independent duplicate-free readback. Controlled termination exposed native
+settings/licence handoffs, which are recorded as limitations rather than claims
+of unattended recovery. Production deployment remains paused under MIN-124.
+
+### 2026-10-10 — Decisions without accounting editors, with verifiable attention
+
+**Situation:** Review mixed automation with editable accounting values and
+correction prompts. Deferred bills could remain scattered in workflow tasks,
+while accepting a low-confidence scan could be mistaken for completed review.
+
+**Task:** Keep Minkops simple while preserving truthful automation, cross-workflow
+manual obligations and auditable authorization.
+
+**Action:** Introduce shared tenant-scoped attention events and concise one-click
+decisions; reject manual accounting value edits in the API as well as removing
+the UI. Keep external resolution checks read-only and pin the post-write native
+fingerprint for best-guess review. Separate explicit supplier creation from reads,
+verify company/master identities, then continue only the authorized bill. Preserve
+ordered native writes and bounded independent hosted sessions. Consolidate the
+final schema for new installs with immutable archived upgrade history for released
+databases, rather than discarding checksums or paid-session state.
+
+**Result:** Operators decide, original systems own manual corrections, and durable
+attention cannot disappear merely because a workflow finished or a record was
+viewed. Tests cover unchanged/changed destination evidence, wrong identities,
+actor audit and independent continuation. Production remains paused.
+
+## Preserve migration integrity during baseline readability cleanup (11 October 2026)
+
+**Situation:** The reconciled baseline retained dump-style ALTER statements for
+tables created in the same file. Folding them into CREATE statements changes the
+checksum, which would block already adopted installations despite an equivalent schema.
+
+**Task:** Improve readability without rebuilding existing databases, changing
+constraint identities or weakening detection of unverified migration edits.
+
+**Action:** Inline constraints and identities, order tables by foreign-key
+dependencies, and recognize only the exact original/new baseline digest pair.
+Preserve recorded history; continue rejecting unknown versions and all other
+checksum changes. Extend upgrade regressions to cover original baseline adoption,
+repeated migration, sequence settings and attempted unverified baseline edits.
+
+**Result:** Fresh and legacy schemas remain equivalent, including constraints,
+indexes, sequences, triggers and the updatable view. Existing rows and original
+checksums survive; migration changes outside the verified pair still fail closed.
+
+## Wait for the complete Tally startup scope before resuming (11 October 2026)
+
+**Situation:** Live interruption testing exposed a readiness check that accepted
+the first loaded company while another requested company was still loading.
+A native memory-access error was also observed; its cause was not established.
+
+**Task:** Resume only after every known numeric company identity is available,
+without bypassing licence/login screens or replaying an uncertain import.
+
+**Action:** Poll company numbers as well as listener availability and wait for
+the complete observed startup scope. Add a regression that first returns one
+company, then both; it fails before the correction and passes afterwards. Keep
+explicit operator continuation after native handoffs separate from automatic
+recovery, preserving the original plan and import count for reconciliation.
+
+**Result:** The Windows native suite passes. Live post-import recovery reads back
+the existing voucher as a duplicate with one import and one restart. Licence
+handoffs remain visible; neither elapsed time nor a partial startup authorizes
+a second import.
+
+## Verify the native report honors the requested period (11 October 2026)
+
+**Situation:** An empty-period live check exposed that TallyPrime's DayBook XML
+report returned its current day despite explicit date variables. Existing range
+validation correctly rejected those records, but discovery could not complete
+for that period and could miss other dates inside a wider range.
+
+**Task:** Preserve complete native voucher XML while honoring inclusive date
+bounds, including empty periods and records across monthly request chunks.
+
+**Action:** Select the native Voucher Register report, which honors the same
+date variables on the installed TallyPrime. Add a failing range regression,
+compare every exported master/voucher record with native XML, and exercise
+populated and empty dates with nested allocations and a real custom UDF.
+
+**Result:** Native exports preserve all records and custom fields. Empty dates
+complete with zero vouchers, while date validation still rejects out-of-scope
+responses. The correction is included in companion 0.6.4.
+
+## Build Windows releases from current workspace sources (11 October 2026)
+
+**Situation:** Native source tests passed, but an installed archive collision
+check still reproduced the old behavior. Inspection of the compiled artifact
+showed that npm's Windows file dependencies were copied modules, leaving the
+bundle on older connector sources despite its updated application version.
+
+**Task:** Make release builds reliably include the reviewed workspace code while
+retaining the installed, locked third-party dependencies.
+
+**Action:** Resolve both workspace packages directly to their repository entry
+points in esbuild, with third-party resolution through the app's node_modules.
+Verify the compiled runtime and repeat the installed archive/date-range checks.
+Preserve intermediate release evidence instead of treating source tests as proof
+of an installed artifact.
+
+**Result:** The release bundle includes the range-aware voucher register, complete
+company readiness and collision-preserving archive checks from current sources.
+The final release is 0.6.4; earlier candidates do not establish those guarantees.

@@ -154,6 +154,16 @@ def tally_target(connection, tenant, user, discovery_id):
         raise ServiceError("forbidden", "Use source discovery confirmed by your account.")
     desktop.owned_device(connection, tenant["id"], user["id"], row["device_id"])
     source = next(s["snapshot"] for s in catalog["sources"] if s["tool"] == "tally")
+    if "companies" in source:
+        from .client_context import targets_from_snapshot
+
+        return {
+            "device_id": str(row["device_id"]),
+            "discovery_id": str(discovery_id),
+            "companies": targets_from_snapshot(source, row["device_id"], discovery_id),
+            "company_mode": "infer",
+            "locked_company_guid": None,
+        }
     if "schema_tables" in source:
         # Metadata is reusable context, not a supplier directory. Bill Entry
         # collects its own bounded references through the registered PC.
@@ -283,6 +293,13 @@ def accept_context(connection, device, job, result):
 
 
 def recheck_target(connection, tenant, user, current):
+    if "companies" in current:
+        from minkops_platform import desktop
+
+        desktop.owned_device(connection, tenant["id"], user["id"], current["device_id"])
+        # The approved snapshot stays pinned. The native adapter rechecks exact
+        # company/master versions and duplicates immediately before each write.
+        return current
     discovered = tally_target(connection, tenant, user, current["discovery_id"])
     if discovered.get("schema_only"):
         if any(discovered[key] != current[key] for key in ("company", "port", "device_id")):
@@ -343,7 +360,13 @@ def capture_tally_findings(result, target):
     unresolved = result.setdefault("unresolved", [])
     for record in result["records"]:
         try:
-            validate_tally(record["data"], target)
+            from .client_context import select_target
+
+            selected = select_target(record, target)
+            if "companies" in target:
+                record["company_guid"] = selected["references"]["company_guid"]
+                record["company_name"] = selected["company"]
+            validate_tally(record["data"], selected)
         except ValueError as error:
             reason = str(error)
             if reason not in record["findings"]:
@@ -360,6 +383,23 @@ def refreshed_tally_target(connection, tenant, user, current):
     Never reroute a held bill to a different company or device. A pending or
     failed refresh must be confirmed before a new paid extraction can start.
     """
+    if "companies" in current:
+        latest = connection.execute(
+            "SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config->>'depth'='client_context' ORDER BY created_at DESC LIMIT 1",
+            (tenant["id"], user["id"], current["device_id"]),
+        ).fetchone()
+        updated = tally_target(
+            connection, tenant, user, latest["id"] if latest else current["discovery_id"]
+        )
+        if {c["destination_key"] for c in current["companies"]} != {
+            c["destination_key"] for c in updated.get("companies", [])
+        }:
+            raise ServiceError("conflict", "Company scope changed. Start a new bill run.")
+        return {
+            **updated,
+            "company_mode": current["company_mode"],
+            "locked_company_guid": current["locked_company_guid"],
+        }
     latest = connection.execute(
         """SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
         AND device_id=%s AND config->'tally'->>'company'=%s

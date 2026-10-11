@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import psycopg
 from psycopg import sql
-from psycopg.conninfo import make_conninfo
 
 from google_api import GoogleApi
 

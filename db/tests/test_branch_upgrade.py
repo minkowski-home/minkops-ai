@@ -6,6 +6,7 @@ import os
 import unittest
 from pathlib import Path
 from uuid import uuid4
+from unittest.mock import patch
 
 import psycopg
 from psycopg import sql
@@ -21,7 +22,7 @@ spec.loader.exec_module(migrations)
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class BranchUpgradeTests(unittest.TestCase):
     def test_fresh_and_both_branch_upgrades_preserve_runs_checksums_and_view_writes(self):
-        for branch in (None, "platform-ai/workflow-architecture", "employees/bill-entry"):
+        for branch in (None, "platform-ai/workflow-architecture", "employees/bill-entry", "current", "baseline"):
             with self.subTest(branch=branch):
                 self.check_upgrade(branch)
 
@@ -36,7 +37,7 @@ class BranchUpgradeTests(unittest.TestCase):
                     "CREATE TABLE schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz DEFAULT now())"
                 )
                 if branch:
-                    directory = ROOT / "db/migrations"
+                    directory = migrations.ARCHIVE
                     names = sorted(
                         path
                         for path in directory.glob("*.sql")
@@ -53,6 +54,10 @@ class BranchUpgradeTests(unittest.TestCase):
                         else ["0009_bill_entry.sql", "0010_bill_company_reservation.sql"]
                     )
                     names.extend(directory / name for name in suffix)
+                    if branch == "current":
+                        names = sorted(directory.glob("*.sql"))
+                    if branch == "baseline":
+                        names = sorted(migrations.MIGRATIONS.glob("*.sql"))
                     for name in names:
                         source = name.read_bytes()
                         if name.name in retained:
@@ -65,6 +70,13 @@ class BranchUpgradeTests(unittest.TestCase):
                         connection.execute(
                             "INSERT INTO schema_migrations(version,checksum) VALUES (%s,%s)",
                             (Path(name).stem, hashlib.sha256(source).hexdigest()),
+                        )
+                    if branch == "baseline":
+                        # The original dump-style baseline has the same schema.
+                        # Existing installations must retain its recorded checksum.
+                        connection.execute(
+                            "UPDATE schema_migrations SET checksum=%s WHERE version=%s",
+                            ("8add6cd28e9b81bc0ad179dfe20a160617f91e998163de03c3451a67ed478ba5", migrations.BASELINE),
                         )
                     tenant = connection.execute(
                         "INSERT INTO tenants(slug,name) VALUES ('history','History') RETURNING id"
@@ -104,6 +116,19 @@ class BranchUpgradeTests(unittest.TestCase):
                     ).fetchall()
             migrations.migrate(scoped)
             migrations.migrate(scoped)
+            if branch == "baseline":
+                original_sources = migrations.sources
+
+                def changed_sources(directory):
+                    result = original_sources(directory)
+                    if directory == migrations.MIGRATIONS:
+                        source, _ = result[migrations.BASELINE]
+                        result[migrations.BASELINE] = (source, "unverified-baseline-edit")
+                    return result
+
+                with patch.object(migrations, "sources", changed_sources):
+                    with self.assertRaisesRegex(RuntimeError, "Applied migration changed"):
+                        migrations.migrate(scoped)
             with psycopg.connect(scoped) as connection:
                 self.assertEqual(
                     connection.execute(
@@ -125,6 +150,11 @@ class BranchUpgradeTests(unittest.TestCase):
                     )
                 }
                 self.assertIn("parent_run_id", columns)
+                shape = self.schema_shape(connection, schema)
+                if branch is None:
+                    self.fresh_shape = shape
+                else:
+                    self.assertEqual(shape, self.fresh_shape)
                 if branch:
                     if pending_write:
                         self.assertEqual(
@@ -186,3 +216,54 @@ class BranchUpgradeTests(unittest.TestCase):
         finally:
             with psycopg.connect(URL, autocommit=True) as admin:
                 admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
+    def schema_shape(self, connection, schema):
+        """Compare effective schema, not formatting, OIDs or migration counts."""
+        queries = [
+            """SELECT c.relname,c.relkind,a.attname,a.attnum,format_type(a.atttypid,a.atttypmod),
+            a.attnotnull,a.attidentity,pg_get_expr(d.adbin,d.adrelid)
+            FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
+            LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+            WHERE n.nspname=%s AND c.relkind IN ('r','v') AND c.relname<>'schema_migrations'
+            ORDER BY c.relname,a.attnum""",
+            """SELECT c.relname,k.conname,pg_get_constraintdef(k.oid)
+            FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+            JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=%s AND c.relname<>'schema_migrations' ORDER BY c.relname,k.conname""",
+            "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname=%s AND tablename<>'schema_migrations' ORDER BY indexname",
+            """SELECT c.relname,format_type(s.seqtypid,NULL),s.seqstart,s.seqincrement,
+            s.seqmax,s.seqmin,s.seqcache,s.seqcycle FROM pg_sequence s
+            JOIN pg_class c ON c.oid=s.seqrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=%s ORDER BY c.relname""",
+            """SELECT c.relname,pg_get_viewdef(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=%s AND c.relkind='v' ORDER BY c.relname""",
+            """SELECT c.relname,t.tgname,pg_get_triggerdef(t.oid) FROM pg_trigger t
+            JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=%s AND NOT t.tgisinternal ORDER BY c.relname,t.tgname""",
+            """SELECT p.proname,p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname=%s ORDER BY p.proname""",
+        ]
+        return [[tuple(' '.join(value.replace(schema+'.','').replace('public.','').split())
+                      if isinstance(value,str) else value for value in row)
+                 for row in connection.execute(query,(schema,))] for query in queries]
+
+    def test_unknown_or_changed_history_rolls_back_without_baseline_adoption(self):
+        for version,checksum,expected in [('unknown_future','hash','Unknown migration'),
+                (next(iter(migrations.sources(migrations.ARCHIVE))),'changed','Applied migration changed'),
+                (migrations.BASELINE, 'changed', 'Applied migration changed')]:
+            schema='upgrade_'+uuid4().hex
+            scoped=make_conninfo(URL,options=f'-csearch_path={schema},public')
+            with psycopg.connect(URL,autocommit=True) as c:
+                c.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
+            try:
+                with psycopg.connect(scoped) as c:
+                    c.execute('CREATE TABLE schema_migrations(version text PRIMARY KEY,checksum text,applied_at timestamptz DEFAULT now())')
+                    c.execute('INSERT INTO schema_migrations(version,checksum) VALUES (%s,%s)',(version,checksum))
+                with self.assertRaisesRegex(RuntimeError,expected): migrations.migrate(scoped)
+                with psycopg.connect(scoped) as c:
+                    self.assertEqual(c.execute('SELECT version FROM schema_migrations').fetchall(),[(version,)])
+                    self.assertIsNone(c.execute('SELECT to_regclass(%s)',(schema+'.tenants',)).fetchone()[0])
+            finally:
+                with psycopg.connect(URL,autocommit=True) as c:
+                    c.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))

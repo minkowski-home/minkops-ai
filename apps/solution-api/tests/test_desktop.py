@@ -107,7 +107,7 @@ class DesktopTests(unittest.TestCase):
                 self.client.post(route, headers=self.worker, content=content).status_code, 422
             )
         self.assertEqual(
-            self.client.post(route, headers=self.worker, content=b" " * 42_000_001).status_code, 413
+            self.client.post(route, headers=self.worker, content=b" " * 96_000_001).status_code, 413
         )
 
     def test_rotation_invalidates_old_credential_and_request_key_cannot_change(self):

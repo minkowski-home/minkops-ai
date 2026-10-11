@@ -4,11 +4,16 @@
   "properties": {
     "destination_mode": {
       "type": "string",
-      "enum": ["excel", "tally", "both"]
+      "enum": [
+        "excel",
+        "tally",
+        "both"
+      ]
     },
     "discovery_depth": {
       "type": "string",
       "enum": [
+        "client_context",
         "structure",
         "reference_data",
         "business_mappings"
@@ -53,6 +58,10 @@
         "initial",
         "refresh"
       ]
+    },
+    "discovery_run_id": {
+      "type": "string",
+      "format": "uuid"
     }
   },
   "required": [

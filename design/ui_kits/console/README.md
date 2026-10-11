@@ -13,3 +13,8 @@ searchable discovery mapping, bill evidence/review and verified local-save
 states. It imports the same `design/accounts.css` used by the app and supports
 Minkops Light, Minkops Dark, Slate Light and Slate Dark. Its buttons are disabled
 because execution belongs to the authenticated running app, not this specimen.
+
+The Accounts specimen also shows full Tally discovery with a voucher-only date
+range, reusable client notes, company selection and a company decision beside
+each bill. These additions reuse the current controls and tokens; the connected
+app remains the executable reference.

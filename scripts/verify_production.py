@@ -1,4 +1,9 @@
-"""Opt-in owned-demo release checks; credentials and results stay private."""
+"""Opt-in owned-demo workflow checks; credentials and results stay private.
+
+After correcting the original system and refreshing discovery, bill-retry reads
+the original evidence again. Reviewed fixture values only guard approval; they
+are never submitted as agent correction text.
+"""
 
 import argparse
 import hashlib
@@ -58,28 +63,19 @@ def main(state_dir, phase, invoice):
             run = api.get(BASE + f"/runs/{previous['id']}")
             run.raise_for_status()
             result = run.json()
-            if phase == "bill-clarify":
+            if phase == "bill-retry":
                 provenance = result["config"]["file_provenance"]
                 require(len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS,
-                        "Clarification requires one reviewed synthetic fixture")
-                expected = REVIEWED_BILLS[provenance[0]["sha256"]]
+                        "Retry requires one reviewed synthetic fixture")
                 require(result["state"] == "review" and result["result"]["unresolved"],
-                        "Only unresolved reviews may be clarified")
+                        "Only unresolved reviews may be retried")
                 require(result["config"]["tally_target"]["company"] == "Test Company",
-                        "Release clarification is restricted to Test Company")
-                clarification = api.post(BASE + f"/runs/{previous['id']}/resolve-bill", json={
+                        "Release retry is restricted to Test Company")
+                retry = api.post(BASE + f"/runs/{previous['id']}/resolve-bill", json={
                     "file_id": provenance[0]["id"],
-                    "user_input": (
-                        "This is an authorized synthetic release test solely in Test Company, not a commercial transaction. "
-                        "Use the printed invoice identifier or billing Ref as the invoice_number; a weighbridge ID is not the invoice number. "
-                        "The synthetic/non-commercial label is intentional test context. "
-                        f"The reviewed fixture's approved purchase ledger is {expected['purchase_ledger']}; "
-                        f"allocate its stated GST to the exact tax ledger {expected['tax_ledger']}. "
-                        "Preserve observed amounts and evidence, and leave any other missing or conflicting values unresolved."
-                    ),
                 })
-                clarification.raise_for_status()
-                result = clarification.json()
+                retry.raise_for_status()
+                result = retry.json()
             if phase == "bill-approve":
                 provenance = result["config"]["file_provenance"]
                 require(len(provenance) == 1 and provenance[0]["sha256"] in REVIEWED_BILLS,
@@ -105,7 +101,7 @@ def main(state_dir, phase, invoice):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, required=True)
-    parser.add_argument("phase", choices=["bill-start", "bill-inspect", "bill-approve", "bill-clarify"])
+    parser.add_argument("phase", choices=["bill-start", "bill-inspect", "bill-approve", "bill-retry"])
     parser.add_argument("--invoice", type=Path)
     args = parser.parse_args()
     main(args.state_dir, args.phase, args.invoice)

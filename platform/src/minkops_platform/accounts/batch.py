@@ -25,13 +25,11 @@ def create_children(connection, run):
         create_child(connection, run, file_id)
 
 
-def create_child(connection, run, file_id, *, user_input=None):
+def create_child(connection, run, file_id):
     config = copy.deepcopy(run["config"])
     config.pop("batch", None)
     config.pop("retry_file_id", None)
     config.pop("tally_context_job_id", None)
-    if user_input:
-        config["user_input"] = user_input
     config["file_ids"] = [file_id]
     config["review_mode"] = "all_outputs"
     child = connection.execute(
@@ -78,8 +76,8 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
         run["result"]["findings"].append(f"Operator rejected input {file_id}; it was not written.")
         complete_run(connection, run, run["result"])
     else:
-        if not user_input.strip():
-            raise ServiceError("invalid", "Describe the correction or missing information.")
+        if user_input.strip():
+            raise ServiceError("invalid", "Edit the original system, refresh discovery, then retry.")
         original_target = run["config"].get("tally_target")
         if original_target:
             from .bills import refreshed_tally_target
@@ -96,7 +94,30 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
         )
-        child = create_child(connection, run, file_id, user_input=user_input.strip())
+        child = create_child(connection, run, file_id)
+        if "companies" in child["config"].get("tally_target", {}):
+            from ..discovery import workflow_context
+            from .client_context import context_assets
+
+            catalog = workflow_context(
+                connection, tenant["id"], child["config"]["tally_target"]["discovery_id"], ["tally"]
+            )
+            child["config"]["source_catalog_snapshot"] = catalog
+            assets, _ = context_assets(catalog)
+            # Only this continuation gets newer evidence; completed siblings retain
+            # their original snapshot and verified company destinations.
+            child["config"]["authorized_bindings"] = [
+                b
+                for b in child["config"]["authorized_bindings"]
+                if not b["resource_id"].startswith("discovery-")
+            ] + [
+                {"capability": "files.snapshot", "resource_id": a["id"], "sha256": a["sha256"]}
+                for a in assets
+            ]
+            connection.execute(
+                "UPDATE account_runs SET config=%s WHERE id=%s",
+                (Jsonb(child["config"]), child["id"]),
+            )
         if child["config"].get("tally_target", {}).get("schema_only"):
             from .bills import queue_tally_context
             from ..discovery import workflow_context
@@ -123,7 +144,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             connection,
             run,
             "queued",
-            "Reading the clarified bill. Previously verified entries are preserved.",
+            "Rechecking the bill. Previously verified entries are preserved.",
             30,
         )
     return public_run(connection, run_for(connection, tenant["id"], run_id))
@@ -199,6 +220,11 @@ def reconcile_once(url):
             # The parent review carries the same immutable client policy as its
             # independent children; aggregation cannot discard a review gate.
             result = enforce_policies(parent["config"], result)
+            from .attention import flag
+            for issue in result.get("unresolved", []):
+                record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
+                              {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
+                flag(connection, parent, record)
             connection.execute(
                 "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), parent["id"])
             )

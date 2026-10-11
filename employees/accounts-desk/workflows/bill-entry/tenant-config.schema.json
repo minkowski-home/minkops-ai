@@ -28,6 +28,21 @@
         "mixed"
       ],
       "title": "Bill inputs"
+    },
+    "company_mode": {
+      "type": "string",
+      "enum": [
+        "locked",
+        "infer"
+      ],
+      "title": "Company selection"
+    },
+    "locked_company_guid": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
     }
   },
   "required": [

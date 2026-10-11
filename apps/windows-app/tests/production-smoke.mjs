@@ -16,7 +16,7 @@ const phase = process.env.MINKOPS_RELEASE_PHASE || 'schema';
 assert.ok(['schema', 'references', 'save'].includes(phase));
 assert.ok(directory && company, 'Supply a private state directory and explicit test company');
 const credentials = JSON.parse(await readFile(join(directory, 'demo-owner.json'), 'utf8'));
-const reviewedBills = JSON.parse(await readFile(new URL('../../../infra/release-bill-fixtures.json', import.meta.url), 'utf8'));
+const reviewedBills = JSON.parse(await readFile(new URL('../../../scripts/release-bill-fixtures.json', import.meta.url), 'utf8'));
 const origin = 'https://app.minkops.com';
 let cookie = '', csrf = '', pending = null, executedJob = null, lastReceipt = null;
 async function api(path, body, { method = body === undefined ? 'GET' : 'POST', worker = false } = {}) {
