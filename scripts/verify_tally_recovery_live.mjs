@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -19,6 +19,38 @@ const root = process.env.MINKOPS_LIVE_EVIDENCE;
 const stage = process.argv[2];
 assert.ok(company && root && ["probe", "masters", "vouchers", "preflight", "import", "readback", "ack-applied", "ack-absent", "ack-different"].includes(stage));
 await mkdir(root, { recursive: true });
+if (process.argv[3] === "--resume") {
+  // An explicit operator continuation after Tally's native licence/login handoff.
+  // Preserve the original plan and counts; an attempted import is read back only.
+  const previous = JSON.parse(await readFile(join(root, `recovery-${stage}.json`), "utf8"));
+  assert.equal(previous.stage, stage);
+  assert.equal(previous.company, company);
+  assert.ok(previous.failure && previous.restarts === 1 && previous.imports <= 1);
+  const current = await captureTallyProcess();
+  assert.equal(current?.exe, previous.observed.exe);
+  let imports = previous.imports;
+  const request = async (url, options) => {
+    if (/<TALLYREQUEST>Import(?: Data)?<\/TALLYREQUEST>/.test(options.body)) imports++;
+    return fetch(url, options);
+  };
+  let result;
+  if (["probe", "masters", "vouchers"].includes(stage)) {
+    result = await discoverClientContext({port:9000,period:{from:"2026-10-01",to:"2026-10-02"}}, {request});
+    assert.equal(result.partial, false);
+    assert.equal(result.companies.length, 2);
+    assert.equal(imports, 0);
+  } else {
+    assert.equal(previous.plan.company, company);
+    result = await commitTallyBill(previous.plan, {request, reconciliationOnly: previous.imports > 0});
+    assert.ok(["saved", "duplicate"].includes(result.outcome));
+    assert.equal(imports, 1, "Explicit resume must never replay an uncertain import.");
+    const matches = (await readTallyBills({company})).filter(v=>v.invoice_number===previous.plan.data.invoice_number);
+    assert.equal(matches.length, 1);
+  }
+  await writeFile(join(root, `recovery-${stage}-resumed.json`), JSON.stringify({previous, imports, result, explicit_resume:true}, null, 2));
+  console.log(JSON.stringify({stage, explicit_resume:true, imports, outcome:result.outcome ?? "ready"}));
+  process.exit(0);
+}
 const observed = await captureTallyProcess();
 assert.ok(observed, "Start one known Tally instance.");
 // Match the companion's startup fallback: use identities exported by this
