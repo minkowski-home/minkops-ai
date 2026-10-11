@@ -85,7 +85,7 @@ const request = recoveringTallyRequest({
     const trigger = !injections && (
       stage === "probe" && options.body.includes("<ID>MinkopsCompanies</ID>") ||
       stage === "masters" && options.body.includes("<ID>List of Accounts</ID>") ||
-      stage === "vouchers" && options.body.includes("<ID>DayBook</ID>") ||
+      stage === "vouchers" && options.body.includes("<ID>Voucher Register</ID>") ||
       stage === "preflight" && !write ||
       stage === "readback" && imports > 0 && !write ||
       ["import", "ack-applied", "ack-absent"].includes(stage) && write

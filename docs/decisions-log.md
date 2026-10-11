@@ -991,3 +991,22 @@ recovery, preserving the original plan and import count for reconciliation.
 the existing voucher as a duplicate with one import and one restart. Licence
 handoffs remain visible; neither elapsed time nor a partial startup authorizes
 a second import.
+
+## Verify the native report honors the requested period (11 October 2026)
+
+**Situation:** An empty-period live check exposed that TallyPrime's DayBook XML
+report returned its current day despite explicit date variables. Existing range
+validation correctly rejected those records, but discovery could not complete
+for that period and could miss other dates inside a wider range.
+
+**Task:** Preserve complete native voucher XML while honoring inclusive date
+bounds, including empty periods and records across monthly request chunks.
+
+**Action:** Select the native Voucher Register report, which honors the same
+date variables on the installed TallyPrime. Add a failing range regression,
+compare every exported master/voucher record with native XML, and exercise
+populated and empty dates with nested allocations and a real custom UDF.
+
+**Result:** Native exports preserve all records and custom fields. Empty dates
+complete with zero vouchers, while date validation still rejects out-of-scope
+responses. Release the correction in companion 0.6.2.

@@ -64,7 +64,7 @@ test("discovery collects every loaded company, undated full masters and dated ne
   );
   assert.ok(
     sent
-      .filter((b) => b.includes("<ID>DayBook</ID>"))
+      .filter((b) => b.includes("<ID>Voucher Register</ID>"))
       .every((b) =>
         b.includes('<SVFROMDATE TYPE="Date">20261001</SVFROMDATE>'),
       ),
@@ -78,6 +78,17 @@ test("failed company remains partial without losing successful company", async (
   assert.equal(result.companies[0].status, "ready");
   assert.equal(result.companies[1].status, "unavailable");
   assert.equal(result.partial, true);
+});
+test("period discovery uses the range-aware register rather than the current-day report", async () => {
+  const base = transport([]);
+  const snapshot = await discoverClientContext(
+    {port:9000,period:{from:"2026-11-01",to:"2026-11-01"}},
+    {request:(url, options)=>options.body.includes("<ID>Voucher Register</ID>")
+      ? Promise.resolve(new Response("<ENVELOPE/>"))
+      : base(url, options)},
+  );
+  assert.equal(snapshot.partial, false);
+  assert.ok(snapshot.companies.every(c=>c.vouchers.count===0));
 });
 test("invalid period and caller-supplied transport options never reach Tally", async () => {
   for (const config of [
@@ -193,7 +204,7 @@ test("an empty native voucher export is a complete empty period, never empty mas
     { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
     {
       request: (url, options) =>
-        options.body.includes("<ID>DayBook</ID>")
+        options.body.includes("<ID>Voucher Register</ID>")
           ? Promise.resolve(new Response("<ENVELOPE/>"))
           : base(url, options),
     },
@@ -231,7 +242,7 @@ test("DayBook company trailers are checked against the discovered identity", asy
         request: async (url, options) => {
           const response = await base(url, options);
           let text = await response.text();
-          if (options.body.includes("<ID>DayBook</ID>") && options.body.includes("<SVCURRENTCOMPANY>A</SVCURRENTCOMPANY>"))
+          if (options.body.includes("<ID>Voucher Register</ID>") && options.body.includes("<SVCURRENTCOMPANY>A</SVCURRENTCOMPANY>"))
             text = text.replace("</REQUESTDATA>", `<TALLYMESSAGE><COMPANY><REMOTECMPINFO.LIST MERGE="Yes"><NAME>${guid}</NAME><REMOTECMPNAME>A</REMOTECMPNAME><REMOTECMPSTATE>Rajasthan</REMOTECMPSTATE></REMOTECMPINFO.LIST></COMPANY></TALLYMESSAGE></REQUESTDATA>`);
           return new Response(text);
         },

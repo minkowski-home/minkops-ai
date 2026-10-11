@@ -165,7 +165,9 @@ export async function discoverClientContext(
           to: end.toISOString().slice(0, 10),
         };
         await onProgress(company, "reading");
-        const records = await exportData(company, "DayBook", period, false, item.company_guid);
+      // DayBook can silently use Tally's current day. The native voucher
+      // register honors the requested inclusive period and retains full XML.
+      const records = await exportData(company, "Voucher Register", period, false, item.company_guid);
         for (const record of records) {
           const value = scalar(record.data.DATE);
           if (
