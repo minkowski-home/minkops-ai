@@ -244,7 +244,9 @@ export async function saveDiscoveryPackage(root, catalog) {
   const manifestBytes = JSON.stringify(manifest, null, 2),
     target = join(root, catalog.run_id);
   try {
-    if ((await lstat(target)).isSymbolicLink())
+    const existingDirectory = await lstat(target);
+    // Windows rename can replace an occupied file with the package directory.
+    if (existingDirectory.isSymbolicLink() || !existingDirectory.isDirectory())
       throw new Error("Invalid package directory.");
     const existing = await readFile(join(target, "manifest.json"), "utf8");
     if (existing !== manifestBytes)

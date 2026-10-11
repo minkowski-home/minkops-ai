@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -132,6 +132,19 @@ test("local package is immutable, hashed and repeatable after receipt replay", a
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local package rejects an occupied file without replacing it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "minkops-context-"));
+  const catalog = {run_id: "11111111-1111-4111-8111-111111111111", sources: []};
+  const target = join(root, catalog.run_id);
+  try {
+    await writeFile(target, "Existing local file");
+    await assert.rejects(saveDiscoveryPackage(root, catalog), /Invalid package directory/);
+    assert.equal(await readFile(target, "utf8"), "Existing local file");
+  } finally {
+    await rm(root, {recursive: true, force: true});
   }
 });
 
