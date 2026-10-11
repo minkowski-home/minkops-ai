@@ -1,6 +1,6 @@
 {
   "name": "minkops-windows-app",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Minkops desktop companion and shared console",
   "author": "Minkops",
   "private": true,

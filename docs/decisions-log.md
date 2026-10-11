@@ -1009,4 +1009,24 @@ populated and empty dates with nested allocations and a real custom UDF.
 
 **Result:** Native exports preserve all records and custom fields. Empty dates
 complete with zero vouchers, while date validation still rejects out-of-scope
-responses. Release the correction in companion 0.6.2.
+responses. The correction is included in companion 0.6.4.
+
+## Build Windows releases from current workspace sources (11 October 2026)
+
+**Situation:** Native source tests passed, but an installed archive collision
+check still reproduced the old behavior. Inspection of the compiled artifact
+showed that npm's Windows file dependencies were copied modules, leaving the
+bundle on older connector sources despite its updated application version.
+
+**Task:** Make release builds reliably include the reviewed workspace code while
+retaining the installed, locked third-party dependencies.
+
+**Action:** Resolve both workspace packages directly to their repository entry
+points in esbuild, with third-party resolution through the app's node_modules.
+Verify the compiled runtime and repeat the installed archive/date-range checks.
+Preserve intermediate release evidence instead of treating source tests as proof
+of an installed artifact.
+
+**Result:** The release bundle includes the range-aware voucher register, complete
+company readiness and collision-preserving archive checks from current sources.
+The final release is 0.6.4; earlier candidates do not establish those guarantees.
