@@ -221,9 +221,11 @@ Use `apps/windows-app/tests/production-smoke.mjs` only with an explicit test com
 and private owner state, for real schema or workflow-reference receipt checks.
 Its explicit save phase is limited to hash-allowlisted synthetic bills in Test Company,
 checks independent readback, and replays both the native save and server receipt.
-`infra/verify_production.py` launches only reviewed synthetic fixtures and
-records actual hosted results. Never substitute fake execution or seed_demo for
-production proof. Publish an unsigned **release candidate**, not a signed final
+`scripts/verify_production.py` launches only reviewed synthetic fixtures and
+records actual hosted results. Its `bill-retry` phase retries original evidence
+after corrections in the original system and refreshed discovery; it replaces
+the obsolete correction-text `bill-clarify` phase. Never substitute fake execution
+or seed_demo for production proof. Publish an unsigned **release candidate**, not a signed final
 release claim; the download page discloses its actual distribution status.
 
 MIN-122 still needs fresh Windows 10/11 x64 install/launch, driver present/missing,

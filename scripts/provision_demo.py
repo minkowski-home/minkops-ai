@@ -1,4 +1,4 @@
-"""Prepare the isolated release demo through verified first-party signup.
+"""Prepare the isolated workflow release demo through verified first-party signup.
 
 This does not seed fake users, platform-admin access, resource grants or tasks.
 The owner must verify the email before the trusted mock-client is installed.
