@@ -227,6 +227,20 @@ test("an empty native voucher export is a complete empty period, never empty mas
   assert.equal(result.companies[0].masters.count, 3);
 });
 
+test("empty voucher DATA accepts whitespace but rejects nonempty text and failed exports", async () => {
+  for (const [content, status, partial] of [["  \r\n", "1", false], ["unexpected", "1", true], ["  ", "0", true]]) {
+    const base = transport([]);
+    const result = await discoverClientContext(
+      { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
+      { request: (url, options) => options.body.includes("<ID>Voucher Register</ID>")
+        ? Promise.resolve(new Response(`<ENVELOPE><HEADER><STATUS>${status}</STATUS></HEADER><BODY><DATA>${content}</DATA></BODY></ENVELOPE>`))
+        : base(url, options) },
+    );
+    assert.equal(result.partial, partial);
+    if (!partial) assert.equal(result.companies[0].vouchers.count, 0);
+  }
+});
+
 test("indented native exports ignore formatting text but never discard unexpected content", async () => {
   for (const content of ["\r\n    ", "unexpected export content"]) {
     const base = transport([]);
