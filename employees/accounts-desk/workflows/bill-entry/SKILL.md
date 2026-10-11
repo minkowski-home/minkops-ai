@@ -29,8 +29,10 @@ established; do not claim full procurement reconciliation.
 For hosted execution follow agent-output.schema.json in the pinned context, including
 confirmed destination file IDs, sheet names, operations and field evidence.
 The legacy draft path uses output.schema.json. Put business fields inside
-each record's `data` object, using the confirmed schema. Echo the run's catalog
-version, schema ID, and schema version. The application validates the envelope
+each record's `data` object, using the confirmed schema. Only the legacy draft
+envelope echoes catalog version, schema ID, and schema version. Hosted output has
+only records, findings and unresolved; run metadata is supplied by the application.
+The application validates the envelope
 and business data separately. Observe
 the run's review policy and request review for ambiguous matches, missing
 required data, duplicates, and validation failures. An agent's confidence alone
@@ -58,6 +60,13 @@ for every bill; contradictory buyer evidence requires handoff. Infer mode may
 choose any discovered company using buyer identity and evidenced client context;
 a shared supplier name alone is insufficient. Save company_guid and explain the
 selection in company_evidence on every proposed record. Ambiguity is unresolved.
+Resolve logical buyer identity using full company masters and confirmed context.
+Allow minor spelling, spacing, punctuation, legal-suffix and evidenced trading-name
+differences when matching GSTIN or other corroborating identity evidence uniquely
+establishes the same company. Never require identical display-name characters.
+Name similarity alone cannot override a conflicting GSTIN or establish an
+otherwise ambiguous buyer. Record the comparison in company_evidence and retain
+exact discovered company identifiers for native writes.
 All scans are persisted for review before native writes. Approved writes are
 authorized through concise one-click decisions. Manual accounting edits happen
 in original systems. Do nothing preserves a shared attention item without a

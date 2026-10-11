@@ -8,6 +8,7 @@ paid-execution recovery. An hourly sweep recovers failed notifications/crashes.
 
 import logging
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from uuid import uuid4
 
 import psycopg
@@ -47,10 +48,13 @@ def dispatch(url, submit):
             return False
 
 
-def drain(url, *, max_seconds=1200, work=None, cleanup=None):
-    from .accounts.worker import work_once, cleanup_once
+def drain(url, *, max_seconds=1200, work=None, cleanup=None, lanes=None):
+    from .accounts.worker import WORKER_LANES, cleanup_once, work_once
 
     work, cleanup = work or work_once, cleanup or cleanup_once
+    lanes = WORKER_LANES if lanes is None else lanes
+    if not isinstance(lanes, int) or isinstance(lanes, bool) or not 1 <= lanes <= WORKER_LANES:
+        raise ValueError(f"Worker lanes must be between 1 and {WORKER_LANES}.")
     deadline, processed = time.monotonic() + max_seconds, 0
     released = False
     with psycopg.connect(url, autocommit=True, row_factory=dict_row) as c:
@@ -59,31 +63,12 @@ def drain(url, *, max_seconds=1200, work=None, cleanup=None):
         ]:
             return 0
         try:
-            while time.monotonic() < deadline:
-                observed = c.execute("SELECT generation FROM worker_wakeup").fetchone()[
-                    "generation"
-                ]
-                c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")
-                if work(url):
-                    processed += 1
-                    continue
-                if cleanup(url):
-                    continue
-                with c.transaction():
-                    current = c.execute(
-                        "SELECT generation FROM worker_wakeup FOR UPDATE"
-                    ).fetchone()["generation"]
-                    if current != observed:
-                        continue
-                    c.execute(
-                        "UPDATE worker_wakeup SET acknowledged=%s,lease_until=NULL,dispatch_token=NULL",
-                        (current,),
-                    )
-                    # Release while holding the notification row. A dispatcher
-                    # cannot start a successor until this acknowledgement commits.
-                    c.execute("SELECT pg_advisory_unlock(%s)", (RUNNER_LOCK,))
-                    released = True
-                    return processed
+            # Keep the global lock until all lane futures finish. Each worker
+            # owns its connection and retains the existing per-run advisory lock.
+            with ThreadPoolExecutor(max_workers=lanes) as pool:
+                processed, released = _drain_lanes(c, pool, url, work, cleanup, lanes, deadline)
+            if released:
+                return processed
             # Preserve runnable work for a successor when this bounded slice ends.
             c.execute("UPDATE worker_wakeup SET generation=generation+1")
             return processed
@@ -92,3 +77,41 @@ def drain(url, *, max_seconds=1200, work=None, cleanup=None):
                 with c.transaction():
                     c.execute("UPDATE worker_wakeup SET lease_until=NULL,dispatch_token=NULL")
                     c.execute("SELECT pg_advisory_unlock(%s)", (RUNNER_LOCK,))
+
+
+def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline):
+    processed = 0
+    pending = set()
+    observed = None
+    while time.monotonic() < deadline or pending:
+        if not pending:
+            if time.monotonic() >= deadline:
+                break
+            observed = c.execute("SELECT generation FROM worker_wakeup").fetchone()["generation"]
+            pending = {pool.submit(work, url) for _ in range(lanes)}
+        c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")
+        done, pending = wait(pending, timeout=10, return_when=FIRST_COMPLETED)
+        worked = sum(bool(future.result()) for future in done)
+        processed += worked
+        if worked and time.monotonic() < deadline:
+            pending.update(pool.submit(work, url) for _ in range(lanes - len(pending)))
+        if pending:
+            continue
+        if time.monotonic() >= deadline:
+            break
+        if cleanup(url):
+            continue
+        # No lane can still be running when we acknowledge this generation.
+        with c.transaction():
+            current = c.execute("SELECT generation FROM worker_wakeup FOR UPDATE").fetchone()[
+                "generation"
+            ]
+            if current != observed:
+                continue
+            c.execute(
+                "UPDATE worker_wakeup SET acknowledged=%s,lease_until=NULL,dispatch_token=NULL",
+                (current,),
+            )
+            c.execute("SELECT pg_advisory_unlock(%s)", (RUNNER_LOCK,))
+            return processed, True
+    return processed, False

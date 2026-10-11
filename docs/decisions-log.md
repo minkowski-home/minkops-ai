@@ -1030,3 +1030,63 @@ of an installed artifact.
 **Result:** The release bundle includes the range-aware voucher register, complete
 company readiness and collision-preserving archive checks from current sources.
 The final release is 0.6.4; earlier candidates do not establish those guarantees.
+
+## Verify concurrency at the production entry point (11 October 2026)
+
+**Situation:** A two-bill production run waited behind a retry, then executed its
+AI scans sequentially. Local continuous-worker coverage had verified four lanes,
+but the deployed bounded drain still invoked the serial primitive.
+
+**Task:** Restore bounded independent AI execution without allowing duplicate
+paid sessions, premature idle acknowledgement or unordered destination writes.
+
+**Action:** Share the four-lane limit, replenish completed lanes independently,
+and retain the runner lock until every submitted future finishes. A coordinator
+alone owns wake-up acknowledgement and lease refresh. Add failing tests against
+the actual drain for four simultaneous claims, slow siblings, generation changes,
+overlapping runners and lane exceptions. Preserve per-run locks and saved-session
+reconciliation; native financial writes retain their separate ordering controls.
+
+**Result:** The entry-point regressions pass. Queue execution no longer depends
+on whether hosting uses continuous or bounded workers. Support can verify actual
+overlapping run timestamps rather than infer concurrency from source intentions.
+
+## Preserve support evidence across business rollback (11 October 2026)
+
+**Situation:** Runtime failures and latency investigations required streamed
+cloud logs; saved outputs did not explain preparation, provider, validation or
+cleanup time. A late validation failure could conceal earlier work.
+
+**Task:** Make engineer-readable workflow evidence durable without exposing raw
+provider payloads or adding detailed logs to the product experience.
+
+**Action:** Add tenant/run-constrained internal diagnostic records with stage
+timings, queue wait, file sizes, hosted event kinds and schema error paths. Use
+independent short transactions with bounded connection/statement/lock timeouts.
+Exclude raw provider exceptions, reasoning and credentials. Diagnostic failure
+cannot commit business work early or change an already applied operation's result.
+Test persistence after rollback, tenant constraints and secret exclusion.
+
+**Result:** Engineers can reconstruct child-run timing and failure boundaries
+through DB queries. Customer task events stay concise, while existing native job
+errors/receipts remain available alongside the new hosted execution evidence.
+
+## Reconcile hosted instructions with their output contract (11 October 2026)
+
+**Situation:** A real two-bill release check matched buyer GSTINs held in modern
+Tally tax-unit masters, but one otherwise truthful handoff failed validation.
+Durable diagnostics identified an additional-properties schema rejection: shared
+instructions still requested metadata belonging to the legacy draft envelope.
+
+**Task:** Preserve strict output validation while removing contradictory guidance
+and proving identity matching against complete native evidence.
+
+**Action:** Explicitly distinguish legacy and hosted envelopes, retain server-owned
+run metadata, and version the corrected immutable workflow. Require checking native
+GST tax units before declaring buyer identifiers missing, while keeping effective
+dates and unsupported tax allocations as separate findings. Verify real scanned
+bills without approving unsupported financial entries.
+
+**Result:** Schema failures are attributable through DB evidence instead of streamed
+cloud logs. Prompt contracts no longer request fields forbidden by hosted validation;
+logical buyer matching retains exact native destination identifiers.

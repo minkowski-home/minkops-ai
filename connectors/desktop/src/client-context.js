@@ -106,7 +106,7 @@ export async function discoverClientContext(
       );
     const data =
       envelope.BODY?.EXPORTDATA?.REQUESTDATA ?? envelope.BODY?.DATA ?? envelope;
-    if (period && data === "") return [];
+    if (period && typeof data === "string" && !data.trim()) return [];
     if (!data || !Object.hasOwn(data, "TALLYMESSAGE"))
       throw new Error("Native detailed data export is unavailable.");
     const records = [];

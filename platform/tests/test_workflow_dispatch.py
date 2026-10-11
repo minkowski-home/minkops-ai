@@ -73,6 +73,7 @@ class DispatchTests(TestCase):
         handler.prepare.return_value = ([{"id": "file", "sha256": "changed"}], {}, {})
         executor = MagicMock()
         with (
+            patch("minkops_platform.runtime.diagnostics.record"),
             patch("minkops_platform.runtime.application.get_handler", return_value=handler),
             self.assertRaisesRegex(ValueError, "authorized resource snapshot"),
         ):

@@ -91,9 +91,11 @@ def get_handler(key):
 
 def process(connection, store, run, *, executor, close_session, cleanup=True):
     from . import lifecycle
+    from .diagnostics import stage
 
     handler = get_handler(binding_for(run).handler)
-    files, context, domain = handler.prepare(connection, run)
+    with stage(connection, run, "prepare", "Prepare authorized files and pinned source context"):
+        files, context, domain = handler.prepare(connection, run)
     if "authorized_bindings" in run["config"]:
         granted = {
             item["resource_id"]: item["sha256"]
@@ -105,10 +107,12 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
     store.observe(connection, run, "executing", handler.executing_summary, 20)
     connection.commit()
     result = lifecycle.execute_proposal(connection, store, run, files, context, executor)
-    result = handler.validate(run, files, context, domain, result)
-    result = enforce_policies(run["config"], result)
+    with stage(connection, run, "validation", "Validate business proposal and trusted policy"):
+        result = handler.validate(run, files, context, domain, result)
+        result = enforce_policies(run["config"], result)
     store.save_result(connection, run, result)
-    handler.finish(connection, store, run, context, domain, result)
-    connection.commit()
+    with stage(connection, run, "result", "Persist validated proposal and review outcome"):
+        handler.finish(connection, store, run, context, domain, result)
+        connection.commit()
     if cleanup:
         lifecycle.close_run(connection, store, run, close_session=close_session)

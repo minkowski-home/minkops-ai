@@ -5,12 +5,14 @@ validation and approvals. This module never plans work or orchestrates tools.
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Protocol
 
 import psycopg
 from jsonschema import Draft202012Validator
 from psycopg.rows import dict_row
 
+from .diagnostics import error_details, record, stage
 from .openai_hosted import close_session as hosted_close_session
 from .openai_hosted import reconcile_turn
 
@@ -37,23 +39,48 @@ def execute_proposal(connection, store: RunStore, run, files, context, executor)
         connection.commit()
         run["session_id"] = session_id or run["session_id"]
         run["turn_id"] = turn_id or run["turn_id"]
+        record(
+            connection,
+            run,
+            "hosted.event",
+            f"Hosted session event: {kind}",
+            details={
+                "provider_event": kind,
+                "session_id": session_id,
+                "turn_id": turn_id,
+            },
+        )
 
     if run["session_id"] and not run["turn_id"]:
         run["turn_id"] = reconcile_turn(run["session_id"])
         store.save_session(connection, run, run["session_id"], run["turn_id"])
         connection.commit()
-    result = executor(
-        run["workflow_key"],
-        files,
-        context,
-        on_event,
-        session_id=run["session_id"],
-        turn_id=run["turn_id"],
-    )
+    with stage(
+        connection,
+        run,
+        "ai",
+        "Execute or reconcile hosted AI proposal",
+        details={
+            "resumed": bool(run["session_id"]),
+            "model": run["config"].get("execution_snapshot", {}).get("execution", {}).get("model"),
+            "inputs": [
+                {"file_id": str(file["id"]), "bytes": len(file["content"])} for file in files
+            ],
+        },
+    ):
+        result = executor(
+            run["workflow_key"],
+            files,
+            context,
+            on_event,
+            session_id=run["session_id"],
+            turn_id=run["turn_id"],
+        )
     store.save_result(connection, run, result)
     connection.commit()
     if run["config"].get("agent_output_schema"):
-        Draft202012Validator(run["config"]["agent_output_schema"]).validate(result)
+        with stage(connection, run, "schema", "Validate hosted output schema"):
+            Draft202012Validator(run["config"]["agent_output_schema"]).validate(result)
     return result
 
 
@@ -61,9 +88,10 @@ def close_run(connection, store: RunStore, run, *, close_session=hosted_close_se
     if not run["session_id"]:
         return
     try:
-        close_session(run["session_id"])
-        store.mark_closed(connection, run)
-        connection.commit()
+        with stage(connection, run, "cleanup", "Release hosted session environment"):
+            close_session(run["session_id"])
+            store.mark_closed(connection, run)
+            connection.commit()
     except Exception as error:
         connection.rollback()
         log.warning("Session cleanup pending for run %s (%s)", run["id"], type(error).__name__)
@@ -83,6 +111,26 @@ def work_once(url, store: RunStore, process):
                 current = store.get(connection, run["tenant_id"], run["id"])
                 if current["state"] not in ("queued", "executing"):
                     continue
+                created = current.get("created_at")
+                queued = current.get("updated_at") if current["state"] == "queued" else None
+                record(
+                    connection,
+                    current,
+                    "worker.claimed",
+                    "Worker claimed durable workflow run",
+                    details={
+                        "previous_state": current["state"],
+                        "age_ms": round((datetime.now(UTC) - created).total_seconds() * 1000)
+                        if created
+                        else None,
+                        "queue_wait_ms": round((datetime.now(UTC) - queued).total_seconds() * 1000)
+                        if queued
+                        else None,
+                        "parent_run_id": str(current["parent_run_id"])
+                        if current.get("parent_run_id")
+                        else None,
+                    },
+                )
                 if current["state"] == "executing" and not current["session_id"]:
                     raise ValueError(
                         "Worker stopped before a session ID was saved. Start a new run explicitly; "
@@ -91,6 +139,14 @@ def work_once(url, store: RunStore, process):
                 process(connection, current)
             except Exception as error:
                 connection.rollback()
+                record(
+                    connection,
+                    run,
+                    "worker.failed",
+                    f"Workflow execution failed ({type(error).__name__}).",
+                    level="error",
+                    details=error_details(error),
+                )
                 message = (
                     str(error).splitlines()[0][:400]
                     if isinstance(error, ValueError)

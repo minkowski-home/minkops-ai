@@ -29,6 +29,24 @@ vendors in two companies are not proof of company identity. If ambiguous, put
 that input in unresolved. Save the company decision for later native entry.
 Use the supplied destination file ID, sheet Purchase and table:null.
 
+Buyer identity is a logical business match, not letter-for-letter name equality.
+Compare the buyer (not supplier) against the discovered company's full masters
+and confirmed context. Before declaring a company identifier missing, inspect
+its supplied masters files: modern Tally may keep GST registration in a TAXUNIT
+record (GSTREGNUMBER or TAXREGISTRATION), not the COMPANY identity fields.
+Use only tax units belonging to that discovered company; supplier ledger GSTINs
+are not buyer evidence. Preserve any effective-date limitations separately from
+the legal identity comparison. Matching GSTIN is strong evidence despite spacing,
+punctuation, abbreviations (Pvt. Ltd. / Private Limited), a trading/display name,
+or minor spelling differences. If GSTIN is absent, require corroborating legal
+name, address or confirmed alias evidence that identifies exactly one company;
+name similarity alone is insufficient. A locked company limits destinations but
+does not prove the buyer match. Conflicting buyer GSTINs or evidence for another
+company require handoff even when names look similar. Never invent an alias or
+ignore contradictory evidence. In company_evidence record the observed buyer
+name/identifiers, the discovered identity and why the differences are consistent.
+Company names and identities in native plans remain the exact discovered values.
+
 For Excel, use actual confirmed columns/types and the exact named table (or
  table:null for a plain sheet). Choose an evidenced destination from the catalog;
 there is no universal invoice schema for Excel. Extract one record per bill or
@@ -44,6 +62,8 @@ input identifier and uncertain field in internal findings; the product supplies
 concise one-click decisions and shared attention.
 
 Write /workspace/outputs/result.json with records, findings and unresolved:
+Do not add catalog_version, schema_id, schema_version or any other root keys;
+the application binds this result to its pinned run metadata.
 {"records":[{"source_file_id":"supplied input ID","destination_file_id":"catalog destination ID",
 "sheet":"confirmed sheet","table":null,"operation":"append","data":{"exact field":"value"},
 "evidence":[{"field":"exact field","page":1,"quote":"observed text"}],
