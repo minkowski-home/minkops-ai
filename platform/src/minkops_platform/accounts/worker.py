@@ -15,6 +15,7 @@ from .agent import close_session, execute
 from .run_store import AccountsRunStore
 
 STORE = AccountsRunStore()
+WORKER_LANES = 4
 
 
 def process(connection, run, *, executor=execute):
@@ -48,8 +49,8 @@ def run_forever(url):
 
     # Each lane owns a database connection; persisted runs/locks remain the
     # source of truth for recovery, including independent paid child sessions.
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(lane) for _ in range(4)]
+    with ThreadPoolExecutor(max_workers=WORKER_LANES) as pool:
+        futures = [pool.submit(lane) for _ in range(WORKER_LANES)]
         for future in futures:
             future.result()
 
