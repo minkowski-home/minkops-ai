@@ -3,7 +3,8 @@
 import unittest
 from io import BytesIO
 
-from minkops_api.accounts_excel import apply_records, inspect_workbook, validate_catalog
+from minkops_connectors.excel import inspect_workbook
+from minkops_platform.accounts.catalog import apply_records, validate_catalog
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.table import Table
 
@@ -56,7 +57,7 @@ class ExcelTests(unittest.TestCase):
             validate_catalog(candidate, {"f1": workbook()})
 
     def test_unrecognized_destination_is_reviewable_and_cannot_be_guessed(self):
-        from minkops_api.accounts_store import check_records
+        from minkops_platform.accounts.checks import check_records
 
         result = {
             "records": [],

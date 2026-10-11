@@ -7,7 +7,6 @@ the mock-client composition is restored afterwards. No production changes.
 import base64
 import copy
 import io
-import json
 import os
 import uuid
 import zipfile

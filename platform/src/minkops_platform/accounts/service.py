@@ -16,7 +16,6 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
 from minkops_platform.workflows import load_definition as load_definition
 
-from .bills import tally_target
 from .catalog import apply_records, validate_catalog, validate_data
 from .checks import check_records, populate_entry_ids
 from .repository import (

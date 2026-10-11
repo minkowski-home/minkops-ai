@@ -25,13 +25,11 @@ def create_children(connection, run):
         create_child(connection, run, file_id)
 
 
-def create_child(connection, run, file_id, *, user_input=None):
+def create_child(connection, run, file_id):
     config = copy.deepcopy(run["config"])
     config.pop("batch", None)
     config.pop("retry_file_id", None)
     config.pop("tally_context_job_id", None)
-    if user_input:
-        config["user_input"] = user_input
     config["file_ids"] = [file_id]
     config["review_mode"] = "all_outputs"
     child = connection.execute(
