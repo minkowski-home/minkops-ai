@@ -971,3 +971,23 @@ repeated migration, sequence settings and attempted unverified baseline edits.
 **Result:** Fresh and legacy schemas remain equivalent, including constraints,
 indexes, sequences, triggers and the updatable view. Existing rows and original
 checksums survive; migration changes outside the verified pair still fail closed.
+
+## Wait for the complete Tally startup scope before resuming (11 October 2026)
+
+**Situation:** Live interruption testing exposed a readiness check that accepted
+the first loaded company while another requested company was still loading.
+A native memory-access error was also observed; its cause was not established.
+
+**Task:** Resume only after every known numeric company identity is available,
+without bypassing licence/login screens or replaying an uncertain import.
+
+**Action:** Poll company numbers as well as listener availability and wait for
+the complete observed startup scope. Add a regression that first returns one
+company, then both; it fails before the correction and passes afterwards. Keep
+explicit operator continuation after native handoffs separate from automatic
+recovery, preserving the original plan and import count for reconciliation.
+
+**Result:** The Windows native suite passes. Live post-import recovery reads back
+the existing voucher as a duplicate with one import and one restart. Licence
+handoffs remain visible; neither elapsed time nor a partial startup authorizes
+a second import.

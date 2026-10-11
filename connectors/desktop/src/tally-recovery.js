@@ -185,10 +185,10 @@ export async function restartTallyProcess(observed) {
   });
   child.unref();
 }
-export async function waitForTally(url) {
+export async function waitForTally(url, observed) {
   // Poll read-only company availability. Authentication screens remain a handoff.
   const body =
-    '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsRecovery</ID></HEADER><BODY><DESC><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsRecovery"><TYPE>Company</TYPE><FETCH>Name</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>';
+    '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsRecovery</ID></HEADER><BODY><DESC><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsRecovery"><TYPE>Company</TYPE><FETCH>Name,CompanyNumber</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>';
   for (let attempt = 0; attempt < 20; attempt++) {
     try {
       const response = await fetch(url, {
@@ -197,10 +197,15 @@ export async function waitForTally(url) {
         signal: AbortSignal.timeout(2000),
       });
       const value = await boundedText(response, 1_000_000);
-      const parsed = new XMLParser().parse(value).ENVELOPE;
+      const parsed = new XMLParser({ parseTagValue: false }).parse(value).ENVELOPE;
+      const collection = parsed?.BODY?.DATA?.COLLECTION?.COMPANY;
+      const companies = Array.isArray(collection) ? collection : collection ? [collection] : [];
+      const numbers = new Set(companies.map(c => tallyCompanyNumber(c.COMPANYNUMBER)));
+      // Tally exposes its listener while companies are still loading. Waiting
+      // for the full observed startup scope prevents reads against that state.
       if (
         String(parsed?.HEADER?.STATUS) === "1" &&
-        parsed.BODY?.DATA?.COLLECTION?.COMPANY
+        companies.length && (observed?.loads ?? []).every(n => numbers.has(n))
       )
         return;
     } catch {

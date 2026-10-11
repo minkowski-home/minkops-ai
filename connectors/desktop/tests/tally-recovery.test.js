@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { recoveringTallyRequest, tallyCompanyNumber } from "../src/tally-recovery.js";
+import { recoveringTallyRequest, tallyCompanyNumber, waitForTally } from "../src/tally-recovery.js";
+
+test("restart readiness waits for every requested company, not the first loaded one", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    const companies = ++requests === 1
+      ? '<COMPANY><NAME>First</NAME><COMPANYNUMBER TYPE="Number"> 100000</COMPANYNUMBER></COMPANY>'
+      : '<COMPANY><NAME>First</NAME><COMPANYNUMBER>100000</COMPANYNUMBER></COMPANY><COMPANY><NAME>Second</NAME><COMPANYNUMBER>100001</COMPANYNUMBER></COMPANY>';
+    return new Response(`<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${companies}</COLLECTION></DATA></BODY></ENVELOPE>`);
+  });
+  await waitForTally("http://127.0.0.1:9000", { loads: ["100000", "100001"] });
+  assert.equal(requests, 2);
+});
 
 test("observed numeric company loads accept Tally typed whitespace without accepting arbitrary arguments", () => {
   assert.equal(tallyCompanyNumber({ "#text": " 100000", "@_TYPE": "Number" }), "100000");
