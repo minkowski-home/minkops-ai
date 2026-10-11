@@ -62,6 +62,8 @@ input identifier and uncertain field in internal findings; the product supplies
 concise one-click decisions and shared attention.
 
 Write /workspace/outputs/result.json with records, findings and unresolved:
+Do not add catalog_version, schema_id, schema_version or any other root keys;
+the application binds this result to its pinned run metadata.
 {"records":[{"source_file_id":"supplied input ID","destination_file_id":"catalog destination ID",
 "sheet":"confirmed sheet","table":null,"operation":"append","data":{"exact field":"value"},
 "evidence":[{"field":"exact field","page":1,"quote":"observed text"}],

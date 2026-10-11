@@ -1070,3 +1070,23 @@ Test persistence after rollback, tenant constraints and secret exclusion.
 **Result:** Engineers can reconstruct child-run timing and failure boundaries
 through DB queries. Customer task events stay concise, while existing native job
 errors/receipts remain available alongside the new hosted execution evidence.
+
+## Reconcile hosted instructions with their output contract (11 October 2026)
+
+**Situation:** A real two-bill release check matched buyer GSTINs held in modern
+Tally tax-unit masters, but one otherwise truthful handoff failed validation.
+Durable diagnostics identified an additional-properties schema rejection: shared
+instructions still requested metadata belonging to the legacy draft envelope.
+
+**Task:** Preserve strict output validation while removing contradictory guidance
+and proving identity matching against complete native evidence.
+
+**Action:** Explicitly distinguish legacy and hosted envelopes, retain server-owned
+run metadata, and version the corrected immutable workflow. Require checking native
+GST tax units before declaring buyer identifiers missing, while keeping effective
+dates and unsupported tax allocations as separate findings. Verify real scanned
+bills without approving unsupported financial entries.
+
+**Result:** Schema failures are attributable through DB evidence instead of streamed
+cloud logs. Prompt contracts no longer request fields forbidden by hosted validation;
+logical buyer matching retains exact native destination identifiers.
