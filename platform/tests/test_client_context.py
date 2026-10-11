@@ -230,14 +230,15 @@ def test_master_index_locations_survive_file_chunk_boundaries():
     assert [contents[entry["path"]][entry["offset"]]["data"]["GUID"] for entry in candidates] == ["0", "1"]
 
 
-def test_detail_summary_does_not_change_stored_catalog():
+def test_detail_summary_does_not_change_stored_catalog(monkeypatch):
     from minkops_platform.discovery import detail
+    monkeypatch.setattr("minkops_platform.discovery.control_state", lambda *args: "active")
 
     value = snapshot()
     catalog = {"sources": [{"tool": "tally", "snapshot": value}], "partial": False}
     original = copy.deepcopy(catalog)
     row = {key: None for key in ("id", "task_id", "device_id", "config", "observations", "created_at")}
-    row.update(catalog=catalog, mapping_run_id=None, state="completed", confirmed_at="now")
+    row.update(tenant_id="tenant", catalog=catalog, mapping_run_id=None, state="completed", confirmed_at="now")
     result = detail(None, row)
     assert catalog == original
     assert result["catalog"]["sources"][0]["snapshot"]["companies"][0]["master_summary"]["unique_count"] == 2

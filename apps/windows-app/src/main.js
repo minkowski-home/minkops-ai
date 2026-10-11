@@ -44,7 +44,7 @@ import {
   commitTallyBill,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
-import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
+import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
 import {
   trustedOrigin,
@@ -224,16 +224,17 @@ function startWorker() {
               request: tallyRequest,
             });
           },
-          onProgress: async (source_key, status, category = null) => {
+          onProgress: async (source_key, status, category = null, progress = null) => {
             try {
-              await request(`/api/desktop/worker/jobs/${job.id}/progress`, {
+              await reportDiscoveryProgress(() => request(`/api/desktop/worker/jobs/${job.id}/progress`, {
                 claim_token: job.claim_token,
                 source_key,
                 status,
                 category,
-              });
+                ...(progress ? { progress } : {}),
+              }));
             } catch (error) {
-              if ([401, 404, 409].includes(error.status)) throw error;
+              if (error.code === "TASK_STOPPED" || [401, 404, 409].includes(error.status)) throw error;
             }
           },
         });

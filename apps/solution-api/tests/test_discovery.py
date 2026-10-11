@@ -380,6 +380,18 @@ class DiscoveryTests(unittest.TestCase):
             download.json()["sources"][0]["snapshot"]["companies"][0]["status"], "unavailable"
         )
 
+    def test_polling_returns_count_summaries_without_records_but_download_keeps_evidence(self):
+        run, _ = self.start()
+        self.collect(run)
+        current = self.client.get(self.discovery + f"/runs/{run['id']}").json()
+        company = current["catalog"]["sources"][0]["snapshot"]["companies"][0]
+        self.assertIn("master_summary", company)
+        self.assertNotIn("records", company["masters"])
+        self.assertNotIn("records", company["vouchers"])
+        self.assertNotIn("local_discovery_snapshot", current["mapping_run"]["config"])
+        download = self.client.get(self.discovery + f"/runs/{run['id']}/catalog.json").json()
+        self.assertIn("records", download["sources"][0]["snapshot"]["companies"][0]["masters"])
+
     def test_confirmation_and_unchanged_refresh_reuse_review_with_idempotence(self):
         run, body = self.start()
         self.assertEqual(
@@ -466,6 +478,28 @@ class DiscoveryTests(unittest.TestCase):
             ).status_code,
             422,
         )
+
+    def test_measured_progress_is_optional_bounded_and_never_authorizes_completion(self):
+        run, _ = self.start()
+        claim = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+        route = self.worker_base + f"/jobs/{claim['id']}/progress"
+        body = {"claim_token": claim["claim_token"], "source_key": "tally", "status": "reading", "category": "A"}
+        self.assertEqual(self.client.post(route, headers=self.worker, json=body).status_code, 200)
+        with psycopg.connect(URL) as connection:
+            before = connection.execute("SELECT count(*) FROM task_events WHERE task_id=%s", (run["task_id"],)).fetchone()[0]
+        for completed in (2, 7):
+            body["progress"] = {"completed": completed, "total": 7, "activity": "Collected masters", "item": "A"}
+            response = self.client.post(route, headers=self.worker, json=body)
+            self.assertEqual(response.status_code, 200, response.text)
+        observed = self.client.get(self.discovery + f"/runs/{run['id']}").json()
+        self.assertEqual(observed["observations"][0]["progress"]["completed"], 7)
+        self.assertEqual(observed["state"], "executing")
+        self.assertFalse(observed["ready"])
+        with psycopg.connect(URL) as connection:
+            after = connection.execute("SELECT count(*) FROM task_events WHERE task_id=%s", (run["task_id"],)).fetchone()[0]
+        self.assertEqual(before, after)
+        body["progress"]["completed"] = 8
+        self.assertEqual(self.client.post(route, headers=self.worker, json=body).status_code, 422)
 
     def test_revocation_stops_discovery_and_progress_cannot_change_a_replaced_attempt(self):
         run, _ = self.start()

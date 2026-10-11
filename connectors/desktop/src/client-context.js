@@ -113,6 +113,12 @@ export async function discoverClientContext(
   }
   const scope = await companyScope();
   const companies = [];
+  // Count verified native reads, not individual records in a bulk export.
+  const total = scope.length * (2 + Math.ceil(((to - from) / 86400000 + 1) / 31)) + 1;
+  let completed = 0;
+  const report = (company, status, activity) => onProgress(company, status, {
+    completed, total, activity, ...(company ? { item: company } : {})
+  });
   let totalBytes = 0;
   async function exportData(
     company,
@@ -206,7 +212,7 @@ export async function discoverClientContext(
     const company = expected.company;
     const item = { company, port: config.port, status: "ready" };
     try {
-      await onProgress(company, "reading");
+      await report(company, "reading", "Checking company");
       if (!expected.company_guid)
         throw new Error("Company is not loaded or requires login.");
       item.identity = await exportData(company, "MinkopsIdentity", null, true);
@@ -217,6 +223,8 @@ export async function discoverClientContext(
           expected.company_number
       )
         throw new Error("Company identity changed during discovery.");
+      completed++;
+      await report(company, "reading", "Reading masters");
       // All Masters is an import report; the native master export is List of Accounts.
       const masters = await exportData(company, "List of Accounts");
       item.masters = {
@@ -224,6 +232,8 @@ export async function discoverClientContext(
         count: masters.length,
         records: masters,
       };
+      completed++;
+      await report(company, "reading", "Collected masters");
       const vouchers = [];
       // Date chunks bound individual responses; no record slicing or sampling.
       for (let start = new Date(from); start <= to; ) {
@@ -232,7 +242,7 @@ export async function discoverClientContext(
           from: start.toISOString().slice(0, 10),
           to: end.toISOString().slice(0, 10),
         };
-        await onProgress(company, "reading");
+        await report(company, "reading", "Reading vouchers");
         // DayBook can silently use Tally's current day. The native voucher
         // register honors the requested inclusive period and retains full XML.
         const records = await exportData(
@@ -253,6 +263,8 @@ export async function discoverClientContext(
             throw new Error("Voucher export does not match its period.");
         }
         vouchers.push(...records);
+        completed++;
+        await report(company, "reading", "Collected vouchers");
         start = new Date(+end + 86400000);
       }
       item.vouchers = {
@@ -260,22 +272,26 @@ export async function discoverClientContext(
         count: vouchers.length,
         records: vouchers,
       };
-    } catch {
+    } catch (error) {
+      if (error.code === "TASK_STOPPED") throw error;
       item.status = "unavailable";
       item.error =
         "Could not collect complete company data. Check access, detailed export support and collection size, then refresh.";
     }
     companies.push(item);
-    await onProgress(company, item.status);
+    await report(company, item.status, item.status === "ready" ? "Collected company" : "Company needs attention");
   }
   let scopeError;
+  await report(null, "reading", "Checking company scope");
   try {
     const current = await companyScope();
     if (!sameCompanyScope(scope, current)) throw new Error("changed");
+    completed++;
   } catch {
     scopeError =
       "Tally company scope changed or could not be verified. Load all original companies and refresh discovery.";
   }
+  await report(null, scopeError || companies.some(c => c.status !== "ready") ? "unavailable" : "ready", scopeError ? "Company scope needs attention" : "Company scope checked");
   return {
     format_version: "2",
     period: config.period,

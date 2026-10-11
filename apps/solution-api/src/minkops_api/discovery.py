@@ -33,6 +33,7 @@ class Observation(BaseModel):
     source_key: str
     status: Literal["reading", "ready", "unavailable"]
     category: str | None = None
+    progress: dict | None = None
 
 
 @router.post("/api/tenants/{slug}/discovery/runs", status_code=202)
@@ -48,7 +49,7 @@ def task(slug: str, task_id: UUID, user: User, connection: Db):
     row = connection.execute(
         "SELECT * FROM discovery_runs WHERE tenant_id=%s AND task_id=%s", (tenant["id"], task_id)
     ).fetchone()
-    return discovery.detail(connection, row) if row else None
+    return discovery.detail(connection, row, include_records=False) if row else None
 
 
 @router.get("/api/tenants/{slug}/discovery/latest")
@@ -58,13 +59,13 @@ def latest(slug: str, user: User, connection: Db):
         "SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s ORDER BY created_at DESC LIMIT 1",
         (tenant["id"], user["id"]),
     ).fetchone()
-    return discovery.detail(connection, row) if row else None
+    return discovery.detail(connection, row, include_records=False) if row else None
 
 
 @router.get("/api/tenants/{slug}/discovery/runs/{run_id}")
 def detail(slug: str, run_id: UUID, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
-    return discovery.detail(connection, call(discovery.get_run, connection, tenant["id"], run_id))
+    return discovery.detail(connection, call(discovery.get_run, connection, tenant["id"], run_id), include_records=False)
 
 
 @router.post("/api/tenants/{slug}/discovery/runs/{run_id}/confirm")
@@ -96,7 +97,9 @@ def progress(job_id: UUID, body: Observation, device: Device, connection: Db):
         from fastapi import HTTPException
 
         raise HTTPException(409, "Discovery is not collecting sources.")
-    return call(discovery.progress, connection, device, job, body.model_dump(mode="json"))
+    result = call(discovery.progress, connection, device, job, body.model_dump(mode="json"))
+    from minkops_platform.run_controls import control_state
+    return {**result, "control_state": control_state(connection, device["tenant_id"], job["task_id"])}
 
 
 @router.get("/api/desktop/discovery/package")

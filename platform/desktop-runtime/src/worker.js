@@ -31,11 +31,11 @@ export class CompanionWorker {
             result: await this.execute(job),
             error: null,
           };
-        } catch {
+        } catch (error) {
           receipt = {
             claim_token: job.claim_token,
             result: null,
-            error:
+            error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
               ["tally.probe", "tally.references"].includes(job.operation)
                 ? "Tally is not responding. Open Tally, load your company, and try again."
                 : job.operation === "tally.save"

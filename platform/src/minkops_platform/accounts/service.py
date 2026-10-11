@@ -39,6 +39,8 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
 
 def approve_run(connection, tenant, user, run_id, body, *, require_destination=True):
     run = run_for(connection, tenant["id"], run_id, True)
+    from minkops_platform.run_controls import require_active
+    require_active(connection, tenant["id"], run["task_id"])
     binding = binding_for(run)
     if binding.handler == "accounts.bill" and run["actor_id"] != user["id"]:
         raise ServiceError(
@@ -513,6 +515,9 @@ def upload_source(
 
 
 def write_content(connection, tenant, run_id, write_id):
+    from minkops_platform.run_controls import require_active
+    run = run_for(connection, tenant["id"], run_id)
+    require_active(connection, tenant["id"], run["task_id"])
     row = connection.execute(
         """SELECT content,cancelled_at FROM account_writes
          WHERE tenant_id=%s AND run_id=%s AND id=%s""",

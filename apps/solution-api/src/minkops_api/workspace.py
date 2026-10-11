@@ -1,14 +1,17 @@
 """Tenant-scoped catalog, settings, and observable task reads."""
 
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from jsonschema import Draft202012Validator
 from minkops_platform.runtime.launch import installed_definition
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from minkops_platform.run_controls import task_control, owns_task
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
+from .desktop import call
 
 router = APIRouter(prefix="/api/tenants/{slug}")
 
@@ -51,7 +54,8 @@ def workflows_for(connection, tenant_id):
 
 def tasks_for(connection, tenant_id):
     return connection.execute(
-        """SELECT id, workflow_id, title, status, progress, summary, created_at, updated_at
+        """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
+                  control_state, progress, summary, created_at, updated_at
            FROM tasks WHERE tenant_id = %s ORDER BY updated_at DESC""",
         (tenant_id,),
     ).fetchall()
@@ -198,15 +202,30 @@ def update_workflow(
 def task_detail(slug: str, task_id: str, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
     task = connection.execute(
-        """SELECT id, workflow_id, title, status, progress, summary, created_at, updated_at
+        """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
+                  control_state, progress, summary, created_at, updated_at
            FROM tasks WHERE tenant_id = %s AND id = %s""",
         (tenant["id"], task_id),
     ).fetchone()
     if not task:
         raise HTTPException(404, "Task not found.")
+    task["can_control"] = owns_task(connection, tenant["id"], task_id, user["id"])
     task["events"] = connection.execute(
         """SELECT id, event_type, summary, progress, created_at
            FROM task_events WHERE tenant_id = %s AND task_id = %s ORDER BY id""",
         (tenant["id"], task_id),
     ).fetchall()
     return task
+
+
+class TaskControl(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["pause", "resume", "stop"]
+
+
+@router.post("/tasks/{task_id}/control")
+def control_task(slug: str, task_id: UUID, body: TaskControl, request: Request, user: User, connection: Db):
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    call(task_control, connection, tenant["id"], user, task_id, body.action)
+    return task_detail(slug, str(task_id), user, connection)

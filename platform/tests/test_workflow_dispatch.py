@@ -61,6 +61,7 @@ class DispatchTests(TestCase):
         from minkops_platform.runtime.application import process
 
         run = {
+            "tenant_id": "tenant", "task_id": "task",
             "workflow_key": "bill-entry",
             "config": {
                 "runtime_binding": {"handler": "accounts.bill"},
@@ -75,6 +76,7 @@ class DispatchTests(TestCase):
         with (
             patch("minkops_platform.runtime.diagnostics.record"),
             patch("minkops_platform.runtime.application.get_handler", return_value=handler),
+            patch("minkops_platform.run_controls.require_active"),
             self.assertRaisesRegex(ValueError, "authorized resource snapshot"),
         ):
             process(MagicMock(), MagicMock(), run, executor=executor, close_session=MagicMock())

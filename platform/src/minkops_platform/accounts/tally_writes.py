@@ -135,8 +135,11 @@ def complete_run(connection, run, result):
     )
 
 
-def spec(connection, device, payload, *, pending=True):
+def spec(connection, device, payload, *, pending=True, underway=False):
     run = run_for(connection, device["tenant_id"], payload["run_id"], True)
+    if pending and not underway:
+        from minkops_platform.run_controls import require_active
+        require_active(connection, device["tenant_id"], run["task_id"])
     if run["actor_id"] != device["owner_id"]:
         raise ServiceError("not_found", "Approved run not found for this account.")
     row = connection.execute(

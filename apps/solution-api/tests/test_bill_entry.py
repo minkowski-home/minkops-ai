@@ -684,6 +684,12 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(loaded["state"], "review")
 
     def test_cancellation_late_tally_receipt_and_lease_expiry_do_not_replay_or_claim_success(self):
+        self.verify_cancelled_tally_receipt()
+
+    def test_stop_preserves_late_tally_receipt_and_prevents_new_save_plans(self):
+        self.verify_cancelled_tally_receipt(control=True)
+
+    def verify_cancelled_tally_receipt(self, control=False):
         did = self.tally_discovery()
         bill = self.upload_bill()
         run, _ = self.launch(
@@ -703,7 +709,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertIsNone(
             self.client.post("/api/desktop/worker/claim", headers=self.worker, json={}).json()
         )
-        cancelled = self.client.post(
+        cancelled = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control", headers=self.csrf, json={"action": "stop"}) if control else self.client.post(
             self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf
         )
         self.assertEqual(cancelled.status_code, 200, cancelled.text)
@@ -723,7 +729,7 @@ class BillEntryTests(unittest.TestCase):
         )
         self.assertEqual(late.status_code, 200, late.text)
         final = self.client.get(self.base + f"/runs/{run['id']}").json()
-        self.assertEqual(final["state"], "failed")
+        self.assertEqual(final["state"], "stopped" if control else "failed")
         self.assertIsNotNone(final["tally_writes"][0]["verified_at"])
 
     def test_human_clarification_retries_only_failed_bill_without_replaying_good_input(self):

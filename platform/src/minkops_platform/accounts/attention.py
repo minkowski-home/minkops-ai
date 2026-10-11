@@ -47,10 +47,26 @@ def flag(connection, run, record, *, title=None, kind="bill", actor=None):
         target=target_for(connection, run, record), actor=actor)
 
 
+def stopped(connection, run, actor):
+    """Retain both proposals and unresolved inputs when automation is stopped."""
+    result = run.get("result") or {}
+    records = {record["source_file_id"]: record for record in result.get("records", [])}
+    for issue in result.get("unresolved", []):
+        records.setdefault(issue["source_file_id"], {"source_file_id": issue["source_file_id"],
+                                                   "findings": [issue["reason"]], "data": {}})
+    for record in records.values():
+        if record.get("status") not in ("saved", "duplicate", "rejected"):
+            item = flag(connection, run, record, title="Run stopped", actor=actor)
+            attention.audit(connection, item, actor, "stopped",
+                            "Remaining automation stopped. Verify the original destination before further action.")
+
+
 def decide(connection, tenant, user, run_id, file_id, action):
     from .service import approve_run
     from .batch import resolve_bill
     run = run_for(connection, tenant["id"], run_id, True)
+    from minkops_platform.run_controls import require_active
+    require_active(connection, tenant["id"], run["task_id"])
     if run["actor_id"] != user["id"] or run["state"] != "review":
         raise ServiceError("forbidden", "Only this run's operator can authorize bill writes.")
     original = next((r for r in run["result"]["records"] if r["source_file_id"] == file_id), None)
@@ -192,6 +208,9 @@ def supplier_created(connection, item, job, observation):
         return
     target = item["target"]
     run = run_for(connection, item["tenant_id"], target["run_id"], True)
+    from minkops_platform.run_controls import control_state
+    if control_state(connection, item["tenant_id"], run["task_id"]) != "active":
+        return
     if run["state"] != "review":
         return
     from .client_context import select_target

@@ -92,6 +92,9 @@ def get_handler(key):
 def process(connection, store, run, *, executor, close_session, cleanup=True):
     from . import lifecycle
     from .diagnostics import stage
+    from minkops_platform.run_controls import control_state, require_active
+
+    require_active(connection, run["tenant_id"], run["task_id"])
 
     handler = get_handler(binding_for(run).handler)
     with stage(connection, run, "prepare", "Prepare authorized files and pinned source context"):
@@ -104,9 +107,18 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
         }
         if any(granted.get(str(file["id"])) != file["sha256"] for file in files):
             raise ValueError("Execution input differs from the run's authorized resource snapshot.")
+    connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR UPDATE", (run["tenant_id"], run["id"]))
+    require_active(connection, run["tenant_id"], run["task_id"])
     store.observe(connection, run, "executing", handler.executing_summary, 20)
     connection.commit()
     result = lifecycle.execute_proposal(connection, store, run, files, context, executor)
+    # Serialize finishing against Stop. Raw provider output remains diagnostic
+    # evidence, but cannot start another operation after the operator stops.
+    connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR UPDATE", (run["tenant_id"], run["id"]))
+    if control_state(connection, run["tenant_id"], run["task_id"]) == "stopped":
+        if cleanup:
+            lifecycle.close_run(connection, store, run, close_session=close_session)
+        return
     with stage(connection, run, "validation", "Validate business proposal and trusted policy"):
         result = handler.validate(run, files, context, domain, result)
         result = enforce_policies(run["config"], result)

@@ -19,7 +19,7 @@ from .accounts.catalog import validate_catalog
 from .accounts.repository import files_for, public_run
 from .errors import ServiceError
 from .resources import REPOSITORY_ROOT
-from .run_controls import observe_task, resolve_request
+from .run_controls import observe_task, resolve_request, control_state, require_active
 
 CONFIG_SCHEMA = json.loads(
     (
@@ -52,7 +52,7 @@ def get_run(connection, tenant_id, run_id, lock=False):
     return row
 
 
-def detail(connection, row):
+def detail(connection, row, *, include_records=True):
     mapping = None
     if row["mapping_run_id"]:
         mapped = connection.execute(
@@ -63,6 +63,9 @@ def detail(connection, row):
     state = row["state"]
     if state not in ("completed", "failed") and mapping:
         state = mapping["state"]
+    control = control_state(connection, row["tenant_id"], row["task_id"])
+    if control != "active":
+        state = control
     catalog = copy.deepcopy(row["catalog"])
     if catalog and mapping and mapping["result"]:
         catalog["excel_mappings"] = mapping["result"]
@@ -82,6 +85,19 @@ def detail(connection, row):
                 except ValueError as error:
                     company["master_lookup_error"] = str(error)
                     catalog["partial"] = True
+        if not include_records:
+            # Poll only review metadata. Full evidence remains in the immutable
+            # catalog, downloads and execution context, never in growing DOMs.
+            for source in catalog.get("sources", []):
+                snapshot = source.get("snapshot", {})
+                for company in snapshot.get("companies", []):
+                    company.pop("identity", None)
+                    for category in ("masters", "vouchers"):
+                        company.get(category, {}).pop("records", None)
+                for collection in snapshot.get("collections", []):
+                    collection.pop("records", None)
+            if mapping:
+                mapping["config"] = {"file_provenance": mapping["config"].get("file_provenance", [])}
     return {
         **{
             k: row[k]
@@ -96,6 +112,7 @@ def detail(connection, row):
             )
         },
         "state": state,
+        "control_state": control,
         "catalog": catalog,
         "mapping_run": mapping,
         "ready": state == "completed" and bool(row["confirmed_at"]) and not catalog["partial"]
@@ -105,6 +122,8 @@ def detail(connection, row):
 
 
 def _observe(connection, row, state, summary, progress):
+    if control_state(connection, row["tenant_id"], row["task_id"]) == "stopped":
+        return
     if state == 'failed':
         from .attention import audit, record
         item = record(connection,row,f"discovery:{row['id']}","Source discovery","Source unavailable")
@@ -261,6 +280,34 @@ def progress(connection, device, job, body):
     }
     if observation["category"] and body["source_key"] != "tally":
         raise ServiceError("invalid", "Invalid discovery company.")
+    measurement = body.get("progress")
+    if measurement is not None:
+        # Display telemetry is bounded and optional for older companions. It
+        # never authorizes completion; only the validated receipt can do that.
+        activities = {
+            "Checking company", "Reading masters", "Collected masters",
+            "Reading vouchers", "Collected vouchers", "Collected company",
+            "Company needs attention", "Checking company scope",
+            "Company scope checked", "Company scope needs attention",
+            "Reading workbook", "Collected workbook", "Workbook needs attention",
+        }
+        if (
+            not isinstance(measurement, dict)
+            or set(measurement) - {"completed", "total", "activity", "item"}
+            or type(measurement.get("completed")) is not int
+            or type(measurement.get("total")) is not int
+            or not 0 <= measurement["completed"] <= measurement["total"] <= 10000
+            or measurement["total"] == 0
+            or not isinstance(measurement.get("activity"), str)
+            or measurement["activity"] not in activities
+            or ("item" in measurement and (
+                not isinstance(measurement["item"], str)
+                or len(measurement["item"]) > 500
+                or any(ord(char) < 32 for char in measurement["item"])
+            ))
+        ):
+            raise ServiceError("invalid", "Invalid discovery progress.")
+        observation["progress"] = measurement
     observations = [
         o
         for o in row["observations"]
@@ -273,7 +320,12 @@ def progress(connection, device, job, body):
     connection.execute(
         "UPDATE desktop_jobs SET lease_until=now()+interval '2 minutes' WHERE id=%s", (job["id"],)
     )
-    if observations != row["observations"]:
+    # Replace the latest measurement in durable state, without a task event
+    # for every export chunk. Source/company state transitions stay auditable.
+    previous = next((o for o in row["observations"] if
+                     (o["key"], o.get("category")) ==
+                     (observation["key"], observation["category"])), None)
+    if previous is None or previous["status"] != observation["status"]:
         label = "Tally" if body["source_key"] == "tally" else "Excel folder"
         _observe(
             connection,
@@ -582,7 +634,7 @@ def collect(connection, device, job, result):
             (row["tenant_id"], row["actor_id"], "0.4.0", Jsonb(remapped)),
         ).fetchone()
         catalog["excel_catalog_id"] = str(linked["id"])
-    elif not partial:
+    elif not partial and control_state(connection, row["tenant_id"], row["task_id"]) != "stopped":
         connection.execute(
             "UPDATE discovery_runs SET catalog=%s WHERE id=%s", (Jsonb(catalog), row["id"])
         )
@@ -645,6 +697,7 @@ def fail(connection, device, job, error):
 
 def confirm(connection, tenant, user, run_id, body):
     row = get_run(connection, tenant["id"], run_id, True)
+    require_active(connection, tenant["id"], row["task_id"])
     if row["actor_id"] != user["id"]:
         raise ServiceError("forbidden", "Only the operator who ran discovery can confirm it.")
     current = detail(connection, row)

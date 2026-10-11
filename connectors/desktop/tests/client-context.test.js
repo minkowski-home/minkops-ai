@@ -120,6 +120,29 @@ test("failed company remains partial without losing successful company", async (
   assert.equal(result.partial, true);
 });
 
+test("collection progress measures verified native reads and replaces the current activity", async () => {
+  const events = [];
+  await discoverClientContext(
+    { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
+    { request: transport([]), onProgress: async (...args) => events.push(args) },
+  );
+  const measured = events.filter(event => event[2]);
+  assert.ok(measured.length > 4);
+  assert.equal(measured[0][2].completed, 0);
+  assert.equal(measured[0][2].total, 7);
+  assert.ok(measured.some(event => event[2].activity === "Collected masters" && event[2].item === "A" && event[2].completed === 2));
+  assert.ok(measured.some(event => event[2].activity === "Collected vouchers" && event[2].item === "B" && event[2].completed === 6));
+  assert.equal(measured.at(-1)[2].completed, 7);
+  for (let i = 1; i < measured.length; i++) assert.ok(measured[i][2].completed >= measured[i - 1][2].completed);
+
+  const failed = [];
+  await discoverClientContext(
+    { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
+    { request: transport([], true), onProgress: async (...args) => failed.push(args) },
+  );
+  assert.ok(failed.at(-1)[2].completed < failed.at(-1)[2].total, "failed exports are never credited as complete");
+});
+
 test("an unopened on-disk company remains an identified unavailable company, never omitted", async () => {
   const base = transport([]);
   const result = await discoverClientContext(

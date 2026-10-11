@@ -58,6 +58,8 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
     from .tally_writes import complete_run
 
     run = run_for(connection, tenant["id"], run_id, True)
+    from minkops_platform.run_controls import require_active
+    require_active(connection, tenant["id"], run["task_id"])
     if run["actor_id"] != user["id"]:
         raise ServiceError("forbidden", "Only this run's operator can resolve its bills.")
     if run["state"] != "review" or run["workflow_key"] != "bill-entry":
@@ -154,6 +156,7 @@ def reconcile_once(url):
     with psycopg.connect(url, row_factory=dict_row) as connection:
         parents = connection.execute("""SELECT * FROM account_runs WHERE
             config->>'batch'='true' AND state IN ('queued','executing')
+            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=account_runs.tenant_id AND t.id=account_runs.task_id AND t.control_state='active')
             FOR UPDATE SKIP LOCKED""").fetchall()
         for parent in parents:
             children = connection.execute(

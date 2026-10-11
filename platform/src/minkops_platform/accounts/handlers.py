@@ -365,6 +365,7 @@ class BillHandler(AccountsHandler):
 
     def finish(self, connection, store, run, context, domain, result):
         from .service import prepare_writes
+        from minkops_platform.run_controls import control_state
         if not run.get("parent_run_id"):
             from .attention import flag
             for issue in result.get("unresolved", []):
@@ -380,7 +381,8 @@ class BillHandler(AccountsHandler):
             70,
         )
         if (
-            not run["config"].get("tally_target")
+            control_state(connection, run["tenant_id"], run["task_id"]) == "active"
+            and not run["config"].get("tally_target")
             and run["config"]["review_mode"] == "only_exceptions"
             and not result.get("requires_review")
             and not result.get("unresolved")
