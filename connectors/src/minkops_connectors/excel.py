@@ -61,7 +61,7 @@ def schema_projection(content, observed=None):
 
     Untabled sheets have at most one declared candidate in the first ten rows;
     named table headers are authoritative. Business interpretation is reviewed
-    separately. Never accept row samples, formulas, links or comments as schema.
+    separately. Preserve formula text without cached results. Reject business rows, links and comments.
     """
     original = open_workbook(content)
     if observed is None:
@@ -73,7 +73,7 @@ def schema_projection(content, observed=None):
                     "preview": [
                         {"row": row[0].row, "values": [c.value for c in row]}
                         for row in s
-                        if any(c.value is not None for c in row)
+                        if any(c.value is not None and c.data_type != "f" for c in row)
                     ],
                 }
                 for s in original
@@ -105,9 +105,16 @@ def schema_projection(content, observed=None):
             raise ValueError("Confirm a single candidate header in the first ten rows.")
         target = projected.create_sheet(source.title)
         target.sheet_state = source.sheet_state
+        formulas = []
         for row in source:
             for cell in row:
                 if cell.value is None:
+                    continue
+                if cell.data_type == "f" and not cell.comment and not cell.hyperlink:
+                    if not isinstance(cell.value, str):
+                        raise ValueError("Unsupported array formula; discovery needs attention.")
+                    target.cell(cell.row, cell.column, cell.value)
+                    formulas.append({"cell": cell.coordinate, "formula": cell.value[1:]})
                     continue
                 if (
                     cell.row not in declared
@@ -120,6 +127,8 @@ def schema_projection(content, observed=None):
                         "Source Discovery accepts headers only; refresh records through the workflow."
                     )
                 target.cell(cell.row, cell.column, cell.value)
+        if "formulas" in observation and observation["formulas"] != formulas:
+            raise ValueError("Formula definitions do not match the workbook.")
         canonical_headers = [
             {"row": r, "values": [c.value for c in target[r]]} for r in sorted(declared)
         ]
@@ -156,7 +165,7 @@ def schema_projection(content, observed=None):
                 "tables": canonical_tables,
                 "merged_ranges": [str(r) for r in source.merged_cells.ranges],
                 "preview": canonical_headers,
-                "formulas": [],
+                "formulas": formulas,
                 "reference_rows": [],
             }
         )

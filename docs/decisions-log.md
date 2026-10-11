@@ -873,3 +873,101 @@ wrong companies and mismatched fixture values, and added the optimized run to CI
 **Result:** Normal and optimized checks reject unsafe reviews before `/approve`;
 the valid clarification path still submits through the ordinary tenant API.
 Production fixture/hash, owner and company limits no longer disappear under `-O`.
+
+## Pin reusable client context and reconcile uncertain native imports (10 October 2026)
+
+**Situation:** Schema-only discovery and per-bill reference exports repeated work,
+missed nested client conventions and forced each run into one company. A Tally
+process can exit during an import, making its acknowledgement insufficient proof
+of either success or failure.
+
+**Task:** Reuse complete discovery evidence, scan mixed-company bills before
+saving, and recover native failures without introducing another accounting layer
+or weakening existing approval, identity and duplicate safeguards.
+
+**Action:** Kept core interpretation in versioned skills/configuration. Added
+bounded native full-master and period-voucher exports, verified report identifiers
+against primary Tally documentation, immutable local packages
+and authorized hosted lookup files. Pinned company GUIDs and extraction context
+per run, separated company routing from business fields, and grouped approved
+plans by company. Retained the existing Purchase adapter and receipts. Shared
+native recovery observes a trusted Tally process, records local diagnostics and
+restarts only a disappeared instance once. Reads may retry; imports with an
+unknown outcome enter read-only reconciliation and never automatic replay.
+
+**Result:** Offline regressions exercise nested records, period and identity
+validation, context pinning, mixed-company duplicate isolation, locked-company
+conflicts, import acknowledgement loss and restart fencing. Desktop/mobile launch
+checks show the new controls without browser errors. Existing financial recovery
+checks remain in place. Installation-specific export completeness, numeric `/LOAD`
+support, Windows crashes and deployment are explicitly pending in MIN-124;
+offline tests do not establish live compatibility.
+
+## Reconcile native XML representations without weakening financial guards (10 October 2026)
+
+**Situation:** MIN-124 live testing found that Tally's detailed exports differ
+from compact reference collections: message indentation creates text nodes,
+DayBook appends company metadata, and numeric company/AlterID fields contain
+padding and typed wrappers. Valid exports were rejected and unchanged ledgers
+looked stale. A restart licence handoff also hid an import's ambiguity flag.
+
+**Task:** Accept the installation's native representation while retaining full
+evidence, company identity checks, genuine stale-master rejection and the rule
+that an unknown import must never be replayed automatically.
+
+**Action:** Reproduced each protocol failure before fixing it. Ignore only
+message-level formatting whitespace; validate DayBook's ancillary company
+trailer against the just-discovered GUID/name. Normalize only numeric startup
+arguments and numeric AlterID comparisons, leaving original discovery records
+and other identity fields intact. Preserve write uncertainty when restart or
+readiness fails. Clarified versioned hosted contracts for company-scoped notes,
+Excel inventory coverage and company routing outside business-field evidence.
+
+**Result:** Regression tests reject mismatched company trailers, actual master
+changes, arbitrary startup arguments and import replay. Paid gpt-6-luna discovery
+and a reviewed mixed-company batch completed against real Windows Tally with
+independent duplicate-free readback. Controlled termination exposed native
+settings/licence handoffs, which are recorded as limitations rather than claims
+of unattended recovery. Production deployment remains paused under MIN-124.
+
+### 2026-10-10 — Decisions without accounting editors, with verifiable attention
+
+**Situation:** Review mixed automation with editable accounting values and
+correction prompts. Deferred bills could remain scattered in workflow tasks,
+while accepting a low-confidence scan could be mistaken for completed review.
+
+**Task:** Keep Minkops simple while preserving truthful automation, cross-workflow
+manual obligations and auditable authorization.
+
+**Action:** Introduce shared tenant-scoped attention events and concise one-click
+decisions; reject manual accounting value edits in the API as well as removing
+the UI. Keep external resolution checks read-only and pin the post-write native
+fingerprint for best-guess review. Separate explicit supplier creation from reads,
+verify company/master identities, then continue only the authorized bill. Preserve
+ordered native writes and bounded independent hosted sessions. Consolidate the
+final schema for new installs with immutable archived upgrade history for released
+databases, rather than discarding checksums or paid-session state.
+
+**Result:** Operators decide, original systems own manual corrections, and durable
+attention cannot disappear merely because a workflow finished or a record was
+viewed. Tests cover unchanged/changed destination evidence, wrong identities,
+actor audit and independent continuation. Production remains paused.
+
+## Preserve migration integrity during baseline readability cleanup (11 October 2026)
+
+**Situation:** The reconciled baseline retained dump-style ALTER statements for
+tables created in the same file. Folding them into CREATE statements changes the
+checksum, which would block already adopted installations despite an equivalent schema.
+
+**Task:** Improve readability without rebuilding existing databases, changing
+constraint identities or weakening detection of unverified migration edits.
+
+**Action:** Inline constraints and identities, order tables by foreign-key
+dependencies, and recognize only the exact original/new baseline digest pair.
+Preserve recorded history; continue rejecting unknown versions and all other
+checksum changes. Extend upgrade regressions to cover original baseline adoption,
+repeated migration, sequence settings and attempted unverified baseline edits.
+
+**Result:** Fresh and legacy schemas remain equivalent, including constraints,
+indexes, sequences, triggers and the updatable view. Existing rows and original
+checksums survive; migration changes outside the verified pair still fail closed.

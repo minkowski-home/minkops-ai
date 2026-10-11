@@ -17,9 +17,14 @@ def prepare(connection, run, result, *, approved=False):
 
     if enforce_policies(run["config"], result).get("requires_review") and not approved:
         raise ValueError("Client policy requires explicit review before destination writes.")
-    target = run["config"]["tally_target"]
+    scope = run["config"]["tally_target"]
+    from .client_context import select_target
+
     seen = {}
-    for index, record in enumerate(result["records"]):
+    ordered = sorted(
+        enumerate(result["records"]), key=lambda pair: pair[1].get("company_guid") or ""
+    )
+    for index, record in ordered:
         if (
             record.get("status") in ("saved", "duplicate", "rejected", "writing")
             or record.get("decision") == "hold"
@@ -29,11 +34,13 @@ def prepare(connection, run, result, *, approved=False):
             record["status"] = "rejected"
             continue
         try:
+            target = select_target(record, scope)
             identity = validate_tally(record["data"], target)
-            if identity in seen:
-                first = result["records"][seen[identity]]
+            key = (target["destination_key"], identity)
+            if key in seen:
+                first = result["records"][seen[key]]
                 if first["data"] == record["data"]:
-                    record["duplicate_of"] = seen[identity]
+                    record["duplicate_of"] = seen[key]
                     record["status"] = "writing"
                     continue
                 raise ValueError(
@@ -79,10 +86,12 @@ def prepare(connection, run, result, *, approved=False):
 
                 enqueue_approved(connection, run, target["device_id"], "tally.save", write["id"])
             record["status"] = "writing"
-            seen[identity] = index
+            seen[key] = index
         except ValueError as error:
             record["status"] = "held"
             record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
+            from .attention import flag
+            flag(connection, run, record)
         except UniqueViolation:
             record["status"] = "held"
             record["findings"].append(
@@ -92,6 +101,10 @@ def prepare(connection, run, result, *, approved=False):
 
 
 def complete_run(connection, run, result):
+    from .attention import flag
+    for record in result["records"]:
+        if record.get("status") == "held":
+            flag(connection, run, record)
     pending_excel = connection.execute(
         "SELECT count(*) AS n FROM account_writes WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL AND cancelled_at IS NULL",
         (run["tenant_id"], run["id"]),
@@ -231,13 +244,24 @@ def accept(connection, device, payload, receipt):
             )
     if current:
         record["current"] = current
+    from .attention import flag
+    if outcome in ("correction", "attention"):
+        item = flag(connection, run, record, title="Review in Tally")
+        from ..attention import audit
+        audit(connection,item,run['actor_id'],outcome,receipt.get('message','Existing voucher needs review.'))
+    # Best-guess review starts after verified write, using exact native identity.
+    if current and outcome in ("saved", "duplicate"):
+        from .attention import written
+        written(connection, run, record)
+        connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
+            (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":
         record["findings"].append(
             "Exact duplicate already exists; no additional voucher was created."
         )
     elif outcome in ("correction", "attention"):
         record["findings"].append(
-            "Existing bill differs. Review values and select Edit before approving."
+            "Review in Tally."
             if outcome == "correction"
             else str(receipt.get("message", "Tally write needs attention."))[:300]
         )

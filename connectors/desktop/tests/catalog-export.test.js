@@ -28,9 +28,9 @@ test("a chosen catalog export is complete, atomic and bounded", async () => {
     assert.deepEqual(await readdir(root), ["catalog.json"]);
     await assert.rejects(
       saveCatalogSnapshot(join(root, "large.json"), {
-        value: "x".repeat(8000001),
+        value: "x".repeat(64000001),
       }),
-      /8 MB/,
+      /64 MB/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

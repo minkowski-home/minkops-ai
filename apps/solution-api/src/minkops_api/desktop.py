@@ -128,8 +128,8 @@ async def finish(job_id: UUID, request: Request, device: Device, connection: Db)
     size = 0
     async for chunk in request.stream():
         size += len(chunk)
-        if size > 42_000_000:
-            raise HTTPException(413, "Choose a smaller folder: at most 30 MB of supported files.")
+        if size > 96_000_000:
+            raise HTTPException(413, "Discovery exceeds the supported transfer size.")
         chunks.append(chunk)
     try:
         body = Receipt.model_validate(json.loads(b"".join(chunks)))

@@ -76,6 +76,7 @@ export interface TaskEvent {
 export interface Workspace {
   tenant: { slug: string; name: string };
   can_edit: boolean;
+  attention_count?: number;
   employees: Employee[];
   workflows: Workflow[];
   tasks: Task[];

@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld(
   Object.freeze({
     version: 1,
     schemaOnlyFolders: true,
+    discoveryPackages: true,
+    openTallyDiagnostics: () => ipcRenderer.invoke("desktop:tally-diagnostics"),
     status: () => ipcRenderer.invoke("desktop:status"),
     connect: (tenant) => ipcRenderer.invoke("desktop:connect", tenant),
     disconnect: () => ipcRenderer.invoke("desktop:disconnect"),

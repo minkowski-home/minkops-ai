@@ -5,17 +5,17 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.4.0 is required for schema-only discovery grants. Tally metadata needs
-the local 64-bit Tally ODBC driver/DSN in addition to its HTTP service. Existing
-0.3.1 installed-RC evidence below is historical; repeat production HTTPS and clean
-Windows 10/11 acceptance with the rebuilt installer before publishing it.
+Companion 0.5.0 is required for version 2 discovery packages and shared Tally
+recovery. Core Tally discovery now uses HTTP/XML exports and needs no ODBC driver.
+Installed-RC evidence below is historical. Production deployment and Windows
+acceptance remain pending in [MIN-124](https://linear.app/minkops/issue/MIN-124).
 
 ## Local capabilities
 
 | Operation | Desktop | Web with a connected PC | Authority |
 | --- | --- | --- | --- |
 | Check Tally | Yes | Yes | Fixed, read-only company export to `127.0.0.1:9000` |
-| Discover Tally and Excel | Yes | Yes | Selected company/port/categories and explicitly granted local folders; server-owned versioned catalog |
+| Discover Tally and Excel | Yes | Yes | All loaded companies, voucher period and explicitly granted folders; versioned client context |
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
 | Save approved Excel entries | Yes | Yes | Accounts approval, before/after hashes, backup, atomic replacement and saved-byte verification |
@@ -24,8 +24,8 @@ Windows 10/11 acceptance with the rebuilt installer before publishing it.
 
 This version adds bounded native operations, not customer-machine agent hosting
 or a general remote shell. See [source discovery](source-discovery.md) for MIN-118.
-Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Tally must be
-open, with its HTTP server enabled on port 9000. A company listing is a connection
+Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Initially open Tally with its HTTP server enabled on port 9000; discovery must
+see every company the run may use. A company listing is a connection
 check, not verification of financial writes.
 
 Close hides the app in its tray; **Quit Minkops** stops the companion. Queued
@@ -65,14 +65,50 @@ server and needs no browser loopback exception, firewall port or router
 forwarding. Future mobile clients can use the same server-owned tasks and
 request bounded work on an authorized connected PC.
 
+## Tally diagnostics and crash recovery
+
+All companion Tally operations use the same bounded recovery transport. HTTP/XML
+failures are recorded in local `tally-diagnostics/<job-id>.json` with the protocol
+error and available recent Windows Application crash events. Review offers **Open
+Tally error details**. Raw request XML, credentials and documents are not logged
+to the server. Windows may not report the original crash cause; diagnostics are
+evidence, not a promise of a complete postmortem.
+
+Automatic recovery requires a previously observed, identifiable Tally executable
+and proof that no Tally instance remains. A live or uncertain instance is never
+replaced. Restart occurs at most once per native job. Only numeric `/LOAD` company
+arguments are replayed; no arbitrary startup scripts, TDL or remote executable
+paths are accepted from workflow inputs. Observed company numbers can supplement
+the original startup arguments. If unavailable, Tally's existing startup settings
+apply. Company GUID/master checks still guard every write. TallyPrime support,
+company-number export and authentication screens require live verification.
+
+[Tally's ERP 9 reference](https://help.tallysolutions.com/article/DeveloperReference/tdlreference/release_1_5.htm/)
+documents `/LOAD:<Company Number>`; a GUID is not that number. TallyPrime also
+supports [startup company selection](https://help.tallysolutions.com/tally/set-up-company-tally/).
+This refactor uses a numeric argument only when observed locally, and never
+assumes arbitrary company GUIDs can be loaded through the command line.
+
+Recovery waits for read-only company availability. Reads may retry once after
+restart. Imports never retry automatically after a lost acknowledgement or
+failure response: fresh read-only reconciliation checks whether the exact approved
+bill exists. Matching data produces a duplicate receipt, a different version is
+held, and a missing bill requires review/Resume. Login/load failure also becomes
+a handoff. Consequential lease expiry and persisted receipt replay retain the
+existing safeguards. External writers can race read/import; Tally offers no
+transaction spanning those separate requests, so ambiguity remains a handoff.
+
+Versioned discovery packages are saved locally as described in
+[source discovery](source-discovery.md), alongside the authoritative server copy.
+
 ## Build and run
 
 The consolidated branch retains Windows baseline `c3b050c`, the shared workflow
 architecture, and Bill Entry's financial-write work through `3dc6552`. Its API/UI
 uses installed bindings and shared dispatch, including independent bill sessions,
-native Tally reconciliation, and verified Excel/Tally writes. Apply all pending
-migrations through `0011_complete_branch_convergence` before starting this
-revision. Either predecessor database can upgrade without resetting run history.
+native Tally reconciliation, and verified Excel/Tally writes. Run `db/migrate.py`
+before starting this revision. It installs the final baseline or adopts archived
+upgrade history. Either predecessor can upgrade without resetting run history.
 See [branch convergence](branch-convergence.md) for the tested paths.
 See [workflow authoring](workflow-authoring.md) for installation and recovery.
 
@@ -98,7 +134,7 @@ default is `https://app.minkops.com`. Packaged releases accept HTTPS only.
 Development can use localhost HTTP. The web host must serve existing `/api/`
 routes at the same origin; Vite already supports this through `VITE_API_TARGET`.
 A build does not deploy or prove that the default production host serves this
-branch. Apply all migrations through 0011 before using bill entry. Use normal
+branch. Install or adopt the final baseline before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
@@ -129,8 +165,9 @@ connection checks/refreshes have their own short stages. Events drive stages,
 with no simulated percentage or ETA. Failures remain at the last observed
 stage. Labels and outlined icons work independently of color or animation.
 
-Review shows actual sheet/entry counts and unclear destinations. Editable
-business values remain visible; source evidence and activity are expandable.
+Review shows actual sheet/entry counts, bill identifiers and short status.
+One-click decisions replace accounting editors and correction prompts. Manual
+changes belong in the original tools; detailed events remain internal audit data.
 All four themes and responsive layout are shared. Accounts alone decides when
 all workbooks are verified; one native job cannot complete a multi-workbook run.
 
@@ -158,7 +195,7 @@ nested names are rejected rather than converted into misleading object strings.
 
 On 6 October 2026 the unsigned 0.3.1 NSIS installer was installed successfully on
 Windows 11 Pro (build 26300) and launched against the shared production UI build. MIN-122's
-local sweep covers four themes, native folder selection, bounded JSON catalog
+historical sweep covered four themes, native folder selection, bounded JSON catalog
 Save As, missing-supplier Needs Attention, independent clarification, approve/
 hold/reject/edit controls, duplicate alerts, source previews and web/desktop task
 synchronization. Closing the main window leaves the native worker in the tray;

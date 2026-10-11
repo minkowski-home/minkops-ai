@@ -1,5 +1,12 @@
 # Infrastructure
 
+Python tools here provision, configure, deploy, audit and recover hosting/cloud
+resources. `google_api.py` is their shared operator-only client, outside the app
+image. Keep workflow/demo operations in `scripts/`: `provision_demo.py` prepares
+the verified demo owner and installation; `verify_production.py` checks the
+reviewed synthetic bill lifecycle. These have separate responsibilities from
+cloud infrastructure and must remain opt-in.
+
 `compose.yml` runs the local OLTP PostgreSQL database. The API and durable
 Accounts worker are separate processes sharing that database. OpenAI provisions
 the agent execution environment; Compose does not run a Codex executor.

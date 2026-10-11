@@ -9,6 +9,7 @@ import { AccessScreen, DashboardScreen, EmployeeDetail, EmployeesScreen, TaskDet
 import Login, { InvitePage, JoinPage, SignupPage, VerifyPage } from "./pages/Login";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { DevicesScreen } from './desktop/DevicesScreen';
+import { Attention } from './workspace/Attention';
 
 function HomeRedirect() {
   const { user, isLoading } = useAuth();
@@ -85,8 +86,9 @@ function Console() {
   const path = location.pathname;
   const title = path.includes("/employees/") ? "Employee" : path.endsWith("/employees") ? "Employees"
     : path.includes("/workflows/") ? "Workflow" : path.endsWith("/workflows") ? "Workflows"
-      : path.includes("/tasks/") ? "Task" : path.endsWith("/connections") ? "Connected PCs" : path.endsWith("/access") ? "Access" : "Dashboard";
-  const attentionCount = workspace.tasks.filter((task) => task.status === "attention").length;
+      : path.includes("/tasks/") ? "Task" : path.endsWith("/connections") ? "Connected PCs"
+        : path.endsWith("/attention") ? "Attention items" : path.endsWith("/access") ? "Access" : "Dashboard";
+  const attentionCount = workspace.attention_count ?? 0;
 
   return <ConsoleShell title={title} tenantName={workspace.tenant.name} routeSlug={routeSlug}
     pendingCount={attentionCount} collapsed={collapsed} onToggleSidebar={() => setCollapsed((value) => !value)}
@@ -102,6 +104,7 @@ function Console() {
         onSaved={refreshWorkspace} />} />
       <Route path="tasks/:id" element={<TaskRoute workspace={workspace} routeSlug={routeSlug} />} />
       <Route path="connections" element={<DevicesScreen tenant={slug} routeSlug={routeSlug} />} />
+      <Route path="attention" element={<Attention tenant={slug} routeSlug={routeSlug} />} />
       <Route path="access" element={workspace.can_edit
         ? <AccessScreen workspace={workspace} onSaved={refreshWorkspace} />
         : <Navigate to="dashboard" replace />} />

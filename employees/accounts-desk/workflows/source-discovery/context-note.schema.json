@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "company_guid",
+    "observation",
+    "evidence_ids",
+    "certainty"
+  ],
+  "properties": {
+    "company_guid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "certainty": {
+      "enum": [
+        "observed",
+        "inferred"
+      ]
+    }
+  }
+}

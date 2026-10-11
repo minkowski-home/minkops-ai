@@ -7,7 +7,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 from zipfile import ZipFile
 
-from minkops_api.accounts_agent import execute, read_result
+from minkops_platform.accounts.agent import execute, read_result
 
 
 class HostedAdapterTests(TestCase):

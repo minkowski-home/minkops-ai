@@ -32,7 +32,9 @@ prebuilding a general workflow engine.
 `apps/solution-web` and `apps/solution-api` serve one shared application for
 every tenant. A signed-in user belongs to a tenant as an admin or member.
 Platform admins can manage any tenant; tenant admins manage their own. Other
-members can view settings. Work email domains provide a verified discovery
+members can view saved settings, choose per-run configuration and resolve
+attention items they can access. Saved tenant/employee configuration stays
+admin-only. Work email domains provide a verified discovery
 hint, never automatic access. Invitations and approved join requests establish
 membership, including for personal email addresses.
 
@@ -46,7 +48,9 @@ foreign keys prevent links across tenants.
 
 The dashboard displays the signed-in user's name and observable work. The
 activity pane owns active tasks, attention requests, handoffs, and recent
-outcomes. Each task has a status, progress, short summary, and event timeline.
+outcomes. Each task has a status, progress and short summary; detailed events
+stay in internal audit. The persistent [attention list](attention.md) spans all
+workflows and retains deferred and best-guess items beyond task completion.
 The pane is adjustable on desktop. The four app themes use the locked brand
 palette in `design/tokens/` and a per-browser preference.
 

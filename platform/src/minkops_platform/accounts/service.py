@@ -16,7 +16,6 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
 from minkops_platform.workflows import load_definition as load_definition
 
-from .bills import tally_target
 from .catalog import apply_records, validate_catalog, validate_data
 from .checks import check_records, populate_entry_ids
 from .repository import (
@@ -62,6 +61,13 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
             destinations = {
                 s["file_id"] for s in body["result"]["sheets"] if s["role"] == "destination"
             }
+            if run["config"].get("local_discovery_snapshot"):
+                from .client_context import validate_notes
+
+                validate_notes(
+                    body["result"].get("context_notes", []),
+                    run["config"]["local_discovery_snapshot"],
+                )
             if require_destination and not destinations:
                 raise ValueError("Confirm at least one bill-entry destination.")
             if any(not f["writable"] for f in files if str(f["id"]) in destinations):
@@ -101,6 +107,8 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "sheet",
                     "table",
                     "evidence",
+                    "company_guid",
+                    "company_evidence",
                 ):
                     if edited.get(field) != old.get(field):
                         raise ValueError(
@@ -113,7 +121,8 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     raise ValueError(
                         "Application-generated entry IDs cannot be changed in bill review."
                     )
-                old["data"], old["operation"] = edited["data"], edited["operation"]
+                if any(edited["data"].get(k) != old["data"].get(k) for k in set(edited["data"]) | set(old["data"])) or edited["operation"] != old["operation"]:
+                    raise ValueError("Edit accounting values in the original system, not Minkops.")
             catalog = run["config"]["catalog_snapshot"]
             tally = run["config"].get("tally_target")
             if tally:
@@ -373,6 +382,9 @@ def verify_write(connection, tenant, run_id, write_id, content):
             index = change.get("record_index")
             if index is not None:
                 result["records"][index]["status"] = "saved"
+                from .attention import excel_baseline, written
+                excel_baseline(connection, run, result["records"][index], content)
+                written(connection, run, result["records"][index])
         if run["state"] == "writing":
             from .tally_writes import complete_run
 

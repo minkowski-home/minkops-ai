@@ -8,6 +8,7 @@ export interface NativeFolder {
   files: NativeFile[];
 }
 export interface DesktopStatus {
+  discovery_archive_error?: string | null;
   version: string;
   name: string;
   device: { id: string; tenant: string; owner_id: string } | null;
@@ -15,6 +16,8 @@ export interface DesktopStatus {
 export interface DesktopBridge {
   version: number;
   schemaOnlyFolders?: boolean;
+  discoveryPackages?: boolean;
+  openTallyDiagnostics?(): Promise<void>;
   status(): Promise<DesktopStatus>;
   connect(tenant: string): Promise<{ id: string }>;
   disconnect(): Promise<void>;

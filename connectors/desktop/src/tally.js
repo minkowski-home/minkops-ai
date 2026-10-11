@@ -23,7 +23,40 @@ const norm = (v) => String(v).trim().toLowerCase();
 const year = (s) => Number(s.slice(0, 4)) - (Number(s.slice(4, 6)) < 4 ? 1 : 0);
 const digest = (v) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
+// Detailed XML pads numeric AlterID text; reference collections trim it. Only
+// normalize that numeric field, retaining exact ledger GUIDs and parent names.
+const referenceDigest = (field, value) => digest(
+  field === "ALTERID" && typeof value === "string" && /^\s*\d+\s*$/.test(value)
+    ? value.trim() : value,
+);
 const unsupported = Symbol("unsupported allocations");
+
+/** Fixed native attention operations. Renderer cannot supply XML or endpoints. */
+export async function inspectTallyAttention(plan, {request = fetch, createSupplier = false} = {}) {
+  const snapshot = await discoverTally({company: plan.company, port: plan.port,
+    depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+  const companies = snapshot.collections.find(c => c.category === "company")?.records ?? [];
+  if (companies.length !== 1 || text(companies[0].GUID) !== plan.company_guid)
+    throw new Error("Tally company changed.");
+  let ledgers = snapshot.collections.find(c => c.category === "ledgers")?.records ?? [];
+  const matches = ledgers.filter(m => text(m["@_NAME"] ?? m.NAME) === plan.vendor);
+  if (createSupplier && !matches.length) {
+    if (typeof plan.vendor !== "string" || !plan.vendor.trim() || plan.vendor.length > 200 || /[\x00-\x1f]/.test(plan.vendor))
+      throw new Error("Invalid supplier name.");
+    const body = `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>All Masters</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><LEDGER NAME="${xml(plan.vendor)}" ACTION="Create"><NAME>${xml(plan.vendor)}</NAME><PARENT>Sundry Creditors</PARENT><ISBILLWISEON>No</ISBILLWISEON></LEDGER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
+    // Losing an import acknowledgement never permits another import in this
+    // attempt. The next explicit action starts with the same exact master read.
+    await exchange(plan.company, plan.port, body, request);
+    const after = await discoverTally({company: plan.company, port: plan.port, depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+    const observed = after.collections.find(c => c.category === "company")?.records ?? [];
+    if (observed.length !== 1 || text(observed[0].GUID) !== plan.company_guid)
+      throw new Error("Tally company changed.");
+    ledgers = after.collections.find(c => c.category === "ledgers")?.records ?? [];
+  }
+  const bills = (await readTallyBills(plan, {request})).filter(v =>
+    v.vendor === plan.vendor && v.invoice_number === plan.invoice_number);
+  return {company_guid: plan.company_guid, ledgers, current: bills.length === 1 ? bills[0] : null};
+}
 const populated = (v) =>
   typeof v === "object" && v !== null
     ? Object.values(v).some(populated)
@@ -133,7 +166,7 @@ function equal(record, data) {
   );
 }
 
-export async function commitTallyBill(plan, { request = fetch } = {}) {
+export async function commitTallyBill(plan, { request = fetch, reconciliationOnly = false } = {}) {
   const { data, company, port = 9000, remote_id, operation, expected } = plan;
   if (
     !/^[a-f0-9-]{36}$/.test(remote_id) ||
@@ -188,7 +221,7 @@ export async function commitTallyBill(plan, { request = fetch } = {}) {
         !pinned ||
         ["GUID", "PARENT", "ALTERID"].some(
           (k) =>
-            pinned[k] != null && digest(actual[0][k]) !== digest(pinned[k]),
+            pinned[k] != null && referenceDigest(k, actual[0][k]) !== referenceDigest(k, pinned[k]),
         )
       )
         throw new Error(
@@ -245,6 +278,7 @@ export async function commitTallyBill(plan, { request = fetch } = {}) {
       message:
         "Existing voucher has allocations this bill mapping cannot preserve. Correct it in Tally, then reconcile.",
     };
+  if (reconciliationOnly) return {outcome:"attention",message:"Tally restarted after an uncertain write. The approved version is not present; review and Resume saves to reconcile before importing."};
   const entry = (ledger, amount) =>
     `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${amount < 0 ? "Yes" : "No"}</ISDEEMEDPOSITIVE><AMOUNT>${(amount / 100).toFixed(2)}</AMOUNT></ALLLEDGERENTRIES.LIST>`;
   const guid = current?.guid || remote_id;
