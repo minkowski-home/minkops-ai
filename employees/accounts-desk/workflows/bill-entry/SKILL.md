@@ -58,6 +58,13 @@ for every bill; contradictory buyer evidence requires handoff. Infer mode may
 choose any discovered company using buyer identity and evidenced client context;
 a shared supplier name alone is insufficient. Save company_guid and explain the
 selection in company_evidence on every proposed record. Ambiguity is unresolved.
+Resolve logical buyer identity using full company masters and confirmed context.
+Allow minor spelling, spacing, punctuation, legal-suffix and evidenced trading-name
+differences when matching GSTIN or other corroborating identity evidence uniquely
+establishes the same company. Never require identical display-name characters.
+Name similarity alone cannot override a conflicting GSTIN or establish an
+otherwise ambiguous buyer. Record the comparison in company_evidence and retain
+exact discovered company identifiers for native writes.
 All scans are persisted for review before native writes. Approved writes are
 authorized through concise one-click decisions. Manual accounting edits happen
 in original systems. Do nothing preserves a shared attention item without a

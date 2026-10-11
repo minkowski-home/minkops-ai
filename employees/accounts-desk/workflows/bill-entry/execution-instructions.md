@@ -29,6 +29,19 @@ vendors in two companies are not proof of company identity. If ambiguous, put
 that input in unresolved. Save the company decision for later native entry.
 Use the supplied destination file ID, sheet Purchase and table:null.
 
+Buyer identity is a logical business match, not letter-for-letter name equality.
+Compare the buyer (not supplier) against the discovered company's full master
+and confirmed context. Matching GSTIN is strong evidence despite spacing,
+punctuation, abbreviations (Pvt. Ltd. / Private Limited), a trading/display name,
+or minor spelling differences. If GSTIN is absent, require corroborating legal
+name, address or confirmed alias evidence that identifies exactly one company;
+name similarity alone is insufficient. A locked company limits destinations but
+does not prove the buyer match. Conflicting buyer GSTINs or evidence for another
+company require handoff even when names look similar. Never invent an alias or
+ignore contradictory evidence. In company_evidence record the observed buyer
+name/identifiers, the discovered identity and why the differences are consistent.
+Company names and identities in native plans remain the exact discovered values.
+
 For Excel, use actual confirmed columns/types and the exact named table (or
  table:null for a plain sheet). Choose an evidenced destination from the catalog;
 there is no universal invoice schema for Excel. Extract one record per bill or
