@@ -11,6 +11,7 @@ import {
   recoveringTallyRequest, captureTallyProcess, tallyProcessRunning,
   restartTallyProcess, waitForTally, tallyCrashEvents,
   discoverClientContext, commitTallyBill, readTallyBills,
+  tallyCompanyNumber,
 } from "../connectors/desktop/src/index.js";
 
 const company = process.env.MINKOPS_TALLY_TEST_COMPANY;
@@ -19,7 +20,13 @@ const stage = process.argv[2];
 assert.ok(company && root && ["probe", "masters", "vouchers", "preflight", "import", "readback", "ack-applied", "ack-absent", "ack-different"].includes(stage));
 await mkdir(root, { recursive: true });
 const observed = await captureTallyProcess();
-assert.ok(observed && observed.loads.length >= 2, "Start one known Tally instance with both numeric /LOAD arguments.");
+assert.ok(observed, "Start one known Tally instance.");
+// Match the companion's startup fallback: use identities exported by this
+// running instance when the operator loaded companies through Tally's UI.
+const initial = await discoverClientContext({port:9000,period:{from:"2026-10-01",to:"2026-10-02"}});
+assert.equal(initial.partial,false);
+observed.loads = [...new Set([...observed.loads, ...initial.companies.map(c => tallyCompanyNumber(c.identity?.COMPANYNUMBER)).filter(Boolean)])];
+assert.ok(observed.loads.length >= 2, "Load both authorised companies before fault injection.");
 const diagnostics = [];
 let injections = 0, restarts = 0, imports = 0;
 process.on("uncaughtException", async (error) => {
@@ -36,7 +43,7 @@ if (stage === "ack-different") {
   assert.equal(first.outcome,"saved");
 }
 const request = recoveringTallyRequest({
-  capture: captureTallyProcess, isRunning: tallyProcessRunning,
+  capture: async () => observed, isRunning: tallyProcessRunning,
   restart: async (p) => { restarts++; await restartTallyProcess(p); },
   ready: waitForTally,
   diagnose: async (d) => { diagnostics.push({...d,events:await tallyCrashEvents()}); },
