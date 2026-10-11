@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
@@ -10,11 +10,14 @@ import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
 import { Icon } from "./Icon";
 import { progressView, type ProgressMode } from '../workspace/progress';
+import { TaskProgress } from "../workspace/TaskProgress";
+import { RunControls } from "../workspace/RunControls";
+import { LoadingIndicator, Spinner } from "../components/Feedback";
 
 const statusText: Record<string, string> = {
   active: "Active", inactive: "Inactive", paused: "Paused", planned: "Planned",
   running: "In progress", attention: "Needs attention", handoff: "Save pending",
-  completed: "Completed", failed: "Failed",
+  completed: "Completed", failed: "Failed", stopped: "Stopped",
 };
 
 function Status({ value }: { value: string }) {
@@ -83,7 +86,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
             }))} />}
     </label>)}
     {!fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
-    {canEdit && <button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button>}
+    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : "Save settings"}</button>}
     {message && <p role="status" className="form-message">{message}</p>}
   </form>;
 }
@@ -100,7 +103,7 @@ export function EmployeesScreen({ workspace, routeSlug }: { workspace: Workspace
         <div className="employee-mark"><Icon name="agents" size={22} /></div>
         <div><h3>{employee.name}</h3><p>{employee.description}</p>
           <div className="employee-workflows"><span>Active workflows</span>
-            <strong>{workflows.length ? workflows.map((workflow) => workflow.name).join(" · ") : "None yet"}</strong>
+            <strong>{workflows.length ? `${workflows.length} available` : "None yet"}</strong>
           </div>
         </div><Icon name="chevronRight" size={17} />
       </Link>;
@@ -173,7 +176,7 @@ export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   const linked = workspace.employees.filter((employee) => item.employee_ids.includes(employee.id));
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
-    <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
+    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? 'Collect reusable context from Tally and Excel.' : item.description}</p></div><Status value={item.status} /></header>
     {presentationFor(item) && <WorkflowLaunch key={item.id}
       tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={item} />}
     <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
@@ -249,10 +252,10 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
     {/* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
     <aside className="attention-pane" aria-label="Activity">
       <div className="activity-heading"><h3>Activity</h3><p>What is happening now</p></div>
-      <TaskLinks title="Active tasks" tasks={tasks.filter((task) => task.status === "running")} routeSlug={routeSlug} />
+      <TaskLinks title="Active tasks" tasks={tasks.filter((task) => ["running", "paused"].includes(task.status))} routeSlug={routeSlug} />
       <TaskLinks title="Needs attention" tasks={tasks.filter((task) => task.status === "attention")} routeSlug={routeSlug} />
       <TaskLinks title="Handoffs" tasks={tasks.filter((task) => task.status === "handoff")} routeSlug={routeSlug} />
-      <TaskLinks title="Recent outcomes" tasks={tasks.filter((task) => ["completed", "failed"].includes(task.status))} routeSlug={routeSlug} />
+      <TaskLinks title="Recent outcomes" tasks={tasks.filter((task) => ["completed", "failed", "stopped"].includes(task.status))} routeSlug={routeSlug} />
     </aside>
   </div>;
 }
@@ -265,6 +268,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
+  const controlRevision = useRef(0);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -272,13 +276,17 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     setError("");
     setLoading(true);
     const poll = async () => {
+      const revision = controlRevision.current;
       try {
         const result = await api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`);
-        if (!active) return;
+        if (!active || revision !== controlRevision.current) return;
         setDetail(result); setError("");
-        if (!["completed", "failed"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
+        if (!["completed", "failed", "stopped"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
       } catch (caught) {
-        if (active) setError(caught instanceof Error ? caught.message : "Could not load task.");
+        if (active) {
+          setError(caught instanceof Error ? caught.message : "Could not load task.");
+          timer = setTimeout(() => void poll(), 5000);
+        }
       } finally { if (active) setLoading(false); }
     };
     void poll();
@@ -288,27 +296,20 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <h2>Task unavailable</h2><p role="alert">{error}</p>
     <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
   </section>;
-  if (!detail) return <section className="route-screen"><p>Loading task…</p></section>;
+  if (!detail) return <section className="route-screen"><LoadingIndicator>Loading task…</LoadingIndicator></section>;
   const workflow = workspace.workflows.find((w) => w.id === detail.workflow_id);
   const presentation = workflow ? presentationFor(workflow) : null;
   const mode: ProgressMode = presentation === "accounts-bill" ? "bill-entry" : presentation === "accounts-discovery" ? "source-discovery"
     : !detail.workflow_id && detail.title === 'Check Tally connection' ? 'tally.probe'
-      : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : 'simple';
+      : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : detail.workflow_id ? 'proposal' : 'simple';
   const progress = progressView(detail, mode);
   return <section className="route-screen detail-screen task-detail">
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
     <header className="detail-heading"><div><h2>{detail.title}</h2></div>
       <Status value={detail.status} /></header>
-    <div className="task-progress">
-      <div className={`task-stage-mark${progress.finished ? ' is-finished' : ''}`} aria-hidden="true"><Icon name={progress.finished ? 'check' : detail.status === 'failed' ? 'x' : 'tasks'} size={28} /></div>
-      <div className="task-stage-copy"><h3>{progress.label}</h3>
-        <ol className="task-stage-list" aria-label="Task stages">{progress.stages.map((stage, index) => <li key={stage}
-          className={index < progress.current || progress.finished ? 'is-done' : index === progress.current ? 'is-current' : ''}
-          aria-current={!progress.finished && index === progress.current ? 'step' : undefined}>
-          <span aria-hidden="true">{index < progress.current || progress.finished ? <Icon name="check" size={14} /> : index + 1}</span>{stage}</li>)}</ol>
-      </div>
-    </div>
-    <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} />
+    <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { controlRevision.current++; setDetail(task); setAttempt(value => value + 1); }} />
+    {mode !== 'source-discovery' && <TaskProgress view={progress} stale={Boolean(error)} />}
+    <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} controlState={detail.control_state ?? 'active'} />
       {error && <p role="alert" className="form-message">Could not refresh <button
         className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}

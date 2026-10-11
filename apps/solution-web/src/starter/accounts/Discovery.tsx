@@ -1,11 +1,15 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type Workflow } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { chooseFolder } from "./localFiles";
-import type { Catalog, Run, Source } from "./types";
+import type { Catalog, Source } from "./types";
 import { CatalogReview } from "./CatalogReview";
 import { desktopBridge } from "../desktop/bridge";
+import { TaskProgress } from "../workspace/TaskProgress";
+import { Spinner } from "../components/Feedback";
+import { discoveryProgress, type Config, type DiscoveryRun } from "./discoveryView";
+import { DiscoveryResults } from "./DiscoveryResults";
 
 interface Device {
   id: string;
@@ -15,88 +19,9 @@ interface Device {
   expires_at: string;
   last_seen_at: string | null;
 }
-interface Binding {
-  source_id: string;
-  device_id: string;
-}
-interface Config {
-  destination_mode?: 'excel' | 'tally' | 'both';
-  depth: "client_context";
-  excel_source_ids: string[];
-  tally: { port: number; period: {from:string;to:string} } | null;
-}
-interface MasterSummary {
-  exported_count: number;
-  unique_count: number;
-  duplicate_count: number;
-  metadata_count: number;
-  counts_by_type: Record<string, number>;
-}
-const masterLabels: Record<string, string> = {
-  LEDGER: "Ledgers", GROUP: "Groups", VOUCHERTYPE: "Voucher types",
-  STOCKITEM: "Stock items", STOCKGROUP: "Stock groups", UNIT: "Units",
-  GODOWN: "Godowns", CURRENCY: "Currencies", COSTCATEGORY: "Cost categories",
-  COSTCENTRE: "Cost centres", TAXUNIT: "Tax units",
-  INCOMETAXCLASSIFICATION: "Income-tax classifications", INCOMETAXSLAB: "Income-tax slabs"
-};
-interface Collection {
-  category: string;
-  status: string;
-  count?: number;
-  records?: Record<string, unknown>[];
-  error?: string;
-  masterSummary?: MasterSummary;
-}
-interface Book {
-  path: string;
-  file_id: string;
-  status: string;
-  error?: string;
-  structure?: {
-    sheets: {
-      sheet: string;
-      columns: number;
-      rows: number;
-      tables: { name: string }[];
-    }[];
-  };
-}
-interface DiscoveredSource {
-  key: string;
-  tool: string;
-  label?: string;
-  status: string;
-  error?: string;
-  workbooks?: Book[];
-  snapshot?: { company?:string; collections?:Collection[]; scope_error?:string; companies?: {company:string;status:string;error?:string;company_guid?:string;master_summary?:MasterSummary;master_lookup_error?:string;masters?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]};vouchers?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]}}[] };
-}
-interface DiscoveryRun {
-  id: string;
-  task_id: string;
-  device_id: string;
-  config: Config;
-  state: string;
-  ready: boolean;
-  observations: { key: string; status: string; category?: string }[];
-  mapping_run: Run | null;
-  catalog: {
-    context_error?:string;
-    context_notes?: {company_guid:string;observation:string;certainty:string;evidence_ids:string[]}[];
-    partial: boolean;
-    sources: DiscoveredSource[];
-    review: { status: string; reused_from: string | null };
-    excel_mappings: Catalog | null;
-  } | null;
-}
-export function DiscoveryLaunch({
-  tenant,
-  routeSlug,
-  workflow
-}: {
-  tenant: string;
-  routeSlug: string;
-  workflow: Workflow;
-}) {
+interface Binding { source_id: string; device_id: string }
+
+export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug: string; workflow: Workflow }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [devices, setDevices] = useState<Device[]>([]);
@@ -104,478 +29,200 @@ export function DiscoveryLaunch({
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
-  const [destinationMode, setDestinationMode] = useState<'excel' | 'tally' | 'both'>(
-    (workflow.config_values.destination_mode ?? 'tally') as 'excel' | 'tally' | 'both'
-  );
-  const tally = destinationMode !== 'excel';
-  const [periodFrom, setPeriodFrom] = useState(new Date(Date.now()-90*86400000).toISOString().slice(0,10));
-  const [periodTo, setPeriodTo] = useState(new Date().toISOString().slice(0,10));
+  const [destinationMode, setDestinationMode] = useState<"excel" | "tally" | "both">((workflow.config_values.destination_mode ?? "tally") as "excel" | "tally" | "both");
+  const tally = destinationMode !== "excel";
+  const excel = destinationMode !== "tally";
+  const [periodFrom, setPeriodFrom] = useState(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10));
+  const [periodTo, setPeriodTo] = useState(new Date().toISOString().slice(0, 10));
   const [port, setPort] = useState(9000);
-
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"launch" | "folder" | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState("");
   const base = `/api/tenants/${tenant}`;
-  async function load() {
+  const load = useCallback(async () => {
     const [dd, ss, bb, latest] = await Promise.all([
-      api<Device[]>(base + "/desktop/devices"),
-      api<Source[]>(base + "/accounts/sources"),
-      api<Binding[]>(base + "/desktop/sources"),
-      api<DiscoveryRun | null>(base + "/discovery/latest")
+      api<Device[]>(base + "/desktop/devices"), api<Source[]>(base + "/accounts/sources"),
+      api<Binding[]>(base + "/desktop/sources"), api<DiscoveryRun | null>(base + "/discovery/latest")
     ]);
-    const owned = dd.filter(
-      (d) =>
-        d.owner_id === user?.id && !d.revoked_at && new Date(d.expires_at) > new Date()
-    );
-    setDevices(owned);
-    setSources(ss);
-    setBindings(bb);
-    setDeviceId((current) =>
-      owned.some((d) => d.id === current)
-        ? current
-        : owned.some((d) => d.id === latest?.device_id)
-          ? latest!.device_id
-          : owned[0]?.id || ""
-    );
-    if (latest) {
-      setSelected(latest.config.excel_source_ids);
-      setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? (latest.config.excel_source_ids.length ? 'both' : 'tally') : 'excel'));
-
-      if (latest.config.tally) {
-        if (latest.config.tally.period) {setPeriodFrom(latest.config.tally.period.from);setPeriodTo(latest.config.tally.period.to);}
-        setPort(latest.config.tally.port);
-
-      }
-    }
-  }
-  useEffect(() => {
-    void load().catch((e: Error) =>
-      setError(e.message)
-    ); /* Server-owned setup is restored on any client. */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return { devices: dd.filter(d => d.owner_id === user?.id && !d.revoked_at && new Date(d.expires_at) > new Date()), sources: ss, bindings: bb, latest };
   }, [base, user?.id]);
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError("");
+    void load().then(({ devices: owned, sources: ss, bindings: bb, latest }) => {
+      if (!active) return;
+      setDevices(owned); setSources(ss); setBindings(bb);
+      setDeviceId(owned.find(d => d.id === latest?.device_id)?.id ?? owned[0]?.id ?? "");
+      if (latest) {
+        setSelected(latest.config.excel_source_ids);
+        setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? latest.config.excel_source_ids.length ? "both" : "tally" : "excel"));
+        if (latest.config.tally) {
+          setPeriodFrom(latest.config.tally.period.from); setPeriodTo(latest.config.tally.period.to);
+          setPort(latest.config.tally.port);
+        }
+      }
+    }).catch((e: Error) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [load, attempt]);
   async function connectFolder() {
     if (!user) return;
-    setBusy(true);
-    setError("");
+    setBusy("folder"); setError("");
     try {
-      const s = await chooseFolder(tenant, user.csrf_token, undefined, true);
-      await load();
-      setSelected((v) => [...new Set([...v, s.id])]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not connect folder.");
-    } finally {
-      setBusy(false);
-    }
+      const source = await chooseFolder(tenant, user.csrf_token, undefined, true);
+      const next = await load();
+      setDevices(next.devices); setSources(next.sources); setBindings(next.bindings);
+      setSelected(current => [...new Set([...current, source.id])]);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not connect folder."); }
+    finally { setBusy(null); }
   }
   async function launch() {
     if (!user) return;
-    setBusy(true);
-    setError("");
+    setBusy("launch"); setError("");
     try {
       if (desktopBridge() && !desktopBridge()?.discoveryPackages) throw new Error("Update Minkops to version 0.5.0 for complete discovery packages.");
       const config: Config = {
-        destination_mode: destinationMode,
-        depth: "client_context",
-        excel_source_ids: destinationMode === 'tally' ? [] : selected.filter((id) =>
-          bindings.some((b) => b.source_id === id && b.device_id === deviceId)
-        ),
-        tally: tally
-          ? { port, period: {from:periodFrom,to:periodTo} }
-          : null
+        destination_mode: destinationMode, depth: "client_context",
+        excel_source_ids: excel ? selected.filter(id => bindings.some(b => b.source_id === id && b.device_id === deviceId)) : [],
+        tally: tally ? { port, period: { from: periodFrom, to: periodTo } } : null
       };
-      const run = await api<DiscoveryRun>(
-        base + "/discovery/runs",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            device_id: deviceId,
-            request_key: crypto.randomUUID(),
-            config
-          })
-        },
-        user.csrf_token
-      );
+      const run = await api<DiscoveryRun>(base + "/discovery/runs", { method: "POST", body: JSON.stringify({ device_id: deviceId, request_key: crypto.randomUUID(), config }) }, user.csrf_token);
       navigate(`/${routeSlug}/tasks/${run.task_id}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start discovery.");
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not start discovery."); }
+    finally { setBusy(null); }
   }
-  const available = sources.filter((s) =>
-    bindings.some((b) => b.source_id === s.id && b.device_id === deviceId)
-  );
-  const selectedFolders = available.filter((s) => selected.includes(s.id));
-  return (
-    <section className="accounts-panel" aria-label="Source discovery setup">
-      <h3>Discover your business sources</h3>
-      <p>
-        Choose what to read on your PC. Review the results once, then reuse them for your
-        workflows.
-      </p>
-      <label className="config-field">
-        PC to use
-        <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+  const available = sources.filter(s => bindings.some(b => b.source_id === s.id && b.device_id === deviceId));
+  const selectedFolders = available.filter(s => selected.includes(s.id));
+  const validPeriod = periodFrom && periodTo && periodFrom <= periodTo;
+  if (loading) return <section className="accounts-panel discovery-panel"><p className="discovery-loading" role="status"><Spinner /> Loading connected sources…</p></section>;
+  return <form className="accounts-panel discovery-panel discovery-setup" aria-label="Source discovery setup" onSubmit={event => { event.preventDefault(); void launch(); }}>
+    <header className="discovery-panel-heading"><h3>Discover your business sources</h3><p>Choose your PC and sources. Review once, reuse in your workflows.</p></header>
+    <div className="discovery-setup-controls">
+      <label className="config-field">PC to use
+        <select value={deviceId} disabled={Boolean(busy)} onChange={event => setDeviceId(event.target.value)}>
           <option value="">Choose a connected PC</option>
-          {devices.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-              {!d.last_seen_at || Date.now() - new Date(d.last_seen_at).getTime() > 30000
-                ? " · waiting for connection"
-                : ""}
-            </option>
-          ))}
+          {devices.map(d => <option key={d.id} value={d.id}>{d.name}{!d.last_seen_at || Date.now() - new Date(d.last_seen_at).getTime() > 30000 ? " · offline" : ""}</option>)}
         </select>
       </label>
-      <label className="config-field">Sources to discover<select value={destinationMode} onChange={e=>setDestinationMode(e.target.value as typeof destinationMode)}><option value="excel">Excel</option><option value="tally">Tally</option><option value="both">Both · Excel and Tally</option></select></label>
-      {!devices.length && (
-        <p role="status">
-          Open the Windows app and connect this workspace in Connected PCs first.
-        </p>
-      )}
-      <div className="discovery-source-grid">
-        <section className="discovery-source-card">
-          <h4>Tally</h4>
-          <p>Read company settings and the masters used for Bill Entry.</p>
-          {tally && (
-            <>
-              <p>Reads every company loaded in Tally. All masters are collected in full.</p>
-              <label className="config-field">Vouchers from<input type="date" value={periodFrom} onChange={e=>setPeriodFrom(e.target.value)} /></label>
-              <label className="config-field">Vouchers through<input type="date" value={periodTo} min={periodFrom} onChange={e=>setPeriodTo(e.target.value)} /></label>
-              <details><summary>Connection</summary>
-                <label className="config-field">
-                  Tally port
-                  <input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={port}
-                    onChange={(e) => setPort(Number(e.target.value))}
-                  />
-                </label>
-              </details>
-            </>
-          )}
-        </section>
-        <section className="discovery-source-card">
-          <h4>Excel</h4>
-          <p>
-            Read worksheets, named tables and candidate headers from
-            selected folders, including formula definitions.
-          </p>
-          <button
-            className="button button-ghost"
-            disabled={busy || !desktopBridge() || destinationMode === 'tally'}
-            onClick={() => void connectFolder()}
-          >
-            Connect Excel folder
-          </button>
-          {!desktopBridge() && (
-            <p className="quiet-state">
-              Connect a folder in the Windows app first. You can then run this workflow
-              from the web.
-            </p>
-          )}
-          {available.map((s) => (
-            <label className="accounts-check" key={s.id}>
-              <input
-                type="checkbox"
-                checked={selected.includes(s.id)}
-                disabled={destinationMode === 'tally'}
-                onChange={(e) =>
-                  setSelected((v) =>
-                    e.target.checked ? [...v, s.id] : v.filter((id) => id !== s.id)
-                  )
-                }
-              />
-              {s.label} · {s.files.filter((f) => /\.xlsx$/i.test(f.path)).length}{" "}
-              workbooks
-            </label>
-          ))}
-          {!available.length && (
-            <p className="quiet-state">No folders connected to this PC yet.</p>
-          )}
-        </section>
-      </div>
-      <p className="quiet-state">
-        Reads happen on the chosen PC. A versioned copy is saved on your PC and in your workspace. Up to
-        45 Excel workbooks / 8 MB per run; select a focused folder.
-      </p>
-      {error && (
-        <p role="alert" className="form-message">
-          {error}
-        </p>
-      )}
-      <button
-        className="button button-primary"
-        disabled={
-          busy ||
-          workflow.status !== "active" ||
-          !deviceId ||
-          (!tally && !selectedFolders.length) ||
-          (destinationMode === 'both' && !selectedFolders.length) ||
-          (tally && (!periodFrom || !periodTo || periodFrom > periodTo))
-        }
-        onClick={() => void launch()}
-      >
-        {busy ? "Starting…" : "Discover sources"}
-      </button>
-    </section>
-  );
+      <fieldset className="discovery-source-choice"><legend>Sources to discover</legend>
+        <div>{([ ["tally", "Tally"], ["excel", "Excel"], ["both", "Tally + Excel"] ] as const).map(([value, label]) => <label key={value} className={destinationMode === value ? "is-selected" : ""}>
+          <input type="radio" name="discovery-source-mode" value={value} checked={destinationMode === value} disabled={Boolean(busy)} onChange={() => setDestinationMode(value)} />{label}
+        </label>)}</div>
+      </fieldset>
+    </div>
+    {!devices.length && <p className="quiet-state">Connect this workspace in the Windows app to get started. <Link to={`/${routeSlug}/connections`}>Connected PCs</Link></p>}
+    <div className={`discovery-setup-sources${tally && excel ? " has-both" : ""}`}>
+      {tally && <section className="discovery-config-source" aria-label="Tally options">
+        <h4>Tally</h4><p>All configured companies and full masters.</p>
+        <div className="discovery-date-range">
+          <label className="config-field">Vouchers from<input type="date" required value={periodFrom} disabled={Boolean(busy)} onChange={event => setPeriodFrom(event.target.value)} /></label>
+          <label className="config-field">Through<input type="date" required min={periodFrom} value={periodTo} disabled={Boolean(busy)} onChange={event => setPeriodTo(event.target.value)} /></label>
+        </div>
+        <details className="discovery-connection"><summary>Connection settings</summary>
+          <label className="config-field">Tally port<input type="number" required min={1} max={65535} step={1} value={port} disabled={Boolean(busy)} onChange={event => setPort(Number(event.target.value))} /></label>
+        </details>
+      </section>}
+      {excel && <section className="discovery-config-source" aria-label="Excel options">
+        <h4>Excel</h4><p>Workbook headers, tables and formula definitions.</p>
+        <button type="button" className="button button-ghost" disabled={Boolean(busy) || !desktopBridge()} onClick={() => void connectFolder()}>{busy === "folder" && <Spinner />}{busy === "folder" ? "Connecting folder…" : "Connect Excel folder"}</button>
+        {!desktopBridge() && <p className="quiet-state">Connect folders in the Windows app, then select them here.</p>}
+        <div className="discovery-folder-list">{available.map(source => <label className="accounts-check" key={source.id}>
+          <input type="checkbox" checked={selected.includes(source.id)} disabled={Boolean(busy)} onChange={event => setSelected(current => event.target.checked ? [...current, source.id] : current.filter(id => id !== source.id))} />
+          <span>{source.label}<small>{source.files.filter(file => /\.xlsx$/i.test(file.path)).length} workbooks</small></span>
+        </label>)}</div>
+        {!available.length && <p className="quiet-state">No folders connected to this PC yet.</p>}
+        <p className="discovery-limit">Up to 45 workbooks / 8 MB per run.</p>
+      </section>}
+    </div>
+    {error && <p role="alert" className="form-message">{error} {!devices.length && <button type="button" className="button button-ghost" onClick={() => setAttempt(value => value + 1)}>Retry loading</button>}</p>}
+    <footer className="discovery-setup-footer"><button type="submit" className="button button-primary" disabled={Boolean(busy) || workflow.status !== "active" || !deviceId || (excel && !selectedFolders.length) || (tally && (!validPeriod || !Number.isInteger(port) || port < 1 || port > 65535))}>
+      {busy === "launch" && <Spinner />}{busy === "launch" ? "Starting discovery…" : "Discover sources"}
+    </button><p>Read on your PC. Saved on your PC and in this workspace.</p></footer>
+  </form>;
 }
 
-export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: string }) {
+export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { tenant: string; taskId: string; controlState?: string }) {
   const { user } = useAuth();
   const [run, setRun] = useState<DiscoveryRun | null>(null);
   const [edited, setEdited] = useState<Catalog | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [busy, setBusy] = useState<"confirm" | "export" | null>(null);
   const [filter, setFilter] = useState("");
+  const [attempt, setAttempt] = useState(0);
   const base = `/api/tenants/${tenant}/discovery`;
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
     const poll = async () => {
       try {
         const next = await api<DiscoveryRun | null>(base + `/tasks/${taskId}`);
         if (!active) return;
-        setRun(next);
-        if (next?.mapping_run?.result)
-          setEdited((v) => v ?? structuredClone(next.mapping_run?.result as Catalog));
-        if (next && !["completed", "failed"].includes(next.state))
-          timer = setTimeout(() => void poll(), 2000);
+        if (!next) throw new Error("This discovery run could not be found.");
+        failures = 0; setLoadError(""); setRun(current => current?.ready ? current : next);
+        if (next.mapping_run?.result) setEdited(current => current ?? structuredClone(next.mapping_run!.result as Catalog));
+        if (!["completed", "failed", "stopped"].includes(next.state)) timer = setTimeout(() => void poll(), 2000);
       } catch (e) {
-        if (active)
-          setError(e instanceof Error ? e.message : "Could not load discovery.");
+        if (!active) return;
+        setLoadError(e instanceof Error ? e.message : "Could not load discovery.");
+        // Preserve the last results and resume after transient network failures.
+        timer = setTimeout(() => void poll(), Math.min(15000, 2000 * 2 ** Math.min(failures++, 3)));
       }
     };
     void poll();
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [base, taskId]);
+    return () => { active = false; clearTimeout(timer); };
+  }, [base, taskId, attempt, controlState]);
   async function confirm() {
     if (!user || !run) return;
-    setBusy(true);
-    setError("");
-    try {
-      setRun(
-        await api<DiscoveryRun>(
-          base + `/runs/${run.id}/confirm`,
-          { method: "POST", body: JSON.stringify({ excel_mappings: edited }) },
-          user.csrf_token
-        )
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not confirm sources.");
-    } finally {
-      setBusy(false);
-    }
+    setBusy("confirm"); setError("");
+    try { setRun(await api<DiscoveryRun>(base + `/runs/${run.id}/confirm`, { method: "POST", body: JSON.stringify({ excel_mappings: edited }) }, user.csrf_token)); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not confirm sources."); }
+    finally { setBusy(null); }
   }
   async function saveCatalog() {
     if (!run) return;
-    setBusy(true);setError('');
-    try { await desktopBridge()?.saveCatalog?.(tenant,run.id); }
-    catch(e) {setError(e instanceof Error?e.message:'Could not save source catalog.');}
-    finally {setBusy(false);}
+    setBusy("export"); setError("");
+    try { await desktopBridge()?.saveCatalog?.(tenant, run.id); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not save source catalog."); }
+    finally { setBusy(null); }
   }
-  if (!run) return error ? <p role="alert">{error}</p> : null;
-  const collectedSources =
-    run.catalog?.sources ??
-    ([
-      ...run.config.excel_source_ids.map((key) => ({
-        key,
-        tool: "excel",
-        status: "waiting"
-      })),
-      ...(run.config.tally ? [{ key: "tally", tool: "tally", status: "waiting" }] : [])
-    ] as DiscoveredSource[]);
-  const sources: DiscoveredSource[] = collectedSources.flatMap(s => s.snapshot?.companies
-    ? s.snapshot.companies.map((c, index) => ({
-        key: `${s.key}-${index}`, tool: 'tally', status: c.status, error: c.error,
-        snapshot: {
-          company: c.company,
-          collections: [
-            {
-              category: 'masters',
-              status: c.master_lookup_error ? 'unavailable' : c.masters?.status ?? 'unavailable',
-              count: c.master_summary?.unique_count ?? c.masters?.count,
-              masterSummary: c.master_summary, error: c.master_lookup_error,
-              records: c.master_summary ? undefined : c.masters?.records.map(r => r.data)
-            },
-            {
-              category: 'vouchers', status: c.vouchers?.status ?? 'unavailable',
-              count: c.vouchers?.count, records: c.vouchers?.records.map(r => r.data)
-            }
-          ]
-        }
-      }))
-    : [s]);
+  const retry = <button className="button button-ghost" onClick={() => setAttempt(value => value + 1)}>Retry now</button>;
+  if (!run) return <section className="accounts-panel discovery-panel">
+    {loadError ? <><p role="alert">{loadError}</p>{retry}</> : <p className="discovery-loading" role="status"><Spinner /> Loading discovery progress…</p>}
+  </section>;
   const pending = ["queued", "executing"].includes(run.state);
-  return (
-    <section className="accounts-panel" aria-label="Discovered sources">
-      <h3>
-        {run.ready
-          ? "Your sources are ready"
-          : run.catalog?.partial
-            ? "Some sources need attention"
-            : pending
-              ? "Discovering your sources"
-              : "Review your sources"}
-      </h3>
-      <p>
-        {run.ready
-          ? run.catalog?.review.reused_from
-            ? "No structure or mapping changes. Your confirmation was retained."
-            : "Catalog confirmed and saved in your workspace."
-          : run.catalog?.partial
-            ? "Successful results are saved below. Reconnect unavailable sources and run discovery again before using this catalog."
-            : pending
-              ? "Keep Minkops running on the selected PC. You can leave this page and come back."
-              : "Check the sources and proposed mappings before confirming."}
-      </p>
-      {collectedSources.map(s => s.snapshot?.scope_error && <p role="alert" key={s.key}>{s.snapshot.scope_error}</p>)}
-      {run.catalog?.context_error&&<p role="alert">{run.catalog.context_error}</p>}
-      <div className="discovery-source-grid">
-        {sources.map((s) => {
-          const observed = run.observations.filter((o) => o.key === s.key);
-          const status =
-            s.status === "waiting"
-              ? (observed.find((o) => !o.category)?.status ?? "waiting")
-              : s.status;
-          const issues =
-            s.snapshot?.collections?.filter((c) => c.status !== "ready").length ??
-            s.workbooks?.filter((b) => b.status !== "ready").length ??
-            0;
-          return (
-            <section className="discovery-source-card" key={s.key}>
-              <h4>
-                {s.tool === "tally"
-                  ? `Tally · ${s.snapshot?.company ?? "All configured companies"}`
-                  : (s.label ?? "Excel folder")}
-              </h4>
-              <strong role="status">
-                {issues
-                  ? "Partly collected"
-                  : ({
-                      ready: "Collected",
-                      reading: "Reading…",
-                      waiting: "Waiting for your PC",
-                      unavailable: "Needs attention"
-                    }[status] ?? status)}
-              </strong>
-              {s.error && <p role="alert">{s.error}</p>}
-              {s.snapshot?.collections?.map((c) => (
-                <details key={c.category}>
-                  <summary>
-                    {c.category === "masters" ? c.masterSummary ? "Unique masters" : "Master export" : "Vouchers"} ·{" "}
-                    {c.status === "ready" ? `${c.count} records` : "Needs attention"}
-                  </summary>
-                  {c.error ? (
-                    <p role="alert">{c.error}</p>
-                  ) : (
-                    <>{c.masterSummary && <>
-                      <p className="quiet-state">Includes Tally statutory and default masters. Exported records: {c.masterSummary.exported_count}. Excluded from the master count: duplicates ({c.masterSummary.duplicate_count}), company metadata ({c.masterSummary.metadata_count}).</p>
-                      <ul>{Object.entries(c.masterSummary.counts_by_type).sort(([a],[b])=>a.localeCompare(b)).map(([type,count])=><li key={type}>{masterLabels[type] ?? type.replaceAll('_',' ')} · {count}</li>)}</ul>
-                    </>}<p className="quiet-state">
-                      Complete collected records are available for downstream lookup.
-                    </p>{!c.masterSummary && <><ul>{c.records?.slice(0,50).map((record,index)=>{
-                      const name=record['@_NAME'] ?? record.NAME;
-                      const label=typeof name==='string'?name:typeof name==='object'&&name?String((name as Record<string,unknown>)['#text']??''):'';
-                      return label?<li key={index}>{label}</li>:null;
-                    })}</ul>{(c.records?.length ?? 0)>50&&<p className="quiet-state">Showing the first 50 names. The saved catalog contains the complete list.</p>}</>}</>
-                  )}
-                </details>
-              ))}
-              {s.workbooks?.map((b) => (
-                <details key={b.path}>
-                  <summary>
-                    {b.path} ·{" "}
-                    {b.status === "ready"
-                      ? `${b.structure?.sheets.length} sheets`
-                      : "Needs attention"}
-                  </summary>
-                  {b.error ? (
-                    <p role="alert">Source unavailable</p>
-                  ) : (
-                    b.structure?.sheets.map((sheet) => (
-                      <p key={sheet.sheet}>
-                        {sheet.sheet} · {sheet.columns} columns · {sheet.tables.length}{" "}
-                        named tables
-                      </p>
-                    ))
-                  )}
-                </details>
-              ))}
-              {!run.catalog &&
-                observed
-                  .filter((o) => o.category)
-                  .map((o) => (
-                    <p className="quiet-state" key={o.category}>
-                      {o.category} ·{" "}
-                      {o.status === "reading"
-                        ? "Reading…"
-                        : o.status === "ready"
-                          ? "Collected"
-                          : "Needs attention"}
-                    </p>
-                  ))}
-            </section>
-          );
-        })}
+  return <>
+    <TaskProgress view={discoveryProgress(controlState === "active" ? run : { ...run, state: controlState, ready: false })} stale={Boolean(loadError)} />
+    {loadError && <p role="alert" className="form-message">Could not refresh discovery. Retrying automatically. {retry}</p>}
+    <section className="accounts-panel discovery-panel" aria-label="Discovered sources">
+      <header className="discovery-panel-heading"><h3>{controlState === "paused" ? "Discovery paused" : controlState === "stopped" ? "Discovery stopped" : run.ready ? "Your sources are ready" : run.catalog?.partial ? "Some sources need attention" : pending ? run.catalog ? "Sources collected" : "Discovering your sources" : run.state === "failed" ? "Discovery needs attention" : "Review your sources"}</h3>
+        <p>{run.ready ? run.catalog?.review.reused_from ? "No changes. Your previous confirmation was retained." : "Confirmed and saved for your workflows."
+          : controlState === "paused" ? "Resume to continue. An operation already underway may finish."
+            : controlState === "stopped" ? run.catalog ? "Remaining work stopped. Collected results are available below." : "Remaining work stopped. Start a new run when you’re ready."
+          : run.catalog?.partial ? "Resolve unavailable sources in the original tools, then run again."
+            : pending ? run.catalog ? "Checking client context and workbook mappings before review." : "You can leave this page and return. Collection continues on your PC."
+              : run.state === "failed" ? "Check source access on your PC, then run discovery again." : "Check the collected counts and mappings, then confirm."}</p></header>
+      {run.catalog?.sources.map(source => source.snapshot?.scope_error && <p role="alert" className="form-message" key={source.key}>{source.snapshot.scope_error}</p>)}
+      {run.catalog?.context_error && <p role="alert" className="form-message">{run.catalog.context_error}</p>}
+      <DiscoveryResults run={controlState === "active" ? run : { ...run, state: controlState }} />
+      {run.state === "review" && edited && edited.sheets.length > 0 && <div className="discovery-mapping-review">
+        <label className="config-field">Find a workbook, sheet or table<input type="search" value={filter} onChange={event => setFilter(event.target.value)} /></label>
+        <CatalogReview catalog={edited} provenance={run.mapping_run?.config.file_provenance as { id: string; path: string }[]} filter={filter} onChange={setEdited} />
+      </div>}
+      {run.catalog?.context_notes?.length ? <details className="discovery-notes"><summary>Client conventions and edge cases <span>{run.catalog.context_notes.length}</span></summary>
+        <ul>{run.catalog.context_notes.map((note, index) => <li key={index}>
+          <strong>{run.catalog?.sources.flatMap(source => source.snapshot?.companies ?? []).find(company => company.company_guid === note.company_guid)?.company ?? note.company_guid}</strong>
+          <p>{note.observation} · {note.certainty}</p><p className="quiet-state">Evidence: {note.evidence_ids.join(", ")}</p>
+        </li>)}</ul></details> : null}
+      <div className="accounts-toolbar discovery-review-actions">
+        {run.state === "review" && <button className="button button-primary" disabled={controlState !== "active" || Boolean(busy) || Boolean(loadError) || run.catalog?.partial || Boolean(run.mapping_run && !edited)} onClick={() => void confirm()}>
+          {busy === "confirm" && <Spinner />}{busy === "confirm" ? "Confirming sources…" : "Confirm sources"}
+        </button>}
+        {run.catalog && (desktopBridge()?.saveCatalog ? <button className="button button-ghost" disabled={Boolean(busy)} onClick={() => void saveCatalog()}>{busy === "export" && <Spinner />}{busy === "export" ? "Saving catalog…" : "Save source catalog"}</button>
+          : <a className="button button-ghost" href={base + `/runs/${run.id}/catalog.json`} download>Download source catalog</a>)}
       </div>
-      {run.state === "failed" && (
-        <p role="alert">
-          Source unavailable. Run discovery again.
-        </p>
-      )}
-      {run.state === "review" && edited && edited.sheets.length > 0 && (
-        <>
-          <label className="config-field">
-            Find a workbook, sheet or table
-            <input
-              type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-          </label>
-          <CatalogReview
-            catalog={edited}
-            provenance={
-              run.mapping_run?.config.file_provenance as { id: string; path: string }[]
-            }
-            filter={filter}
-            onChange={setEdited}
-          />
-        </>
-      )}
-      {run.catalog?.context_notes?.length ? <details><summary>Client conventions and edge cases</summary><ul>{run.catalog.context_notes.map((note,index)=><li key={index}>{run.catalog?.sources.flatMap(source=>source.snapshot?.companies??[]).find(company=>company.company_guid===note.company_guid)?.company??note.company_guid}: {note.observation} · {note.certainty}<p className="quiet-state">Evidence: {note.evidence_ids.join(", ")}</p></li>)}</ul></details> : null}
-      <div className="accounts-toolbar">
-        {run.state === "review" && (
-          <button
-            className="button button-primary"
-            disabled={busy || run.catalog?.partial || Boolean(run.mapping_run && !edited)}
-            onClick={() => void confirm()}
-          >
-            {busy ? "Saving…" : "Confirm sources and mappings"}
-          </button>
-        )}
-        {run.catalog && (desktopBridge()?.saveCatalog ? <button className="button button-ghost" disabled={busy} onClick={()=>void saveCatalog()}>Save source catalog</button> : (
-          <a
-            className="button button-ghost"
-            href={base + `/runs/${run.id}/catalog.json`}
-            download
-          >
-            Download source catalog
-          </a>
-        ))}
-      </div>
-      {error && (
-        <p role="alert" className="form-message">
-          {error}
-        </p>
-      )}
+      {error && <p role="alert" className="form-message">{error}</p>}
     </section>
-  );
+  </>;
 }

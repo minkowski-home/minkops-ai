@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { desktopBridge, type DesktopStatus } from "./bridge";
+import { LoadingIndicator, RetryMessage } from "../components/Feedback";
 
 interface Device {
   id: string;
@@ -26,6 +27,7 @@ export function DevicesScreen({
   const [native, setNative] = useState<DesktopStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
   const refresh = useCallback(async () => {
     const [loaded, status] = await Promise.all([
       api<Device[]>(`/api/tenants/${tenant}/desktop/devices`),
@@ -36,20 +38,22 @@ export function DevicesScreen({
   }, [tenant]);
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        if (active) await refresh();
+        if (active) { await refresh(); setLoadError(""); }
       } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : "Could not load your PCs.");
+        if (active) setLoadError(e instanceof Error ? e.message : "Could not load your PCs.");
+      } finally {
+        if (active) { setLoading(false); timer = setTimeout(() => void poll(), 5000); }
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), 5000);
     return () => {
       active = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
-  }, [refresh]);
+  }, [refresh, attempt]);
   async function action(work: () => Promise<unknown>) {
     setBusy(true);
     setError("");
@@ -76,6 +80,8 @@ export function DevicesScreen({
           </p>
         </div>
       </header>
+      {loadError && <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>}
+      {loading && <LoadingIndicator>Loading connected PCs…</LoadingIndicator>}
       {native ? (
         <article className="device-connect-card">
           <div>

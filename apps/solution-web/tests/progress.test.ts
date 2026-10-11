@@ -2,6 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { progressView } from "../src/starter/workspace/progress.ts";
 
+test("paused and stopped tasks retain their last stage without spinning or completing", () => {
+  for (const status of ["paused", "stopped"]) {
+    const view = progressView({status, progress: 85, events: [{event_type: "writing"}, {event_type: `control.${status === "paused" ? "pause" : "stop"}`}]});
+    assert.equal(view.current, 3);
+    assert.equal(view.finished, false); assert.equal(view.running, false);
+    assert.equal(view.percent, null);
+  }
+});
+
+test("generic installed proposals have a distinct review checkpoint", () => {
+  const view = progressView({ status: "attention", progress: 70, events: [{event_type: "review"}] }, "proposal");
+  assert.equal(view.stages[view.current], "Review"); assert.equal(view.states[view.current], "attention");
+});
+
 test("progress describes waiting, work and review without inventing completion", () => {
   assert.equal(
     progressView({ status: "running", progress: 0, events: [] }).label,

@@ -6,6 +6,7 @@ import { api, type Workflow } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { chooseFolder, refreshFolder, supportsLocalFolder } from './localFiles';
 import type { Run, Source, SavedCatalog } from './types';
+import { LoadingIndicator, RetryMessage, Spinner } from '../components/Feedback';
 
 interface NativeCatalog { id:string; ready:boolean; device_id:string; config:{tally:{company?:string}|null};catalog?:{format_version?:string;sources:{tool:string;snapshot?:{companies?:{company:string;company_guid:string}[]}}[]} }
 const discoveredCompanies = (catalog:NativeCatalog|null) => catalog?.catalog?.sources.flatMap(s=>s.tool==='tally' ? s.snapshot?.companies ?? [] : []) ?? [];
@@ -27,7 +28,7 @@ function BillLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug
   const enabledOutputs = workflow.config_schema.properties.output_mode?.['x-enabled-options'];
   const base = `/api/tenants/${tenant}/accounts`;
   const preferences = `${tenant}:${workflow.key}:selections:v1`;
-  useEffect(()=>{let active=true;void api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`).then(c=>{if(active){setNativeCatalog(c);setLockedCompanyGuid(discoveredCompanies(c)[0]?.company_guid??'');}}).catch((e:Error)=>{if(active)setError(e.message);});return()=>{active=false;};},[tenant]);
+  const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(''), [attempt, setAttempt] = useState(0);
 
   async function refresh() {
     const [loadedSources, loadedCatalogs] = await Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs')]);
@@ -40,15 +41,17 @@ function BillLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug
     setSelected(eligible.filter((f) => saved.length ? saved.includes(f.key) : true).map((f) => f.id));
   }
   useEffect(() => { let active = true;
-    void Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs')]).then(([ss, cc]) => {
+    setLoading(true); setLoadError('');
+    void Promise.all([api<Source[]>(base + '/sources'), api<SavedCatalog[]>(base + '/catalogs'), api<NativeCatalog|null>(`/api/tenants/${tenant}/discovery/latest`)]).then(([ss, cc, native]) => {
       if (!active) return;
+      setNativeCatalog(native); setLockedCompanyGuid(discoveredCompanies(native)[0]?.company_guid ?? '');
       const destinations=cc.filter(c=>c.catalog.sheets.some(s=>s.role==='destination'));
       setSources(ss); setCatalogs(destinations); setCatalogId(destinations[0]?.id ?? '');
       let saved: string[] = []; try { saved = JSON.parse(localStorage.getItem(preferences) ?? '[]') as string[]; } catch { /* Old preferences are optional. */ }
       setSelected(ss.flatMap((s) => s.files.filter((f) => (/\.(pdf|png|jpe?g|webp)$/i.test(f.path)) && (!saved.length || saved.includes(`${s.id}:${f.path}`))).map((f) => f.id)));
-    }).catch((e: Error) => { if (active) setError(e.message); });
+    }).catch((e: Error) => { if (active) setLoadError(e.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [base, preferences]);
+  }, [base, preferences, tenant, attempt]);
 
   async function action(work: () => Promise<unknown>) {
     setBusy(true); setError('');
@@ -78,6 +81,8 @@ function BillLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not start workflow.'); }
     finally { setBusy(false); }
   }
+  if (loading) return <section className="accounts-panel"><LoadingIndicator>Loading bill sources…</LoadingIndicator></section>;
+  if (loadError) return <section className="accounts-panel"><RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage></section>;
   return <section className="accounts-panel" aria-label="Run workflow">
     <div className="section-heading"><div><h3>Enter bills</h3>
       <p>Read bills in parallel, review entries, and save to your connected Excel or Tally.</p></div></div>
@@ -108,7 +113,7 @@ function BillLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug
         {outputMode!=='tally_in_place'&&<fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>}
     </div></details>
     {error && <p role="alert" className="form-message">{error}</p>}
-    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (outputMode==='tally_in_place'? !nativeCatalog?.ready||!discoveredCompanies(nativeCatalog).length||(companyMode==='locked'&&!lockedCompanyGuid) : !catalogId)} onClick={() => void launch()}>{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
+    <button className="button button-primary" disabled={busy || workflow.status !== 'active' || !selected.length || (outputMode==='tally_in_place'? !nativeCatalog?.ready||!discoveredCompanies(nativeCatalog).length||(companyMode==='locked'&&!lockedCompanyGuid) : !catalogId)} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
     <span className="quiet-state"> {selected.length} files selected</span>
   </section>;
 }
@@ -168,7 +173,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     } catch (e) { setError(e instanceof Error ? e.message : 'Open workflow details to reconnect your folder.'); }
     finally { setBusy(false); }
   }
-  return <div><button className="button button-primary" disabled={busy} onClick={() => void run()}>{busy ? 'Starting…' : 'Run workflow'}</button>
+  return <div><button className="button button-primary" disabled={busy} onClick={() => void run()}>{busy && <Spinner />}{busy ? 'Starting…' : 'Run workflow'}</button>
     {error && <p role="alert" className="form-message">{error}</p>}</div>;
 }
 

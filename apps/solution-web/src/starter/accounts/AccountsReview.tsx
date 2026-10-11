@@ -6,9 +6,12 @@ import { CatalogReview } from "./CatalogReview";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
 import type { BillResult, Catalog, Run } from "./types";
+import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
+import { TaskProgress } from "../workspace/TaskProgress";
+import { progressView } from "../workspace/progress";
 
 /** Decisions only. Accounting edits and corrections belong in original tools. */
-function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
+function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string; taskId: string; controlState?: string }) {
   const { user } = useAuth();
   const { workspaceId } = useParams();
   const [run, setRun] = useState<Run | null>(null);
@@ -18,6 +21,9 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
   const applying = useRef(false),
     attempted = useRef("");
   const base = `/api/tenants/${tenant}/accounts`;
+  const [loadError, setLoadError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -25,12 +31,12 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
       try {
         const value = await api<Run | null>(`${base}/tasks/${taskId}/run`);
         if (!active) return;
-        setRun(value);
+        setRun(value); setLoaded(true); setLoadError("");
         setCatalog((current) => current ?? (value?.result as Catalog | null));
         if (value && !["completed", "failed"].includes(value.state))
           timer = setTimeout(() => void poll(), 2000);
       } catch {
-        if (active) setError("Could not load task");
+        if (active) { setLoadError("Could not refresh task. Retrying automatically."); timer = setTimeout(() => void poll(), 5000); }
       }
     };
     void poll();
@@ -38,23 +44,28 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
       active = false;
       clearTimeout(timer);
     };
-  }, [base, taskId]);
+  }, [base, taskId, attempt, controlState]);
   async function apply(value: Run) {
-    if (!user || value.actor_id !== user.id || applying.current) return;
+    if (!user || value.actor_id !== user.id || applying.current || controlState !== "active" || loadError) return;
     applying.current = true;
     setBusy(true);
     setError("");
     try {
-      const local = await Promise.allSettled(
-        value.writes
-          .filter((w) => !w.verified_at && !w.cancelled_at)
-          .map((w) => applyLocalPlan(tenant, value.id, w, user.csrf_token))
-      );
-      if (local.some((r) => r.status === "rejected")) setError("Save needs attention");
+      for (const write of value.writes.filter(w => !w.verified_at && !w.cancelled_at)) {
+        const current = await api<Run>(`${base}/runs/${value.id}`);
+        if (current.state !== "writing") break;
+        try { await applyLocalPlan(tenant, value.id, write, user.csrf_token); }
+        catch { setError("Save needs attention"); }
+      }
       for (const w of (value.tally_writes ?? []).filter(
         (w) => !w.finished_at && !w.cancelled_at
-      ))
+      )) {
+        // Reload the control intent between saves. A save in flight retains its
+        // receipt; pausing never starts the next bill in a stale client loop.
+        const current = await api<Run>(`${base}/runs/${value.id}`);
+        if (current.state !== "writing") break;
         await applyTallyPlan(tenant, value.id, w, user.csrf_token);
+      }
       setRun(await api<Run>(`${base}/runs/${value.id}`));
     } catch {
       setError("Save needs attention");
@@ -64,6 +75,8 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
     }
   }
   useEffect(() => {
+    // Resume is an explicit operator request to retry remaining immutable plans.
+    if (controlState !== "active") attempted.current = "";
     const key = run
       ? [
           ...run.writes.filter((w) => !w.verified_at && !w.cancelled_at).map((w) => w.id),
@@ -74,6 +87,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
       : "";
     if (
       run?.state === "writing" &&
+      controlState === "active" && !loadError &&
       key &&
       key !== attempted.current &&
       !applying.current
@@ -83,9 +97,9 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
     }
     // Each immutable write gets one attempt; retries remain explicit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run]);
+  }, [run, controlState, loadError]);
   async function act(path: string, body: unknown) {
-    if (!user) return;
+    if (!user || controlState !== "active" || loadError) return;
     setBusy(true);
     setError("");
     try {
@@ -102,7 +116,8 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
       setBusy(false);
     }
   }
-  if (!run) return error ? <p role="alert">{error}</p> : null;
+  if (!run) return loadError ? <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>
+    : loaded ? null : <LoadingIndicator>Loading workflow results…</LoadingIndicator>;
   const discovery = run.workflow_key === "source-discovery";
   const ownsRun = run.actor_id === user?.id;
   const result = run.result as BillResult | null;
@@ -114,6 +129,12 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
   );
   return (
     <section className="accounts-panel" aria-label="Workflow result">
+      {discovery && <TaskProgress view={progressView({
+        status: controlState !== "active" ? controlState : run.state === "review" ? "attention" : run.state === "completed" ? "completed" : run.state === "failed" ? "failed" : "running",
+        progress: 0, events: [{ event_type: run.state }],
+      }, "source-discovery")} stale={Boolean(loadError)} />}
+      {loadError && <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>}
+      {busy && <p className="loading-feedback" role="status"><Spinner />Working…</p>}
       <h3>{discovery ? "Source discovery" : "Bill entry"}</h3>
       <Link to={`/${workspaceId ?? tenant}/attention`}>Attention items</Link>
       {["queued", "executing", "collecting"].includes(run.state) && (
@@ -130,7 +151,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
           />
           <button
             className="button button-ghost"
-            disabled={busy}
+            disabled={busy || controlState !== "active" || Boolean(loadError)}
             onClick={() =>
               void act(`${base}/runs/${run.id}/approve`, { result: catalog })
             }
@@ -183,7 +204,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
                   {!missingSupplier && (
                     <button
                       className="button button-ghost"
-                      disabled={busy}
+                      disabled={busy || controlState !== "active" || Boolean(loadError)}
                       onClick={() => void decide("guess")}
                     >
                       {needsAttention ? "Best guess write" : "Write bill"}
@@ -192,7 +213,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
                   {missingSupplier && r.data.tax === 0 && (
                     <button
                       className="button button-ghost"
-                      disabled={busy}
+                      disabled={busy || controlState !== "active" || Boolean(loadError)}
                       onClick={() => void decide("supplier")}
                     >
                       Create this ledger
@@ -200,7 +221,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
                   )}
                   <button
                     className="button button-ghost"
-                    disabled={busy}
+                    disabled={busy || controlState !== "active" || Boolean(loadError)}
                     onClick={() => void decide("nothing")}
                   >
                     Do nothing
@@ -210,7 +231,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
                   ) && (
                     <button
                       className="button button-ghost"
-                      disabled={busy}
+                      disabled={busy || controlState !== "active" || Boolean(loadError)}
                       onClick={() => void decide("retry")}
                     >
                       Recheck bill
@@ -228,7 +249,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
             <p>Needs attention</p>
             <button
               className="button button-ghost"
-              disabled={busy || !ownsRun}
+              disabled={busy || !ownsRun || controlState !== "active" || Boolean(loadError)}
               onClick={() =>
                 void act(
                   `/api/tenants/${tenant}/attention/bills/${run.id}/${i.source_file_id}`,
@@ -240,7 +261,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
             </button>
             <button
               className="button button-ghost"
-              disabled={busy || !ownsRun}
+              disabled={busy || !ownsRun || controlState !== "active" || Boolean(loadError)}
               onClick={() =>
                 void act(
                   `/api/tenants/${tenant}/attention/bills/${run.id}/${i.source_file_id}`,
@@ -264,7 +285,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
         ) && (
           <button
             className="button button-ghost"
-            disabled={busy}
+            disabled={busy || controlState !== "active" || Boolean(loadError)}
             onClick={() =>
               void act(`${base}/runs/${run.id}/approve`, {
                 result: {
@@ -290,7 +311,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
       {run.state === "writing" && ownsRun && (
         <button
           className="button button-ghost"
-          disabled={busy}
+          disabled={busy || controlState !== "active" || Boolean(loadError)}
           onClick={() => void apply(run)}
         >
           Resume saves
@@ -302,11 +323,13 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
   );
 }
 
-export function AccountsReview({ tenant, taskId }: { tenant: string; taskId: string }) {
+export function AccountsReview({ tenant, taskId, controlState = "active" }: { tenant: string; taskId: string; controlState?: string }) {
   const [native, setNative] = useState<boolean | null>(null),
     [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
+    setError("");
     void api<unknown>(`/api/tenants/${tenant}/discovery/tasks/${taskId}`)
       .then((r) => {
         if (active) setNative(Boolean(r));
@@ -317,12 +340,12 @@ export function AccountsReview({ tenant, taskId }: { tenant: string; taskId: str
     return () => {
       active = false;
     };
-  }, [tenant, taskId]);
-  if (error) return <p role="alert">{error}</p>;
-  if (native === null) return null;
+  }, [tenant, taskId, attempt]);
+  if (error) return <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{error}</RetryMessage>;
+  if (native === null) return <LoadingIndicator>Loading workflow…</LoadingIndicator>;
   return native ? (
-    <DiscoveryReview tenant={tenant} taskId={taskId} />
+    <DiscoveryReview tenant={tenant} taskId={taskId} controlState={controlState} />
   ) : (
-    <RunReview tenant={tenant} taskId={taskId} />
+    <RunReview tenant={tenant} taskId={taskId} controlState={controlState} />
   );
 }

@@ -58,7 +58,9 @@ export interface Task {
   id: string;
   workflow_id: string | null;
   title: string;
-  status: "running" | "attention" | "handoff" | "completed" | "failed";
+  status: "running" | "attention" | "handoff" | "completed" | "failed" | "paused" | "stopped";
+  control_state?: "active" | "paused" | "stopped";
+  can_control?: boolean;
   progress: number;
   summary: string;
   created_at: string;
