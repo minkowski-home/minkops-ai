@@ -387,11 +387,26 @@ class DiscoveryTests(unittest.TestCase):
             run["id"],
         )
         self.collect(run)
+        with psycopg.connect(URL, row_factory=dict_row) as connection:
+            native_sources = connection.execute(
+                "SELECT catalog->'sources' AS sources FROM discovery_runs WHERE id=%s",
+                (run["id"],),
+            ).fetchone()["sources"]
         confirmed = self.client.post(
             self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={}
         )
         self.assertEqual(confirmed.status_code, 200, confirmed.text)
         self.assertTrue(confirmed.json()["ready"])
+        self.assertIn(
+            "master_summary",
+            confirmed.json()["catalog"]["sources"][0]["snapshot"]["companies"][0],
+        )
+        with psycopg.connect(URL, row_factory=dict_row) as connection:
+            stored_sources = connection.execute(
+                "SELECT catalog->'sources' AS sources FROM discovery_runs WHERE id=%s",
+                (run["id"],),
+            ).fetchone()["sources"]
+        self.assertEqual(stored_sources, native_sources)
         body["request_key"] = str(uuid.uuid4())
         refresh = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body).json()
         again = self.collect(refresh)

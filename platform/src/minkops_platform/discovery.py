@@ -655,7 +655,10 @@ def confirm(connection, tenant, user, run_id, body):
             "conflict",
             "Finish all selected sources before confirming. Partial results remain available to review and download.",
         )
-    catalog = current["catalog"]
+    # detail() is a presentation projection with derived master summaries.
+    # Persist native evidence, then apply approved mappings explicitly; display
+    # fields must never change source fingerprints or invalidate review reuse.
+    catalog = copy.deepcopy(row["catalog"])
     if row["mapping_run_id"]:
         mappings = body.get("excel_mappings") or current["mapping_run"]["result"]
         approved = accounts.approve_run(

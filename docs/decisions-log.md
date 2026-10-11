@@ -1,5 +1,24 @@
 # Decision Logs
 
+## Keep display projections outside discovery confirmation fingerprints (11 October 2026)
+
+**Situation:** Database integration tests found that confirming discovery saved
+UI-derived master summaries into the native catalog. An identical refresh then
+appeared changed, requested review again and dropped confirmed context notes.
+
+**Task:** Preserve truthful count displays while making confirmation and unchanged
+refresh operate exclusively on native evidence and approved interpretation.
+
+**Action:** Confirm from a copy of the stored catalog instead of the presentation
+projection; apply approved mappings explicitly. Extend the database regression to
+compare native sources before/after confirmation while checking the response still
+contains display summaries. Verify unchanged refresh, notes and archive behavior
+against an isolated PostgreSQL instance using the existing test-database lifecycle.
+
+**Result:** Presentation metadata cannot contaminate persisted source fingerprints;
+unchanged discovery retains confirmation and evidenced notes. The full suite passes
+259 tests and 49 subtests against disposable PostgreSQL, with no skipped tests.
+
 ## Separate native discovery evidence from indexed master lookups (11 October 2026)
 
 **Situation:** Two test companies displayed 198/195 masters. Read-only native
