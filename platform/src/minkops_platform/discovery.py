@@ -37,6 +37,7 @@ def workflow_context(connection, tenant_id, run_id, tools):
     """Pin a reviewed complete package, bounded to the consuming workflow's tools."""
     catalog = copy.deepcopy(require_ready(connection, tenant_id, run_id, tools))
     catalog["sources"] = [s for s in catalog["sources"] if s["tool"] in tools]
+    catalog["master_lookup_version"] = "1"
     return catalog
 
 
@@ -66,6 +67,21 @@ def detail(connection, row):
     if catalog and mapping and mapping["result"]:
         catalog["excel_mappings"] = mapping["result"]
         catalog["context_notes"] = mapping["result"].get("context_notes", [])
+    # Display a derived summary without rewriting the immutable native catalog.
+    if catalog:
+        from .accounts.client_context import master_lookup
+
+        for source in catalog.get("sources", []):
+            if source["tool"] != "tally":
+                continue
+            for company in source.get("snapshot", {}).get("companies", []):
+                if company.get("masters", {}).get("status") != "ready":
+                    continue
+                try:
+                    company["master_summary"] = master_lookup(company)["summary"]
+                except ValueError as error:
+                    company["master_lookup_error"] = str(error)
+                    catalog["partial"] = True
     return {
         **{
             k: row[k]
@@ -520,6 +536,7 @@ def collect(connection, device, job, result):
     )
     unchanged = previous and not partial and previous["fingerprint"] == signature
     catalog = {
+        "master_lookup_version": "1",
         "format_version": "2",
         "context_notes": copy.deepcopy(previous["catalog"].get("context_notes", []))
         if unchanged

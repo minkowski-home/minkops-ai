@@ -1,5 +1,27 @@
 # Decision Logs
 
+## Separate native discovery evidence from indexed master lookups (11 October 2026)
+
+**Situation:** Two test companies displayed 198/195 masters. Read-only native
+comparison proved the counts included statutory definitions, an identical
+currency repeated by Tally, and a remote-company metadata trailer.
+
+**Task:** Make counts and downstream lookup truthful without losing source
+evidence, merging company identities, or changing already-authorized inputs.
+
+**Action:** Preserve native catalogs and archives; derive versioned company-scoped
+master files and type/GUID/name indexes with candidate locations and raw record
+provenance. Collapse only identical definitions, reject conflicting native
+identities, and verify metadata against the owning company. Keep statutory,
+custom and GST tax-unit masters. Pin the derived format at collection/launch;
+historical runs retain exact file contents and hashes. Display unique per-type
+counts separately from native export totals and update versioned workflow guidance.
+
+**Result:** Regression coverage verifies identity conflicts, name collisions,
+cross-company isolation, chunk locations, provenance and immutable legacy inputs.
+The supplied real export produces 196/193 unique masters while retaining all
+useful definitions; the seven derived input files total about 3.2 MB.
+
 Entries below preserve historical decisions and may describe structures that
 have since changed. See `engineering-architecture.md` for the current model.
 

@@ -1,6 +1,6 @@
 # Source Discovery: reusable client context
 
-Source Discovery 0.8.0 and Windows companion 0.6.6 collect a versioned package
+Source Discovery 0.8.1 and Windows companion 0.6.6 collect a versioned package
 before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.
@@ -53,6 +53,23 @@ Formula/layout changes invalidate automatic reuse of the mappings. Unsupported
 formula representations or collection failures require attention.
 
 ## Persistence and downstream access
+
+Raw native exports remain immutable in PostgreSQL and the PC archive. Newly
+collected or pinned catalogs carry `master_lookup_version: "1"`. Downstream
+files are a derived view: verified remote-company trailers are separated and
+identical records with the same company/type/native identity are collapsed.
+Conflicting definitions for one identity block lookup preparation. Every retained
+record has `source_record_indexes` pointing into its company's raw master export.
+Statutory/default masters and custom types remain available; counts are not fixed.
+
+Each company manifest supplies `master_lookup_path`: an index grouped by type,
+GUID and exact name, with candidate lists containing file paths and zero-based
+offsets. Equal names with different GUIDs remain separate candidates; companies
+are never merged. `TAXUNIT` definitions remain available for buyer GST identity.
+The UI shows unique counts by type and distinguishes raw exported records,
+duplicates and metadata. Already-pinned catalogs without the lookup version retain
+their original file contents and hashes. No new DB table, live retrieval endpoint
+or accounting state is introduced; hosted input-size limits still apply.
 
 PostgreSQL holds the tenant/operator/device-scoped immutable catalog and reviewed
 notes. The connected PC also creates atomic, hashed packages under its per-user

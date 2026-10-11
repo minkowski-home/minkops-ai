@@ -1,6 +1,6 @@
 {
   "key": "source-discovery",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "name": "Source discovery",
   "description": "Collect complete Tally masters, recent vouchers, workbook headers and formulas, and reviewed client context.",
   "owner": "accounts-desk",

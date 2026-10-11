@@ -55,6 +55,13 @@ capabilities. Look up actual historical voucher records for unclear handwriting
 or stock-item names. History supplies candidates, never replacement amounts or
 tax evidence. Unsupported inventory/allocation structures require handoff.
 
+Use master_lookup_path when supplied: its company-scoped type/GUID/name index
+points to candidate records by file path and zero-based offset. Native statutory
+and default definitions remain available but are not supplier accounts. Never
+merge companies or arbitrarily select among same-name candidates. Collapsed
+identical records retain source_record_indexes for raw-export provenance; older
+manifests without this index retain their original lookup files.
+
 Company mode is locked or infer. Locked mode uses the user-selected company GUID
 for every bill; contradictory buyer evidence requires handoff. Infer mode may
 choose any discovered company using buyer identity and evidenced client context;

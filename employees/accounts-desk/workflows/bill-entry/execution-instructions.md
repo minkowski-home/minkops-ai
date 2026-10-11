@@ -10,6 +10,14 @@ recent-voucher and subjective-context JSON files as needed. Historical vouchers
 may suggest candidates for unclear handwriting or stock names; history cannot
 replace current bill evidence for amounts, taxes, dates or buyer identity.
 Subjective notes cover obscure conventions, not an alternative voucher database.
+When master_lookup_path is present, consult that company's index first. by_type
+contains exact by_guid/by_name candidate lists with file paths and zero-based
+record offsets. Only consult relevant native types, including TAXUNIT for buyer
+GST identity. Statutory/default masters are not supplier accounts. Equal names
+across companies do not establish shared identity; resolve multiple candidates
+using evidence or hand off. Lookup records retain source_record_indexes in the
+raw export; use native GUIDs for identity. Older manifests without an index still
+use their supplied master files.
 
 Extract invoice_number as the supplier's invoice reference, vendor as the exact
 matching supplier ledger, date as the invoice issue date in YYYY-MM-DD,

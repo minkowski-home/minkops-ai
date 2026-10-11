@@ -25,12 +25,27 @@ interface Config {
   excel_source_ids: string[];
   tally: { port: number; period: {from:string;to:string} } | null;
 }
+interface MasterSummary {
+  exported_count: number;
+  unique_count: number;
+  duplicate_count: number;
+  metadata_count: number;
+  counts_by_type: Record<string, number>;
+}
+const masterLabels: Record<string, string> = {
+  LEDGER: "Ledgers", GROUP: "Groups", VOUCHERTYPE: "Voucher types",
+  STOCKITEM: "Stock items", STOCKGROUP: "Stock groups", UNIT: "Units",
+  GODOWN: "Godowns", CURRENCY: "Currencies", COSTCATEGORY: "Cost categories",
+  COSTCENTRE: "Cost centres", TAXUNIT: "Tax units",
+  INCOMETAXCLASSIFICATION: "Income-tax classifications", INCOMETAXSLAB: "Income-tax slabs"
+};
 interface Collection {
   category: string;
   status: string;
   count?: number;
   records?: Record<string, unknown>[];
   error?: string;
+  masterSummary?: MasterSummary;
 }
 interface Book {
   path: string;
@@ -53,7 +68,7 @@ interface DiscoveredSource {
   status: string;
   error?: string;
   workbooks?: Book[];
-  snapshot?: { company?:string; collections?:Collection[]; scope_error?:string; companies?: {company:string;status:string;error?:string;company_guid?:string;masters?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]};vouchers?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]}}[] };
+  snapshot?: { company?:string; collections?:Collection[]; scope_error?:string; companies?: {company:string;status:string;error?:string;company_guid?:string;master_summary?:MasterSummary;master_lookup_error?:string;masters?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]};vouchers?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]}}[] };
 }
 interface DiscoveryRun {
   id: string;
@@ -376,7 +391,27 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
       })),
       ...(run.config.tally ? [{ key: "tally", tool: "tally", status: "waiting" }] : [])
     ] as DiscoveredSource[]);
-  const sources: DiscoveredSource[] = collectedSources.flatMap(s => s.snapshot?.companies ? s.snapshot.companies.map((c,index)=>({key:`${s.key}-${index}`,tool:'tally',status:c.status,error:c.error,snapshot:{company:c.company,collections:[{category:'masters',status:c.masters?.status??'unavailable',count:c.masters?.count,records:c.masters?.records.map(r=>r.data)},{category:'vouchers',status:c.vouchers?.status??'unavailable',count:c.vouchers?.count,records:c.vouchers?.records.map(r=>r.data)}]}})) : [s]);
+  const sources: DiscoveredSource[] = collectedSources.flatMap(s => s.snapshot?.companies
+    ? s.snapshot.companies.map((c, index) => ({
+        key: `${s.key}-${index}`, tool: 'tally', status: c.status, error: c.error,
+        snapshot: {
+          company: c.company,
+          collections: [
+            {
+              category: 'masters',
+              status: c.master_lookup_error ? 'unavailable' : c.masters?.status ?? 'unavailable',
+              count: c.master_summary?.unique_count ?? c.masters?.count,
+              masterSummary: c.master_summary, error: c.master_lookup_error,
+              records: c.master_summary ? undefined : c.masters?.records.map(r => r.data)
+            },
+            {
+              category: 'vouchers', status: c.vouchers?.status ?? 'unavailable',
+              count: c.vouchers?.count, records: c.vouchers?.records.map(r => r.data)
+            }
+          ]
+        }
+      }))
+    : [s]);
   const pending = ["queued", "executing"].includes(run.state);
   return (
     <section className="accounts-panel" aria-label="Discovered sources">
@@ -434,19 +469,22 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
               {s.snapshot?.collections?.map((c) => (
                 <details key={c.category}>
                   <summary>
-                    {c.category === "masters" ? "Masters" : "Vouchers"} ·{" "}
+                    {c.category === "masters" ? c.masterSummary ? "Unique masters" : "Master export" : "Vouchers"} ·{" "}
                     {c.status === "ready" ? `${c.count} records` : "Needs attention"}
                   </summary>
                   {c.error ? (
                     <p role="alert">{c.error}</p>
                   ) : (
-                    <><p className="quiet-state">
+                    <>{c.masterSummary && <>
+                      <p className="quiet-state">Includes Tally statutory and default masters. Exported records: {c.masterSummary.exported_count}. Excluded from the master count: duplicates ({c.masterSummary.duplicate_count}), company metadata ({c.masterSummary.metadata_count}).</p>
+                      <ul>{Object.entries(c.masterSummary.counts_by_type).sort(([a],[b])=>a.localeCompare(b)).map(([type,count])=><li key={type}>{masterLabels[type] ?? type.replaceAll('_',' ')} · {count}</li>)}</ul>
+                    </>}<p className="quiet-state">
                       Complete collected records are available for downstream lookup.
-                    </p><ul>{c.records?.slice(0,50).map((record,index)=>{
+                    </p>{!c.masterSummary && <><ul>{c.records?.slice(0,50).map((record,index)=>{
                       const name=record['@_NAME'] ?? record.NAME;
                       const label=typeof name==='string'?name:typeof name==='object'&&name?String((name as Record<string,unknown>)['#text']??''):'';
                       return label?<li key={index}>{label}</li>:null;
-                    })}</ul>{(c.records?.length ?? 0)>50&&<p className="quiet-state">Showing the first 50 names. The saved catalog contains the complete list.</p>}</>
+                    })}</ul>{(c.records?.length ?? 0)>50&&<p className="quiet-state">Showing the first 50 names. The saved catalog contains the complete list.</p>}</>}</>
                   )}
                 </details>
               ))}
