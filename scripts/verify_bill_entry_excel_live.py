@@ -58,7 +58,7 @@ def main():
                 "device_id": device["id"],
                 "request_key": str(uuid.uuid4()),
                 "config": {
-                    "depth": "business_mappings",
+                    "depth": "client_context",
                     "excel_source_ids": [source["id"]],
                     "tally": None,
                 },

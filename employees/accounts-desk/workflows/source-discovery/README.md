@@ -13,7 +13,7 @@ Source discovery proposes actual workbook/sheet/table mappings with header
 positions and semantic concepts. Bill entry recognizes the appropriate confirmed
 destination, extracts PDFs/images, supplies field evidence and reports unresolved
 routing. The application owns approvals, checks and verified in-place Excel
-writes. Registered-PC discovery collects all loaded Tally companies' complete,
+writes. Registered-PC discovery collects all configured Tally companies' complete,
 undated masters and detailed vouchers for an inclusive date period, plus fresh
 workbook projections containing headers, tables and formula text. Excel business
 rows and cached results stay out of discovery. Hosted interpretation proposes

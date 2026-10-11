@@ -188,7 +188,6 @@ class BillEntryTests(unittest.TestCase):
         *,
         extra_ledgers=(),
         reuse_device=False,
-        schema=False,
         multiple=False,
     ):
         self.native = "/api/tenants/mock-tenant/desktop"
@@ -209,11 +208,9 @@ class BillEntryTests(unittest.TestCase):
                 "device_id": self.device["id"],
                 "request_key": str(uuid.uuid4()),
                 "config": {
-                    "depth": "structure" if schema else "client_context",
+                    "depth": "client_context",
                     "excel_source_ids": [],
-                    "tally": {"company": "Test", "port": 9000, "categories": categories}
-                    if schema
-                    else {"port": 9000, "period": period},
+                    "tally": {"port": 9000, "period": period},
                 },
             },
         )
@@ -249,82 +246,69 @@ class BillEntryTests(unittest.TestCase):
         }
         if company_guid:
             receipt["sources"][0]["snapshot"]["collections"][0]["records"][0]["GUID"] = company_guid
-        if schema:
-            self.reference_receipt = copy.deepcopy(receipt["sources"][0]["snapshot"])
-            snapshot = receipt["sources"][0]["snapshot"]
-            snapshot["schema_tables"] = []
-            for collection, table in zip(
-                snapshot["collections"], ("Company", "Ledger", "VoucherType")
-            ):
-                columns = [{"name": "$Name", "type": "VarChar", "nullable": True, "ordinal": 1}]
-                snapshot["schema_tables"].append({"table": table, "columns": columns})
-                collection.update(
-                    count=0,
-                    fields=["$Name"],
-                    records=[],
-                    schema={
-                        "source": "odbc_metadata",
-                        "coverage": "exposed_top_level_methods",
-                        "table": table,
-                        "columns": columns,
-                    },
-                )
-        else:
-            original = receipt["sources"][0]["snapshot"]
-            guid = company_guid or self.device["id"] + "-company"
-            identity = {"NAME": "Test", "GUID": guid}
-            company = {
-                "company": "Test",
-                "company_guid": guid,
-                "identity": identity,
-                "port": 9000,
-                "status": "ready",
-                "masters": {"status": "ready", "count": 0, "records": []},
-                "vouchers": {"status": "ready", "count": 0, "records": []},
+        original = receipt["sources"][0]["snapshot"]
+        guid = company_guid or self.device["id"] + "-company"
+        identity = {"NAME": "Test", "GUID": guid, "COMPANYNUMBER": "100000"}
+        company = {
+            "company": "Test",
+            "company_guid": guid,
+            "identity": identity,
+            "port": 9000,
+            "status": "ready",
+            "masters": {"status": "ready", "count": 0, "records": []},
+            "vouchers": {"status": "ready", "count": 0, "records": []},
+        }
+        for collection in original["collections"]:
+            if collection["category"] == "company":
+                continue
+            kind = "LEDGER" if collection["category"] == "ledgers" else "VOUCHERTYPE"
+            company["masters"]["records"].extend(
+                {"type": kind, "data": r} for r in collection["records"]
+            )
+        company["masters"]["count"] = len(company["masters"]["records"])
+        period = {"from": "2026-10-01", "to": "2026-10-31"}
+        receipt["sources"][0]["snapshot"] = {
+            "format_version": "2",
+            "period": period,
+            "companies": [company],
+            "partial": False,
+        }
+        if multiple:
+            other = copy.deepcopy(company)
+            other.update(
+                company="Beta",
+                company_guid="beta-guid",
+                identity={"NAME": "Beta", "GUID": "beta-guid", "COMPANYNUMBER": "100001"},
+            )
+            receipt["sources"][0]["snapshot"]["companies"].append(other)
+        snapshot = receipt["sources"][0]["snapshot"]
+        snapshot["company_scope"] = [
+            {
+                "company": c["company"],
+                "company_guid": c["company_guid"],
+                "company_number": c["identity"]["COMPANYNUMBER"],
             }
-            for collection in original["collections"]:
-                if collection["category"] == "company":
-                    continue
-                kind = "LEDGER" if collection["category"] == "ledgers" else "VOUCHERTYPE"
-                company["masters"]["records"].extend(
-                    {"type": kind, "data": r} for r in collection["records"]
-                )
-            company["masters"]["count"] = len(company["masters"]["records"])
-            period = {"from": "2026-10-01", "to": "2026-10-31"}
-            receipt["sources"][0]["snapshot"] = {
-                "format_version": "2",
-                "period": period,
-                "companies": [company],
-                "partial": False,
-            }
-            if multiple:
-                other = copy.deepcopy(company)
-                other.update(
-                    company="Beta",
-                    company_guid="beta-guid",
-                    identity={"NAME": "Beta", "GUID": "beta-guid"},
-                )
-                receipt["sources"][0]["snapshot"]["companies"].append(other)
+            for c in snapshot["companies"]
+        ]
         r = self.client.post(
             f"/api/desktop/worker/jobs/{claim['id']}/finish",
             headers=self.worker,
             json={"claim_token": claim["claim_token"], "result": receipt},
         )
         self.assertEqual(r.status_code, 200, r.text)
-        if not schema:
-            from minkops_platform.accounts.worker import process
+        from minkops_platform.accounts.worker import process
 
-            with psycopg.connect(URL, row_factory=dict_row) as c:
-                mapping = c.execute(
-                    "SELECT mapping_run_id FROM discovery_runs WHERE id=%s",
-                    (launched.json()["id"],),
-                ).fetchone()["mapping_run_id"]
-                if mapping is not None:
-                    process(
-                        c,
-                        c.execute("SELECT * FROM account_runs WHERE id=%s", (mapping,)).fetchone(),
-                        executor=lambda *args, **kwargs: {"sheets": [], "context_notes": []},
-                    )
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            mapping = c.execute(
+                "SELECT mapping_run_id FROM discovery_runs WHERE id=%s",
+                (launched.json()["id"],),
+            ).fetchone()["mapping_run_id"]
+            if mapping is not None:
+                process(
+                    c,
+                    c.execute("SELECT * FROM account_runs WHERE id=%s", (mapping,)).fetchone(),
+                    executor=lambda *args, **kwargs: {"sheets": [], "context_notes": []},
+                )
         r = self.client.post(
             discovery + f"/runs/{launched.json()['id']}/confirm", headers=self.csrf, json={}
         )
@@ -466,12 +450,18 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(held["result"]["records"][0]["status"], "held")
         edited = held["result"]
         edited["records"][0]["operation"] = "update"
-        denied = self.client.post(self.base + f"/runs/{held['id']}/approve", headers=self.csrf,
-            json={"result": edited, "acknowledge_findings": True})
-        self.assertEqual(denied.status_code,422)
-        response = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
-            headers=self.csrf,json={"action":"guess"})
-        self.assertEqual(response.status_code,200,response.text)
+        denied = self.client.post(
+            self.base + f"/runs/{held['id']}/approve",
+            headers=self.csrf,
+            json={"result": edited, "acknowledge_findings": True},
+        )
+        self.assertEqual(denied.status_code, 422)
+        response = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
+            headers=self.csrf,
+            json={"action": "guess"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
         _, _, correction = self.tally_job(response.json())
         self.assertEqual(correction["expected"]["fingerprint"], "a" * 64)
 
@@ -534,9 +524,12 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(held["state"], "review")
         edited = held["result"]
         edited["records"][0]["operation"] = "update"
-        response = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
-            headers=self.csrf,json={"action":"guess"})
-        self.assertEqual(response.status_code,200,response.text)
+        response = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
+            headers=self.csrf,
+            json={"action": "guess"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["state"], "writing")
 
     def test_parallel_workers_keep_independent_bill_sessions_and_single_parent_task(self):
@@ -832,9 +825,12 @@ class BillEntryTests(unittest.TestCase):
         second, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
         self.process(second, self.excel_result(bill, 13))
         self.approve(second, self.excel_result(bill, 13))
-        corrected = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{second['id']}/{bill}",
-            headers=self.csrf,json={"action":"guess"})
-        self.assertEqual(corrected.status_code,200,corrected.text)
+        corrected = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{second['id']}/{bill}",
+            headers=self.csrf,
+            json={"action": "guess"},
+        )
+        self.assertEqual(corrected.status_code, 200, corrected.text)
         updated = corrected.json()
         write = updated["writes"][0]
         route = self.base + f"/runs/{second['id']}/writes/{write['id']}"
@@ -843,16 +839,22 @@ class BillEntryTests(unittest.TestCase):
             route + "/verify", headers=self.csrf, files={"file": ("records.xlsx", saved)}
         )
         self.assertEqual(response.status_code, 200, response.text)
-        corrected = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{first['id']}/{bill}",
-            headers=self.csrf,json={"action":"guess"})
-        self.assertEqual(corrected.status_code,200,corrected.text)
+        corrected = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{first['id']}/{bill}",
+            headers=self.csrf,
+            json={"action": "guess"},
+        )
+        self.assertEqual(corrected.status_code, 200, corrected.text)
         held = corrected.json()
         self.assertEqual(held["state"], "review")
         self.assertEqual(held["writes"], [])
         self.assertEqual(held["result"]["records"][0]["current_excel"]["Amount"], 13)
-        resumed = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
-            headers=self.csrf,json={"action":"guess"})
-        self.assertEqual(resumed.status_code,200,resumed.text)
+        resumed = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
+            headers=self.csrf,
+            json={"action": "guess"},
+        )
+        self.assertEqual(resumed.status_code, 200, resumed.text)
         self.assertEqual(resumed.json()["state"], "writing")
 
     def test_late_cancelled_excel_receipt_retains_newer_observed_source_bytes(self):

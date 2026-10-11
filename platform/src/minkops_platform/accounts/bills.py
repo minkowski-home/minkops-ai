@@ -6,12 +6,13 @@ keys remain authoritative for backfills and externally created records.
 
 import hashlib
 import json
-from uuid import uuid4
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from uuid import uuid4
+
+from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
-from psycopg.types.json import Jsonb
 
 
 def normalized(value):
@@ -257,17 +258,15 @@ def context_plan(connection, device, job):
         "company": target["company"],
         "port": target["port"],
         "categories": ["company", "ledgers", "voucher_types"],
-        "depth": "reference_data",
     }
 
 
 def accept_context(connection, device, job, result):
-    from minkops_platform.discovery import _validate_tally
-    from .repository import run_for
     from .batch import create_children
+    from .repository import run_for
 
     plan = context_plan(connection, device, job)
-    _validate_tally(result, plan)
+    validate_references(result, plan)
     run = run_for(connection, device["tenant_id"], job["input"]["run_id"], True)
     target = target_from_references(
         result, device["id"], run["config"]["tally_target"]["discovery_id"]
@@ -290,6 +289,56 @@ def accept_context(connection, device, job, result):
     if len(run["file_ids"]) > 1:
         create_children(connection, run)
     return {"references_prepared": True}
+
+
+def validate_references(snapshot, plan):
+    """Validate bounded destination identities for already-pinned legacy bill jobs.
+
+    This compatibility path cannot launch Source Discovery or accept full records.
+    New bills use confirmed client context and recheck identities before writing.
+    """
+    if (
+        not isinstance(snapshot, dict)
+        or set(snapshot) != {"company", "port", "collections"}
+        or snapshot["company"] != plan["company"]
+        or snapshot["port"] != plan["port"]
+        or not isinstance(snapshot["collections"], list)
+    ):
+        raise ServiceError("invalid", "Tally returned a different destination scope.")
+    seen = []
+    for collection in snapshot["collections"]:
+        if not isinstance(collection, dict):
+            raise ServiceError("invalid", "Invalid destination references.")
+        seen.append(collection.get("category"))
+        if collection.get("status") == "unavailable":
+            if (
+                set(collection) != {"category", "status", "error"}
+                or not isinstance(collection["error"], str)
+                or not 1 <= len(collection["error"]) <= 300
+            ):
+                raise ServiceError("invalid", "Invalid destination reference error.")
+        elif (
+            collection.get("status") != "ready"
+            or set(collection) != {"category", "status", "count", "fields", "records"}
+            or type(collection["count"]) is not int
+            or not 0 <= collection["count"] <= 10000
+            or not isinstance(collection["fields"], list)
+            or any(not isinstance(f, str) for f in collection["fields"])
+            or not isinstance(collection["records"], list)
+            or len(collection["records"]) != collection["count"]
+            or any(
+                not isinstance(r, dict)
+                or any(
+                    k not in {"@_NAME", "NAME", "GUID", "PARENT", "ALTERID"}
+                    or not isinstance(v, str)
+                    for k, v in r.items()
+                )
+                for r in collection["records"]
+            )
+        ):
+            raise ServiceError("invalid", "Invalid destination reference records.")
+    if len(seen) != len(set(seen)) or set(seen) != set(plan["categories"]):
+        raise ServiceError("invalid", "Tally omitted destination reference categories.")
 
 
 def recheck_target(connection, tenant, user, current):

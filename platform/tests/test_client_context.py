@@ -19,7 +19,11 @@ def snapshot():
                 "company_guid": name + "-guid",
                 "port": 9000,
                 "status": "ready",
-                "identity": {"@_NAME": name, "GUID": name + "-guid"},
+                "identity": {
+                    "@_NAME": name,
+                    "GUID": name + "-guid",
+                    "COMPANYNUMBER": "100000" if name == "A" else "100001",
+                },
                 "masters": {
                     "status": "ready",
                     "count": 2,
@@ -47,6 +51,14 @@ def snapshot():
         "format_version": "2",
         "period": {"from": "2026-10-01", "to": "2026-10-02"},
         "companies": companies,
+        "company_scope": [
+            {
+                "company": c["company"],
+                "company_guid": c["company_guid"],
+                "company_number": str(100000 + index),
+            }
+            for index, c in enumerate(companies)
+        ],
         "partial": False,
     }
 
@@ -70,6 +82,10 @@ def test_full_nested_records_preserved_and_undated_masters():
         lambda s: s["companies"][0].update(port=9001),
         lambda s: s.update(partial=True),
         lambda s: s["companies"].__setitem__(0, "invalid"),
+        lambda s: s.pop("company_scope"),
+        lambda s: s["company_scope"].pop(),
+        lambda s: s["company_scope"][0].update(company_guid="replacement"),
+        lambda s: s.update(scope_error="Company scope changed."),
     ],
 )
 def test_invalid_snapshot_rejected(mutation):
@@ -79,6 +95,12 @@ def test_invalid_snapshot_rejected(mutation):
         validate_snapshot(
             value, {"port": 9000, "period": {"from": "2026-10-01", "to": "2026-10-02"}}
         )
+
+
+def test_scope_failure_is_partial_even_when_every_export_succeeded():
+    value = snapshot()
+    value.update(partial=True, scope_error="Company scope changed. Refresh discovery.")
+    validate_snapshot(value, {"port": 9000, "period": value["period"]})
 
 
 def test_explicit_company_per_record_and_locked_mode():

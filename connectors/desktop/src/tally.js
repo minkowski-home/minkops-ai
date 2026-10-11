@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { boundedText } from "./index.js";
-import { discoverTally } from "./discovery.js";
+import { readTallyReferences } from "./tally-references.js";
 
 const xml = (s) =>
   String(s).replace(
@@ -33,8 +33,7 @@ const unsupported = Symbol("unsupported allocations");
 
 /** Fixed native attention operations. Renderer cannot supply XML or endpoints. */
 export async function inspectTallyAttention(plan, {request = fetch, createSupplier = false} = {}) {
-  const snapshot = await discoverTally({company: plan.company, port: plan.port,
-    depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+  const snapshot = await readTallyReferences({company: plan.company, port: plan.port, categories: ["company", "ledgers"]}, {request});
   const companies = snapshot.collections.find(c => c.category === "company")?.records ?? [];
   if (companies.length !== 1 || text(companies[0].GUID) !== plan.company_guid)
     throw new Error("Tally company changed.");
@@ -47,7 +46,7 @@ export async function inspectTallyAttention(plan, {request = fetch, createSuppli
     // Losing an import acknowledgement never permits another import in this
     // attempt. The next explicit action starts with the same exact master read.
     await exchange(plan.company, plan.port, body, request);
-    const after = await discoverTally({company: plan.company, port: plan.port, depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+    const after = await readTallyReferences({company: plan.company, port: plan.port, categories: ["company", "ledgers"]}, {request});
     const observed = after.collections.find(c => c.category === "company")?.records ?? [];
     if (observed.length !== 1 || text(observed[0].GUID) !== plan.company_guid)
       throw new Error("Tally company changed.");
@@ -185,12 +184,11 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
   )
     throw new Error("Unbalanced bill.");
   if (plan.references) {
-    const snapshot = await discoverTally(
+    const snapshot = await readTallyReferences(
       {
         company,
         port,
         categories: ["company", "ledgers"],
-        depth: "reference_data",
       },
       { request },
     );

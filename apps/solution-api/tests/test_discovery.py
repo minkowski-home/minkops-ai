@@ -99,7 +99,7 @@ class DiscoveryTests(unittest.TestCase):
             ).status_code,
             200,
         )
-        config = {"depth": "structure", "excel_source_ids": [source["id"]], "tally": None}
+        config = {"depth": "client_context", "excel_source_ids": [source["id"]], "tally": None}
 
         def scan(content):
             # Native discovery sends a new header-only package. Bill Entry must
@@ -220,7 +220,7 @@ class DiscoveryTests(unittest.TestCase):
         )
 
         def executor(key, files, context, event, **kwargs):
-            self.assertEqual(context["local_discovery"]["sources"][0]["tool"], "excel")
+            self.assertEqual(context["local_discovery"]["format_version"], "2")
             return proposal
 
         with psycopg.connect(URL, row_factory=dict_row) as c:
@@ -260,19 +260,33 @@ class DiscoveryTests(unittest.TestCase):
 
     def start(self, **extra):
         self.pair()
+        from minkops_platform.resources import REPOSITORY_ROOT
+        from minkops_platform.workflows import load_definition, register_workflow
+
         with psycopg.connect(URL) as c:
+            tenant_id = c.execute("SELECT id FROM tenants WHERE slug=%s", (self.slug,)).fetchone()[
+                0
+            ]
             c.execute(
-                "INSERT INTO workflows(tenant_id,key,name,description,status) SELECT id,'source-discovery','Source discovery','Test','active' FROM tenants WHERE slug=%s ON CONFLICT DO NOTHING",
-                (self.slug,),
+                "INSERT INTO employees(tenant_id,key,name) VALUES (%s,'accounts-desk','Accounts desk') ON CONFLICT DO NOTHING",
+                (tenant_id,),
             )
+            workflow = register_workflow(
+                c,
+                tenant_id,
+                load_definition(
+                    REPOSITORY_ROOT / "employees/accounts-desk/workflows/source-discovery"
+                ),
+            )
+            c.execute("UPDATE workflows SET status='active' WHERE id=%s", (workflow,))
         self.discovery = f"/api/tenants/{self.slug}/discovery"
         body = {
             "device_id": self.device["id"],
             "request_key": str(uuid.uuid4()),
             "config": {
-                "depth": "structure",
+                "depth": "client_context",
                 "excel_source_ids": [],
-                "tally": {"company": "Test", "port": 9000, "categories": ["ledgers", "units"]},
+                "tally": {"port": 9000, "period": {"from": "2026-10-01", "to": "2026-10-02"}},
             },
         }
         body.update(extra)
@@ -289,58 +303,40 @@ class DiscoveryTests(unittest.TestCase):
                     "tool": "tally",
                     "status": "ready",
                     "snapshot": {
-                        "company": "Test",
-                        "port": 9000,
-                        "schema_tables": [
+                        "format_version": "2",
+                        "period": {"from": "2026-10-01", "to": "2026-10-02"},
+                        "company_scope": [
                             {
-                                "table": "Ledger",
-                                "columns": [
-                                    {
-                                        "name": "$Name",
-                                        "type": "VarChar",
-                                        "nullable": True,
-                                        "ordinal": 1,
-                                    }
-                                ],
+                                "company": "Test",
+                                "company_guid": "test-guid",
+                                "company_number": "100000",
                             }
                         ],
-                        "collections": [
+                        "companies": [
                             {
-                                "category": "ledgers",
+                                "company": "Test",
+                                "port": 9000,
+                                "status": "unavailable",
+                                "error": "Unavailable",
+                            }
+                        ]
+                        if partial
+                        else [
+                            {
+                                "company": "Test",
+                                "port": 9000,
                                 "status": "ready",
-                                "count": 0,
-                                "fields": ["$Name"],
-                                "records": [],
-                                "schema": {
-                                    "source": "odbc_metadata",
-                                    "coverage": "exposed_top_level_methods",
-                                    "table": "Ledger",
-                                    "columns": [
-                                        {
-                                            "name": "$Name",
-                                            "type": "VarChar",
-                                            "nullable": True,
-                                            "ordinal": 1,
-                                        }
-                                    ],
+                                "company_guid": "test-guid",
+                                "identity": {
+                                    "NAME": "Test",
+                                    "GUID": "test-guid",
+                                    "COMPANYNUMBER": "100000",
                                 },
-                            },
-                            {"category": "units", "status": "unavailable", "error": "Unavailable"}
-                            if partial
-                            else {
-                                "category": "units",
-                                "status": "ready",
-                                "count": 0,
-                                "fields": [],
-                                "records": [],
-                                "schema": {
-                                    "source": "odbc_metadata",
-                                    "coverage": "not_exposed",
-                                    "table": "Unit",
-                                    "columns": [],
-                                },
-                            },
+                                "masters": {"status": "ready", "count": 0, "records": []},
+                                "vouchers": {"status": "ready", "count": 0, "records": []},
+                            }
                         ],
+                        "partial": partial,
                     },
                 }
             ]
@@ -351,6 +347,18 @@ class DiscoveryTests(unittest.TestCase):
             json={"claim_token": claim["claim_token"], "result": result},
         )
         self.assertEqual(r.status_code, 200, r.text)
+        current = self.client.get(self.discovery + f"/runs/{run['id']}").json()
+        if current["mapping_run"]:
+            from minkops_platform.accounts.worker import process
+
+            with psycopg.connect(URL, row_factory=dict_row) as c:
+                process(
+                    c,
+                    c.execute(
+                        "SELECT * FROM account_runs WHERE id=%s", (current["mapping_run"]["id"],)
+                    ).fetchone(),
+                    executor=lambda *args, **kwargs: {"sheets": [], "context_notes": []},
+                )
         return self.client.get(self.discovery + f"/runs/{run['id']}").json()
 
     def test_partial_results_are_observable_downloadable_and_cannot_be_confirmed(self):
@@ -368,7 +376,9 @@ class DiscoveryTests(unittest.TestCase):
         download = self.client.get(self.discovery + f"/runs/{run['id']}/catalog.json")
         self.assertEqual(download.status_code, 200)
         self.assertIn("attachment", download.headers["content-disposition"])
-        self.assertEqual(download.json()["sources"][0]["snapshot"]["collections"][0]["count"], 0)
+        self.assertEqual(
+            download.json()["sources"][0]["snapshot"]["companies"][0]["status"], "unavailable"
+        )
 
     def test_confirmation_and_unchanged_refresh_reuse_review_with_idempotence(self):
         run, body = self.start()
@@ -411,7 +421,7 @@ class DiscoveryTests(unittest.TestCase):
             self.client.get("/api/tenants/mock-tenant/discovery/runs/" + run["id"]).status_code, 403
         )
         config = {
-            "depth": "structure",
+            "depth": "client_context",
             "excel_source_ids": [],
             "tally": {"company": "Test", "port": 9000, "categories": ["arbitrary"]},
         }

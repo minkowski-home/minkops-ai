@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import re
 from datetime import date
 
 MAX_CONTEXT_BYTES = 64_000_000
@@ -17,7 +18,8 @@ def text(value):
 def validate_snapshot(snapshot, config):
     if (
         not isinstance(snapshot, dict)
-        or set(snapshot) != {"format_version", "period", "companies", "partial"}
+        or set(snapshot) - {"scope_error"}
+        != {"format_version", "period", "companies", "company_scope", "partial"}
         or snapshot["format_version"] != "2"
         or snapshot["period"] != config["period"]
     ):
@@ -27,12 +29,40 @@ def validate_snapshot(snapshot, config):
     if start > end:
         raise ValueError("Invalid discovery period.")
     companies = snapshot["companies"]
+    scope = snapshot["company_scope"]
+    scope_error = snapshot.get("scope_error")
+    if scope_error is not None and (
+        not isinstance(scope_error, str) or not 1 <= len(scope_error) <= 300
+    ):
+        raise ValueError("Invalid company scope failure.")
     if (
         not isinstance(companies, list)
         or not 1 <= len(companies) <= 50
         or type(snapshot["partial"]) is not bool
     ):
         raise ValueError("Invalid company scope.")
+    if (
+        not isinstance(scope, list)
+        or len(scope) != len(companies)
+        or any(
+            not isinstance(c, dict)
+            or set(c) != {"company", "company_guid", "company_number"}
+            or any(
+                not isinstance(c[k], str) or not c[k].strip() for k in ("company", "company_number")
+            )
+            or (
+                c["company_guid"] is not None
+                and (not isinstance(c["company_guid"], str) or not c["company_guid"].strip())
+            )
+            or not re.fullmatch(r"[0-9]{1,10}", c["company_number"])
+            for c in scope
+        )
+        or any(len({c[key] for c in scope}) != len(scope) for key in ("company", "company_number"))
+        or len([c["company_guid"] for c in scope if c["company_guid"] is not None])
+        != len({c["company_guid"] for c in scope if c["company_guid"] is not None})
+    ):
+        raise ValueError("Invalid company scope evidence.")
+    expected = {c["company"]: c for c in scope}
     names, guids = set(), set()
     for company in companies:
         if not isinstance(company, dict):
@@ -47,6 +77,8 @@ def validate_snapshot(snapshot, config):
         ):
             raise ValueError("Invalid or duplicate company.")
         names.add(name)
+        if name not in expected:
+            raise ValueError("Discovery omitted or replaced a scoped company.")
         if company.get("status") == "unavailable":
             if not isinstance(company.get("error"), str) or not 1 <= len(company["error"]) <= 300:
                 raise ValueError("Invalid collection failure.")
@@ -70,6 +102,9 @@ def validate_snapshot(snapshot, config):
             or not guid.strip()
             or guid in guids
             or text(identity.get("GUID")) != guid
+            or guid != expected[name]["company_guid"]
+            or str(text(identity.get("COMPANYNUMBER")) or "").strip()
+            != expected[name]["company_number"]
         ):
             raise ValueError("Company identity mismatch.")
         guids.add(guid)
@@ -111,7 +146,7 @@ def validate_snapshot(snapshot, config):
                     if not identifier or identifier in voucher_ids:
                         raise ValueError("Missing or duplicate voucher identity.")
                     voucher_ids.add(identifier)
-    if snapshot["partial"] != any(c["status"] != "ready" for c in companies):
+    if snapshot["partial"] != (bool(scope_error) or any(c["status"] != "ready" for c in companies)):
         raise ValueError("Incorrect discovery completeness.")
     if len(json.dumps(snapshot).encode()) > MAX_CONTEXT_BYTES:
         raise ValueError("Discovery exceeds supported size.")
@@ -240,6 +275,7 @@ def context_assets(catalog):
 
 def validate_notes(notes, catalog):
     from jsonschema import Draft202012Validator
+
     from minkops_platform.resources import REPOSITORY_ROOT
 
     schema = json.loads(

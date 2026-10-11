@@ -1,6 +1,6 @@
 {
   "key": "source-discovery",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "name": "Source discovery",
   "description": "Collect complete Tally masters, recent vouchers, workbook headers and formulas, and reviewed client context.",
   "owner": "accounts-desk",
@@ -10,7 +10,6 @@
   "instructions": "SKILL.md",
   "tenant_defaults": {
     "destination_mode": "tally",
-    "discovery_depth": "client_context",
     "max_files": 100
   },
   "run_defaults": {

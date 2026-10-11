@@ -10,16 +10,6 @@
         "both"
       ]
     },
-    "discovery_depth": {
-      "type": "string",
-      "enum": [
-        "client_context",
-        "structure",
-        "reference_data",
-        "business_mappings"
-      ],
-      "title": "Default discovery depth"
-    },
     "max_files": {
       "type": "integer",
       "minimum": 1,
@@ -68,7 +58,6 @@
     "source_ids",
     "scope_paths",
     "exclusions",
-    "discovery_depth",
     "max_files",
     "refresh_mode"
   ],

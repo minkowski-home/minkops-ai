@@ -13,7 +13,13 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { tallyProbe, boundedText } from "./index.js";
+import { boundedText } from "./index.js";
+import {
+  readTallyCompanyScope,
+  readTallyAvailableCompanies,
+  sameCompanyScope,
+  tallyCompanyNumber,
+} from "./tally-recovery.js";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const escape = (s) =>
   s.replace(
@@ -61,12 +67,60 @@ export async function discoverClientContext(
     to = date(config.period.to);
   if (from > to || (to - from) / 86400000 > 3660)
     throw new Error("Invalid period.");
-  const probe = await tallyProbe({ port: config.port, request });
-  if (!probe.companies.length || probe.companies.length > 50)
-    throw new Error("Load between one and 50 authorised companies in Tally.");
+  async function companyScope() {
+    const available = await readTallyAvailableCompanies({
+      port: config.port,
+      request,
+    });
+    const loaded = await readTallyCompanyScope({ port: config.port, request });
+    const scope = available.map((c) => ({
+      ...c,
+      company_guid:
+        loaded.find(
+          (l) =>
+            l.company === c.company && l.company_number === c.company_number,
+        )?.company_guid ?? null,
+    }));
+    // Preserve companies opened from another configured location as well.
+    for (const company of loaded) {
+      if (
+        scope.some(
+          (c) =>
+            c.company_number === company.company_number &&
+            c.company !== company.company,
+        ) ||
+        scope.some(
+          (c) =>
+            c.company === company.company &&
+            c.company_number !== company.company_number,
+        )
+      )
+        throw Object.assign(
+          new Error(
+            "Tally company scope has conflicting identities. Check company data paths and retry discovery.",
+          ),
+          { tallyScope: true },
+        );
+      if (!scope.some((c) => c.company_number === company.company_number))
+        scope.push(company);
+    }
+    if (scope.length > 50)
+      throw Object.assign(
+        new Error("Tally company scope exceeds 50 companies."),
+        { tallyScope: true },
+      );
+    return scope.sort((a, b) => a.company.localeCompare(b.company));
+  }
+  const scope = await companyScope();
   const companies = [];
   let totalBytes = 0;
-  async function exportData(company, id, period = null, identity = false, companyGuid = null) {
+  async function exportData(
+    company,
+    id,
+    period = null,
+    identity = false,
+    companyGuid = null,
+  ) {
     const variables =
       `<SVCURRENTCOMPANY>${escape(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>` +
       (period
@@ -128,11 +182,18 @@ export async function discoverClientContext(
               remote.length !== 1 ||
               scalar(remote[0].NAME) !== companyGuid ||
               scalar(remote[0].REMOTECMPNAME) !== company ||
-              Object.keys(record).some((key) =>
-                key !== "REMOTECMPINFO.LIST" && !key.startsWith("@_") &&
-                !(key === "#text" && typeof record[key] === "string" && !record[key].trim()),
+              Object.keys(record).some(
+                (key) =>
+                  key !== "REMOTECMPINFO.LIST" &&
+                  !key.startsWith("@_") &&
+                  !(
+                    key === "#text" &&
+                    typeof record[key] === "string" &&
+                    !record[key].trim()
+                  ),
               )
-            ) throw new Error("Voucher export company identity mismatch.");
+            )
+              throw new Error("Voucher export company identity mismatch.");
             continue;
           }
           records.push({ type, data: record });
@@ -141,14 +202,21 @@ export async function discoverClientContext(
     }
     return records;
   }
-  for (const company of probe.companies) {
+  for (const expected of scope) {
+    const company = expected.company;
     const item = { company, port: config.port, status: "ready" };
     try {
       await onProgress(company, "reading");
+      if (!expected.company_guid)
+        throw new Error("Company is not loaded or requires login.");
       item.identity = await exportData(company, "MinkopsIdentity", null, true);
       item.company_guid = scalar(item.identity?.GUID);
-      if (!item.company_guid?.trim())
-        throw new Error("Company GUID is unavailable.");
+      if (
+        item.company_guid !== expected.company_guid ||
+        tallyCompanyNumber(item.identity?.COMPANYNUMBER) !==
+          expected.company_number
+      )
+        throw new Error("Company identity changed during discovery.");
       // All Masters is an import report; the native master export is List of Accounts.
       const masters = await exportData(company, "List of Accounts");
       item.masters = {
@@ -158,16 +226,22 @@ export async function discoverClientContext(
       };
       const vouchers = [];
       // Date chunks bound individual responses; no record slicing or sampling.
-      for (let start = new Date(from); start <= to;) {
+      for (let start = new Date(from); start <= to; ) {
         const end = new Date(Math.min(+to, +start + 30 * 86400000));
         const period = {
           from: start.toISOString().slice(0, 10),
           to: end.toISOString().slice(0, 10),
         };
         await onProgress(company, "reading");
-      // DayBook can silently use Tally's current day. The native voucher
-      // register honors the requested inclusive period and retains full XML.
-      const records = await exportData(company, "Voucher Register", period, false, item.company_guid);
+        // DayBook can silently use Tally's current day. The native voucher
+        // register honors the requested inclusive period and retains full XML.
+        const records = await exportData(
+          company,
+          "Voucher Register",
+          period,
+          false,
+          item.company_guid,
+        );
         for (const record of records) {
           const value = scalar(record.data.DATE);
           if (
@@ -194,11 +268,21 @@ export async function discoverClientContext(
     companies.push(item);
     await onProgress(company, item.status);
   }
+  let scopeError;
+  try {
+    const current = await companyScope();
+    if (!sameCompanyScope(scope, current)) throw new Error("changed");
+  } catch {
+    scopeError =
+      "Tally company scope changed or could not be verified. Load all original companies and refresh discovery.";
+  }
   return {
     format_version: "2",
     period: config.period,
     companies,
-    partial: companies.some((c) => c.status !== "ready"),
+    company_scope: scope,
+    ...(scopeError ? { scope_error: scopeError } : {}),
+    partial: Boolean(scopeError) || companies.some((c) => c.status !== "ready"),
   };
 }
 

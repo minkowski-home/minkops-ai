@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 
 export async function collectSources(
   plan,
-  { folderFor, inventory, inspectExcel, discoverTally, discoverClientContext, excelSchemaBytes, onProgress },
+  { folderFor, inventory, inspectExcel, discoverClientContext, excelSchemaBytes, onProgress },
 ) {
   const sources = [];
   let selectedBytes = 0,
@@ -12,13 +12,9 @@ export async function collectSources(
     await onProgress(source.key, "reading");
     try {
       if (source.tool === "tally") {
-        const snapshot = plan.config.depth === "client_context" ? await discoverClientContext(plan.config.tally, {onProgress: (company, status) => onProgress(source.key, status, company)}) : await discoverTally(
-          { ...plan.config.tally, depth: plan.config.depth },
-          {
-            onProgress: (category, status) =>
-              onProgress(source.key, status, category),
-          },
-        );
+        const snapshot = await discoverClientContext(plan.config.tally, {
+          onProgress: (company, status) => onProgress(source.key, status, company),
+        });
         sources.push({ ...source, status: "ready", snapshot });
         delete sources.at(-1).label;
       } else if (source.tool === "excel") {
@@ -47,10 +43,8 @@ export async function collectSources(
         const workbooks = [];
         for (const file of files.filter((f) => /\.xlsx$/i.test(f.path))) {
           let bytes = Buffer.from(file.content, "base64");
-          if (["structure", "client_context"].includes(plan.config.depth)) {
-            bytes = await excelSchemaBytes(bytes);
-            selected.find((s) => s.path === file.path).content = bytes.toString("base64");
-          }
+          bytes = await excelSchemaBytes(bytes);
+          selected.find((s) => s.path === file.path).content = bytes.toString("base64");
           const book = {
             path: file.path,
             sha256: createHash("sha256").update(bytes).digest("hex"),
@@ -59,7 +53,7 @@ export async function collectSources(
             workbooks.push({
               ...book,
               status: "ready",
-              structure: await inspectExcel(bytes, "structure"),
+              structure: await inspectExcel(bytes),
             });
           } catch {
             workbooks.push({
@@ -79,14 +73,14 @@ export async function collectSources(
           workbooks,
         });
       } else throw new Error("Unsupported source");
-    } catch {
+    } catch (error) {
       sources.push({
         key: source.key,
         tool: source.tool,
         status: "unavailable",
         error:
-          source.tool === "tally"
-            ? "Tally is unavailable or the selected company is not open. Open Tally and refresh."
+          error.tallyScope ? error.message : source.tool === "tally"
+            ? "Tally service or company access could not be verified. Check Tally on this PC and retry discovery."
             : "Folder is unavailable. Reconnect the original folder on this PC and refresh.",
       });
     }

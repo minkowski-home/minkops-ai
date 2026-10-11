@@ -16,12 +16,7 @@
       ]
     },
     "depth": {
-      "enum": [
-        "structure",
-        "reference_data",
-        "business_mappings",
-        "client_context"
-      ]
+      "const": "client_context"
     },
     "excel_source_ids": {
       "type": "array",
@@ -36,49 +31,6 @@
       "oneOf": [
         {
           "type": "null"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "company",
-            "port",
-            "categories"
-          ],
-          "properties": {
-            "company": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200,
-              "pattern": "^[^\u0000-\u001f]+$"
-            },
-            "port": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535
-            },
-            "categories": {
-              "type": "array",
-              "items": {
-                "enum": [
-                  "company",
-                  "groups",
-                  "ledgers",
-                  "voucher_types",
-                  "stock_items",
-                  "stock_groups",
-                  "units",
-                  "godowns",
-                  "cost_centres",
-                  "cost_categories",
-                  "currencies"
-                ]
-              },
-              "uniqueItems": true,
-              "minItems": 1,
-              "maxItems": 11
-            }
-          }
         },
         {
           "type": "object",

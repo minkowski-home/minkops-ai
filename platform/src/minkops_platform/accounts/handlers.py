@@ -76,7 +76,6 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 tenant["id"],
                 discovery_id,
                 ["tally"],
-                tally_categories=["company", "ledgers", "voucher_types"],
             )
             catalog_snapshot = tally_mapping(discovery_id)
             if "companies" not in target:

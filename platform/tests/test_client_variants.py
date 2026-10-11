@@ -29,7 +29,7 @@ class ClientVariantTests(TestCase):
                     {
                         "version": "1.0.0",
                         "instructions": "client.md",
-                        "defaults": {"discovery_depth": "structure"},
+                        "defaults": {"max_files": 50},
                     }
                 )
             )

@@ -21,18 +21,16 @@ interface Binding {
 }
 interface Config {
   destination_mode?: 'excel' | 'tally' | 'both';
-  depth: string;
+  depth: "client_context";
   excel_source_ids: string[];
-  tally: { company?: string; port: number; categories?: string[]; period?: {from:string;to:string} } | null;
+  tally: { port: number; period: {from:string;to:string} } | null;
 }
 interface Collection {
   category: string;
   status: string;
   count?: number;
-  fields?: string[];
   records?: Record<string, unknown>[];
   error?: string;
-  schema?: { source: string; coverage: string; table: string; columns: {name:string;type:string}[] };
 }
 interface Book {
   path: string;
@@ -55,7 +53,7 @@ interface DiscoveredSource {
   status: string;
   error?: string;
   workbooks?: Book[];
-  snapshot?: { company: string; collections: Collection[]; companies?: {company:string;status:string;error?:string;company_guid?:string;masters?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]};vouchers?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]}}[] };
+  snapshot?: { company?:string; collections?:Collection[]; scope_error?:string; companies?: {company:string;status:string;error?:string;company_guid?:string;masters?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]};vouchers?:{status:string;count:number;records:{type:string;data:Record<string,unknown>}[]}}[] };
 }
 interface DiscoveryRun {
   id: string;
@@ -75,20 +73,6 @@ interface DiscoveryRun {
     excel_mappings: Catalog | null;
   } | null;
 }
-const categories = [
-  ["company", "Company & tax settings"],
-  ["groups", "Account groups"],
-  ["ledgers", "Ledgers & supplier tax details"],
-  ["voucher_types", "Voucher types"],
-  ["stock_items", "Stock items & tax details"],
-  ["stock_groups", "Stock groups"],
-  ["units", "Units"],
-  ["godowns", "Locations"],
-  ["cost_centres", "Cost centres"],
-  ["cost_categories", "Cost categories"],
-  ["currencies", "Currencies"]
-];
-
 export function DiscoveryLaunch({
   tenant,
   routeSlug,
@@ -416,6 +400,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
               ? "Keep Minkops running on the selected PC. You can leave this page and come back."
               : "Check the sources and proposed mappings before confirming."}
       </p>
+      {collectedSources.map(s => s.snapshot?.scope_error && <p role="alert" key={s.key}>{s.snapshot.scope_error}</p>)}
       {run.catalog?.context_error&&<p role="alert">{run.catalog.context_error}</p>}
       <div className="discovery-source-grid">
         {sources.map((s) => {
@@ -425,14 +410,14 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
               ? (observed.find((o) => !o.category)?.status ?? "waiting")
               : s.status;
           const issues =
-            s.snapshot?.collections.filter((c) => c.status !== "ready").length ??
+            s.snapshot?.collections?.filter((c) => c.status !== "ready").length ??
             s.workbooks?.filter((b) => b.status !== "ready").length ??
             0;
           return (
             <section className="discovery-source-card" key={s.key}>
               <h4>
                 {s.tool === "tally"
-                  ? `Tally · ${s.snapshot?.company ?? run.config.tally?.company}`
+                  ? `Tally · ${s.snapshot?.company ?? "All configured companies"}`
                   : (s.label ?? "Excel folder")}
               </h4>
               <strong role="status">
@@ -446,17 +431,17 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                     }[status] ?? status)}
               </strong>
               {s.error && <p role="alert">{s.error}</p>}
-              {s.snapshot?.collections.map((c) => (
+              {s.snapshot?.collections?.map((c) => (
                 <details key={c.category}>
                   <summary>
-                    {categories.find((k) => k[0] === c.category)?.[1] ?? c.category} ·{" "}
-                    {c.status === "ready" ? (c.schema ? `${c.fields?.length ?? 0} fields` : `${c.count} records`) : "Needs attention"}
+                    {c.category === "masters" ? "Masters" : "Vouchers"} ·{" "}
+                    {c.status === "ready" ? `${c.count} records` : "Needs attention"}
                   </summary>
                   {c.error ? (
                     <p role="alert">{c.error}</p>
                   ) : (
                     <><p className="quiet-state">
-                      {c.schema ? (c.schema.coverage === "not_exposed" ? "This category is not exposed through Tally ODBC metadata." : "Observed top-level methods. Nested XML structures and custom fields not exposed by ODBC are outside this metadata view.") : "Complete collected records are available for downstream lookup."}
+                      Complete collected records are available for downstream lookup.
                     </p><ul>{c.records?.slice(0,50).map((record,index)=>{
                       const name=record['@_NAME'] ?? record.NAME;
                       const label=typeof name==='string'?name:typeof name==='object'&&name?String((name as Record<string,unknown>)['#text']??''):'';
@@ -490,7 +475,7 @@ export function DiscoveryReview({ tenant, taskId }: { tenant: string; taskId: st
                   .filter((o) => o.category)
                   .map((o) => (
                     <p className="quiet-state" key={o.category}>
-                      {categories.find((k) => k[0] === o.category)?.[1]} ·{" "}
+                      {o.category} ·{" "}
                       {o.status === "reading"
                         ? "Reading…"
                         : o.status === "ready"

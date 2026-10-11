@@ -167,7 +167,7 @@ test("correction leaves complex existing allocations for human review", async ()
 });
 
 test("changed discovered company prevents any financial import", async () => {
-  // discoverTally first probes the company list, then collects references.
+  // readTallyReferences first probes the company list, then collects references.
   const io = fake([
     '<ENVELOPE><BODY><DATA><COLLECTION><COMPANY NAME="Test"/></COLLECTION></DATA></BODY></ENVELOPE>',
     '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Test"><GUID>changed</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>',

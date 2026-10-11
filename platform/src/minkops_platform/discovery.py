@@ -21,19 +21,6 @@ from .errors import ServiceError
 from .resources import REPOSITORY_ROOT
 from .run_controls import observe_task, resolve_request
 
-CATEGORIES = [
-    "company",
-    "groups",
-    "ledgers",
-    "voucher_types",
-    "stock_items",
-    "stock_groups",
-    "units",
-    "godowns",
-    "cost_centres",
-    "cost_categories",
-    "currencies",
-]
 CONFIG_SCHEMA = json.loads(
     (
         REPOSITORY_ROOT
@@ -46,34 +33,10 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def workflow_context(connection, tenant_id, run_id, tools, *, tally_categories=None):
-    """Pin reviewed schema context, bounded to a dependent workflow's tool scope.
-
-    Every client owns its catalog; core skills never read a global client schema.
-    Full client-context packages retain their native records for lookup.
-    """
+def workflow_context(connection, tenant_id, run_id, tools):
+    """Pin a reviewed complete package, bounded to the consuming workflow's tools."""
     catalog = copy.deepcopy(require_ready(connection, tenant_id, run_id, tools))
     catalog["sources"] = [s for s in catalog["sources"] if s["tool"] in tools]
-    for source in catalog["sources"]:
-        if source["tool"] != "tally":
-            continue
-        snapshot = source["snapshot"]
-        if "companies" in snapshot:
-            continue
-        categories = set(tally_categories or CATEGORIES)
-        if not categories <= set(CATEGORIES):
-            raise ValueError("Unsupported Tally schema context.")
-        snapshot["collections"] = [
-            c for c in snapshot["collections"] if c["category"] in categories
-        ]
-        for collection in snapshot["collections"]:
-            collection["records"] = []
-            collection["count"] = 0
-        if "schema_tables" in snapshot and tally_categories is not None:
-            names = {c["schema"]["table"] for c in snapshot["collections"] if "schema" in c}
-            snapshot["schema_tables"] = [
-                t for t in snapshot["schema_tables"] if t["table"] in names
-            ]
     return catalog
 
 
@@ -127,7 +90,7 @@ def detail(connection, row):
 
 def _observe(connection, row, state, summary, progress):
     if state == 'failed':
-        from .attention import record, audit
+        from .attention import audit, record
         item = record(connection,row,f"discovery:{row['id']}","Source discovery","Source unavailable")
         audit(connection,item,None,'failed',summary)
     observe_task(
@@ -150,19 +113,14 @@ def launch(connection, tenant, user, body):
     except ValidationError as error:
         raise ServiceError("invalid", "Choose valid Tally and Excel discovery options.") from error
     config = body["config"]
-    if config["depth"] not in ("structure", "client_context"):
-        raise ServiceError(
-            "invalid",
-            "Choose structure or complete client context discovery.",
-        )
-    if config["depth"] == "client_context" and config["tally"]:
+    if config["tally"]:
         from datetime import date
 
         tally = config["tally"]
         if set(tally) != {"port", "period"}:
             raise ServiceError(
                 "invalid",
-                "Complete discovery reads all loaded companies; specify only port and voucher period.",
+                "Complete discovery reads all configured companies; specify only port and voucher period.",
             )
         start, end = map(date.fromisoformat, (tally["period"]["from"], tally["period"]["to"]))
         if start > end or (end - start).days > 3660:
@@ -265,7 +223,7 @@ def plan(connection, device, job):
             {
                 "key": "tally",
                 "tool": "tally",
-                "label": row["config"]["tally"].get("company", "All loaded companies"),
+                "label": "All configured companies",
             }
         )
     return {"config": row["config"], "sources": sources}
@@ -285,14 +243,8 @@ def progress(connection, device, job, body):
         "status": body["status"],
         "category": body.get("category"),
     }
-    if observation["category"] and (
-        body["source_key"] != "tally"
-        or (
-            row["config"]["depth"] != "client_context"
-            and observation["category"] not in row["config"]["tally"]["categories"]
-        )
-    ):
-        raise ServiceError("invalid", "Invalid discovery category.")
+    if observation["category"] and body["source_key"] != "tally":
+        raise ServiceError("invalid", "Invalid discovery company.")
     observations = [
         o
         for o in row["observations"]
@@ -323,122 +275,12 @@ def progress(connection, device, job, body):
 
 
 def _validate_tally(snapshot, config):
-    if config["depth"] == "client_context":
-        from .accounts.client_context import validate_snapshot
+    from .accounts.client_context import validate_snapshot
 
-        try:
-            validate_snapshot(snapshot, config)
-        except (ValueError, TypeError, KeyError) as error:
-            raise ServiceError("invalid", str(error)) from error
-        return
-    if (
-        not isinstance(snapshot, dict)
-        or set(snapshot)
-        != (
-            {"company", "port", "collections", "schema_tables"}
-            if config["depth"] == "structure"
-            else {"company", "port", "collections"}
-        )
-        or snapshot["company"] != config["company"]
-        or snapshot["port"] != config["port"]
-        or not isinstance(snapshot["collections"], list)
-    ):
-        raise ServiceError("invalid", "Tally returned a different company or scope.")
-    if config["depth"] == "structure":
-        tables = snapshot["schema_tables"]
-        if not isinstance(tables, list) or len(tables) > 500:
-            raise ServiceError("invalid", "Invalid Tally metadata scope.")
-        names = []
-        for table in tables:
-            if (
-                not isinstance(table, dict)
-                or set(table) != {"table", "columns"}
-                or not isinstance(table["table"], str)
-                or not 1 <= len(table["table"]) <= 200
-            ):
-                raise ServiceError("invalid", "Invalid Tally metadata table.")
-            names.append(table["table"])
-            _validate_columns(table["columns"])
-        if len(names) != len(set(names)):
-            raise ServiceError("invalid", "Duplicate Tally metadata tables.")
-        if sum(len(t["columns"]) for t in tables) > 100000:
-            raise ServiceError("invalid", "Tally metadata exceeds the supported scope.")
-    seen = []
-    for c in snapshot["collections"]:
-        if not isinstance(c, dict) or c.get("status") not in ("ready", "unavailable"):
-            raise ServiceError("invalid", "Invalid Tally collection.")
-        seen.append(c.get("category"))
-        if c["status"] == "ready":
-            if (
-                set(c)
-                != (
-                    {"category", "status", "count", "fields", "records", "schema"}
-                    if config["depth"] == "structure"
-                    else {"category", "status", "count", "fields", "records"}
-                )
-                or type(c["count"]) is not int
-                or not 0 <= c["count"] <= 10000
-                or not isinstance(c["fields"], list)
-                or any(not isinstance(f, str) for f in c["fields"])
-                or not isinstance(c["records"], list)
-                or any(not isinstance(r, dict) for r in c["records"])
-                or len(c["records"]) != (0 if config["depth"] == "structure" else c["count"])
-            ):
-                raise ServiceError("invalid", "Invalid Tally reference records.")
-            if config["depth"] == "structure":
-                schema = c["schema"]
-                if (
-                    c["count"] != 0
-                    or not isinstance(schema, dict)
-                    or set(schema) != {"source", "coverage", "table", "columns"}
-                    or schema["source"] != "odbc_metadata"
-                    or schema["coverage"] not in ("exposed_top_level_methods", "not_exposed")
-                    or not isinstance(schema["table"], str)
-                ):
-                    raise ServiceError("invalid", "Structure discovery cannot include records.")
-                _validate_columns(schema["columns"])
-                if c["fields"] != [col["name"] for col in schema["columns"]] or schema[
-                    "columns"
-                ] != next(
-                    (t["columns"] for t in tables if t["table"].lower() == schema["table"].lower()),
-                    [],
-                ):
-                    raise ServiceError(
-                        "invalid", "Tally metadata fields do not match the observed table."
-                    )
-        elif (
-            set(c) != {"category", "status", "error"}
-            or not isinstance(c["error"], str)
-            or not 1 <= len(c["error"]) <= 300
-        ):
-            raise ServiceError("invalid", "Invalid Tally collection error.")
-    if len(seen) != len(set(seen)) or set(seen) != set(config["categories"]):
-        raise ServiceError("invalid", "Tally discovery omitted selected categories.")
-
-
-def _validate_columns(columns):
-    if (
-        not isinstance(columns, list)
-        or len(columns) > 2000
-        or any(
-            not isinstance(c, dict)
-            or set(c) != {"name", "type", "nullable", "ordinal"}
-            or not isinstance(c["name"], str)
-            or not 1 <= len(c["name"]) <= 300
-            or not isinstance(c["type"], str)
-            or len(c["type"]) > 100
-            or type(c["nullable"]) is not bool
-            or type(c["ordinal"]) is not int
-            or c["ordinal"] < 0
-            for c in columns
-        )
-    ):
-        raise ServiceError("invalid", "Invalid Tally column metadata.")
-    # Tally exposes repeated method names at distinct ODBC positions (e.g.
-    # $Category in CostCentreBreakUp). Preserve that schema; the position is
-    # the column identity. Repeated positions still indicate an invalid receipt.
-    if len({c["ordinal"] for c in columns}) != len(columns):
-        raise ServiceError("invalid", "Duplicate Tally metadata columns.")
+    try:
+        validate_snapshot(snapshot, config)
+    except (ValueError, TypeError, KeyError) as error:
+        raise ServiceError("invalid", str(error)) from error
 
 
 def _structure(files, mappings=None):
@@ -533,9 +375,7 @@ def collect(connection, device, job, result):
             _validate_tally(
                 source["snapshot"], {**row["config"]["tally"], "depth": row["config"]["depth"]}
             )
-            partial |= source["snapshot"].get("partial", False) or any(
-                c["status"] != "ready" for c in source["snapshot"].get("collections", [])
-            )
+            partial |= source["snapshot"]["partial"]
             catalog_sources.append(source)
         else:
             if (
@@ -588,10 +428,7 @@ def collect(connection, device, job, result):
                     "structure",
                 }:
                     raise ServiceError("invalid", "Invalid workbook structure.")
-                if book["status"] == "ready" and row["config"]["depth"] in (
-                    "structure",
-                    "client_context",
-                ):
+                if book["status"] == "ready":
                     try:
                         content, structure = schema_projection(
                             originals[book["path"]], book["structure"]
@@ -616,7 +453,7 @@ def collect(connection, device, job, result):
                     True,
                     bound["id"],
                     refresh_extensions=[".xlsx"],
-                    schema_only=row["config"]["depth"] in ("structure", "client_context"),
+                    schema_only=True,
                 )
                 current = {
                     f["path"]: f
@@ -683,7 +520,7 @@ def collect(connection, device, job, result):
     )
     unchanged = previous and not partial and previous["fingerprint"] == signature
     catalog = {
-        "format_version": "2" if config["depth"] == "client_context" else "1",
+        "format_version": "2",
         "context_notes": copy.deepcopy(previous["catalog"].get("context_notes", []))
         if unchanged
         else [],
@@ -699,7 +536,7 @@ def collect(connection, device, job, result):
         },
         "excel_mappings": remapped if unchanged else None,
     }
-    if config["depth"] == "client_context" and not partial:
+    if not partial:
         from .accounts.client_context import context_assets
 
         try:
@@ -728,7 +565,7 @@ def collect(connection, device, job, result):
             (row["tenant_id"], row["actor_id"], "0.4.0", Jsonb(remapped)),
         ).fetchone()
         catalog["excel_catalog_id"] = str(linked["id"])
-    elif (excel_files or config["depth"] == "client_context") and not partial:
+    elif not partial:
         connection.execute(
             "UPDATE discovery_runs SET catalog=%s WHERE id=%s", (Jsonb(catalog), row["id"])
         )
@@ -741,7 +578,7 @@ def collect(connection, device, job, result):
                 "request_key": str(uuid4()),
                 "file_ids": [str(f["id"]) for f in excel_files],
                 "catalog_id": None,
-                "config": {"discovery_depth": "structure", "discovery_run_id": str(row["id"])},
+                "config": {"discovery_run_id": str(row["id"])},
             },
             task_id=row["task_id"],
         )
@@ -810,7 +647,7 @@ def confirm(connection, tenant, user, run_id, body):
             user,
             row["mapping_run_id"],
             {"result": mappings, "acknowledge_findings": False},
-            require_destination=row["config"]["depth"] == "business_mappings",
+            require_destination=False,
         )
         catalog["excel_catalog_id"] = str(approved["catalog_id"])
         catalog["excel_mappings"] = mappings
@@ -868,12 +705,12 @@ def require_ready(connection, tenant_id, run_id, required_tools):
         "SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config=%s ORDER BY created_at DESC LIMIT 1",
         (tenant_id, row["actor_id"], row["device_id"], Jsonb(row["config"])),
     ).fetchone()
-    if latest["id"] != row["id"]:
-        # Periodic discovery must not invalidate an in-flight approval when its
-        # confirmed structure and references are exactly unchanged. Keep the
-        # pinned catalog; pending, partial or changed observations still block.
-        if not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]:
-            raise ServiceError(
-                "conflict", "Source discovery has a newer run. Review the latest catalog first."
-            )
+    # An unchanged confirmed refresh preserves pinned approvals. Pending,
+    # partial or changed observations still block use of the older package.
+    if latest["id"] != row["id"] and (
+        not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]
+    ):
+        raise ServiceError(
+            "conflict", "Source discovery has a newer run. Review the latest catalog first."
+        )
     return current["catalog"]
