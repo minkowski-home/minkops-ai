@@ -1,0 +1,23 @@
+Minkops 0.6.1 — Windows release candidate — 11 October 2026
+
+Windows 10/11 x64. Unsigned installer; Windows may show a publisher warning.
+Default service: https://app.minkops.com
+
+Source Discovery collects complete masters for all loaded Tally companies and
+detailed vouchers for the selected inclusive period through local HTTP/XML.
+Confirmed, versioned context is archived locally and supplies subsequent work.
+Excel discovery projects workbook structure and headers without business rows.
+
+Bill Entry identifies the buyer's company from source evidence, preserves explicit
+company selection, and verifies approved writes independently. Ambiguous decisions
+and unsupported structures remain in shared attention. Best-guess writes retain
+their review obligation; manual accounting corrections stay in Tally or Excel.
+
+Recovery waits for all observed numeric company identities after one controlled
+restart. Uncertain imports are reconciled without automatic replay. Native
+licence/login screens require an operator handoff. No automatic update is installed.
+
+Sign in, connect this PC, and open the intended companies in Tally with its local
+HTTP/XML service on port 9000. Workspace workflows must be configured. Start with
+an isolated test company and keep recovery backups until saves are verified.
+Windows 10 compatibility is retained; its device test is deferred for this release.
