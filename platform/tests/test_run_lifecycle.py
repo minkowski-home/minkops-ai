@@ -5,6 +5,15 @@ from unittest.mock import MagicMock, patch
 
 
 class RunLifecycleTests(TestCase):
+    def setUp(self):
+        # Persistence has separate PostgreSQL integration coverage.
+        patcher = patch("minkops_platform.runtime.diagnostics.record")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = patch("minkops_platform.runtime.lifecycle.record")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_run(self, **changes):
         return {
             "id": "run",

@@ -1030,3 +1030,43 @@ of an installed artifact.
 **Result:** The release bundle includes the range-aware voucher register, complete
 company readiness and collision-preserving archive checks from current sources.
 The final release is 0.6.4; earlier candidates do not establish those guarantees.
+
+## Verify concurrency at the production entry point (11 October 2026)
+
+**Situation:** A two-bill production run waited behind a retry, then executed its
+AI scans sequentially. Local continuous-worker coverage had verified four lanes,
+but the deployed bounded drain still invoked the serial primitive.
+
+**Task:** Restore bounded independent AI execution without allowing duplicate
+paid sessions, premature idle acknowledgement or unordered destination writes.
+
+**Action:** Share the four-lane limit, replenish completed lanes independently,
+and retain the runner lock until every submitted future finishes. A coordinator
+alone owns wake-up acknowledgement and lease refresh. Add failing tests against
+the actual drain for four simultaneous claims, slow siblings, generation changes,
+overlapping runners and lane exceptions. Preserve per-run locks and saved-session
+reconciliation; native financial writes retain their separate ordering controls.
+
+**Result:** The entry-point regressions pass. Queue execution no longer depends
+on whether hosting uses continuous or bounded workers. Support can verify actual
+overlapping run timestamps rather than infer concurrency from source intentions.
+
+## Preserve support evidence across business rollback (11 October 2026)
+
+**Situation:** Runtime failures and latency investigations required streamed
+cloud logs; saved outputs did not explain preparation, provider, validation or
+cleanup time. A late validation failure could conceal earlier work.
+
+**Task:** Make engineer-readable workflow evidence durable without exposing raw
+provider payloads or adding detailed logs to the product experience.
+
+**Action:** Add tenant/run-constrained internal diagnostic records with stage
+timings, queue wait, file sizes, hosted event kinds and schema error paths. Use
+independent short transactions with bounded connection/statement/lock timeouts.
+Exclude raw provider exceptions, reasoning and credentials. Diagnostic failure
+cannot commit business work early or change an already applied operation's result.
+Test persistence after rollback, tenant constraints and secret exclusion.
+
+**Result:** Engineers can reconstruct child-run timing and failure boundaries
+through DB queries. Customer task events stay concise, while existing native job
+errors/receipts remain available alongside the new hosted execution evidence.
