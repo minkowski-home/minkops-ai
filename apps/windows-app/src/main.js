@@ -29,10 +29,11 @@ import {
   tallyProbe,
   inspectExcel,
   excelSchemaBytes,
-  discoverTally,
+  readTallyReferences,
   discoverClientContext,
   saveDiscoveryPackage,
   recoveringTallyRequest,
+  ensureTallyDiscovery,
   inspectTallyAttention,
   tallyCompanyNumber,
   captureTallyProcess,
@@ -162,6 +163,7 @@ function startWorker() {
     execute: async (job) => {
       if (state.device !== identity) throw new Error("PC connection changed.");
       const tallyRequest = recoveringTallyRequest({
+        preserveCompanyScope: job.operation === "sources.discover",
         capture: async () => {
           const observed = await captureTallyProcess().catch(() => null);
           if (observed) {
@@ -185,6 +187,7 @@ function startWorker() {
           const record = {
             ...diagnostic,
             observed: undefined,
+            company_scope: diagnostic.observed?.company_scope,
             job_id: job.id,
             collected_at: new Date().toISOString(),
             windows_events: await tallyCrashEvents(),
@@ -212,13 +215,15 @@ function startWorker() {
           inventory,
           inspectExcel,
           excelSchemaBytes,
-          discoverTally: (config, options) =>
-            discoverTally(config, { ...options, request: tallyRequest }),
-          discoverClientContext: (config, options) =>
-            discoverClientContext(config, {
+          discoverClientContext: async (config, options) => {
+            const startup = await ensureTallyDiscovery(config);
+            state.tally_startup = startup;
+            await persist();
+            return discoverClientContext(config, {
               ...options,
               request: tallyRequest,
-            }),
+            });
+          },
           onProgress: async (source_key, status, category = null) => {
             try {
               await request(`/api/desktop/worker/jobs/${job.id}/progress`, {
@@ -277,7 +282,7 @@ function startWorker() {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        return discoverTally(plan, { request: tallyRequest });
+        return readTallyReferences(plan, { request: tallyRequest });
       }
       if (job.operation === "tally.save") {
         const plan = await request(

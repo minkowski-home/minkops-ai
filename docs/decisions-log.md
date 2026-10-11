@@ -1090,3 +1090,30 @@ bills without approving unsupported financial entries.
 **Result:** Schema failures are attributable through DB evidence instead of streamed
 cloud logs. Prompt contracts no longer request fields forbidden by hosted validation;
 logical buyer matching retains exact native destination identifiers.
+
+## Fence discovery against company loss and retire conflicting modes (11 October 2026)
+
+**Situation:** The latest Demo discovery completed with two companies although
+Tally held a third, Pradeepraj Infra. Native diagnostics recorded a disappeared
+Tally process; restart history could restore only remembered company loads. The
+old settings also offered mutually exclusive depths that no longer matched the
+complete client-context execution path.
+
+**Task:** Make complete context the sole discovery contract and include configured
+companies without relying on a person opening each company beforehand.
+
+**Action:** Remove retired preferences, schemas, category selection, ODBC discovery
+and reference-row extraction. Migrate installed workflow settings idempotently,
+preserving historical evidence. Use Tally's native Company on Disk inventory and
+live GUID/number identities to establish scope before collecting. Start a verified
+local installation with numbered native company directories when stopped; load
+missing companies through a graceful scoped restart. Never force-close accounting
+work or replay an uncertain import. Recheck scope after restart and collection;
+retain missing companies and scope changes as incomplete evidence. Keep bounded
+destination-reference checks separate for already-pinned bill jobs.
+
+**Result:** Regression tests cover company loss, additions, identity replacement,
+unopened companies, stopped services, blocked closing/login and migration replay.
+A live read of the Oct 1–2 period includes all three companies, with Pradeepraj
+Infra's 170 masters, and reports a complete package. Production deployment and
+companion rollout remain separate from this branch push.

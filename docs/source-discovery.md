@@ -1,17 +1,30 @@
 # Source Discovery: reusable client context
 
-Source Discovery 0.7.2 and Windows companion 0.6.4 collect a versioned package
+Source Discovery 0.8.0 and Windows companion 0.6.6 collect a versioned package
 before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.
 
 ## Collection and interpretation
 
-Tally discovery lists every company currently loaded through the local HTTP
-service; it is independent of Bill Entry's company choice. Load all companies
-that should be available before discovery. The fixed connector accepts a
-loopback port and an inclusive voucher period, never caller XML, TDL, scripts,
-hostnames or SQL. ODBC is no longer required for this core path.
+Source Discovery always uses `client_context`; depth and category selectors are
+removed. The upgrade migration removes retired depth settings from installed
+workflows while preserving immutable historical run catalogs.
+
+Tally discovery uses the native **Company on Disk** collection to include every
+company in Tally's configured data directory, together with any already loaded
+companies. The companion locates the locally installed TallyPrime and starts it
+with all numbered company directories when stopped. To load unopened companies
+in a running instance it requests a graceful close and restarts with the complete
+scope. It never force-closes Tally; unsaved work, company login, unavailable data
+paths and uncertain process identity require attention.
+
+Company names, GUIDs and company numbers fence crash recovery and collection.
+The catalog retains the initial scope, records unavailable companies explicitly,
+and becomes partial if companies disappear, appear or change identity during
+collection. A partial package cannot be confirmed or reused as complete context.
+The fixed connector accepts a loopback port and inclusive voucher period, never
+caller XML, TDL, scripts, hostnames or SQL. ODBC metadata discovery is removed.
 
 For each company it exports full identity, native **List of Accounts** with **All Masters** and no date
 filter, and detailed **Voucher Register** vouchers in 31-day date chunks. Native nested

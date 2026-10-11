@@ -6,14 +6,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { discoverTally, inspectExcel, inventory, excelSchemaBytes, tallyProbe, commitTallyBill, readTallyBills } from '../../../connectors/desktop/src/index.js';
+import { readTallyReferences, discoverClientContext, ensureTallyDiscovery, inspectExcel, inventory, excelSchemaBytes, tallyProbe, commitTallyBill, readTallyBills } from '../../../connectors/desktop/src/index.js';
 import { collectSources } from '../../../platform/desktop-runtime/src/discovery.js';
 import { CompanionWorker } from '../../../platform/desktop-runtime/src/worker.js';
 
 const directory = process.env.MINKOPS_RELEASE_STATE;
 const company = process.env.MINKOPS_TEST_COMPANY;
-const phase = process.env.MINKOPS_RELEASE_PHASE || 'schema';
-assert.ok(['schema', 'references', 'save'].includes(phase));
+const phase = process.env.MINKOPS_RELEASE_PHASE || 'discovery';
+assert.ok(['discovery', 'references', 'save'].includes(phase));
 assert.ok(directory && company, 'Supply a private state directory and explicit test company');
 const credentials = JSON.parse(await readFile(join(directory, 'demo-owner.json'), 'utf8'));
 const reviewedBills = JSON.parse(await readFile(new URL('../../../scripts/release-bill-fixtures.json', import.meta.url), 'utf8'));
@@ -39,14 +39,14 @@ csrf = user.csrf_token;
 assert.ok(user.memberships.some(m => m.slug === 'mock-tenant' && m.role === 'admin'));
 assert.ok((await tallyProbe()).companies.includes(company), 'Explicit test company must be open');
 const base = '/api/tenants/mock-tenant';
-const device = phase === 'schema'
+const device = phase === 'discovery'
   ? await api(base + '/desktop/devices', { name: 'Production release verification PC', installation_id: randomUUID() })
   : JSON.parse(await readFile(join(directory, 'release-pc.json'), 'utf8'));
 await writeFile(join(directory, 'release-pc.json'), JSON.stringify(device), { mode: 0o600 });
-const run = phase === 'schema' ? await api(base + '/discovery/runs', {
+const run = phase === 'discovery' ? await api(base + '/discovery/runs', {
   device_id: device.id, request_key: randomUUID(),
-  config: { depth: 'structure', destination_mode: 'tally', excel_source_ids: [],
-    tally: { company, port: 9000, categories: ['company','groups','ledgers','voucher_types','stock_items','stock_groups','units','godowns','cost_centres','cost_categories','currencies'] } },
+  config: { depth: 'client_context', excel_source_ids: [],
+    tally: { port: 9000, period: {from: '2026-01-01', to: '2026-01-02'} } },
 }) : null;
 const worker = new CompanionWorker({
   request: (path, body) => api(path, body, { worker: true }),
@@ -58,11 +58,11 @@ const worker = new CompanionWorker({
   },
   execute: async job => {
     executedJob = job;
-    assert.equal(job.operation, { schema: 'sources.discover', references: 'tally.references', save: 'tally.save' }[phase]);
+    assert.equal(job.operation, { discovery: 'sources.discover', references: 'tally.references', save: 'tally.save' }[phase]);
     const plan = await api(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`, undefined, { worker: true });
     if (phase === 'references') {
       assert.equal(plan.company, company);
-      return discoverTally(plan);
+      return readTallyReferences(plan);
     }
     if (phase === 'save') {
       assert.equal(company, 'Test Company');
@@ -99,7 +99,8 @@ const worker = new CompanionWorker({
       console.log(JSON.stringify({ productionTallyReadback: 'passed', outcome: result.outcome, matchingVouchers: 1, replayImports: 0 }));
       return result;
     }
-    return collectSources(plan, { inventory, inspectExcel, excelSchemaBytes, discoverTally,
+    return collectSources(plan, { inventory, inspectExcel, excelSchemaBytes,
+      discoverClientContext: async config => { await ensureTallyDiscovery(config); return discoverClientContext(config); },
       folderFor: () => { throw new Error('This schema check grants no folders'); },
       onProgress: (source_key,status,category=null) => api(`/api/desktop/worker/jobs/${job.id}/progress`, { claim_token: job.claim_token, source_key,status,category }, { worker: true }),
     });
@@ -118,10 +119,11 @@ if (detail.state === 'review')
 assert.equal(detail.state, 'completed');
 assert.equal(detail.ready, true);
 const snapshot = detail.catalog.sources.find(s => s.tool === 'tally').snapshot;
-assert.ok(snapshot.schema_tables.length > 0);
-assert.ok(snapshot.collections.every(c => c.records.length === 0));
-await writeFile(join(directory, 'production-schema.json'), JSON.stringify(detail.catalog, null, 2), { mode: 0o600 });
-console.log(JSON.stringify({ productionSourceDiscovery: 'passed', run: run.id, tables: snapshot.schema_tables.length, businessRecords: 0, reviewed: true }));
+assert.ok(snapshot.company_scope.length > 0);
+assert.equal(snapshot.partial, false);
+assert.ok(snapshot.companies.every(c => c.status === 'ready'));
+await writeFile(join(directory, 'production-discovery.json'), JSON.stringify(detail.catalog, null, 2), { mode: 0o600 });
+console.log(JSON.stringify({ productionSourceDiscovery: 'passed', run: run.id, companies: snapshot.companies.length, reviewed: true }));
 } else {
   console.log(JSON.stringify({ operation: executedJob.operation, productionReceipt: 'accepted and replayed' }));
 }

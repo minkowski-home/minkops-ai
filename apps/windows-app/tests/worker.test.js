@@ -7,7 +7,7 @@ test("discovery continues after a missing folder and reports a separate Tally re
   const events = [];
   const result = await collectSources(
     {
-      config: { depth: "structure", tally: {} },
+      config: { depth: "client_context", tally: {} },
       sources: [
         { key: "missing", tool: "excel" },
         { key: "tally", tool: "tally" },
@@ -19,7 +19,7 @@ test("discovery continues after a missing folder and reports a separate Tally re
       },
       inventory: async () => [],
       inspectExcel: async () => {},
-      discoverTally: async () => ({ collections: [] }),
+      discoverClientContext: async () => ({ companies: [] }),
       onProgress: async (...args) => events.push(args),
     },
   );
