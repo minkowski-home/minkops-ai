@@ -1313,3 +1313,26 @@ legacy single-tax runs and existing uncertainty/reconciliation fences.
 unsupported client versions, competing splits and collapsed receipts. Live proof
 records the native outcome separately from extraction quality and operator review;
 Tally date rejection remains an external-system handoff.
+## Bound hosted stream persistence without weakening recovery (12 October 2026)
+
+**Situation:** A production Source Discovery collected native sources quickly,
+then waited about two minutes for its Cloud Run worker and another 154 seconds
+for hosted interpretation. All 585 streamed events synchronously updated the
+same recovery IDs and opened a separate diagnostic connection, including 492
+text/output chunks. Durable bookkeeping sat directly on the stream-consumption path.
+
+**Task:** Remove per-chunk persistence overhead while retaining paid-session
+recovery, worker freshness and useful independent failure diagnostics.
+
+**Action:** Commit newly observed session/turn IDs immediately, regardless of
+which event first supplies them. Persist unchanged IDs at most once per ten-second
+activity heartbeat. Aggregate chunk/item events into counts, flushing on that
+heartbeat, lifecycle milestones and executor exit, including failure. Retain
+individual lifecycle diagnostics and the existing raw-result-before-validation
+commit. Keep this in the shared runtime, without another worker or audit schema.
+
+**Result:** Regression tests cover hundreds of chunks without repeated session
+writes, heartbeat timing, missing IDs on resumed streams, IDs first supplied on
+a chunk, and disconnects retaining final activity counts. Existing runtime and
+hosted-adapter tests pass. Production rollout and measured latency improvement
+remain separate; this change does not remove cloud startup or model execution time.

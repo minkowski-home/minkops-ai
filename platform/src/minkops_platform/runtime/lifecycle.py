@@ -5,6 +5,8 @@ validation and approvals. This module never plans work or orchestrates tools.
 """
 
 import logging
+import time
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -17,6 +19,7 @@ from .openai_hosted import close_session as hosted_close_session
 from .openai_hosted import reconcile_turn
 
 log = logging.getLogger(__name__)
+HOSTED_ACTIVITY_INTERVAL = 10
 
 
 class RunStore(Protocol):
@@ -34,11 +37,41 @@ def execute_proposal(connection, store: RunStore, run, files, context, executor)
     if not run["config"].get("execution_snapshot") and not run["session_id"]:
         raise ValueError("Legacy run has no pinned execution bundle. Launch a new run explicitly.")
 
+    activity = Counter()
+    last_saved = time.monotonic()
+
+    def flush_activity():
+        if activity:
+            record(connection, run, "hosted.activity", "Hosted stream activity", details={
+                "event_counts": dict(activity),
+                "session_id": run["session_id"], "turn_id": run["turn_id"],
+            })
+            activity.clear()
+
     def on_event(kind, session_id, turn_id):
-        store.save_session(connection, run, session_id, turn_id)
-        connection.commit()
-        run["session_id"] = session_id or run["session_id"]
-        run["turn_id"] = turn_id or run["turn_id"]
+        nonlocal last_saved
+        now = time.monotonic()
+        session_id = session_id or run["session_id"]
+        turn_id = turn_id or run["turn_id"]
+        changed = (session_id, turn_id) != (run["session_id"], run["turn_id"])
+        heartbeat = now - last_saved >= HOSTED_ACTIVITY_INTERVAL
+        # Recovery IDs must be durable before consuming another event. Unchanged
+        # IDs need only a bounded heartbeat, not a commit for every text chunk.
+        if changed or heartbeat:
+            store.save_session(connection, run, session_id, turn_id)
+            connection.commit()
+            run["session_id"], run["turn_id"] = session_id, turn_id
+            last_saved = now
+        if kind.endswith(".delta") or kind.startswith((
+            "agent.session.turn.item.", "agent.session.turn.content_part.",
+            "agent.session.turn.output_text.",
+        )):
+            activity[kind] += 1
+            if heartbeat:
+                flush_activity()
+            return
+        # Lifecycle milestones and failures remain individually auditable.
+        flush_activity()
         record(
             connection,
             run,
@@ -68,14 +101,18 @@ def execute_proposal(connection, store: RunStore, run, files, context, executor)
             ],
         },
     ):
-        result = executor(
-            run["workflow_key"],
-            files,
-            context,
-            on_event,
-            session_id=run["session_id"],
-            turn_id=run["turn_id"],
-        )
+        try:
+            result = executor(
+                run["workflow_key"],
+                files,
+                context,
+                on_event,
+                session_id=run["session_id"],
+                turn_id=run["turn_id"],
+            )
+        finally:
+            # Preserve the final counts even on disconnect or provider failure.
+            flush_activity()
     store.save_result(connection, run, result)
     connection.commit()
     if run["config"].get("agent_output_schema"):
