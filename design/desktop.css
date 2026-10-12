@@ -124,3 +124,6 @@
 .discovery-source-card { border: var(--rule-default); border-radius: var(--radius-card, 12px); padding: 20px; background: var(--surface-raised); }
 .discovery-source-card h4 { margin: 0 0 12px; }
 .discovery-source-card details { margin-top: 12px; }
+
+.device-connections { margin: 16px 0; padding: 16px 0; border-top: var(--rule-default); border-bottom: var(--rule-default); }
+.device-connections h4, .device-connections h5 { margin: 0 0 8px; }

@@ -26,3 +26,19 @@
 .accounts-panel dl div { padding: 8px 0; }
 .accounts-panel dt { font-weight: 600; font-size: 13px; }
 .accounts-panel dd { margin: 6px 0; font-size: 13px; }
+
+/* Bill selection follows the discovery surfaces, with explicit batch scope. */
+.bill-launch, .bill-file-selection .discovery-source-card { border-radius: var(--radius-1); }
+.bill-selection-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0; }
+.bill-selection-toolbar .config-field { flex: 1; min-width: 180px; margin: 0; }
+.bill-source summary { overflow-wrap: anywhere; }
+.bill-source summary small { display: block; color: var(--text-secondary); font-weight: 400; margin-top: 6px; }
+.bill-file-list { max-height: 320px; overflow-y: auto; border: var(--rule-default); }
+.bill-file-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: var(--rule-default); cursor: pointer; }
+.bill-file-row:last-child { border-bottom: 0; }
+.bill-file-row:has(input:checked) { background: var(--surface-selected); }
+.bill-file-row:focus-within { outline: 1px solid var(--border-accent); outline-offset: -1px; }
+.bill-file-row input { flex-shrink: 0; }
+.bill-file-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bill-file-row small { color: var(--text-muted); font: var(--type-mono); }
+.bill-file-selection .discovery-source-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }

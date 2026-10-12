@@ -8,7 +8,7 @@ import type { Source } from "../accounts/types";
 import { useAuth } from "../contexts/AuthContext";
 import { presentationFor } from "./presentation";
 
-type LaunchProps = { tenant: string; routeSlug: string; workflow: Workflow };
+type LaunchProps = { tenant: string; routeSlug: string; workflow: Workflow; onConfigChange?: (values: Workflow["config_values"]) => void };
 
 /** Schema-driven fallback for reviewed proposals using existing file grants. */
 function ProposalLaunch({ tenant, routeSlug, workflow }: LaunchProps) {
