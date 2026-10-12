@@ -21,6 +21,20 @@ from .errors import ServiceError
 from .resources import REPOSITORY_ROOT
 from .run_controls import observe_task, resolve_request
 
+
+def latest_run(connection, tenant, user, device_id=None):
+    """Scope discovery to an explicit, owned PC without falling back to another PC."""
+    if device_id is not None:
+        from .desktop import owned_device
+
+        owned_device(connection, tenant["id"], user["id"], device_id)
+    return connection.execute(
+        """SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
+        AND (%s::uuid IS NULL OR device_id=%s::uuid) ORDER BY created_at DESC LIMIT 1""",
+        (tenant["id"], user["id"], device_id, device_id),
+    ).fetchone()
+
+
 CATEGORIES = [
     "company",
     "groups",
@@ -127,7 +141,7 @@ def detail(connection, row):
 
 def _observe(connection, row, state, summary, progress):
     if state == 'failed':
-        from .attention import record, audit
+        from .attention import audit, record
         item = record(connection,row,f"discovery:{row['id']}","Source discovery","Source unavailable")
         audit(connection,item,None,'failed',summary)
     observe_task(
@@ -868,12 +882,13 @@ def require_ready(connection, tenant_id, run_id, required_tools):
         "SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config=%s ORDER BY created_at DESC LIMIT 1",
         (tenant_id, row["actor_id"], row["device_id"], Jsonb(row["config"])),
     ).fetchone()
-    if latest["id"] != row["id"]:
-        # Periodic discovery must not invalidate an in-flight approval when its
-        # confirmed structure and references are exactly unchanged. Keep the
-        # pinned catalog; pending, partial or changed observations still block.
-        if not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]:
-            raise ServiceError(
-                "conflict", "Source discovery has a newer run. Review the latest catalog first."
-            )
+    # Periodic discovery must not invalidate an in-flight approval when its
+    # confirmed structure and references are exactly unchanged. Keep the
+    # pinned catalog; pending, partial or changed observations still block.
+    if latest["id"] != row["id"] and (
+        not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]
+    ):
+        raise ServiceError(
+            "conflict", "Source discovery has a newer run. Review the latest catalog first."
+        )
     return current["catalog"]

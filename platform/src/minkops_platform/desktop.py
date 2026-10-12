@@ -305,6 +305,9 @@ def _save_spec(connection, device, payload, *, pending=True):
     ).fetchone()
     if not run or run["actor_id"] != device["owner_id"]:
         raise ServiceError("not_found", "Approved run not found for this account.")
+    selected = run["config"].get("destination_device_id")
+    if selected and selected != str(device["id"]):
+        raise ServiceError("conflict", "This approved save belongs to a different destination PC.")
     spec = connection.execute(
         "SELECT * FROM account_writes WHERE tenant_id=%s AND run_id=%s AND id=%s FOR UPDATE",
         (device["tenant_id"], payload["run_id"], payload["write_id"]),

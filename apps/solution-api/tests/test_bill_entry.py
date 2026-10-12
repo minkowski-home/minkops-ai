@@ -17,6 +17,81 @@ class BillEntryTests(unittest.TestCase):
     launch = accounts_tests.AccountsTests.launch
     execute_discovery = accounts_tests.AccountsTests.execute_discovery
 
+    def test_destination_pc_scopes_discovery_and_pins_bill_jobs(self):
+        first = self.tally_discovery("first-company")
+        first_pc = self.device["id"]
+        second = self.tally_discovery("second-company")
+        second_pc = self.device["id"]
+        endpoint = "/api/tenants/mock-tenant/discovery/latest"
+        self.assertEqual(self.client.get(endpoint).json()["id"], second)
+        response = self.client.get(endpoint, params={"device_id": first_pc})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], first)
+        run, _ = self.launch(
+            "bill-entry", file_ids=[self.upload_bill()], destination_device_id=first_pc,
+            config={"output_mode": "tally_in_place", "discovery_id": first},
+        )
+        self.assertEqual(run["config"]["destination_device_id"], first_pc)
+        self.assertEqual(run["config"]["tally_target"]["device_id"], first_pc)
+        self.process(run, self.tally_result(run, run["file_ids"][0]))
+        proposal = self.client.get(self.base + f"/runs/{run['id']}").json()["result"]
+        self.approve(run, proposal)
+        with psycopg.connect(URL) as connection:
+            queued_pc = connection.execute(
+                "SELECT device_id FROM desktop_jobs WHERE task_id=%s AND operation='tally.save'",
+                (run["task_id"],),
+            ).fetchone()[0]
+        self.assertEqual(str(queued_pc), first_pc)
+        rejected = self.client.post(self.base + "/runs", headers=self.csrf, json={
+            "key": "bill-entry", "request_key": str(uuid.uuid4()),
+            "file_ids": [self.upload_bill()], "destination_device_id": second_pc,
+            "config": {"output_mode": "tally_in_place", "discovery_id": first},
+        })
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        self.assertIn("selected destination PC", rejected.text)
+
+    def test_destination_pc_never_falls_back_or_accepts_revoked_devices(self):
+        self.tally_discovery("ready-company")
+        selected_pc = self.device["id"]
+        empty_pc = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
+            json={"name": "No discovery yet", "installation_id": str(uuid.uuid4())}).json()["id"]
+        endpoint = "/api/tenants/mock-tenant/discovery/latest"
+        self.assertIsNone(self.client.get(endpoint, params={"device_id": empty_pc}).json())
+        unknown = self.client.get(endpoint, params={"device_id": str(uuid.uuid4())})
+        self.assertEqual(unknown.status_code, 404, unknown.text)
+        self.client.delete(f"/api/tenants/mock-tenant/desktop/devices/{selected_pc}", headers=self.csrf)
+        response = self.client.get(endpoint, params={"device_id": selected_pc})
+        self.assertEqual(response.status_code, 409, response.text)
+
+    def test_excel_destination_cannot_cross_pc_folder_bindings(self):
+        catalog = self.execute_discovery()
+        pc = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
+            json={"name": "Excel PC", "installation_id": str(uuid.uuid4())}).json()["id"]
+        other = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
+            json={"name": "Other PC", "installation_id": str(uuid.uuid4())}).json()["id"]
+        bound = self.client.post(f"/api/tenants/mock-tenant/desktop/devices/{pc}/sources/{self.source['id']}", headers=self.csrf)
+        self.assertEqual(bound.status_code, 200, bound.text)
+        run, _ = self.launch("bill-entry", file_ids=[self.upload_bill()], catalog_id=catalog,
+            destination_device_id=pc, config={"output_mode": "excel_in_place"})
+        self.assertEqual(run["config"]["destination_device_id"], pc)
+        rejected = self.client.post(self.base + "/runs", headers=self.csrf, json={
+            "key": "bill-entry", "request_key": str(uuid.uuid4()), "file_ids": [self.upload_bill()],
+            "catalog_id": catalog, "destination_device_id": other, "config": {"output_mode": "excel_in_place"},
+        })
+        self.assertEqual(rejected.status_code, 404, rejected.text)
+        self.assertIn("original folder", rejected.text)
+        bill = run["file_ids"][0]
+        result = self.excel_result(bill, 24, invoice="A-2")
+        self.process(run, result)
+        moved = self.client.post(f"/api/tenants/mock-tenant/desktop/devices/{other}/sources/{self.source['id']}", headers=self.csrf)
+        self.assertEqual(moved.status_code, 200, moved.text)
+        rejected = self.client.post(self.base + f"/runs/{run['id']}/approve", headers=self.csrf,
+            json={"result": result, "acknowledge_findings": True})
+        self.assertEqual(rejected.status_code, 404, rejected.text)
+        with psycopg.connect(URL) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM account_writes WHERE run_id=%s", (run["id"],)).fetchone()[0], 0)
+
+
     def test_both_mode_cannot_silently_fall_through_to_excel(self):
         response = self.client.post(
             self.base + "/runs",

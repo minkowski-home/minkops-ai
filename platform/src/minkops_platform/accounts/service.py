@@ -239,11 +239,19 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
             raise ValueError(
                 "Destination is disconnected or changed. Refresh discovery before writing."
             )
+        destination_id = run["config"].get("destination_device_id")
+        if destination_id:
+            from minkops_platform import desktop
+
+            destination = desktop.owned_device(connection, run["tenant_id"], run["actor_id"], destination_id)
         # Lock source metadata so a refresh cannot interleave with approval.
         connection.execute(
             "SELECT id FROM account_sources WHERE tenant_id=%s AND id=%s FOR UPDATE",
             (run["tenant_id"], file["source_id"]),
         )
+        if destination_id:
+            # Rebinding acquires this same source lock; validate after taking it.
+            desktop._bound_source(connection, destination, file["source_id"])
         current = connection.execute(
             "SELECT current FROM account_files WHERE tenant_id=%s AND id=%s",
             (run["tenant_id"], file["id"]),
@@ -321,8 +329,9 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
         ).fetchone()
         bound = connection.execute(
             """SELECT d.id FROM desktop_source_bindings b JOIN desktop_devices d ON d.tenant_id=b.tenant_id AND d.id=b.device_id
-            WHERE b.tenant_id=%s AND b.source_id=%s AND d.owner_id=%s AND d.revoked_at IS NULL AND d.expires_at>now()""",
-            (run["tenant_id"], file["source_id"], run["actor_id"]),
+            WHERE b.tenant_id=%s AND b.source_id=%s AND d.owner_id=%s AND d.revoked_at IS NULL AND d.expires_at>now()
+            AND (%s::uuid IS NULL OR d.id=%s::uuid)""",
+            (run["tenant_id"], file["source_id"], run["actor_id"], destination_id, destination_id),
         ).fetchone()
         if bound:
             from minkops_platform.desktop import enqueue_approved
