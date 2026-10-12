@@ -54,7 +54,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       for (const write of value.writes.filter(w => !w.verified_at && !w.cancelled_at)) {
         const current = await api<Run>(`${base}/runs/${value.id}`);
         if (current.state !== "writing") break;
-        try { await applyLocalPlan(tenant, value.id, write, user.csrf_token); }
+        try { await applyLocalPlan(tenant, value.id, write, user.csrf_token, typeof value.config.destination_device_id === "string" ? value.config.destination_device_id : undefined); }
         catch { setError("Save needs attention"); }
       }
       for (const w of (value.tally_writes ?? []).filter(

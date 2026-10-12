@@ -6,6 +6,47 @@ workflow only for `mock-tenant`. No PR Infra rules or customer data are added.
 The existing hosted Agents API runs all Accounts proposals on `gpt-6-luna`;
 launch rejects another model. The model never writes financial systems.
 
+## Bill selection and settings
+
+Select **Destination PC** before launching Bill entry from the web. The picker
+lists this account's PCs, labels offline/expired registrations, and remembers the
+choice per account/workflow in this browser. Multiple PCs require an explicit
+choice unless a choice was already saved. A missing or expired saved PC never
+switches automatically to another machine.
+
+Discovery is loaded for that PC only. Tally company choices and Excel destination
+catalogs come from its latest discovery; missing/incomplete discovery blocks launch.
+Dashboard Quick Run retains the same PC even when another PC has newer discovery.
+Changing the picker without launching sends Quick Run back to setup rather than
+using its older target. A later folder rebind cannot reroute an approved Excel save,
+and an explicitly PC-directed save cannot fall back to a browser folder.
+
+Bill entry has one settings panel: its initial values are saved tenant defaults.
+Edits apply to the current run; only workspace editors can persist them with
+**Save defaults** or change workflow status. Catalog and company choices stay
+contextual under **Destination and checks**. Tally runs always require approval
+of every output, even when the saved review default is only exceptions.
+
+The grouped file selector supports individual/group/all selection and search.
+Selections persist in this browser by source ID and path, including an explicitly
+empty selection. Refresh preserves choices when snapshot IDs change, removes
+missing files and leaves new files unchecked. Upload cancellation submits nothing;
+source loading failures offer a retry without overwriting saved choices.
+
+Connected PCs shows device readiness independently of workflows. **Check
+connections** opens the chosen PC's tool panel without submitting a job. Its
+explicit **Check Tally connection** action uses the existing read-only
+`tally.probe` job, owner checks, CSRF token and request key. Offline checks wait
+for reconnection; expired PCs must reconnect first.
+
+The browser regression suite uses synthetic sources and intercepts every API
+request. It never runs a live Windows or Tally adapter. From
+`apps/solution-web`, run `npm run test:browser` after installing Playwright's
+Chromium (`npx playwright install chromium`). To use an existing Chromium,
+run `CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`.
+Screenshots and failure artifacts default to `/tmp/minkops-ui-tests`; override
+with `MINKOPS_UI_ARTIFACTS`. Unit tests remain `npm test`.
+
 ## Workflow
 
 1. Connect the Windows PC and grant the destination folder. Run Source discovery

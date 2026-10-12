@@ -16,6 +16,7 @@ LEGACY_BINDINGS = {
     "bill-entry": {"handler": "accounts.bill", "presentation": "accounts-bill"},
 }
 RESERVED = {
+    "destination_device_id",
     "runtime_binding",
     "authorized_bindings",
     "execution_snapshot",

@@ -21,6 +21,19 @@ from .errors import ServiceError
 from .resources import REPOSITORY_ROOT
 from .run_controls import observe_task, resolve_request, control_state, require_active
 
+
+def latest_run(connection, tenant, user, device_id=None):
+    """Scope discovery to an explicit, owned PC without falling back to another PC."""
+    if device_id is not None:
+        from .desktop import owned_device
+
+        owned_device(connection, tenant["id"], user["id"], device_id)
+    return connection.execute(
+        """SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
+        AND (%s::uuid IS NULL OR device_id=%s::uuid) ORDER BY created_at DESC LIMIT 1""",
+        (tenant["id"], user["id"], device_id, device_id),
+    ).fetchone()
+
 CONFIG_SCHEMA = json.loads(
     (
         REPOSITORY_ROOT

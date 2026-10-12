@@ -84,6 +84,11 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
         if RESERVED.intersection(body["config"]):
             raise ValueError("Run configuration contains reserved runtime fields.")
         definition = installed_definition(binding, body["key"])
+        destination = None
+        if body.get("destination_device_id"):
+            from minkops_platform.desktop import owned_device
+
+            destination = owned_device(connection, tenant["id"], user["id"], body["destination_device_id"])
         handler = get_handler(binding["handler"])
         prepared = handler.prepare_launch(connection, tenant, user, body, workflow, definition)
         files, ids, catalog_id = prepared.files, prepared.file_ids, prepared.catalog_id
@@ -98,6 +103,10 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
         if prepared.snapshots.keys() & (config.keys() | {"file_provenance"}):
             raise ValueError("Domain snapshots cannot replace runtime or selection fields.")
         config.update(prepared.snapshots)
+        if destination:
+            # This shared routing field is authenticated independently of workflow
+            # schemas. A PC choice does not grant tools, folder access or writes.
+            config["destination_device_id"] = str(destination["id"])
         config["file_provenance"] = [
             {"id": str(f["id"]), "path": f["path"], "sha256": f["sha256"]} for f in files
         ]

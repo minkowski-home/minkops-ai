@@ -11,14 +11,9 @@ import { Spinner } from "../components/Feedback";
 import { discoveryProgress, type Config, type DiscoveryRun } from "./discoveryView";
 import { DiscoveryResults } from "./DiscoveryResults";
 
-interface Device {
-  id: string;
-  name: string;
-  owner_id: string;
-  revoked_at: string | null;
-  expires_at: string;
-  last_seen_at: string | null;
-}
+import { DestinationPCPicker } from '../desktop/DestinationPC';
+import { destinationAvailable, destinationDevices, type DestinationDevice as Device } from '../desktop/destinationPCs';
+
 interface Binding { source_id: string; device_id: string }
 
 export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: string; routeSlug: string; workflow: Workflow }) {
@@ -45,7 +40,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
       api<Device[]>(base + "/desktop/devices"), api<Source[]>(base + "/accounts/sources"),
       api<Binding[]>(base + "/desktop/sources"), api<DiscoveryRun | null>(base + "/discovery/latest")
     ]);
-    return { devices: dd.filter(d => d.owner_id === user?.id && !d.revoked_at && new Date(d.expires_at) > new Date()), sources: ss, bindings: bb, latest };
+    return { devices: destinationDevices(dd, user?.id ?? ''), sources: ss, bindings: bb, latest };
   }, [base, user?.id]);
   useEffect(() => {
     let active = true;
@@ -53,7 +48,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
     void load().then(({ devices: owned, sources: ss, bindings: bb, latest }) => {
       if (!active) return;
       setDevices(owned); setSources(ss); setBindings(bb);
-      setDeviceId(owned.find(d => d.id === latest?.device_id)?.id ?? owned[0]?.id ?? "");
+      setDeviceId(owned.find(d => d.id === latest?.device_id)?.id ?? owned.find(d => destinationAvailable(d))?.id ?? "");
       if (latest) {
         setSelected(latest.config.excel_source_ids);
         setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? latest.config.excel_source_ids.length ? "both" : "tally" : "excel"));
@@ -98,12 +93,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
   return <form className="accounts-panel discovery-panel discovery-setup" aria-label="Source discovery setup" onSubmit={event => { event.preventDefault(); void launch(); }}>
     <header className="discovery-panel-heading"><h3>Discover your business sources</h3><p>Choose your PC and sources. Review once, reuse in your workflows.</p></header>
     <div className="discovery-setup-controls">
-      <label className="config-field">PC to use
-        <select value={deviceId} disabled={Boolean(busy)} onChange={event => setDeviceId(event.target.value)}>
-          <option value="">Choose a connected PC</option>
-          {devices.map(d => <option key={d.id} value={d.id}>{d.name}{!d.last_seen_at || Date.now() - new Date(d.last_seen_at).getTime() > 30000 ? " · offline" : ""}</option>)}
-        </select>
-      </label>
+      <DestinationPCPicker devices={devices} value={deviceId} onChange={setDeviceId} busy={Boolean(busy)} />
       <fieldset className="discovery-source-choice"><legend>Sources to discover</legend>
         <div>{([ ["tally", "Tally"], ["excel", "Excel"], ["both", "Tally + Excel"] ] as const).map(([value, label]) => <label key={value} className={destinationMode === value ? "is-selected" : ""}>
           <input type="radio" name="discovery-source-mode" value={value} checked={destinationMode === value} disabled={Boolean(busy)} onChange={() => setDestinationMode(value)} />{label}
@@ -135,7 +125,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
       </section>}
     </div>
     {error && <p role="alert" className="form-message">{error} {!devices.length && <button type="button" className="button button-ghost" onClick={() => setAttempt(value => value + 1)}>Retry loading</button>}</p>}
-    <footer className="discovery-setup-footer"><button type="submit" className="button button-primary" disabled={Boolean(busy) || workflow.status !== "active" || !deviceId || (excel && !selectedFolders.length) || (tally && (!validPeriod || !Number.isInteger(port) || port < 1 || port > 65535))}>
+    <footer className="discovery-setup-footer"><button type="submit" className="button button-primary" disabled={Boolean(busy) || workflow.status !== "active" || !destinationAvailable(devices.find(d => d.id === deviceId)) || (excel && !selectedFolders.length) || (tally && (!validPeriod || !Number.isInteger(port) || port < 1 || port > 65535))}>
       {busy === "launch" && <Spinner />}{busy === "launch" ? "Starting discovery…" : "Discover sources"}
     </button><p>Read on your PC. Saved on your PC and in this workspace.</p></footer>
   </form>;

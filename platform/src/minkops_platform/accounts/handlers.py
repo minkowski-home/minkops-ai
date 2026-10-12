@@ -125,6 +125,18 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             )
         if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
             raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
+        if body.get("destination_device_id"):
+            from minkops_platform import desktop
+
+            device_id = str(body["destination_device_id"])
+            if target and target["device_id"] != device_id:
+                raise ServiceError("invalid", "Discovery does not belong to the selected destination PC.")
+            if not target:
+                device = desktop.owned_device(connection, tenant["id"], user["id"], device_id)
+                destinations = {sheet["file_id"] for sheet in catalog_snapshot["sheets"] if sheet["role"] == "destination"}
+                for file in references:
+                    if str(file["id"]) in destinations:
+                        desktop._bound_source(connection, device, file["source_id"])
         files += references
     is_bill = definition.metadata["handler"] == "accounts.bill"
     reference_files = files[len(ids):] if is_bill else []

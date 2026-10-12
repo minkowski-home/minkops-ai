@@ -413,6 +413,12 @@ class AccountsTests(unittest.TestCase):
                 headers=self.csrf,
             )
             self.assertEqual(bound.status_code, 200, bound.text)
+            if control:
+                # Exercise Pause/Stop receipts with the merged destination guard,
+                # not just the legacy unscoped save contract.
+                with psycopg.connect(URL) as connection:
+                    connection.execute("UPDATE workflow_runs SET config=config || jsonb_build_object('destination_device_id',%s::text) WHERE id=%s",
+                                       (device["id"], run["id"]))
             payload = {
                 "device_id": device["id"],
                 "request_key": str(uuid.uuid4()),

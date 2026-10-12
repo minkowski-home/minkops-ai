@@ -54,6 +54,26 @@ evaluation answers must never enter the bundle. Hosted Python helpers can be
 ordinary Python scripts. Network access is disabled for the current runtime;
 declaring a capability or connector does not enable a business-system MCP/API.
 
+## Shared destination selection
+
+The shared workflow launcher provides **Destination PC** by default for Bill entry
+and the generic `proposal` presentation; Source Discovery uses the same picker.
+Hosted-only proposals can choose **No PC destination**. A chosen PC is destination
+context, not a claim that hosted reasoning runs on the customer's machine.
+
+Launch transport accepts an optional UUID `destination_device_id` beside `config`,
+not inside a workflow's run schema. The shared platform validates tenant, owner,
+revocation and expiration, includes the choice in request identity, and pins it in
+server-owned run configuration. An omitted/null choice preserves legacy request
+fingerprints. Client configuration cannot inject or replace that trusted field.
+Existing handlers continue hosted execution and do not gain shell/tool/write access.
+Future local-destination handlers must use the pinned PC when resolving resources
+and enforce it again at approval and execution; the field itself grants nothing.
+
+Bill Entry enforces catalog/PC agreement and per-PC folder grants. Discovery lookup
+accepts `?device_id=<UUID>` and never falls back to a different device. Legacy
+unscoped discovery reads remain available to restore the native discovery setup.
+
 ## Client composition and installation
 
 `solutions/<client>/installation.json` selects an **existing** tenant and enabled

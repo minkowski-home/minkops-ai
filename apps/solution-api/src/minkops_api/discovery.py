@@ -53,12 +53,9 @@ def task(slug: str, task_id: UUID, user: User, connection: Db):
 
 
 @router.get("/api/tenants/{slug}/discovery/latest")
-def latest(slug: str, user: User, connection: Db):
+def latest(slug: str, user: User, connection: Db, device_id: UUID | None = None):
     tenant, _ = tenant_access(slug, user, connection)
-    row = connection.execute(
-        "SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s ORDER BY created_at DESC LIMIT 1",
-        (tenant["id"], user["id"]),
-    ).fetchone()
+    row = call(discovery.latest_run, connection, tenant, user, device_id)
     return discovery.detail(connection, row, include_records=False) if row else None
 
 

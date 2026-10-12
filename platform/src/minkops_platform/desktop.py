@@ -308,6 +308,9 @@ def _save_spec(connection, device, payload, *, pending=True, underway=False):
     if pending and not underway:
         from .run_controls import require_active
         require_active(connection, device["tenant_id"], run["task_id"])
+    selected = run["config"].get("destination_device_id")
+    if selected and selected != str(device["id"]):
+        raise ServiceError("conflict", "This approved save belongs to a different destination PC.")
     spec = connection.execute(
         "SELECT * FROM account_writes WHERE tenant_id=%s AND run_id=%s AND id=%s FOR UPDATE",
         (device["tenant_id"], payload["run_id"], payload["write_id"]),

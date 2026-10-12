@@ -1208,3 +1208,25 @@ and late Excel/Tally receipts. Native tests cover pause/resume boundaries, offli
 pause retention and stop propagation. Browser checks exercise controls and verify
 paused/stopped animation feedback. Production rollout requires the migration and
 coordinated API/worker/client versions; already issued operations may finish.
+
+## Pin workflow destinations independently of discovery recency (12 October 2026)
+
+**Situation:** Web Bill Entry inferred its destination from the account's newest
+discovery. With several connected PCs, refreshing one machine could change the
+implicit destination. Excel folder bindings could also change between launch and
+approval, making a correct launch insufficient proof of the later write target.
+
+**Task:** Make destination choice explicit and reusable for future workflows while
+preserving account ownership, hosted execution, immutable approvals and retries.
+
+**Action:** Add a shared destination picker and authenticated launch-envelope UUID.
+Scope discovery by the chosen PC, pin that identity outside untrusted workflow
+configuration, and validate catalog/folder agreement at launch and again at approval
+under the source lock. Prevent native saves from targeting another PC or falling back
+to browser grants. Keep absent destination fields out of legacy request fingerprints.
+Exercise two-PC routing, delayed discovery responses, disappeared registrations,
+folder rebinding and hosted-only proposals with synthetic integration/browser tests.
+
+**Result:** Another PC's discovery recency no longer chooses Bill Entry's destination.
+Future handlers receive an authorized, durable destination without new tool grants;
+old launch retries and external-system recovery boundaries remain compatible.

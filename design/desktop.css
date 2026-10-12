@@ -161,3 +161,5 @@
   .workflow-meter.is-indeterminate > span { transform: translateX(100%); }
   .workflow-meter > span, .discovery-row-chevron { transition: none; }
 }
+.device-connections { margin: 16px 0; padding: 16px 0; border-top: var(--rule-default); border-bottom: var(--rule-default); }
+.device-connections h4, .device-connections h5 { margin: 0 0 8px; }

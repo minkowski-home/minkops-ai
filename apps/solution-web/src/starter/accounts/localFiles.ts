@@ -136,8 +136,11 @@ export async function refreshFolder(tenant: string, source: Source, csrf: string
   return syncFolder(tenant, csrf, folder, source.id);
 }
 
-export async function applyLocalPlan(tenant: string, runId: string, write: WritePlan, csrf: string): Promise<void> {
+export async function applyLocalPlan(tenant: string, runId: string, write: WritePlan, csrf: string, destinationDeviceId?: string): Promise<void> {
   const remote = await connectedSource(tenant, write.source_id);
+  if (destinationDeviceId && remote?.device_id !== destinationDeviceId) {
+    throw new Error('Reconnect this folder on the selected destination PC before saving.');
+  }
   if (remote) {
     await onConnectedPC(tenant, remote.device_id, 'accounts.save', { run_id: runId, write_id: write.id }, csrf);
     return;

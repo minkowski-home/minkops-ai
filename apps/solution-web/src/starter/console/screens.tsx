@@ -29,19 +29,24 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
     <h3>{title}</h3><p>{detail}</p></div>;
 }
 
-function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
+function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, onValuesChange }: {
   item: Employee | Workflow;
   kind: "employees" | "workflows";
   tenantSlug: string;
   canEdit: boolean;
   onSaved: () => Promise<void>;
+  onValuesChange?: (values: Workflow["config_values"]) => void;
 }) {
   const { user } = useAuth();
-  const [values, setValues] = useState(item.config_values);
+  const [savedValues, setValues] = useState(item.config_values);
+  const values = onValuesChange ? item.config_values : savedValues;
   const [status, setStatus] = useState(item.status);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const fields = Object.entries(item.config_schema.properties);
+  const fields = Object.entries(item.config_schema.properties).filter(([key]) => !onValuesChange || !['company_mode', 'locked_company_guid'].includes(key));
+  function update(next: Workflow['config_values']) {
+    setValues(next); onValuesChange?.(next);
+  }
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!user || !canEdit) return;
@@ -59,11 +64,11 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
     } finally { setBusy(false); }
   }
   return <form className="config-panel" onSubmit={(event) => void save(event)}>
-    <div className="section-heading"><div><h2>Settings</h2><p>Simple controls for this {kind === "employees" ? "employee" : "workflow"}.</p></div>
-      {!canEdit && <span className="read-only-note">View only</span>}
+    <div className="section-heading"><div><h2>{onValuesChange ? "Bill entry settings" : "Settings"}</h2><p>{onValuesChange ? "Start with saved defaults. Changes apply to this run unless you save them as defaults." : `Simple controls for this ${kind === "employees" ? "employee" : "workflow"}.`}</p></div>
+      {!canEdit && <span className="read-only-note">{onValuesChange ? "Run overrides only" : "View only"}</span>}
     </div>
     <label className="config-field"><span>Status</span>
-      <select value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value as typeof status)}>
+      <select aria-label="Status" value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value as typeof status)}>
         {(kind === "employees" ? ["active", "inactive"] : ["active", "paused", "planned"])
           .map((option) => <option key={option} value={option}>{statusText[option]}</option>)}
       </select>
@@ -73,20 +78,21 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
       {spec.description && <small>{spec.description}</small>}
       {spec.type === "boolean"
         ? <span className="switch-row"><input type="checkbox" checked={Boolean(values[key])}
-          disabled={!canEdit} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.checked }))} />
+          disabled={!canEdit && !onValuesChange} onChange={(event) => update({ ...values, [key]: event.target.checked })} />
           {values[key] ? "On" : "Off"}</span>
         : spec.enum
-          ? <select value={String(values[key] ?? "")} disabled={!canEdit}
-            onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))}>
-              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft'} as Record<string,string>)[String(option)] ?? option}</option>)}
+          ? <select aria-label={spec.title ?? key} value={String(values[key] ?? "")} disabled={!canEdit && !onValuesChange}
+            onChange={(event) => update({ ...values, [key]: event.target.value })}>
+              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft',all_outputs:'Approve every output',only_exceptions:'Only exceptions',pdf:'PDFs',image:'Images',mixed:'PDFs and images'} as Record<string,string>)[String(option)] ?? option}</option>)}
             </select>
-          : <input type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
-            disabled={!canEdit} onChange={(event) => setValues((current) => ({
-              ...current, [key]: spec.type === "integer" ? Number(event.target.value) : event.target.value,
-            }))} />}
+          : <input aria-label={spec.title ?? key} type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
+            disabled={!canEdit && !onValuesChange} onChange={(event) => update({
+              ...values, [key]: spec.type === "integer" ? Number(event.target.value) : event.target.value,
+            })} />}
     </label>)}
     {!fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
-    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : "Save settings"}</button>}
+    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : onValuesChange ? "Save defaults" : "Save settings"}</button>}
+    {onValuesChange && values.output_mode === "tally_in_place" && <p className="quiet-state">Tally runs always require approval of every output, regardless of the saved review default.</p>}
     {message && <p role="status" className="form-message">{message}</p>}
   </form>;
 }
@@ -171,16 +177,20 @@ export function WorkflowsScreen({ workspace, routeSlug }: { workspace: Workspace
 export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   workspace: Workspace; routeSlug: string; id: string; onSaved: () => Promise<void>;
 }) {
+  const [overrides, setOverrides] = useState<Workflow['config_values']>({});
+  useEffect(() => { setOverrides({}); }, [id]);
   const item = workspace.workflows.find((workflow) => workflow.id === id);
   if (!item) return <section className="route-screen"><EmptyState title="Workflow not found" detail="This workflow is not in your workspace." /></section>;
   const linked = workspace.employees.filter((employee) => item.employee_ids.includes(employee.id));
+  const bill = presentationFor(item) === 'accounts-bill';
+  const runWorkflow = bill ? { ...item, config_values: { ...item.config_values, ...overrides } } : item;
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
     <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? 'Collect reusable context from Tally and Excel.' : item.description}</p></div><Status value={item.status} /></header>
     {presentationFor(item) && <WorkflowLaunch key={item.id}
-      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={item} />}
-    <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
-      canEdit={workspace.can_edit} onSaved={onSaved} />
+      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={runWorkflow} onConfigChange={bill ? setOverrides : undefined} />}
+    <div className="detail-grid"><ConfigPanel key={item.id} item={runWorkflow} kind="workflows" tenantSlug={workspace.tenant.slug}
+      canEdit={workspace.can_edit} onSaved={onSaved} onValuesChange={bill ? setOverrides : undefined} />
       <aside className="related-panel"><h2>Employees</h2>
         {linked.map((employee) => <Link key={employee.id} to={`/${routeSlug}/employees/${employee.id}`}
           className="related-row"><span>{employee.name}</span><Icon name="chevronRight" size={16} /></Link>)}

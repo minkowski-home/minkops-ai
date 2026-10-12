@@ -6,13 +6,14 @@ import { AccountsLaunch, AccountsQuickRun } from "../accounts/AccountsLaunch";
 import { AccountsReview } from "../accounts/AccountsReview";
 import type { Source } from "../accounts/types";
 import { useAuth } from "../contexts/AuthContext";
+import { DestinationPCPicker, useDestinationPC, type DestinationPCState } from '../desktop/DestinationPC';
 import { presentationFor } from "./presentation";
 import { LoadingIndicator, Spinner, RetryMessage } from "../components/Feedback";
 
-type LaunchProps = { tenant: string; routeSlug: string; workflow: Workflow };
+type LaunchProps = { tenant: string; routeSlug: string; workflow: Workflow; destination?: DestinationPCState; onConfigChange?: (values: Workflow["config_values"]) => void };
 
 /** Schema-driven fallback for reviewed proposals using existing file grants. */
-function ProposalLaunch({ tenant, routeSlug, workflow }: LaunchProps) {
+function ProposalLaunch({ tenant, routeSlug, workflow, destination }: LaunchProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [sources, setSources] = useState<Source[]>([]);
@@ -30,13 +31,13 @@ function ProposalLaunch({ tenant, routeSlug, workflow }: LaunchProps) {
     return () => { active = false; };
   }, [tenant, attempt]);
   const properties = (workflow.run_schema?.properties ?? {}) as Record<string, { type?: string; title?: string; enum?: string[] }>;
-  const fields = Object.entries(properties).filter(([key]) => key !== "source_ids");
+  const fields = Object.entries(properties).filter(([key]) => ! ["source_ids", "destination_device_id"].includes(key));
   async function launch() {
     if (!user) return;
     setBusy(true); setError("");
     try {
       const run = await api<{ task_id: string }>(`/api/tenants/${tenant}/accounts/runs`, {
-        method: "POST", body: JSON.stringify({ key: workflow.key, request_key: crypto.randomUUID(), file_ids: selected, config: values }),
+        method: "POST", body: JSON.stringify({ key: workflow.key, request_key: crypto.randomUUID(), file_ids: selected, destination_device_id: destination?.deviceId || null, config: values }),
       }, user.csrf_token);
       navigate(`/${routeSlug}/tasks/${run.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not start workflow."); }
@@ -58,7 +59,7 @@ function ProposalLaunch({ tenant, routeSlug, workflow }: LaunchProps) {
             onChange={(event) => setValues((current) => ({ ...current, [key]: spec.type === "integer" || spec.type === "number" ? Number(event.target.value) : event.target.value }))} />}
     </label>)}
     {error && <p role="alert">{error}</p>}
-    <button className="button button-primary" disabled={busy || !selected.length || workflow.status !== "active"} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Starting…' : 'Run workflow'}</button>
+    <button className="button button-primary" disabled={busy || destination?.loading || Boolean(destination?.deviceId && !destination.available) || !selected.length || workflow.status !== "active"} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Starting…' : 'Run workflow'}</button>
   </section>;
 }
 
@@ -99,10 +100,26 @@ function ProposalReview({ tenant, taskId, controlState = "active" }: { tenant: s
   </section>;
 }
 
+function DestinationWorkflowLaunch(props: LaunchProps) {
+  const destination = useDestinationPC(props.tenant, props.workflow.key);
+  const proposal = presentationFor(props.workflow) === 'proposal';
+  return <>
+    <section className="accounts-panel workflow-destination-panel" aria-label="Workflow destination">
+      <DestinationPCPicker devices={destination.devices} value={destination.state.deviceId}
+        onChange={destination.select} required={!proposal} loading={destination.state.loading} />
+      {destination.state.error && <><p role="alert">{destination.state.error}</p>
+        <button className="button button-ghost" onClick={() => void destination.refresh()}>Retry loading PCs</button></>}
+      <p className="quiet-state">{proposal ? 'Processing uses the hosted runtime. PC selection does not grant tools or writes.' : 'Destination reads and approved writes use this PC. Bill recognition runs in the hosted environment.'}</p>
+    </section>
+    {proposal ? <ProposalLaunch {...props} destination={destination.state} /> : <AccountsLaunch {...props} destination={destination.state} />}
+  </>;
+}
+
+/** New workflow presentations inherit destination selection without per-workflow PC pickers. */
 export function WorkflowLaunch(props: LaunchProps) {
   const presentation = presentationFor(props.workflow);
-  if (presentation === "proposal") return <ProposalLaunch {...props} />;
-  return presentation ? <AccountsLaunch {...props} /> : null;
+  if (presentation === 'accounts-discovery') return <AccountsLaunch {...props} />;
+  return presentation ? <DestinationWorkflowLaunch key={`${props.tenant}:${props.workflow.id}`} {...props} /> : null;
 }
 
 export function WorkflowQuickRun(props: LaunchProps) {
