@@ -8,6 +8,19 @@ launch rejects another model. The model never writes financial systems.
 
 ## Bill selection and settings
 
+Select **Destination PC** before launching Bill entry from the web. The picker
+lists this account's PCs, labels offline/expired registrations, and remembers the
+choice per account/workflow in this browser. Multiple PCs require an explicit
+choice unless a choice was already saved. A missing or expired saved PC never
+switches automatically to another machine.
+
+Discovery is loaded for that PC only. Tally company choices and Excel destination
+catalogs come from its latest discovery; missing/incomplete discovery blocks launch.
+Dashboard Quick Run retains the same PC even when another PC has newer discovery.
+Changing the picker without launching sends Quick Run back to setup rather than
+using its older target. A later folder rebind cannot reroute an approved Excel save,
+and an explicitly PC-directed save cannot fall back to a browser folder.
+
 Bill entry has one settings panel: its initial values are saved tenant defaults.
 Edits apply to the current run; only workspace editors can persist them with
 **Save defaults** or change workflow status. Catalog and company choices stay

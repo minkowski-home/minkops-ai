@@ -5,16 +5,10 @@ import { useAuth } from "../contexts/AuthContext";
 import { chooseFolder } from "./localFiles";
 import type { Catalog, Run, Source } from "./types";
 import { CatalogReview } from "./CatalogReview";
+import { DestinationPCPicker } from '../desktop/DestinationPC';
+import { destinationAvailable, destinationDevices, type DestinationDevice as Device } from '../desktop/destinationPCs';
 import { desktopBridge } from "../desktop/bridge";
 
-interface Device {
-  id: string;
-  name: string;
-  owner_id: string;
-  revoked_at: string | null;
-  expires_at: string;
-  last_seen_at: string | null;
-}
 interface Binding {
   source_id: string;
   device_id: string;
@@ -123,10 +117,7 @@ export function DiscoveryLaunch({
       api<Binding[]>(base + "/desktop/sources"),
       api<DiscoveryRun | null>(base + "/discovery/latest")
     ]);
-    const owned = dd.filter(
-      (d) =>
-        d.owner_id === user?.id && !d.revoked_at && new Date(d.expires_at) > new Date()
-    );
+    const owned = destinationDevices(dd, user?.id ?? '');
     setDevices(owned);
     setSources(ss);
     setBindings(bb);
@@ -135,7 +126,7 @@ export function DiscoveryLaunch({
         ? current
         : owned.some((d) => d.id === latest?.device_id)
           ? latest!.device_id
-          : owned[0]?.id || ""
+          : owned.find(device => destinationAvailable(device))?.id || ""
     );
     if (latest) {
       setSelected(latest.config.excel_source_ids);
@@ -214,20 +205,7 @@ export function DiscoveryLaunch({
         Choose what to read on your PC. Review the results once, then reuse them for your
         workflows.
       </p>
-      <label className="config-field">
-        PC to use
-        <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
-          <option value="">Choose a connected PC</option>
-          {devices.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-              {!d.last_seen_at || Date.now() - new Date(d.last_seen_at).getTime() > 30000
-                ? " · waiting for connection"
-                : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      <DestinationPCPicker devices={devices} value={deviceId} onChange={setDeviceId} busy={busy} />
       <label className="config-field">Sources to discover<select value={destinationMode} onChange={e=>setDestinationMode(e.target.value as typeof destinationMode)}><option value="excel">Excel</option><option value="tally">Tally</option><option value="both">Both · Excel and Tally</option></select></label>
       {!devices.length && (
         <p role="status">
@@ -312,7 +290,7 @@ export function DiscoveryLaunch({
         disabled={
           busy ||
           workflow.status !== "active" ||
-          !deviceId ||
+          !destinationAvailable(devices.find(device => device.id === deviceId)) ||
           (!tally && !selectedFolders.length) ||
           (destinationMode === 'both' && !selectedFolders.length) ||
           (tally && (!periodFrom || !periodTo || periodFrom > periodTo))

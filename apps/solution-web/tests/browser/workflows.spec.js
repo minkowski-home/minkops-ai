@@ -38,7 +38,7 @@ await context.route('**/api/**',async r=>{
  await r.fulfill({status,json:body});
 });
 const url='http://127.0.0.1:3000/mock-tenant/workflows/bill';
-async function open(){await page.goto(url);await page.getByRole('button',{name:'Clear selection',exact:true}).waitFor();await page.getByText('Loading bill files…',{exact:true}).waitFor({state:'hidden'});}
+async function open(){await page.goto(url);await page.getByRole('button',{name:'Clear selection',exact:true}).waitFor();await page.getByText('Loading bill files…',{exact:true}).waitFor({state:'hidden'});const picker=page.getByLabel('Destination PC',{exact:true});await picker.waitFor();await picker.selectOption('pc');}
 
 const selection=page.getByRole('region',{name:'Bill files',exact:true});
 const checks=()=>selection.getByRole('checkbox');
@@ -104,7 +104,7 @@ await context.addInitScript(() => {
   Storage.prototype.getItem = () => { throw new Error('Synthetic storage denial'); };
   Storage.prototype.setItem = () => { throw new Error('Synthetic storage denial'); };
 });
-await page.reload();await page.getByRole('button',{name:'Run bill entry',exact:true}).waitFor();await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.waitForURL('**/tasks/run-task');
+await open();await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.waitForURL('**/tasks/run-task');
 // Deliberate HTTP error responses above produce expected Chromium resource errors.
 const unexpected=errors.filter(error=>!error.includes('the server responded with a status of 400')&&!error.includes('the server responded with a status of 503'));
 assert.deepEqual(unexpected,[]);

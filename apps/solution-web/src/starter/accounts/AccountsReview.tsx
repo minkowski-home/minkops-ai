@@ -48,7 +48,7 @@ function RunReview({ tenant, taskId }: { tenant: string; taskId: string }) {
       const local = await Promise.allSettled(
         value.writes
           .filter((w) => !w.verified_at && !w.cancelled_at)
-          .map((w) => applyLocalPlan(tenant, value.id, w, user.csrf_token))
+          .map((w) => applyLocalPlan(tenant, value.id, w, user.csrf_token, typeof value.config.destination_device_id === "string" ? value.config.destination_device_id : undefined))
       );
       if (local.some((r) => r.status === "rejected")) setError("Save needs attention");
       for (const w of (value.tally_writes ?? []).filter(

@@ -42,3 +42,6 @@
 .bill-file-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .bill-file-row small { color: var(--text-muted); font: var(--type-mono); }
 .bill-file-selection .discovery-source-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+
+.workflow-destination-panel { border-radius: var(--radius-1); }
+.workflow-destination select { width: 100%; }
