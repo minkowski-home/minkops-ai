@@ -50,9 +50,12 @@ The fixed connector accepts a loopback port and inclusive voucher period, never
 caller XML, TDL, scripts, hostnames or SQL. ODBC metadata discovery is removed.
 
 For each company it exports full identity, native **List of Accounts** with **All Masters** and no date
-filter, and detailed **Voucher Register** vouchers in 31-day date chunks. Native nested
+filter, and full native voucher collections in 31-day date chunks. A fixed
+calendar-component predicate preserves the inclusive period even when native Date
+variables are coerced; ledger and inventory allocation aliases are fetched explicitly.
+Native nested
 fields, custom master types, identifiers and leading zeroes remain intact.
-Collection never samples records. Date filters apply only to vouchers. The report
+Collection never samples records. Date filters apply only to vouchers. The collection
 identifiers follow [Tally’s XML samples](https://help.tallysolutions.com/sample-xml/);
 **All Masters** alone is an import report.
 Installation-specific customisations and counts require native export comparison.

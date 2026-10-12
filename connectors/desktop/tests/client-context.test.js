@@ -77,7 +77,7 @@ test("discovery collects every loaded company, undated full masters and dated ne
   );
   assert.ok(
     sent
-      .filter((b) => b.includes("<ID>Voucher Register</ID>"))
+      .filter((b) => b.includes("<ID>MinkopsPeriodVouchers</ID>"))
       .every((b) =>
         b.includes('<SVFROMDATE TYPE="Date">20261001</SVFROMDATE>'),
       ),
@@ -164,19 +164,26 @@ test("an unopened on-disk company remains an identified unavailable company, nev
   assert.equal(result.companies[1].status, "unavailable");
   assert.equal(result.company_scope[1].company_guid, null);
 });
-test("period discovery uses the range-aware register rather than the current-day report", async () => {
+test("period discovery requests a complete date-filtered native voucher collection", async () => {
   const base = transport([]);
+  const requests = [];
   const snapshot = await discoverClientContext(
     { port: 9000, period: { from: "2026-11-01", to: "2026-11-01" } },
     {
-      request: (url, options) =>
-        options.body.includes("<ID>Voucher Register</ID>")
-          ? Promise.resolve(new Response("<ENVELOPE/>"))
-          : base(url, options),
+      request: (url, options) => {
+        requests.push(options.body);
+        return options.body.includes("<ID>MinkopsPeriodVouchers</ID>")
+          ? Promise.resolve(new Response('<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION ISCMPDEPTYPE="Yes">\n </COLLECTION></DATA></BODY></ENVELOPE>'))
+          : base(url, options);
+      },
     },
   );
   assert.equal(snapshot.partial, false);
   assert.ok(snapshot.companies.every((c) => c.vouchers.count === 0));
+  const periods = requests.filter(body => body.includes('<ID>MinkopsPeriodVouchers</ID>'));
+  assert.equal(periods.length, 2);
+  assert.ok(periods.every(body => body.includes('<TYPE>Voucher</TYPE><FETCH>*,AllLedgerEntries.*,LedgerEntries.*,AllInventoryEntries.*,InventoryEntries.*</FETCH><FILTER>MinkopsPeriod</FILTER>')
+    && body.includes('($$YearOfDate:$Date * 10000 + $$MonthOfDate:$Date * 100 + $$DayOfDate:$Date) Between 20261101 And 20261101')));
 });
 test("invalid period and caller-supplied transport options never reach Tally", async () => {
   for (const config of [
@@ -196,6 +203,23 @@ test("invalid period and caller-supplied transport options never reach Tally", a
       }),
       /Invalid/,
     );
+  }
+});
+
+test("native voucher collections preserve nested data and reject dates outside their chunk", async () => {
+  for (const [day, partial] of [["20261001", false], ["20260930", true]]) {
+    const base = transport([]);
+    const snapshot = await discoverClientContext(
+      {port:9000, period:{from:"2026-10-01", to:"2026-10-02"}},
+      {request: (url, options) => options.body.includes('<ID>MinkopsPeriodVouchers</ID>')
+        ? Promise.resolve(new Response(`<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION ISCMPDEPTYPE="Yes">\n<VOUCHER><DATE>${day}</DATE><GUID>voucher-1</GUID><ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Item</STOCKITEMNAME><BATCHALLOCATIONS.LIST><GODOWNNAME>Site</GODOWNNAME></BATCHALLOCATIONS.LIST></ALLINVENTORYENTRIES.LIST></VOUCHER>\n</COLLECTION></DATA></BODY></ENVELOPE>`))
+        : base(url, options)},
+    );
+    assert.equal(snapshot.partial, partial);
+    if (!partial) {
+      assert.equal(snapshot.companies[0].vouchers.count, 1);
+      assert.equal(snapshot.companies[0].vouchers.records[0].data['ALLINVENTORYENTRIES.LIST']['BATCHALLOCATIONS.LIST'].GODOWNNAME, 'Site');
+    }
   }
 });
 test("local package is immutable, hashed and repeatable after receipt replay", async () => {
@@ -311,7 +335,7 @@ test("an empty native voucher export is a complete empty period, never empty mas
     { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
     {
       request: (url, options) =>
-        options.body.includes("<ID>Voucher Register</ID>")
+        options.body.includes("<ID>MinkopsPeriodVouchers</ID>")
           ? Promise.resolve(new Response("<ENVELOPE/>"))
           : base(url, options),
     },
@@ -332,7 +356,7 @@ test("empty voucher DATA accepts whitespace but rejects nonempty text and failed
       { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
       {
         request: (url, options) =>
-          options.body.includes("<ID>Voucher Register</ID>")
+          options.body.includes("<ID>MinkopsPeriodVouchers</ID>")
             ? Promise.resolve(
                 new Response(
                   `<ENVELOPE><HEADER><STATUS>${status}</STATUS></HEADER><BODY><DATA>${content}</DATA></BODY></ENVELOPE>`,
@@ -378,7 +402,7 @@ test("DayBook company trailers are checked against the discovered identity", asy
           const response = await base(url, options);
           let text = await response.text();
           if (
-            options.body.includes("<ID>Voucher Register</ID>") &&
+            options.body.includes("<ID>MinkopsPeriodVouchers</ID>") &&
             options.body.includes("<SVCURRENTCOMPANY>A</SVCURRENTCOMPANY>")
           )
             text = text.replace(

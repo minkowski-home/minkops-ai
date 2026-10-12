@@ -134,7 +134,19 @@ export async function discoverClientContext(
         : id === "List of Accounts"
           ? "<ACCOUNTTYPE>All Masters</ACCOUNTTYPE>"
           : "");
-    const body = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>${identity ? "Collection" : "Data"}</TYPE><ID>${id}</ID></HEADER><BODY><DESC><STATICVARIABLES>${variables}</STATICVARIABLES>${identity ? '<TDL><TDLMESSAGE><COLLECTION NAME="MinkopsIdentity"><TYPE>Company</TYPE><FETCH>*</FETCH></COLLECTION></TDLMESSAGE></TDL>' : ""}</DESC></BODY></ENVELOPE>`;
+    // Report-level date settings may override the supplied period. A fixed
+    // native collection filters stored vouchers directly and fetches every
+    // method/subcollection, including inventory and statutory allocations.
+    // The root wildcard omits ledger/inventory allocations in native XML;
+    // request their alternate native collection names explicitly as well.
+    const definition = identity
+      ? '<TDL><TDLMESSAGE><COLLECTION NAME="MinkopsIdentity"><TYPE>Company</TYPE><FETCH>*</FETCH></COLLECTION></TDLMESSAGE></TDL>'
+      : period
+        // Compare calendar components to validated numeric bounds: some native
+        // modes coerce a requested Date variable to an empty/default date.
+        ? `<TDL><TDLMESSAGE><COLLECTION NAME="MinkopsPeriodVouchers"><TYPE>Voucher</TYPE><FETCH>*,AllLedgerEntries.*,LedgerEntries.*,AllInventoryEntries.*,InventoryEntries.*</FETCH><FILTER>MinkopsPeriod</FILTER></COLLECTION><SYSTEM TYPE="Formulae" NAME="MinkopsPeriod">($$YearOfDate:$Date * 10000 + $$MonthOfDate:$Date * 100 + $$DayOfDate:$Date) Between ${period.from.replaceAll("-", "")} And ${period.to.replaceAll("-", "")}</SYSTEM></TDLMESSAGE></TDL>`
+        : "";
+    const body = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>${identity || period ? "Collection" : "Data"}</TYPE><ID>${id}</ID></HEADER><BODY><DESC><STATICVARIABLES>${variables}</STATICVARIABLES>${definition}</DESC></BODY></ENVELOPE>`;
     const response = await request(`http://127.0.0.1:${config.port}`, {
       method: "POST",
       body,
@@ -164,13 +176,14 @@ export async function discoverClientContext(
       return array(envelope.BODY?.DATA?.COLLECTION?.COMPANY).find(
         (r) => (r["@_NAME"] ?? scalar(r.NAME)) === company,
       );
-    const data =
+    const collection = period ? envelope.BODY?.DATA?.COLLECTION : undefined;
+    const data = collection ??
       envelope.BODY?.EXPORTDATA?.REQUESTDATA ?? envelope.BODY?.DATA ?? envelope;
     if (period && typeof data === "string" && !data.trim()) return [];
-    if (!data || !Object.hasOwn(data, "TALLYMESSAGE"))
+    if (!data || (collection === undefined && !Object.hasOwn(data, "TALLYMESSAGE")))
       throw new Error("Native detailed data export is unavailable.");
     const records = [];
-    for (const message of array(data.TALLYMESSAGE)) {
+    for (const message of collection === undefined ? array(data.TALLYMESSAGE) : [data]) {
       for (const [type, values] of Object.entries(message ?? {})) {
         if (type.startsWith("@_")) continue;
         // Native exports indent mixed XML content. Preserve record text exactly,
@@ -243,11 +256,9 @@ export async function discoverClientContext(
           to: end.toISOString().slice(0, 10),
         };
         await report(company, "reading", "Reading vouchers");
-        // DayBook can silently use Tally's current day. The native voucher
-        // register honors the requested inclusive period and retains full XML.
         const records = await exportData(
           company,
-          "Voucher Register",
+          "MinkopsPeriodVouchers",
           period,
           false,
           item.company_guid,
