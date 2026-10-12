@@ -114,7 +114,8 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
     require_active(connection, run["tenant_id"], run["task_id"])
     store.observe(connection, run, "executing", handler.executing_summary, 20)
     connection.commit()
-    result = lifecycle.execute_proposal(connection, store, run, files, context, executor)
+    result = lifecycle.execute_proposal(connection, store, run, files, context, executor,
+                                        reuse_environments=cleanup)
     # Serialize finishing against Stop. Raw provider output remains diagnostic
     # evidence, but cannot start another operation after the operator stops.
     connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR NO KEY UPDATE", (run["tenant_id"], run["id"]))

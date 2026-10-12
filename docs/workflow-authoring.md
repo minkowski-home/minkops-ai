@@ -169,6 +169,26 @@ this for independent paid sessions under one parent review task; the shared
 store excludes aggregate parents from execution and children do not update the
 parent task directly. Accounts remains an adapter over this single runtime.
 
+The shared hosted runtime reuses at most four standalone environments within a
+parent batch. Every child still creates its own conversation. PostgreSQL slots
+and advisory locks survive worker rotations and permit reuse only after the
+previous session's confirmed cleanup. Tenant, operator, task, workflow version,
+pinned bundle and resource grants bound the scope. Expired environments, failed
+runs, changed grants and the provider's 128-attachment limit rotate compute.
+Pending cleanup uses an isolated environment for new work; saved sessions only
+reconcile their existing turn and never upload or submit input again.
+
+Fresh inputs and the pinned skill bundle occupy `/workspace/runs/<run-id>/`;
+published results occupy `/workspace/outputs/<run-id>/`. The native skill points
+to the run's complete bundle. Trusted instruction paths and derived lookup-index
+references are rebound to those directories; business evidence bytes stay intact.
+Keep absolute workflow paths in the existing `/workspace/context.json`,
+`/workspace/inputs/` and `/workspace/outputs/` conventions. Existing standalone
+and legacy sessions retain those paths. Apply migration 0005 before upgrading
+workers. This removes repeated sandbox provisioning within active batches;
+Cloud Run startup, file uploads, model processing and native writes still take time.
+Review, full-batch duplicate preflight and ordered writes remain unchanged.
+
 Client destination restrictions in `solutions/<id>/workflow-policy.json` are
 applied by declarative installation to the registered schema. Mock-client keeps
 Bill Entry Tally-only; the reusable workflow retains its Excel/Tally choices.

@@ -7,6 +7,7 @@ validation and approvals. This module never plans work or orchestrates tools.
 import logging
 import time
 from collections import Counter
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -32,7 +33,7 @@ class RunStore(Protocol):
     def mark_closed(self, connection, run): ...
 
 
-def execute_proposal(connection, store: RunStore, run, files, context, executor):
+def execute_proposal(connection, store: RunStore, run, files, context, executor, *, reuse_environments=False):
     """Save raw proposals before validation, preserving failed-run diagnostics."""
     if not run["config"].get("execution_snapshot") and not run["session_id"]:
         raise ValueError("Legacy run has no pinned execution bundle. Launch a new run explicitly.")
@@ -102,14 +103,14 @@ def execute_proposal(connection, store: RunStore, run, files, context, executor)
         },
     ):
         try:
-            result = executor(
-                run["workflow_key"],
-                files,
-                context,
-                on_event,
-                session_id=run["session_id"],
-                turn_id=run["turn_id"],
-            )
+            from .environments import acquire
+
+            with acquire(connection, run) if reuse_environments else nullcontext() as lease:
+                result = executor(
+                    run["workflow_key"], files, context, on_event,
+                    session_id=run["session_id"], turn_id=run["turn_id"],
+                    **({"environment_lease": lease} if lease else {}),
+                )
         finally:
             # Preserve the final counts even on disconnect or provider failure.
             flush_activity()

@@ -30,6 +30,9 @@ def create_child(connection, run, file_id):
     config.pop("batch", None)
     config.pop("retry_file_id", None)
     config.pop("tally_context_job_id", None)
+    # Provider receipts belong to a particular run, including retry children.
+    for field in ("hosted_workspace", "hosted_session_closed", "cleanup_attempt_at", "cleanup_attempt_count"):
+        config.pop(field, None)
     config["file_ids"] = [file_id]
     config["review_mode"] = "all_outputs"
     child = connection.execute(

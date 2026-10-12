@@ -1357,3 +1357,31 @@ and review. Preserve Bill Entry's existing confirmed-catalog selection and pinni
 rejection and Excel formula preservation without a hosted run or fabricated mappings.
 Browser coverage exercises all three source modes, choice restoration, AI-on selection,
 confirmation and responsive layout. Production rollout remains separate.
+
+## Reuse batch compute while preserving durable conversations (12 October 2026)
+
+**Situation:** A production bill took 7m 29s to reach review, including 88.6 seconds
+waiting for its hosted sandbox. Four independent bill lanes repeated that setup
+for each input. Early Tally writes could bypass the existing comparison of all
+versions of an invoice and therefore were unsuitable as a behavior-preserving fix.
+
+**Task:** Reuse hosted compute across a batch without merging bill conversations,
+weakening operator controls, replaying paid work, or changing review and writes.
+
+**Action:** Reserve four PostgreSQL-backed environment slots per operator's parent
+run. Hold advisory locks through provisioning, uploads and extraction; require a
+confirmed session cleanup receipt before reuse. Pin profile and resource grants,
+rotate expired or failed environments and enforce the provider attachment limit.
+Use fresh per-run inputs, full skill bundles and output namespaces, rebinding only
+trusted execution paths and derived lookup references. Save workspace metadata
+before submitting input; recover saved sessions without provisioning or uploading.
+Clear inherited cleanup receipts on retry children. Retain the complete-batch
+duplicate checks and consequential-write sequence.
+
+**Result:** PostgreSQL and adapter regressions cover contention, cleanup gates,
+worker rotation, changed grants, expiry, attachment limits, Stop and ambiguous
+creation. Two synthetic live sessions reused the same environment with distinct
+verified outputs and completed-turn recovery; their total times were 50.8s and
+36.5s. These are capability checks, not customer batch benchmarks. Production
+rollout and measured customer latency remain separate; Cloud Run's initial startup
+and bill reasoning still contribute to elapsed time.
