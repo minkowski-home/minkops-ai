@@ -24,8 +24,20 @@ and an explicitly PC-directed save cannot fall back to a browser folder.
 Bill entry has one settings panel: its initial values are saved tenant defaults.
 Edits apply to the current run; only workspace editors can persist them with
 **Save defaults** or change workflow status. Catalog and company choices stay
-contextual under **Destination and checks**. Tally runs always require approval
-of every output, even when the saved review default is only exceptions.
+contextual under **Destination and checks**. New Tally runs honor the selected
+review mode. **Only exceptions** dispatches clean supported bills independently;
+uncertain inputs stay in Attention. **All outputs** and client-wide review policies
+retain explicit approval. Already-pinned legacy runs keep their original behavior.
+
+Workflow 0.11.1 selects company/catalog-scoped master references with identity
+evidence from full Discovery, including aliases and relevant native voucher history.
+The server supplies canonical ledger names before business identity and monetary
+validation; spelling, spacing and language differences alone do not force review.
+Foreign, ambiguous, invented or stale references remain held. New supplier creation
+requires an explicit positive lookup outcome and the existing operator decision;
+an unresolved match is not a new supplier. Purchase classification excludes the
+current invoice's own voucher as supporting history. Similar references retain
+every token; similar dates or amounts alone do not establish duplicate identity.
 
 The grouped file selector supports individual/group/all selection and search.
 Selections persist in this browser by source ID and path, including an explicitly
@@ -120,10 +132,18 @@ The Tally mock contract is a balanced accounting Purchase voucher:
 `invoice_number`, `vendor`, `date`, `purchase_ledger`, `subtotal`, `tax`,
 `tax_ledger`, `total`, and nullable `cost_code`. Supplier, purchase and nonzero tax
 allocations must use distinct discovered ledgers. Money must reconcile exactly
-at two decimal places and fit exact native cents. The demo's combined tax ledger
-is synthetic, not a statutory GST filing configuration.
+at two decimal places and fit exact native cents. A single tax ledger remains
+supported for legacy runs. Workflow 0.11.1 also supports one to eight separately
+evidenced tax allocations, including CGST and SGST, through company-scoped native
+master references. The server derives canonical names, checks each positive amount
+and the exact tax sum, and rejects mixed scalar/split mappings and repeated ledgers.
+Split plans require companion 0.6.9 and native plan protocol 2; older companions
+receive an update instruction before accessing such a plan. Every selected master
+is rechecked, and every saved allocation must match readback independently. Equal
+gross totals cannot conceal a collapsed or changed tax split. This accounting
+voucher contract does not assert statutory filing readiness.
 
-Inventory invoices, bill/payment/cost allocations and additional ledger splits
+Inventory invoices, bill/payment/cost allocations and additional non-tax ledger splits
 need a richer connector contract; corrections containing those allocations are
 held so they cannot be flattened. Unsupported cost allocations also require
 review. Client-specific rules belong in versioned employee workflow definitions,
@@ -168,6 +188,9 @@ Reads may repeat once; an uncertain import is never automatically resent. Read-o
 reconciliation distinguishes an already-applied bill, a conflicting version and
 an absent bill requiring review/Resume. If restart, login or readback cannot be
 established, the run remains unresolved. See [Windows recovery](windows-app.md).
+An XML rejection from a still-running Tally process does not imply a restart.
+Rejected dates receive a concise date-settings handoff; uncertain writes retain
+read-only reconciliation and never automatically repeat an import.
 
 The following generator and live scripts describe the earlier development proof.
 Do not run them against this preserved Test Company: their fixed fixture IDs

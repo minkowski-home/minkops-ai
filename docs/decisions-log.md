@@ -1230,3 +1230,86 @@ folder rebinding and hosted-only proposals with synthetic integration/browser te
 **Result:** Another PC's discovery recency no longer chooses Bill Entry's destination.
 Future handlers receive an authorized, durable destination without new tool grants;
 old launch retries and external-system recovery boundaries remain compatible.
+
+## Resolve invoice names through pinned native identities (12 October 2026)
+
+**Situation:** Exact invoice/ledger-name equality held routine bills despite complete
+Discovery evidence. Formatting and OCR differences were confused with genuinely
+new suppliers. Requiring approval for every native bill defeated exception-only mode.
+
+**Task:** Let the hosted workflow recognize business identity from full evidence,
+while keeping company authority, duplicate identity and consequential writes deterministic.
+
+**Action:** Expose opaque discovery/company-scoped ledger references. Require the
+workflow to cite identity evidence, then resolve every selection atomically to its
+native canonical name before business validation and duplicate identity generation.
+Reject foreign, invented, ambiguous and stale selections. Require a separate positive
+new-supplier lookup outcome before the existing explicit native creation decision.
+Preserve name-based legacy runs. Apply exception-only authorization to clean inputs
+independently, scope child findings to their own input, and retain client-wide policy
+gates and unchanged native identity/readback checks. Version and pin the revised bundle.
+
+**Result:** Regression tests cover cross-company/catalog selections, Hindi and spelling
+variants, duplicate native names, invalid lookup outcomes, supplier creation, sibling
+isolation and approval policy. Live trials use scans, aliases and similarly named
+suppliers across three companies; verified writes and exceptions remain auditable.
+
+## Verify complete native evidence beyond successful export responses (12 October 2026)
+
+**Situation:** Wider live Discovery returned vouchers outside requested date chunks.
+Replacing the report with a native collection initially retained voucher identities
+but omitted ledger allocation lines, making historical classification unnecessarily ambiguous.
+
+**Task:** Collect truthful period-scoped, complete native evidence without sampling
+or weakening byte, identity and period checks.
+
+**Action:** Use a fixed read-only voucher collection and compare native calendar
+components against validated numeric date bounds, avoiding native Date coercion.
+Fetch the ledger and inventory subcollection aliases explicitly alongside the root
+wildcard. Keep raw nested records intact and independently reject out-of-period dates.
+Validate against the live exports, including allocation amounts and ledger identities,
+instead of treating a successful XML status or record count as completeness proof.
+
+**Result:** April–October collection succeeds for all three loaded companies and
+retains the seeded vouchers' exact native allocations. Regression coverage checks
+empty periods, nested data, failed exports, company changes and invalid dates.
+The revised adapter ships in desktop 0.6.8; unsupported accounting structures remain held.
+
+## Preserve independent diagnostics under business row locks (12 October 2026)
+
+**Situation:** Validation held a workflow row with FOR UPDATE. A separate diagnostic
+transaction needed a foreign-key key-share lock on that same row, timed out, and
+discarded the diagnostic evidence it was intended to preserve across business rollback.
+
+**Task:** Retain independent audit durability without committing business work early
+or weakening serialization against operator controls.
+
+**Action:** Use FOR NO KEY UPDATE for runtime mutations of immutable run identities.
+The lock still excludes concurrent business updates and Stop while allowing the
+diagnostic foreign-key check. Add a PostgreSQL regression that records a diagnostic
+under the real business lock, rolls back the business transaction, and verifies the
+diagnostic survives with tenant isolation intact.
+
+**Result:** The reproduced timeout is resolved. Run controls and receipt regressions
+continue to pass, and live validation now retains its internal stage diagnostics.
+
+## Preserve separate tax identities through consequential writes (12 October 2026)
+
+**Situation:** Real purchase bills supplied distinct CGST and SGST amounts, while
+the adapter could represent only a single tax allocation. Collapsing those lines
+would preserve a gross total while losing the accounting meaning.
+
+**Task:** Support bounded split tax without letting old companions flatten a new
+plan or letting two conflicting candidates choose an arbitrary first write.
+
+**Action:** Extend the versioned proposal with separately evidenced company-scoped
+tax references. Resolve them atomically, enforce exact cents and distinct ledgers,
+preflight every candidate sharing an invoice identity, and hold all conflicting
+versions. Negotiate native plan protocol 2 before delivering a split plan. Recheck
+every master and verify each independent native allocation after import. Preserve
+legacy single-tax runs and existing uncertainty/reconciliation fences.
+
+**Result:** Regression tests reject invalid sums, foreign or repeated masters,
+unsupported client versions, competing splits and collapsed receipts. Live proof
+records the native outcome separately from extraction quality and operator review;
+Tally date rejection remains an external-system handoff.
