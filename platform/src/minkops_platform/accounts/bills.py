@@ -206,7 +206,7 @@ def target_from_references(source, device_id, discovery_id):
         raise ServiceError(
             "conflict", "A Purchase voucher type is required in the selected company."
         )
-    return {
+    target = {
         "device_id": str(device_id),
         "company": source["company"],
         "destination_key": f"company:{company_guid}"
@@ -217,6 +217,15 @@ def target_from_references(source, device_id, discovery_id):
         "discovery_id": str(discovery_id),
         "references": {"company_guid": company_guid, "ledgers": ledger_versions},
     }
+    from .master_selection import ledger_reference
+
+    target["ledger_refs"] = {
+        ledger_reference(target, name(r), {"GUID": r.get("GUID")}): {
+            "name": name(r), "identity": {k: r.get(k) for k in ("GUID", "PARENT", "ALTERID")}
+        }
+        for r in collections["ledgers"]["records"]
+    }
+    return target
 
 
 def queue_tally_context(connection, run):
@@ -359,7 +368,34 @@ def recheck_target(connection, tenant, user, current):
     return discovered
 
 
-def validate_tally(data, target):
+def allocation_entries(data, allocations=None):
+    """Canonical tax lines; never infer rates or combine different tax ledgers."""
+    if allocations is None:
+        return [{"ledger": data.get("tax_ledger"), "amount": data["tax"]}] if data.get("tax") else []
+    if not isinstance(allocations, list) or not 1 <= len(allocations) <= 8 or data.get("tax_ledger") is not None:
+        raise ValueError("Select either one tax ledger or explicit split tax allocations.")
+    result = []
+    try:
+        for line in allocations:
+            if (not isinstance(line, dict) or not {"ledger", "amount"} <= set(line)
+                    or set(line) - {"ledger", "amount", "ref", "evidence"}
+                    or not isinstance(line["ledger"], str) or not line["ledger"].strip()
+                    or type(line["amount"]) not in (int, float)):
+                raise ValueError("Invalid tax allocation.")
+            amount = Decimal(str(line["amount"]))
+            if not amount.is_finite() or amount <= 0 or amount.as_tuple().exponent < -2 or amount * 100 > 2**53 - 1:
+                raise ValueError("Tax allocations require positive exact money values.")
+            result.append({"ledger": line["ledger"], "amount": line["amount"]})
+        if sum(Decimal(str(line["amount"])) for line in result) != Decimal(str(data["tax"])):
+            raise ValueError("Tax allocations must equal the bill's total tax exactly.")
+        if len({line["ledger"] for line in result}) != len(result):
+            raise ValueError("Distinct tax allocations require distinct native ledgers.")
+    except (InvalidOperation, KeyError, TypeError) as error:
+        raise ValueError("Invalid tax allocation amounts.") from error
+    return result
+
+
+def validate_tally(data, target, allocations=None):
     from .catalog import validate_data
 
     validate_data(tally_mapping(target["discovery_id"])["sheets"][0], data)
@@ -380,7 +416,8 @@ def validate_tally(data, target):
             raise ValueError("Subtotal plus tax must equal total exactly.")
     except (InvalidOperation, TypeError, KeyError) as error:
         raise ValueError("Invalid bill amounts.") from error
-    for key in ("vendor", "purchase_ledger") + (("tax_ledger",) if values[1] else ()):
+    taxes = allocation_entries(data, allocations)
+    for key in ("vendor", "purchase_ledger"):
         if data.get(key) not in target["ledgers"]:
             if key == "vendor":
                 raise ValueError(
@@ -388,9 +425,9 @@ def validate_tally(data, target):
                     "Add or map the supplier, refresh Source discovery, then continue this bill."
                 )
             raise ValueError(f"{key} must match a discovered ledger exactly.")
-    selected = [data["vendor"], data["purchase_ledger"]] + (
-        [data["tax_ledger"]] if values[1] else []
-    )
+    if any(line["ledger"] not in target["ledgers"] for line in taxes):
+        raise ValueError("Tax allocations must match discovered ledgers exactly.")
+    selected = [data["vendor"], data["purchase_ledger"], *(line["ledger"] for line in taxes)]
     if len(set(selected)) != len(selected):
         raise ValueError("Supplier, purchase and tax allocations require distinct ledgers.")
     if data.get("cost_code"):
@@ -412,10 +449,14 @@ def capture_tally_findings(result, target):
             from .client_context import select_target
 
             selected = select_target(record, target)
+            from .master_selection import resolve_masters
+
+            resolve_masters(record, selected, required=target.get("master_selection_version") == 1,
+                            allow_split=target.get("tax_allocation_version") == 1)
             if "companies" in target:
                 record["company_guid"] = selected["references"]["company_guid"]
                 record["company_name"] = selected["company"]
-            validate_tally(record["data"], selected)
+            validate_tally(record["data"], selected, record.get("tax_allocations"))
         except ValueError as error:
             reason = str(error)
             if reason not in record["findings"]:
@@ -448,6 +489,8 @@ def refreshed_tally_target(connection, tenant, user, current):
             **updated,
             "company_mode": current["company_mode"],
             "locked_company_guid": current["locked_company_guid"],
+            **({"master_selection_version": 1} if current.get("master_selection_version") == 1 else {}),
+            **({"tax_allocation_version": 1} if current.get("tax_allocation_version") == 1 else {}),
         }
     latest = connection.execute(
         """SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s

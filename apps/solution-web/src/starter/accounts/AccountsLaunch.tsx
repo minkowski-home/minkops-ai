@@ -99,7 +99,7 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
       const run = await api<Run>(base + '/runs', { method: 'POST', body: JSON.stringify({
         key: workflow.key, request_key: crypto.randomUUID(), file_ids: selected, destination_device_id: destination?.deviceId,
         catalog_id: outputMode==='tally_in_place' ? null : destinationCatalogId,
-        config: { ...workflow.config_values, input_format: inputFormat, review_mode: outputMode==='tally_in_place'?'all_outputs':reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id,company_mode:companyMode,locked_company_guid:companyMode==='locked'?lockedCompanyGuid:null}:{}) },
+        config: { ...workflow.config_values, input_format: inputFormat, review_mode: reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id,company_mode:companyMode,locked_company_guid:companyMode==='locked'?lockedCompanyGuid:null}:{}) },
       }) }, user.csrf_token);
       navigate(`/${routeSlug}/tasks/${run.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not start workflow.'); }

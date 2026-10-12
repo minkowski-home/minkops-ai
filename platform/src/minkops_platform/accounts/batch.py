@@ -202,11 +202,16 @@ def reconcile_once(url):
                         }
                     )
                 else:
-                    proposal = child["result"]
+                    proposal = copy.deepcopy(child["result"])
+                    # A child's findings concern its one selected input, not
+                    # unrelated siblings. Preserve them as blocking evidence on
+                    # its records; client-wide policy is reapplied below.
+                    for record in proposal["records"]:
+                        record["findings"] = list(dict.fromkeys([
+                            *record["findings"], *proposal["findings"]]))
                     result["records"].extend(previous or proposal["records"])
                     if previous and file_id == parent["config"].get("retry_file_id"):
                         result["records"].extend(proposal["records"])
-                    result["findings"].extend(proposal["findings"])
                     result["unresolved"].extend(proposal.get("unresolved", []))
             # A single-input run also becomes a batch only when retrying a held
             # extraction. Retain unrelated outcomes not represented by children.
@@ -241,3 +246,7 @@ def reconcile_once(url):
                 f"{pending} bill entries ready; {len(result['unresolved'])} bills need attention.",
                 70,
             )
+            if parent["config"].get("tally_target"):
+                from .tally_writes import prepare_automatic
+
+                prepare_automatic(connection, parent, result)

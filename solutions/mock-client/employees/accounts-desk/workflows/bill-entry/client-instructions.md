@@ -1,8 +1,9 @@
-This client uses reviewed Tally Purchase vouchers and requires explicit review
-for every bill. Use the selected company and the current references supplied by
+This client uses Tally Purchase vouchers under the run's selected review mode.
+Only unresolved exceptions require decisions in only_exceptions mode. Use the
+selected company and the current references supplied by
 the platform; never substitute a company from an example or another client.
-Combine tax components into a single allocation only when the bill and the
-operator's approved mapping identify the same tax ledger. Ambiguous allocations
+Keep distinct evidenced tax components in their separate discovered tax ledgers.
+Use the run's versioned allocation capability; unsupported or ambiguous allocations
 need clarification. The platform's monetary checks and native readback remain
 mandatory regardless of these client instructions.
 

@@ -101,6 +101,15 @@ def decide(connection, tenant, user, run_id, file_id, action):
     try:
         selected = select_target(record, scope) if scope else None
         if action == "supplier":
+            if scope and scope.get("master_selection_version") == 1:
+                from .master_selection import resolve_masters
+
+                # Missing names are not evidence of a genuinely new supplier.
+                # Require an explicit lookup outcome and valid other selections.
+                resolve_masters(record, selected, required=True,
+                                allow_split=scope.get("tax_allocation_version") == 1)
+                if record["master_refs"]["vendor"].get("new_supplier") is not True:
+                    raise ValueError("Supplier match must be resolved before master creation.")
             if not selected or record["data"].get("tax") != 0 or record["data"].get("vendor") in selected["ledgers"]:
                 raise ValueError("Supplier creation needs a supported non-tax bill and a new supplier.")
             vendor = record["data"]["vendor"]
@@ -114,7 +123,7 @@ def decide(connection, tenant, user, run_id, file_id, action):
         if action != "guess":
             raise ValueError("Unsupported bill decision.")
         if selected:
-            validate_tally(record["data"], selected)
+            validate_tally(record["data"], selected, record.get("tax_allocations"))
         if record.get("findings"):
             flag(connection, run, record, title="Review written bill", kind="review", actor=user["id"])
         # One click authorizes the observed correction; no operation or values
@@ -225,6 +234,13 @@ def supplier_created(connection, item, job, observation):
         raise ServiceError("invalid", "Supplier definition needs review.")
     selected["ledgers"] = list(dict.fromkeys([*selected["ledgers"], target["vendor"]]))
     selected["references"]["ledgers"][target["vendor"]] = {k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}
+    if run["config"]["tally_target"].get("master_selection_version") == 1:
+        from .master_selection import ledger_reference
+
+        identity = selected["references"]["ledgers"][target["vendor"]]
+        ref = ledger_reference(selected, target["vendor"], identity)
+        selected["ledger_refs"][ref] = {"name": target["vendor"], "identity": identity}
+        record["master_refs"]["vendor"] = {"ref": ref, "evidence": "Explicit supplier creation verified by native readback."}
     record["decision"] = "approve"
     result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != target["file_id"]]
     for row in result["records"]:

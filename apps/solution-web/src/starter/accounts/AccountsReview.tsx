@@ -169,7 +169,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
             r.findings.length ||
             result?.unresolved?.some((i) => i.source_file_id === r.source_file_id)
           );
-          const missingSupplier = r.findings.some((f) =>
+          const missingSupplier = (!r.master_refs || r.master_refs.vendor?.new_supplier === true) && r.findings.some((f) =>
             f.includes("missing from the confirmed Tally ledgers")
           );
           const decide = (action: string) =>
@@ -191,6 +191,8 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
               >
                 View bill
               </a>
+              {Boolean(r.tax_allocations?.length) && <p className="muted">Tax: {r.tax_allocations!.map(line =>
+                `${line.ledger ?? "Pending ledger"} · ${new Intl.NumberFormat("en-IN").format(line.amount)}`).join(" · ")}</p>}
               <span role="status">
                 {" "}
                 {missingSupplier

@@ -8,8 +8,33 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
 
-from .bills import validate_tally
+from .bills import validate_tally, allocation_entries
 from .repository import observe, run_for
+
+
+def prepare_automatic(connection, run, result):
+    """The selected exception-only mode authorizes clean bills independently.
+
+    Client-wide review gates still apply to the full batch. Native duplicate,
+    identity/version and exact readback checks are identical to explicit writes.
+    """
+    from minkops_platform.run_controls import control_state
+    from minkops_platform.workflow_policies import enforce_policies
+
+    if (run["config"].get("review_mode") != "only_exceptions"
+            or run["config"].get("tally_target", {}).get("master_selection_version") != 1
+            or enforce_policies(run["config"], result).get("requires_review")
+            or result.get("findings")
+            or control_state(connection, run["tenant_id"], run["task_id"]) != "active"):
+        return False
+    unresolved = {issue["source_file_id"] for issue in result.get("unresolved", [])}
+    for record in result["records"]:
+        if record.get("findings") or record["source_file_id"] in unresolved:
+            if record.get("status") not in ("saved", "duplicate", "writing", "rejected"):
+                record["decision"] = "hold"
+    prepare(connection, run, result)
+    complete_run(connection, run, result)
+    return True
 
 
 def prepare(connection, run, result, *, approved=False):
@@ -24,6 +49,30 @@ def prepare(connection, run, result, *, approved=False):
     ordered = sorted(
         enumerate(result["records"]), key=lambda pair: pair[1].get("company_guid") or ""
     )
+    from .master_selection import resolve_masters
+
+    candidates, errors, groups = {}, {}, {}
+    # Compare the complete accounting versions before enqueuing any intent.
+    # Otherwise the first conflicting duplicate could be written by ordering.
+    for index, record in ordered:
+        if record.get("status") in ("saved", "duplicate", "rejected", "writing") or record.get("decision") in ("hold", "reject"):
+            continue
+        try:
+            target = select_target(record, scope)
+            resolve_masters(record, target, required=scope.get("master_selection_version") == 1,
+                            allow_split=scope.get("tax_allocation_version") == 1)
+            identity = validate_tally(record["data"], target, record.get("tax_allocations"))
+            candidates[index] = target, identity
+            groups.setdefault((target["destination_key"], identity), []).append(index)
+        except ValueError as error:
+            errors[index] = str(error)
+    def taxes(record):
+        return sorted(allocation_entries(record["data"], record.get("tax_allocations")), key=lambda line: line["ledger"])
+    for indexes in groups.values():
+        first = result["records"][indexes[0]]
+        if any(first["data"] != result["records"][i]["data"] or taxes(first) != taxes(result["records"][i]) for i in indexes[1:]):
+            for index in indexes:
+                errors[index] = "This batch contains conflicting versions of the same bill. Review the correction separately."
     for index, record in ordered:
         if (
             record.get("status") in ("saved", "duplicate", "rejected", "writing")
@@ -34,12 +83,13 @@ def prepare(connection, run, result, *, approved=False):
             record["status"] = "rejected"
             continue
         try:
-            target = select_target(record, scope)
-            identity = validate_tally(record["data"], target)
+            if index in errors:
+                raise ValueError(errors[index])
+            target, identity = candidates[index]
             key = (target["destination_key"], identity)
             if key in seen:
                 first = result["records"][seen[key]]
-                if first["data"] == record["data"]:
+                if first["data"] == record["data"] and taxes(first) == taxes(record):
                     record["duplicate_of"] = seen[key]
                     record["status"] = "writing"
                     continue
@@ -66,6 +116,8 @@ def prepare(connection, run, result, *, approved=False):
                 "discovery_id": target["discovery_id"],
                 "references": target.get("references"),
             }
+            if record.get("tax_allocations") is not None:
+                plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
             with connection.transaction():
                 write = connection.execute(
                     """INSERT INTO account_tally_writes
@@ -216,8 +268,8 @@ def accept(connection, device, payload, receipt):
                 {"ledger": data["vendor"], "amount": money(data["total"])},
                 {"ledger": data["purchase_ledger"], "amount": -money(data["subtotal"])},
             ]
-            if data["tax"]:
-                expected.append({"ledger": data["tax_ledger"], "amount": -money(data["tax"])})
+            expected.extend({"ledger": line["ledger"], "amount": -money(line["amount"])}
+                            for line in allocation_entries(data, write["plan"].get("tax_allocations")))
 
             def key(e):
                 return e["ledger"], e["amount"]

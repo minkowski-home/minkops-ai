@@ -171,10 +171,23 @@ class AttentionTests(unittest.TestCase):
         with psycopg.connect(URL) as c:
             self.assertEqual(c.execute("SELECT done_by FROM attention_items WHERE id=%s",(item["id"],)).fetchone()[0],member)
 
+    def test_unresolved_supplier_does_not_authorize_master_creation(self):
+        run,bill,result=self.ready()
+        result["records"][0]["data"].update(vendor="Unresolved spelling",tax=0,tax_ledger=None,total=100)
+        result["records"][0]["master_refs"].update(vendor={"ref": None, "evidence": "Two possible existing suppliers."}, tax_ledger=None)
+        result["records"][0]["evidence"].append({"field":"vendor","page":1,"quote":"Unresolved spelling"})
+        with psycopg.connect(URL) as c:
+            from psycopg.types.json import Jsonb
+            c.execute("UPDATE account_runs SET result=%s WHERE id=%s",(Jsonb(result),run["id"]))
+        response=self.decision(run,bill,"supplier")
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertIsNone(self.client.post("/api/desktop/worker/claim",headers=self.worker,json={}).json())
+
     def test_supplier_creation_authorizes_fixed_native_plan_then_continues(self):
         run,bill,result=self.ready()
         with psycopg.connect(URL,row_factory=dict_row) as c:
             result["records"][0]["data"].update(vendor="New supplier",tax=0,tax_ledger=None,total=100)
+            result["records"][0]["master_refs"].update(vendor={"ref": None, "evidence": "No discovered supplier matches.", "new_supplier": True}, tax_ledger=None)
             result["records"][0]["evidence"].append({"field":"vendor","page":1,"quote":"New supplier"})
             from minkops_platform.accounts.bills import capture_tally_findings
             config=c.execute("SELECT config FROM account_runs WHERE id=%s",(run["id"],)).fetchone()["config"]

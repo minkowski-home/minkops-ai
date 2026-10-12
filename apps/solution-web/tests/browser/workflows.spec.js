@@ -61,8 +61,9 @@ await page.getByText('Destination and checks',{exact:true}).click();await page.g
 await page.screenshot({path:testInfo.outputPath('bills-settings.png'),fullPage:true});
 await page.locator('.console-view').evaluate(node => { node.scrollTop=0; });
 await page.screenshot({path:testInfo.outputPath('bills-desktop.png'),fullPage:false});
-failRun=true;await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.getByText('Synthetic run failed',{exact:true}).waitFor();assert.equal(runs.at(-1).config.input_format,'image');assert.equal(runs.at(-1).config.review_mode,'all_outputs');assert.equal(runs.at(-1).config.company_mode,'locked');assert.equal(runs.at(-1).config.locked_company_guid,'company');assert.equal(runs.at(-1).catalog_id,null);assert.equal(runs.at(-1).file_ids.includes('new'),false);
-failRun=false;await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.waitForURL('**/tasks/run-task');
+failRun=true;await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.getByText('Synthetic run failed',{exact:true}).waitFor();assert.equal(runs.at(-1).config.input_format,'image');assert.equal(runs.at(-1).config.review_mode,'only_exceptions');assert.equal(runs.at(-1).config.company_mode,'locked');assert.equal(runs.at(-1).config.locked_company_guid,'company');assert.equal(runs.at(-1).catalog_id,null);assert.equal(runs.at(-1).file_ids.includes('new'),false);
+await page.getByLabel('Default review mode',{exact:true}).selectOption('all_outputs');
+failRun=false;await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.waitForURL('**/tasks/run-task');assert.equal(runs.at(-1).config.review_mode,'all_outputs');
 await open();assert.equal(await page.getByLabel('Bill inputs',{exact:true}).inputValue(),'pdf');
 // Responsive layout and dark theme tokens.
 await page.setViewportSize({width:390,height:844});await page.screenshot({path:testInfo.outputPath('bills-mobile.png'),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
