@@ -46,7 +46,7 @@ class WorkflowRunStore:
             AND NOT coalesce((config->>'hosted_session_closed')::boolean,false)
             AND coalesce((config->>'cleanup_attempt_count')::integer,0) < 10
             AND coalesce((config->>'cleanup_attempt_at')::timestamptz,'epoch') < now()-interval '1 minute'
-            ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED""").fetchone()
+            ORDER BY updated_at LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED""").fetchone()
         if run:
             connection.execute(
                 """UPDATE workflow_runs SET config=config || jsonb_build_object('cleanup_attempt_at',now(),
@@ -70,7 +70,9 @@ class WorkflowRunStore:
 def run_for(connection, tenant_id, run_id, lock=False):
     row = connection.execute(
         "SELECT * FROM workflow_runs WHERE tenant_id=%s AND id=%s"
-        + (" FOR UPDATE" if lock else ""),
+        # Run identities never change. This still serializes business mutations
+        # while permitting the separate diagnostic transaction's FK key check.
+        + (" FOR NO KEY UPDATE" if lock else ""),
         (tenant_id, run_id),
     ).fetchone()
     if not row:

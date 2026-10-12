@@ -64,6 +64,12 @@ class DiagnosticPersistenceTests(TestCase):
                 (tenant, task, actor, uuid4()),
             ).fetchone()
             connection.commit()
+            from minkops_platform.runtime.store import run_for
+
+            # The worker holds this lock while validating a result. Diagnostic
+            # FK checks must coexist with it and survive business rollback.
+            run_for(connection, tenant, run["id"], lock=True)
+            connection.execute("UPDATE workflow_runs SET config='{}' WHERE id=%s", (run["id"],))
             record(
                 connection,
                 run,

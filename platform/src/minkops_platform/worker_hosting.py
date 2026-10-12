@@ -84,12 +84,14 @@ def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline):
     pending = set()
     observed = None
     while time.monotonic() < deadline or pending:
+        # A lane can run immediately after submit. Publish the runner lease first
+        # so dispatchers never observe active work without its coalescing lease.
+        c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")
         if not pending:
             if time.monotonic() >= deadline:
                 break
             observed = c.execute("SELECT generation FROM worker_wakeup").fetchone()["generation"]
             pending = {pool.submit(work, url) for _ in range(lanes)}
-        c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")
         done, pending = wait(pending, timeout=10, return_when=FIRST_COMPLETED)
         worked = sum(bool(future.result()) for future in done)
         processed += worked

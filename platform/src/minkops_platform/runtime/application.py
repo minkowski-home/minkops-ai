@@ -108,14 +108,14 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
         }
         if any(granted.get(str(file["id"])) != file["sha256"] for file in files):
             raise ValueError("Execution input differs from the run's authorized resource snapshot.")
-    connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR UPDATE", (run["tenant_id"], run["id"]))
+    connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR NO KEY UPDATE", (run["tenant_id"], run["id"]))
     require_active(connection, run["tenant_id"], run["task_id"])
     store.observe(connection, run, "executing", handler.executing_summary, 20)
     connection.commit()
     result = lifecycle.execute_proposal(connection, store, run, files, context, executor)
     # Serialize finishing against Stop. Raw provider output remains diagnostic
     # evidence, but cannot start another operation after the operator stops.
-    connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR UPDATE", (run["tenant_id"], run["id"]))
+    connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR NO KEY UPDATE", (run["tenant_id"], run["id"]))
     if control_state(connection, run["tenant_id"], run["task_id"]) == "stopped":
         if cleanup:
             lifecycle.close_run(connection, store, run, close_session=close_session)
