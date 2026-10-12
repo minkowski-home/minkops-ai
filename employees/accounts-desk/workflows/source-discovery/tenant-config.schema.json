@@ -4,18 +4,12 @@
   "properties": {
     "destination_mode": {
       "type": "string",
-      "enum": ["excel", "tally", "both"],
-      "title": "Source systems"
-    },
-    "discovery_depth": {
-      "type": "string",
       "enum": [
-        "client_context",
-        "structure",
-        "reference_data",
-        "business_mappings"
+        "excel",
+        "tally",
+        "both"
       ],
-      "title": "Default discovery depth"
+      "title": "Source systems"
     },
     "max_files": {
       "type": "integer",
@@ -25,7 +19,6 @@
     }
   },
   "required": [
-    "discovery_depth",
     "max_files"
   ],
   "additionalProperties": false

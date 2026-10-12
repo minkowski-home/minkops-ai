@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { boundedText } from "./index.js";
-import { discoverTally } from "./discovery.js";
+import { readTallyReferences } from "./tally-references.js";
 
 const xml = (s) =>
   String(s).replace(
@@ -33,8 +33,7 @@ const unsupported = Symbol("unsupported allocations");
 
 /** Fixed native attention operations. Renderer cannot supply XML or endpoints. */
 export async function inspectTallyAttention(plan, {request = fetch, createSupplier = false} = {}) {
-  const snapshot = await discoverTally({company: plan.company, port: plan.port,
-    depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+  const snapshot = await readTallyReferences({company: plan.company, port: plan.port, categories: ["company", "ledgers"]}, {request});
   const companies = snapshot.collections.find(c => c.category === "company")?.records ?? [];
   if (companies.length !== 1 || text(companies[0].GUID) !== plan.company_guid)
     throw new Error("Tally company changed.");
@@ -47,7 +46,7 @@ export async function inspectTallyAttention(plan, {request = fetch, createSuppli
     // Losing an import acknowledgement never permits another import in this
     // attempt. The next explicit action starts with the same exact master read.
     await exchange(plan.company, plan.port, body, request);
-    const after = await discoverTally({company: plan.company, port: plan.port, depth: "reference_data", categories: ["company", "ledgers"]}, {request});
+    const after = await readTallyReferences({company: plan.company, port: plan.port, categories: ["company", "ledgers"]}, {request});
     const observed = after.collections.find(c => c.category === "company")?.records ?? [];
     if (observed.length !== 1 || text(observed[0].GUID) !== plan.company_guid)
       throw new Error("Tally company changed.");
@@ -149,13 +148,34 @@ export async function readTallyBills(
     }));
 }
 
-function equal(record, data) {
+function taxLines(plan) {
+  const {data} = plan;
+  if (plan.tax_allocations === undefined)
+    return cents(data.tax) ? [{ledger:data.tax_ledger,amount:cents(data.tax)}] : [];
+  if (plan.format_version !== 2 || !plan.references?.company_guid || data.tax_ledger != null
+      || !Array.isArray(plan.tax_allocations) || !plan.tax_allocations.length || plan.tax_allocations.length > 8)
+    throw new Error("Unsupported split tax plan; refresh the approved mapping.");
+  const lines = plan.tax_allocations.map(line => {
+    if (!line || Object.keys(line).sort().join(',') !== 'amount,ledger'
+        || typeof line.ledger !== 'string' || !line.ledger.trim() || line.ledger.length > 200
+        || /[\x00-\x1f]/.test(line.ledger) || typeof line.amount !== 'number' || cents(line.amount) <= 0)
+      throw new Error("Invalid tax allocation.");
+    return {ledger:line.ledger,amount:cents(line.amount)};
+  });
+  const sum = lines.reduce((n,line)=>n+line.amount,0);
+  if (!Number.isSafeInteger(sum) || sum !== cents(data.tax)
+      || new Set(lines.map(line=>line.ledger)).size !== lines.length
+      || lines.some(line=>[data.vendor,data.purchase_ledger].includes(line.ledger)))
+    throw new Error("Tax allocations must balance exactly and use distinct ledgers.");
+  return lines;
+}
+
+function equal(record, data, taxes) {
   const expected = [
     { ledger: data.vendor, amount: cents(data.total) },
     { ledger: data.purchase_ledger, amount: -cents(data.subtotal) },
   ];
-  if (cents(data.tax))
-    expected.push({ ledger: data.tax_ledger, amount: -cents(data.tax) });
+  expected.push(...taxes.map(line=>({ledger:line.ledger,amount:-line.amount})));
   const sort = (v) =>
     v.toSorted(
       (a, b) => a.ledger.localeCompare(b.ledger) || a.amount - b.amount,
@@ -168,6 +188,7 @@ function equal(record, data) {
 
 export async function commitTallyBill(plan, { request = fetch, reconciliationOnly = false } = {}) {
   const { data, company, port = 9000, remote_id, operation, expected } = plan;
+  const taxes = taxLines(plan);
   if (
     !/^[a-f0-9-]{36}$/.test(remote_id) ||
     !["append", "update"].includes(operation) ||
@@ -185,12 +206,11 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
   )
     throw new Error("Unbalanced bill.");
   if (plan.references) {
-    const snapshot = await discoverTally(
+    const snapshot = await readTallyReferences(
       {
         company,
         port,
         categories: ["company", "ledgers"],
-        depth: "reference_data",
       },
       { request },
     );
@@ -210,7 +230,7 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
     for (const name of [
       data.vendor,
       data.purchase_ledger,
-      ...(data.tax ? [data.tax_ledger] : []),
+      ...taxes.map(line=>line.ledger),
     ]) {
       const actual = ledgers.filter(
         (r) => text(r["@_NAME"] ?? r.NAME) === name,
@@ -241,7 +261,7 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
         "Multiple vouchers share this bill identity. Review Tally before retrying.",
     };
   const current = records[0];
-  if (current && equal(current, data)) return { outcome: "duplicate", current };
+  if (current && equal(current, data, taxes)) return { outcome: "duplicate", current };
   if (
     current &&
     (operation !== "update" || expected?.fingerprint !== current.fingerprint)
@@ -268,7 +288,7 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
     (current[unsupported] ||
       current.entries.some(
         (e) =>
-          ![data.vendor, data.purchase_ledger, data.tax_ledger].includes(
+          ![data.vendor, data.purchase_ledger, ...taxes.map(line=>line.ledger)].includes(
             e.ledger,
           ),
       ))
@@ -278,14 +298,14 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
       message:
         "Existing voucher has allocations this bill mapping cannot preserve. Correct it in Tally, then reconcile.",
     };
-  if (reconciliationOnly) return {outcome:"attention",message:"Tally restarted after an uncertain write. The approved version is not present; review and Resume saves to reconcile before importing."};
+  if (reconciliationOnly) return {outcome:"attention",message:"Tally did not confirm the write. The approved version is not present; review Tally, then use Resume saves to reconcile before importing."};
   const entry = (ledger, amount) =>
     `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${amount < 0 ? "Yes" : "No"}</ISDEEMEDPOSITIVE><AMOUNT>${(amount / 100).toFixed(2)}</AMOUNT></ALLLEDGERENTRIES.LIST>`;
   const guid = current?.guid || remote_id;
   const attributes = current
     ? `DATE="${xml(current.date)}" TAGNAME="MASTER ID" TAGVALUE="${xml(current.master_id)}" Action="Alter"`
     : `REMOTEID="${xml(guid)}" Action="Create"`;
-  const body = `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="Purchase" OBJVIEW="Accounting Voucher View"><GUID>${xml(guid)}</GUID><DATE>${data.date.replaceAll("-", "")}</DATE><VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME><REFERENCE>${xml(data.invoice_number)}</REFERENCE><PARTYLEDGERNAME>${xml(data.vendor)}</PARTYLEDGERNAME><PERSISTEDVIEW>Accounting Voucher View</PERSISTEDVIEW><ISINVOICE>No</ISINVOICE><NARRATION>Minkops reviewed mock bill ${xml(data.invoice_number)}</NARRATION>${entry(data.vendor, cents(data.total))}${entry(data.purchase_ledger, -cents(data.subtotal))}${cents(data.tax) ? entry(data.tax_ledger, -cents(data.tax)) : ""}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
+  const body = `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="Purchase" OBJVIEW="Accounting Voucher View"><GUID>${xml(guid)}</GUID><DATE>${data.date.replaceAll("-", "")}</DATE><VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME><REFERENCE>${xml(data.invoice_number)}</REFERENCE><PARTYLEDGERNAME>${xml(data.vendor)}</PARTYLEDGERNAME><PERSISTEDVIEW>Accounting Voucher View</PERSISTEDVIEW><ISINVOICE>No</ISINVOICE><NARRATION>Minkops reviewed bill ${xml(data.invoice_number)}</NARRATION>${entry(data.vendor, cents(data.total))}${entry(data.purchase_ledger, -cents(data.subtotal))}${taxes.map(line=>entry(line.ledger,-line.amount)).join('')}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
   const reply = await exchange(company, port, body, request);
   const result = reply.RESPONSE || reply.ENVELOPE?.BODY?.DATA;
   if (
@@ -305,7 +325,7 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
   // business identity and observed ID are authoritative, not the supplied UUID.
   if (
     saved.length !== 1 ||
-    !equal(saved[0], data) ||
+    !equal(saved[0], data, taxes) ||
     (current && saved[0].guid !== current.guid)
   )
     throw new Error(

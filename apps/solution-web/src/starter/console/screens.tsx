@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
@@ -10,11 +10,14 @@ import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
 import { Icon } from "./Icon";
 import { progressView, type ProgressMode } from '../workspace/progress';
+import { TaskProgress } from "../workspace/TaskProgress";
+import { RunControls } from "../workspace/RunControls";
+import { LoadingIndicator, Spinner } from "../components/Feedback";
 
 const statusText: Record<string, string> = {
   active: "Active", inactive: "Inactive", paused: "Paused", planned: "Planned",
   running: "In progress", attention: "Needs attention", handoff: "Save pending",
-  completed: "Completed", failed: "Failed",
+  completed: "Completed", failed: "Failed", stopped: "Stopped",
 };
 
 function Status({ value }: { value: string }) {
@@ -26,19 +29,24 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
     <h3>{title}</h3><p>{detail}</p></div>;
 }
 
-function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
+function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, onValuesChange }: {
   item: Employee | Workflow;
   kind: "employees" | "workflows";
   tenantSlug: string;
   canEdit: boolean;
   onSaved: () => Promise<void>;
+  onValuesChange?: (values: Workflow["config_values"]) => void;
 }) {
   const { user } = useAuth();
-  const [values, setValues] = useState(item.config_values);
+  const [savedValues, setValues] = useState(item.config_values);
+  const values = onValuesChange ? item.config_values : savedValues;
   const [status, setStatus] = useState(item.status);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const fields = Object.entries(item.config_schema.properties);
+  const fields = Object.entries(item.config_schema.properties).filter(([key]) => !onValuesChange || !['company_mode', 'locked_company_guid'].includes(key));
+  function update(next: Workflow['config_values']) {
+    setValues(next); onValuesChange?.(next);
+  }
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!user || !canEdit) return;
@@ -56,11 +64,11 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
     } finally { setBusy(false); }
   }
   return <form className="config-panel" onSubmit={(event) => void save(event)}>
-    <div className="section-heading"><div><h2>Settings</h2><p>Simple controls for this {kind === "employees" ? "employee" : "workflow"}.</p></div>
-      {!canEdit && <span className="read-only-note">View only</span>}
+    <div className="section-heading"><div><h2>{onValuesChange ? "Bill entry settings" : "Settings"}</h2><p>{onValuesChange ? "Start with saved defaults. Changes apply to this run unless you save them as defaults." : `Simple controls for this ${kind === "employees" ? "employee" : "workflow"}.`}</p></div>
+      {!canEdit && <span className="read-only-note">{onValuesChange ? "Run overrides only" : "View only"}</span>}
     </div>
     <label className="config-field"><span>Status</span>
-      <select value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value as typeof status)}>
+      <select aria-label="Status" value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value as typeof status)}>
         {(kind === "employees" ? ["active", "inactive"] : ["active", "paused", "planned"])
           .map((option) => <option key={option} value={option}>{statusText[option]}</option>)}
       </select>
@@ -70,20 +78,21 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
       {spec.description && <small>{spec.description}</small>}
       {spec.type === "boolean"
         ? <span className="switch-row"><input type="checkbox" checked={Boolean(values[key])}
-          disabled={!canEdit} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.checked }))} />
+          disabled={!canEdit && !onValuesChange} onChange={(event) => update({ ...values, [key]: event.target.checked })} />
           {values[key] ? "On" : "Off"}</span>
         : spec.enum
-          ? <select value={String(values[key] ?? "")} disabled={!canEdit}
-            onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))}>
-              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft'} as Record<string,string>)[String(option)] ?? option}</option>)}
+          ? <select aria-label={spec.title ?? key} value={String(values[key] ?? "")} disabled={!canEdit && !onValuesChange}
+            onChange={(event) => update({ ...values, [key]: event.target.value })}>
+              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft',all_outputs:'Approve every output',only_exceptions:'Only exceptions',pdf:'PDFs',image:'Images',mixed:'PDFs and images'} as Record<string,string>)[String(option)] ?? option}</option>)}
             </select>
-          : <input type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
-            disabled={!canEdit} onChange={(event) => setValues((current) => ({
-              ...current, [key]: spec.type === "integer" ? Number(event.target.value) : event.target.value,
-            }))} />}
+          : <input aria-label={spec.title ?? key} type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
+            disabled={!canEdit && !onValuesChange} onChange={(event) => update({
+              ...values, [key]: spec.type === "integer" ? Number(event.target.value) : event.target.value,
+            })} />}
     </label>)}
     {!fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
-    {canEdit && <button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button>}
+    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : onValuesChange ? "Save defaults" : "Save settings"}</button>}
+    {onValuesChange && values.output_mode === "tally_in_place" && <p className="quiet-state">Tally runs always require approval of every output, regardless of the saved review default.</p>}
     {message && <p role="status" className="form-message">{message}</p>}
   </form>;
 }
@@ -100,7 +109,7 @@ export function EmployeesScreen({ workspace, routeSlug }: { workspace: Workspace
         <div className="employee-mark"><Icon name="agents" size={22} /></div>
         <div><h3>{employee.name}</h3><p>{employee.description}</p>
           <div className="employee-workflows"><span>Active workflows</span>
-            <strong>{workflows.length ? workflows.map((workflow) => workflow.name).join(" · ") : "None yet"}</strong>
+            <strong>{workflows.length ? `${workflows.length} available` : "None yet"}</strong>
           </div>
         </div><Icon name="chevronRight" size={17} />
       </Link>;
@@ -168,16 +177,20 @@ export function WorkflowsScreen({ workspace, routeSlug }: { workspace: Workspace
 export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   workspace: Workspace; routeSlug: string; id: string; onSaved: () => Promise<void>;
 }) {
+  const [overrides, setOverrides] = useState<Workflow['config_values']>({});
+  useEffect(() => { setOverrides({}); }, [id]);
   const item = workspace.workflows.find((workflow) => workflow.id === id);
   if (!item) return <section className="route-screen"><EmptyState title="Workflow not found" detail="This workflow is not in your workspace." /></section>;
   const linked = workspace.employees.filter((employee) => item.employee_ids.includes(employee.id));
+  const bill = presentationFor(item) === 'accounts-bill';
+  const runWorkflow = bill ? { ...item, config_values: { ...item.config_values, ...overrides } } : item;
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
-    <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
+    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? 'Collect reusable context from Tally and Excel.' : item.description}</p></div><Status value={item.status} /></header>
     {presentationFor(item) && <WorkflowLaunch key={item.id}
-      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={item} />}
-    <div className="detail-grid"><ConfigPanel key={item.id} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
-      canEdit={workspace.can_edit} onSaved={onSaved} />
+      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={runWorkflow} onConfigChange={bill ? setOverrides : undefined} />}
+    <div className="detail-grid"><ConfigPanel key={item.id} item={runWorkflow} kind="workflows" tenantSlug={workspace.tenant.slug}
+      canEdit={workspace.can_edit} onSaved={onSaved} onValuesChange={bill ? setOverrides : undefined} />
       <aside className="related-panel"><h2>Employees</h2>
         {linked.map((employee) => <Link key={employee.id} to={`/${routeSlug}/employees/${employee.id}`}
           className="related-row"><span>{employee.name}</span><Icon name="chevronRight" size={16} /></Link>)}
@@ -249,10 +262,10 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
     {/* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
     <aside className="attention-pane" aria-label="Activity">
       <div className="activity-heading"><h3>Activity</h3><p>What is happening now</p></div>
-      <TaskLinks title="Active tasks" tasks={tasks.filter((task) => task.status === "running")} routeSlug={routeSlug} />
+      <TaskLinks title="Active tasks" tasks={tasks.filter((task) => ["running", "paused"].includes(task.status))} routeSlug={routeSlug} />
       <TaskLinks title="Needs attention" tasks={tasks.filter((task) => task.status === "attention")} routeSlug={routeSlug} />
       <TaskLinks title="Handoffs" tasks={tasks.filter((task) => task.status === "handoff")} routeSlug={routeSlug} />
-      <TaskLinks title="Recent outcomes" tasks={tasks.filter((task) => ["completed", "failed"].includes(task.status))} routeSlug={routeSlug} />
+      <TaskLinks title="Recent outcomes" tasks={tasks.filter((task) => ["completed", "failed", "stopped"].includes(task.status))} routeSlug={routeSlug} />
     </aside>
   </div>;
 }
@@ -265,6 +278,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
+  const controlRevision = useRef(0);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -272,13 +286,17 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     setError("");
     setLoading(true);
     const poll = async () => {
+      const revision = controlRevision.current;
       try {
         const result = await api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`);
-        if (!active) return;
+        if (!active || revision !== controlRevision.current) return;
         setDetail(result); setError("");
-        if (!["completed", "failed"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
+        if (!["completed", "failed", "stopped"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
       } catch (caught) {
-        if (active) setError(caught instanceof Error ? caught.message : "Could not load task.");
+        if (active) {
+          setError(caught instanceof Error ? caught.message : "Could not load task.");
+          timer = setTimeout(() => void poll(), 5000);
+        }
       } finally { if (active) setLoading(false); }
     };
     void poll();
@@ -288,27 +306,20 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <h2>Task unavailable</h2><p role="alert">{error}</p>
     <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
   </section>;
-  if (!detail) return <section className="route-screen"><p>Loading task…</p></section>;
+  if (!detail) return <section className="route-screen"><LoadingIndicator>Loading task…</LoadingIndicator></section>;
   const workflow = workspace.workflows.find((w) => w.id === detail.workflow_id);
   const presentation = workflow ? presentationFor(workflow) : null;
   const mode: ProgressMode = presentation === "accounts-bill" ? "bill-entry" : presentation === "accounts-discovery" ? "source-discovery"
     : !detail.workflow_id && detail.title === 'Check Tally connection' ? 'tally.probe'
-      : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : 'simple';
+      : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : detail.workflow_id ? 'proposal' : 'simple';
   const progress = progressView(detail, mode);
   return <section className="route-screen detail-screen task-detail">
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
     <header className="detail-heading"><div><h2>{detail.title}</h2></div>
       <Status value={detail.status} /></header>
-    <div className="task-progress">
-      <div className={`task-stage-mark${progress.finished ? ' is-finished' : ''}`} aria-hidden="true"><Icon name={progress.finished ? 'check' : detail.status === 'failed' ? 'x' : 'tasks'} size={28} /></div>
-      <div className="task-stage-copy"><h3>{progress.label}</h3>
-        <ol className="task-stage-list" aria-label="Task stages">{progress.stages.map((stage, index) => <li key={stage}
-          className={index < progress.current || progress.finished ? 'is-done' : index === progress.current ? 'is-current' : ''}
-          aria-current={!progress.finished && index === progress.current ? 'step' : undefined}>
-          <span aria-hidden="true">{index < progress.current || progress.finished ? <Icon name="check" size={14} /> : index + 1}</span>{stage}</li>)}</ol>
-      </div>
-    </div>
-    <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} />
+    <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { controlRevision.current++; setDetail(task); setAttempt(value => value + 1); }} />
+    {mode !== 'source-discovery' && <TaskProgress view={progress} stale={Boolean(error)} />}
+    <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} controlState={detail.control_state ?? 'active'} />
       {error && <p role="alert" className="form-message">Could not refresh <button
         className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}

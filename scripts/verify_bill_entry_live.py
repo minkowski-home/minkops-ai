@@ -120,11 +120,7 @@ def main():
 
 
 def launch_batch(csrf, base, discovery, device, worker, folder):
-    config = {
-        "company": COMPANY,
-        "port": 9000,
-        "categories": ["company", "ledgers", "voucher_types"],
-    }
+    config = {"port": 9000, "period": {"from": "2026-01-01", "to": "2026-01-02"}}
     scan = checked(
         "post",
         discovery + "/runs",
@@ -132,11 +128,11 @@ def launch_batch(csrf, base, discovery, device, worker, folder):
         json={
             "device_id": device["id"],
             "request_key": str(uuid.uuid4()),
-            "config": {"depth": "business_mappings", "excel_source_ids": [], "tally": config},
+            "config": {"depth": "client_context", "excel_source_ids": [], "tally": config},
         },
     )
     claim = checked("post", "/api/desktop/worker/claim", headers=worker, json={})
-    snapshot = native({"operation": "discover", "config": {**config, "depth": "business_mappings"}})
+    snapshot = native({"operation": "client_context", "config": {**config, "depth": "client_context"}})
     checked(
         "post",
         f"/api/desktop/worker/jobs/{claim['id']}/finish",
@@ -150,6 +146,8 @@ def launch_batch(csrf, base, discovery, device, worker, folder):
             },
         },
     )
+    prepared = checked("get", discovery + f"/runs/{scan['id']}")
+    hosted(prepared["mapping_run"])
     checked("post", discovery + f"/runs/{scan['id']}/confirm", headers=csrf, json={})
     paths = ["01-new-scan.pdf", "02-new-scan.pdf", "03-backfill-scan.pdf", "05-unreadable.png"]
     source = checked(

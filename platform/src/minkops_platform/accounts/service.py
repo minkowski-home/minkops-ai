@@ -39,6 +39,8 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
 
 def approve_run(connection, tenant, user, run_id, body, *, require_destination=True):
     run = run_for(connection, tenant["id"], run_id, True)
+    from minkops_platform.run_controls import require_active
+    require_active(connection, tenant["id"], run["task_id"])
     binding = binding_for(run)
     if binding.handler == "accounts.bill" and run["actor_id"] != user["id"]:
         raise ServiceError(
@@ -239,11 +241,19 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
             raise ValueError(
                 "Destination is disconnected or changed. Refresh discovery before writing."
             )
+        destination_id = run["config"].get("destination_device_id")
+        if destination_id:
+            from minkops_platform import desktop
+
+            destination = desktop.owned_device(connection, run["tenant_id"], run["actor_id"], destination_id)
         # Lock source metadata so a refresh cannot interleave with approval.
         connection.execute(
             "SELECT id FROM account_sources WHERE tenant_id=%s AND id=%s FOR UPDATE",
             (run["tenant_id"], file["source_id"]),
         )
+        if destination_id:
+            # Rebinding acquires this same source lock; validate after taking it.
+            desktop._bound_source(connection, destination, file["source_id"])
         current = connection.execute(
             "SELECT current FROM account_files WHERE tenant_id=%s AND id=%s",
             (run["tenant_id"], file["id"]),
@@ -321,8 +331,9 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
         ).fetchone()
         bound = connection.execute(
             """SELECT d.id FROM desktop_source_bindings b JOIN desktop_devices d ON d.tenant_id=b.tenant_id AND d.id=b.device_id
-            WHERE b.tenant_id=%s AND b.source_id=%s AND d.owner_id=%s AND d.revoked_at IS NULL AND d.expires_at>now()""",
-            (run["tenant_id"], file["source_id"], run["actor_id"]),
+            WHERE b.tenant_id=%s AND b.source_id=%s AND d.owner_id=%s AND d.revoked_at IS NULL AND d.expires_at>now()
+            AND (%s::uuid IS NULL OR d.id=%s::uuid)""",
+            (run["tenant_id"], file["source_id"], run["actor_id"], destination_id, destination_id),
         ).fetchone()
         if bound:
             from minkops_platform.desktop import enqueue_approved
@@ -513,6 +524,9 @@ def upload_source(
 
 
 def write_content(connection, tenant, run_id, write_id):
+    from minkops_platform.run_controls import require_active
+    run = run_for(connection, tenant["id"], run_id)
+    require_active(connection, tenant["id"], run["task_id"])
     row = connection.execute(
         """SELECT content,cancelled_at FROM account_writes
          WHERE tenant_id=%s AND run_id=%s AND id=%s""",

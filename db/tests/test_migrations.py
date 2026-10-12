@@ -7,11 +7,10 @@ import os
 import subprocess
 import sys
 import unittest
-from uuid import uuid4
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
-
 
 ROOT = Path(__file__).resolve().parents[2]
 URL = os.environ.get("TEST_DATABASE_URL")
@@ -19,6 +18,54 @@ URL = os.environ.get("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class MigrationTests(unittest.TestCase):
+    def test_retired_discovery_preference_is_removed_without_changing_other_settings(self):
+        from psycopg.types.json import Jsonb
+
+        with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
+            tenant = connection.execute(
+                "INSERT INTO tenants(slug,name) VALUES (%s,'Migration test') RETURNING id",
+                ("discovery-migration-" + uuid4().hex,),
+            ).fetchone()[0]
+            for key, presentation in [
+                ("source-discovery", "accounts-discovery"),
+                ("client-discovery", "accounts-discovery"),
+                ("another-workflow", "proposal"),
+            ]:
+                connection.execute(
+                    "INSERT INTO workflows(tenant_id,key,name,description,config_schema,config_values,execution_binding) VALUES (%s,%s,'Test','Test',%s,%s,%s)",
+                    (
+                        tenant,
+                        key,
+                        Jsonb(
+                            {
+                                "properties": {
+                                    "discovery_depth": {"type": "string"},
+                                    "max_files": {"type": "integer"},
+                                },
+                                "required": ["discovery_depth", "max_files"],
+                            }
+                        ),
+                        Jsonb({"discovery_depth": "structure", "max_files": 57}),
+                        Jsonb({"presentation": presentation}),
+                    ),
+                )
+            migration = (ROOT / "db/migrations/0003_complete_source_discovery.sql").read_text()
+            for _ in range(2):
+                connection.execute(migration)
+            rows = connection.execute(
+                "SELECT key,config_values,config_schema,config_version FROM workflows WHERE tenant_id=%s",
+                (tenant,),
+            ).fetchall()
+            for key, values, schema, version in rows:
+                if key == "another-workflow":
+                    self.assertEqual(values["discovery_depth"], "structure")
+                    self.assertEqual(version, 1)
+                else:
+                    self.assertEqual(values, {"max_files": 57})
+                    self.assertNotIn("discovery_depth", schema["properties"])
+                    self.assertEqual(schema["required"], ["max_files"])
+                    self.assertEqual(version, 2)
+
     def test_desktop_binding_and_dispatch_foreign_keys_prevent_cross_tenant_links(self):
         with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
             prefix = "desktop-migration-" + uuid4().hex

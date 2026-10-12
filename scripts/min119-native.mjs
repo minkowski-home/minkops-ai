@@ -2,7 +2,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  discoverTally,
   discoverClientContext,
   excelSchemaBytes,
   saveDiscoveryPackage,
@@ -18,14 +17,13 @@ const chunks = [];
 for await (const part of process.stdin) chunks.push(part);
 const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 let result;
-if (input.operation === "discover") result = await discoverTally(input.config);
-else if (input.operation === "client_context") result = await discoverClientContext(input.config);
+if (input.operation === "client_context") result = await discoverClientContext(input.config);
 else if (input.operation === "archive") result = await saveDiscoveryPackage(input.root, input.catalog);
 else if (input.operation === "read") result = await readTallyBills(input.plan);
 else if (input.operation === "read_file") result = { content: (await readFile(input.path)).toString("base64") };
 else if (input.operation === "schema") {
   const content = await excelSchemaBytes(await readFile(input.path));
-  result = { content: content.toString("base64"), structure: await inspectExcel(content, "structure") };
+  result = { content: content.toString("base64"), structure: await inspectExcel(content) };
 }
 else if (input.operation === "inspect")
   result = await inspectExcel(await readFile(input.path));
@@ -37,7 +35,6 @@ else if (input.operation === "collect")
     folderFor: () => input.root,
     inventory,
     inspectExcel,
-    discoverTally,
     discoverClientContext,
     excelSchemaBytes,
     onProgress: async () => {},

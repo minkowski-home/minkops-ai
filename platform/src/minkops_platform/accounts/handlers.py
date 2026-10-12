@@ -76,7 +76,6 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 tenant["id"],
                 discovery_id,
                 ["tally"],
-                tally_categories=["company", "ledgers", "voucher_types"],
             )
             catalog_snapshot = tally_mapping(discovery_id)
             if "companies" not in target:
@@ -85,6 +84,8 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                     "Refresh Source Discovery to collect complete company context before a new bill run.",
                 )
             target["company_mode"] = selections.get("company_mode", "infer")
+            target["master_selection_version"] = 1
+            target["tax_allocation_version"] = 1
             target["locked_company_guid"] = selections.get("locked_company_guid")
             if target["company_mode"] == "locked":
                 from .client_context import select_target
@@ -126,6 +127,18 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             )
         if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
             raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
+        if body.get("destination_device_id"):
+            from minkops_platform import desktop
+
+            device_id = str(body["destination_device_id"])
+            if target and target["device_id"] != device_id:
+                raise ServiceError("invalid", "Discovery does not belong to the selected destination PC.")
+            if not target:
+                device = desktop.owned_device(connection, tenant["id"], user["id"], device_id)
+                destinations = {sheet["file_id"] for sheet in catalog_snapshot["sheets"] if sheet["role"] == "destination"}
+                for file in references:
+                    if str(file["id"]) in destinations:
+                        desktop._bound_source(connection, device, file["source_id"])
         files += references
     is_bill = definition.metadata["handler"] == "accounts.bill"
     reference_files = files[len(ids):] if is_bill else []
@@ -162,7 +175,6 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         config["catalog_snapshot"] = catalog_snapshot
         if target:
             config["tally_target"] = target
-            config["review_mode"] = "all_outputs"
         fmt = config["input_format"]
         if fmt != "mixed" and any(
             (Path(f["path"]).suffix.lower() == ".pdf") != (fmt == "pdf") for f in files[: len(ids)]
@@ -346,6 +358,10 @@ class BillHandler(AccountsHandler):
             raise ValueError(
                 "Agent proposals must append by default; edits require explicit review."
             )
+        if run["config"].get("tally_target"):
+            from .bills import capture_tally_findings
+
+            capture_tally_findings(result, run["config"]["tally_target"])
         result = populate_entry_ids(result, context["catalog"], run["id"])
         result = check_records(
             result,
@@ -354,11 +370,7 @@ class BillHandler(AccountsHandler):
             contents,
             [] if run["config"].get("tally_target") else run["config"]["checks"],
         )
-        if run["config"].get("tally_target"):
-            from .bills import capture_tally_findings
-
-            capture_tally_findings(result, run["config"]["tally_target"])
-        else:
+        if not run["config"].get("tally_target"):
             from .bills import capture_excel_state
 
             capture_excel_state(result, context["catalog"], contents)
@@ -366,6 +378,7 @@ class BillHandler(AccountsHandler):
 
     def finish(self, connection, store, run, context, domain, result):
         from .service import prepare_writes
+        from minkops_platform.run_controls import control_state
         if not run.get("parent_run_id"):
             from .attention import flag
             for issue in result.get("unresolved", []):
@@ -380,8 +393,13 @@ class BillHandler(AccountsHandler):
             "Review bill values, source evidence and proposed destination entries.",
             70,
         )
+        if run["config"].get("tally_target") and not run.get("parent_run_id"):
+            from .tally_writes import prepare_automatic
+
+            prepare_automatic(connection, run, result)
         if (
-            not run["config"].get("tally_target")
+            control_state(connection, run["tenant_id"], run["task_id"]) == "active"
+            and not run["config"].get("tally_target")
             and run["config"]["review_mode"] == "only_exceptions"
             and not result.get("requires_review")
             and not result.get("unresolved")

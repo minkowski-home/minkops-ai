@@ -7,7 +7,7 @@ import ExcelJS from "../../../connectors/desktop/node_modules/exceljs/excel.js";
 import {
   inventory,
   inspectExcel,
-  discoverTally,
+  discoverClientContext,
 } from "../../../connectors/desktop/src/index.js";
 import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
 
@@ -120,25 +120,9 @@ for (const f of files)
 const source = await api(base + "/accounts/sources", form);
 await api(base + `/desktop/devices/${device.id}/sources/${source.id}`, {});
 const config = {
-  depth: "business_mappings",
+  depth: "client_context",
   excel_source_ids: [source.id],
-  tally: {
-    company: process.env.MINKOPS_TALLY_COMPANY ?? "Minkops Test",
-    port: 9000,
-    categories: [
-      "company",
-      "groups",
-      "ledgers",
-      "voucher_types",
-      "stock_items",
-      "stock_groups",
-      "units",
-      "godowns",
-      "cost_centres",
-      "cost_categories",
-      "currencies",
-    ],
-  },
+  tally: {port: 9000, period: {from: "2026-01-01", to: "2026-01-02"}},
 };
 const run = await api(base + "/discovery/runs", {
   device_id: device.id,
@@ -159,7 +143,7 @@ const result = await collectSources(plan, {
   },
   inventory,
   inspectExcel,
-  discoverTally,
+  discoverClientContext,
   onProgress: (source_key, status, category = null) =>
     api(
       `/api/desktop/worker/jobs/${claim.id}/progress`,
@@ -169,7 +153,7 @@ const result = await collectSources(plan, {
 });
 assert.equal(result.sources[0].workbooks[0].structure.sheets.length, 3);
 assert.ok(
-  result.sources[1].snapshot.collections.every((c) => c.status === "ready"),
+  result.sources[1].snapshot.companies.every((c) => c.status === "ready"),
 );
 for (let n = 0; n < 2; n++)
   await api(

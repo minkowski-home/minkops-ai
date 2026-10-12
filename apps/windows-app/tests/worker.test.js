@@ -1,13 +1,44 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CompanionWorker } from "../../../platform/desktop-runtime/src/worker.js";
-import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
+import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
+
+test("discovery pauses at a read boundary, renews observations, and resumes once", async () => {
+  const states = ["paused", "paused", "active"];
+  let waits = 0, reads = 0;
+  await reportDiscoveryProgress(async () => ({ control_state: states[reads++] }), {
+    wait: async ms => { assert.equal(ms, 2000); waits++; }
+  });
+  assert.equal(waits, 2); assert.equal(reads, 3);
+  await reportDiscoveryProgress(async () => ({})); // An older API remains compatible.
+  await assert.rejects(reportDiscoveryProgress(async () => ({ control_state: "stopped" })), { code: "TASK_STOPPED" });
+});
+
+test("a discovery Stop is never mistaken for an unavailable source or followed by more reads", async () => {
+  let reads = 0;
+  await assert.rejects(collectSources({ config: {}, sources: [{key: "excel", tool: "excel"}, {key: "second", tool: "excel"}] }, {
+    folderFor: () => "folder", inventory: async () => [{path: "one.xlsx", content: Buffer.from("x").toString("base64")}],
+    excelSchemaBytes: async b => b, inspectExcel: async () => { reads++; return {}; },
+    onProgress: async (_key, _status, _category, progress) => { if (progress?.completed === 1) throw Object.assign(new Error("Stopped"), {code: "TASK_STOPPED"}); }
+  }), { code: "TASK_STOPPED" });
+  assert.equal(reads, 1);
+});
+
+test("a network failure cannot release an acknowledged pause", async () => {
+  let calls = 0, waits = 0;
+  await reportDiscoveryProgress(async () => {
+    calls++;
+    if (calls === 2) throw new Error("Offline");
+    return {control_state: calls === 1 ? "paused" : "active"};
+  }, {wait: async () => { waits++; }});
+  assert.equal(calls, 3); assert.equal(waits, 2);
+});
 
 test("discovery continues after a missing folder and reports a separate Tally result", async () => {
   const events = [];
   const result = await collectSources(
     {
-      config: { depth: "structure", tally: {} },
+      config: { depth: "client_context", tally: {} },
       sources: [
         { key: "missing", tool: "excel" },
         { key: "tally", tool: "tally" },
@@ -19,7 +50,7 @@ test("discovery continues after a missing folder and reports a separate Tally re
       },
       inventory: async () => [],
       inspectExcel: async () => {},
-      discoverTally: async () => ({ collections: [] }),
+      discoverClientContext: async () => ({ companies: [] }),
       onProgress: async (...args) => events.push(args),
     },
   );
@@ -28,6 +59,22 @@ test("discovery continues after a missing folder and reports a separate Tally re
     ["unavailable", "ready"],
   );
   assert.equal(events.at(-1)[0], "tally");
+});
+
+test("discovery forwards native measurements and reports one workbook activity at a time", async () => {
+  const events = [];
+  const measurement = { completed: 2, total: 7, activity: "Collected masters", item: "A" };
+  await collectSources({ config: { tally: {} }, sources: [{ key: "tally", tool: "tally" }, { key: "excel", tool: "excel" }] }, {
+    folderFor: () => "folder", inventory: async () => ["one.xlsx", "two.xlsx"].map(path => ({ path, content: Buffer.from("bytes").toString("base64") })),
+    excelSchemaBytes: async bytes => bytes, inspectExcel: async () => ({ sheets: [] }),
+    discoverClientContext: async (_config, { onProgress }) => { await onProgress("A", "reading", measurement); return { companies: [] }; },
+    onProgress: async (...args) => events.push(args)
+  });
+  assert.ok(events.some(event => event[0] === "tally" && event[3] === measurement));
+  const excel = events.filter(event => event[0] === "excel" && event[3]);
+  assert.equal(excel.at(-1)[3].completed, 2);
+  assert.equal(excel.at(-1)[3].total, 2);
+  assert.equal(excel.at(-1)[3].item, "two.xlsx");
 });
 
 test("a rejected receipt becomes an observable failure instead of an endless read retry", async () => {

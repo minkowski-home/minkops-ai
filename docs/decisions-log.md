@@ -1,5 +1,46 @@
 # Decision Logs
 
+## Keep display projections outside discovery confirmation fingerprints (11 October 2026)
+
+**Situation:** Database integration tests found that confirming discovery saved
+UI-derived master summaries into the native catalog. An identical refresh then
+appeared changed, requested review again and dropped confirmed context notes.
+
+**Task:** Preserve truthful count displays while making confirmation and unchanged
+refresh operate exclusively on native evidence and approved interpretation.
+
+**Action:** Confirm from a copy of the stored catalog instead of the presentation
+projection; apply approved mappings explicitly. Extend the database regression to
+compare native sources before/after confirmation while checking the response still
+contains display summaries. Verify unchanged refresh, notes and archive behavior
+against an isolated PostgreSQL instance using the existing test-database lifecycle.
+
+**Result:** Presentation metadata cannot contaminate persisted source fingerprints;
+unchanged discovery retains confirmation and evidenced notes. The full suite passes
+259 tests and 49 subtests against disposable PostgreSQL, with no skipped tests.
+
+## Separate native discovery evidence from indexed master lookups (11 October 2026)
+
+**Situation:** Two test companies displayed 198/195 masters. Read-only native
+comparison proved the counts included statutory definitions, an identical
+currency repeated by Tally, and a remote-company metadata trailer.
+
+**Task:** Make counts and downstream lookup truthful without losing source
+evidence, merging company identities, or changing already-authorized inputs.
+
+**Action:** Preserve native catalogs and archives; derive versioned company-scoped
+master files and type/GUID/name indexes with candidate locations and raw record
+provenance. Collapse only identical definitions, reject conflicting native
+identities, and verify metadata against the owning company. Keep statutory,
+custom and GST tax-unit masters. Pin the derived format at collection/launch;
+historical runs retain exact file contents and hashes. Display unique per-type
+counts separately from native export totals and update versioned workflow guidance.
+
+**Result:** Regression coverage verifies identity conflicts, name collisions,
+cross-company isolation, chunk locations, provenance and immutable legacy inputs.
+The supplied real export produces 196/193 unique masters while retaining all
+useful definitions; the seven derived input files total about 3.2 MB.
+
 Entries below preserve historical decisions and may describe structures that
 have since changed. See `engineering-architecture.md` for the current model.
 
@@ -1090,3 +1131,185 @@ bills without approving unsupported financial entries.
 **Result:** Schema failures are attributable through DB evidence instead of streamed
 cloud logs. Prompt contracts no longer request fields forbidden by hosted validation;
 logical buyer matching retains exact native destination identifiers.
+
+## Fence discovery against company loss and retire conflicting modes (11 October 2026)
+
+**Situation:** The latest Demo discovery completed with two companies although
+Tally held a third, Pradeepraj Infra. Native diagnostics recorded a disappeared
+Tally process; restart history could restore only remembered company loads. The
+old settings also offered mutually exclusive depths that no longer matched the
+complete client-context execution path.
+
+**Task:** Make complete context the sole discovery contract and include configured
+companies without relying on a person opening each company beforehand.
+
+**Action:** Remove retired preferences, schemas, category selection, ODBC discovery
+and reference-row extraction. Migrate installed workflow settings idempotently,
+preserving historical evidence. Use Tally's native Company on Disk inventory and
+live GUID/number identities to establish scope before collecting. Start a verified
+local installation with numbered native company directories when stopped; load
+missing companies through a graceful scoped restart. Never force-close accounting
+work or replay an uncertain import. Recheck scope after restart and collection;
+retain missing companies and scope changes as incomplete evidence. Keep bounded
+destination-reference checks separate for already-pinned bill jobs.
+
+**Result:** Regression tests cover company loss, additions, identity replacement,
+unopened companies, stopped services, blocked closing/login and migration replay.
+A live read of the Oct 1–2 period includes all three companies, with Pradeepraj
+Infra's 170 masters, and reports a complete package. Production deployment and
+companion rollout remain separate from this branch push.
+
+## Measure discovery work without inventing completion (11 October 2026)
+
+**Situation:** Discovery presented expanding record-name lists and four static
+checkpoints. Large company scopes became hard to review, and a failed browser
+poll could silently leave the screen frozen. Bulk Tally exports cannot truthfully
+report per-ledger processing or predict hosted interpretation duration.
+
+**Task:** Make discovery readable at scale and visibly active while preserving
+immutable evidence, catalog confirmation and the product's truthful automation rule.
+
+**Action:** Reuse server-derived master counts in searchable, paginated company
+rows. Add optional bounded phase measurements along the existing connector →
+desktop runtime → authenticated API path. Count verified native reads and workbook
+inspections, including the final company-scope check; failed reads earn no credit.
+Replace a single durable activity observation rather than adding an event per
+export chunk. Keep unknown-duration work indeterminate, confirmation separate,
+and source/company transitions auditable. Resume browser polling after transient
+failures with capped backoff and explicit stale-state feedback.
+
+**Result:** Regression coverage checks 13-company pagination, legacy counts,
+partial results, rejected measurements, API claim fencing and unchanged completion
+gates. Browser verification exercises source selection, review, reconnect recovery,
+four themes, mobile layouts and reduced motion using isolated fixtures. Live Tally
+and deployment verification remain separate from that UI evidence.
+
+## Separate operator controls from execution facts (11 October 2026)
+
+**Situation:** Workflows span hosted turns, parallel bill children, read-only native
+collection and verified destination saves. Cancelling by changing a visible status
+would allow stale workers to restart work, lose receipts, or repeat uncertain writes.
+
+**Task:** Provide shared Pause/Resume and Stop controls with truthful feedback and
+auditable operator intent, preserving the existing runtime and financial safeguards.
+
+**Action:** Add one bounded task control field independent of domain run states.
+Fence worker selection, approval and new browser plans; serialize hosted dispatch
+and finishing against the run locks used by controls. Pause native discovery at read
+boundaries while renewing its existing claim. Stop cancels unsaved intents, retains
+verified and late receipts, and sends remaining business items to shared attention.
+Use the existing task timeline/outbox for actor audit and wake the cloud worker on
+resume, even after it acknowledged an idle queue. Unknown-duration work remains
+indeterminate and a stopped task never acquires a fictional completion percentage.
+
+**Result:** PostgreSQL integration covers concurrent duplicate actions, operator
+authorization, resume wake-up, hosted work stopped before review, blocked approvals
+and late Excel/Tally receipts. Native tests cover pause/resume boundaries, offline
+pause retention and stop propagation. Browser checks exercise controls and verify
+paused/stopped animation feedback. Production rollout requires the migration and
+coordinated API/worker/client versions; already issued operations may finish.
+
+## Pin workflow destinations independently of discovery recency (12 October 2026)
+
+**Situation:** Web Bill Entry inferred its destination from the account's newest
+discovery. With several connected PCs, refreshing one machine could change the
+implicit destination. Excel folder bindings could also change between launch and
+approval, making a correct launch insufficient proof of the later write target.
+
+**Task:** Make destination choice explicit and reusable for future workflows while
+preserving account ownership, hosted execution, immutable approvals and retries.
+
+**Action:** Add a shared destination picker and authenticated launch-envelope UUID.
+Scope discovery by the chosen PC, pin that identity outside untrusted workflow
+configuration, and validate catalog/folder agreement at launch and again at approval
+under the source lock. Prevent native saves from targeting another PC or falling back
+to browser grants. Keep absent destination fields out of legacy request fingerprints.
+Exercise two-PC routing, delayed discovery responses, disappeared registrations,
+folder rebinding and hosted-only proposals with synthetic integration/browser tests.
+
+**Result:** Another PC's discovery recency no longer chooses Bill Entry's destination.
+Future handlers receive an authorized, durable destination without new tool grants;
+old launch retries and external-system recovery boundaries remain compatible.
+
+## Resolve invoice names through pinned native identities (12 October 2026)
+
+**Situation:** Exact invoice/ledger-name equality held routine bills despite complete
+Discovery evidence. Formatting and OCR differences were confused with genuinely
+new suppliers. Requiring approval for every native bill defeated exception-only mode.
+
+**Task:** Let the hosted workflow recognize business identity from full evidence,
+while keeping company authority, duplicate identity and consequential writes deterministic.
+
+**Action:** Expose opaque discovery/company-scoped ledger references. Require the
+workflow to cite identity evidence, then resolve every selection atomically to its
+native canonical name before business validation and duplicate identity generation.
+Reject foreign, invented, ambiguous and stale selections. Require a separate positive
+new-supplier lookup outcome before the existing explicit native creation decision.
+Preserve name-based legacy runs. Apply exception-only authorization to clean inputs
+independently, scope child findings to their own input, and retain client-wide policy
+gates and unchanged native identity/readback checks. Version and pin the revised bundle.
+
+**Result:** Regression tests cover cross-company/catalog selections, Hindi and spelling
+variants, duplicate native names, invalid lookup outcomes, supplier creation, sibling
+isolation and approval policy. Live trials use scans, aliases and similarly named
+suppliers across three companies; verified writes and exceptions remain auditable.
+
+## Verify complete native evidence beyond successful export responses (12 October 2026)
+
+**Situation:** Wider live Discovery returned vouchers outside requested date chunks.
+Replacing the report with a native collection initially retained voucher identities
+but omitted ledger allocation lines, making historical classification unnecessarily ambiguous.
+
+**Task:** Collect truthful period-scoped, complete native evidence without sampling
+or weakening byte, identity and period checks.
+
+**Action:** Use a fixed read-only voucher collection and compare native calendar
+components against validated numeric date bounds, avoiding native Date coercion.
+Fetch the ledger and inventory subcollection aliases explicitly alongside the root
+wildcard. Keep raw nested records intact and independently reject out-of-period dates.
+Validate against the live exports, including allocation amounts and ledger identities,
+instead of treating a successful XML status or record count as completeness proof.
+
+**Result:** April–October collection succeeds for all three loaded companies and
+retains the seeded vouchers' exact native allocations. Regression coverage checks
+empty periods, nested data, failed exports, company changes and invalid dates.
+The revised adapter ships in desktop 0.6.8; unsupported accounting structures remain held.
+
+## Preserve independent diagnostics under business row locks (12 October 2026)
+
+**Situation:** Validation held a workflow row with FOR UPDATE. A separate diagnostic
+transaction needed a foreign-key key-share lock on that same row, timed out, and
+discarded the diagnostic evidence it was intended to preserve across business rollback.
+
+**Task:** Retain independent audit durability without committing business work early
+or weakening serialization against operator controls.
+
+**Action:** Use FOR NO KEY UPDATE for runtime mutations of immutable run identities.
+The lock still excludes concurrent business updates and Stop while allowing the
+diagnostic foreign-key check. Add a PostgreSQL regression that records a diagnostic
+under the real business lock, rolls back the business transaction, and verifies the
+diagnostic survives with tenant isolation intact.
+
+**Result:** The reproduced timeout is resolved. Run controls and receipt regressions
+continue to pass, and live validation now retains its internal stage diagnostics.
+
+## Preserve separate tax identities through consequential writes (12 October 2026)
+
+**Situation:** Real purchase bills supplied distinct CGST and SGST amounts, while
+the adapter could represent only a single tax allocation. Collapsing those lines
+would preserve a gross total while losing the accounting meaning.
+
+**Task:** Support bounded split tax without letting old companions flatten a new
+plan or letting two conflicting candidates choose an arbitrary first write.
+
+**Action:** Extend the versioned proposal with separately evidenced company-scoped
+tax references. Resolve them atomically, enforce exact cents and distinct ledgers,
+preflight every candidate sharing an invoice identity, and hold all conflicting
+versions. Negotiate native plan protocol 2 before delivering a split plan. Recheck
+every master and verify each independent native allocation after import. Preserve
+legacy single-tax runs and existing uncertainty/reconciliation fences.
+
+**Result:** Regression tests reject invalid sums, foreign or repeated masters,
+unsupported client versions, competing splits and collapsed receipts. Live proof
+records the native outcome separately from extraction quality and operator review;
+Tally date rejection remains an external-system handoff.

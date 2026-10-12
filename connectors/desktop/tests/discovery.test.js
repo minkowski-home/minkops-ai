@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { inspectExcel, discoverTally } from "../src/discovery.js";
+import { inspectExcel } from "../src/discovery.js";
+import { readTallyReferences } from "../src/tally-references.js";
 
 test("typed Tally reference identities become exact strings and malformed wrappers fail closed", async () => {
   for (const malformed of [false, true]) {
-    const result = await discoverTally({ company: "Test", port: 9000, categories: ["company", "ledgers"], depth: "reference_data" }, {
+    const result = await readTallyReferences({ company: "Test", port: 9000, categories: ["company", "ledgers"], }, {
       request: async (_url, options) => {
         const record = options.body.includes("<TYPE>Ledger</TYPE>")
           ? `<LEDGER NAME="Supplier"><GUID TYPE="String">${malformed ? '<VALUE>bad</VALUE>' : 'ledger-guid'}</GUID><PARENT TYPE="String">Sundry Creditors</PARENT><ALTERID TYPE="Number">0017</ALTERID></LEDGER>`
@@ -66,7 +67,6 @@ test("local Excel inspection preserves off-row headers, named tables, formulas a
   s.getCell("D6").value = { formula: "C6*2", result: 236 };
   const result = await inspectExcel(
     Buffer.from(await w.xlsx.writeBuffer()),
-    "business_mappings",
   );
   assert.equal(result.sheets[0].tables[0].name, "Bills");
   assert.equal(result.sheets[0].tables[0].header_row, 5);
@@ -75,28 +75,25 @@ test("local Excel inspection preserves off-row headers, named tables, formulas a
     "Vendor",
     "Total",
   ]);
-  assert.equal(
-    result.sheets[0].preview.find((r) => r.row === 6).values[0],
-    "00017",
-  );
+  assert.ok(!result.sheets[0].preview.some(r => r.values.includes("00017")));
+  assert.deepEqual(result.sheets[0].reference_rows, []);
   assert.deepEqual(result.sheets[0].formulas, [
     { cell: "D6", formula: "C6*2" },
   ]);
   assert.ok(
     (
-      await inspectExcel(Buffer.from(await w.xlsx.writeBuffer()), "structure")
+      await inspectExcel(Buffer.from(await w.xlsx.writeBuffer()))
     ).sheets[0].preview.every((r) => r.row <= 10),
   );
 });
 
 test("Tally workflow references scope company, exclude unrelated values, and isolate failed categories", async () => {
   const sent = [];
-  const result = await discoverTally(
+  const result = await readTallyReferences(
     {
       company: "Test & Co",
       port: 9001,
       categories: ["ledgers", "stock_items"],
-      depth: "reference_data",
     },
     {
       request: async (url, options) => {
@@ -129,11 +126,10 @@ test("Tally workflow references scope company, exclude unrelated values, and iso
     ),
   );
   await assert.rejects(
-    discoverTally({
+    readTallyReferences({
       company: "Test",
       port: 9000,
       categories: ["arbitrary"],
-      depth: "structure",
     }),
   );
 });
@@ -141,12 +137,11 @@ test("Tally workflow references scope company, exclude unrelated values, and iso
 test("Tally discovery refuses unopened companies and never falls back to the active company", async () => {
   let calls = 0;
   await assert.rejects(
-    discoverTally(
+    readTallyReferences(
       {
         company: "Missing",
         port: 9000,
         categories: ["ledgers"],
-        depth: "reference_data",
       },
       {
         request: async () => {

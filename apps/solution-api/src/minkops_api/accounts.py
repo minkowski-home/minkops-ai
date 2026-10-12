@@ -92,6 +92,7 @@ class Launch(BaseModel):
     request_key: UUID
     file_ids: list[UUID] = Field(min_length=1, max_length=1000)
     catalog_id: UUID | None = None
+    destination_device_id: UUID | None = None
     config: dict = Field(default_factory=dict)
 
 
@@ -123,7 +124,11 @@ def resolve_bill(
 def launch(slug: str, body: Launch, request: Request, user: User, connection: Db):
     require_csrf(request)
     tenant, _ = tenant_access(slug, user, connection)
-    return _call(service.launch_run, connection, tenant, user, body.model_dump(mode="json"))
+    payload = body.model_dump(mode="json")
+    if payload["destination_device_id"] is None:
+        # Preserve pre-selector request hashes for retries across an upgrade.
+        payload.pop("destination_device_id")
+    return _call(service.launch_run, connection, tenant, user, payload)
 
 
 @router.get("/runs/{run_id}")

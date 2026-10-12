@@ -3,13 +3,14 @@
 from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
-from minkops_platform.run_controls import observe_task
+from minkops_platform.run_controls import observe_task, control_state
 
 
 class WorkflowRunStore:
     def candidates(self, connection):
         return connection.execute("""SELECT * FROM workflow_runs WHERE
             NOT coalesce((config->>'batch')::boolean,false)
+            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=workflow_runs.tenant_id AND t.id=workflow_runs.task_id AND t.control_state='active')
             AND (state='queued' OR (state='executing' AND updated_at < now()-interval '30 seconds'))
             AND (NOT config ? 'tally_context_job_id' OR EXISTS
                 (SELECT 1 FROM desktop_jobs j WHERE j.tenant_id=workflow_runs.tenant_id
@@ -45,7 +46,7 @@ class WorkflowRunStore:
             AND NOT coalesce((config->>'hosted_session_closed')::boolean,false)
             AND coalesce((config->>'cleanup_attempt_count')::integer,0) < 10
             AND coalesce((config->>'cleanup_attempt_at')::timestamptz,'epoch') < now()-interval '1 minute'
-            ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED""").fetchone()
+            ORDER BY updated_at LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED""").fetchone()
         if run:
             connection.execute(
                 """UPDATE workflow_runs SET config=config || jsonb_build_object('cleanup_attempt_at',now(),
@@ -69,7 +70,9 @@ class WorkflowRunStore:
 def run_for(connection, tenant_id, run_id, lock=False):
     row = connection.execute(
         "SELECT * FROM workflow_runs WHERE tenant_id=%s AND id=%s"
-        + (" FOR UPDATE" if lock else ""),
+        # Run identities never change. This still serializes business mutations
+        # while permitting the separate diagnostic transaction's FK key check.
+        + (" FOR NO KEY UPDATE" if lock else ""),
         (tenant_id, run_id),
     ).fetchone()
     if not row:
@@ -78,6 +81,8 @@ def run_for(connection, tenant_id, run_id, lock=False):
 
 
 def observe(connection, run, state, summary, progress):
+    if control_state(connection, run["tenant_id"], run["task_id"]) == "stopped":
+        return
     connection.execute(
         "UPDATE workflow_runs SET state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s",
         (state, run["tenant_id"], run["id"]),
@@ -108,4 +113,7 @@ def public_run(connection, run):
     value = {key: data for key, data in run.items() if key != "request_hash"}
     handler = get_handler(binding_for(run).handler)
     value.update(handler.public_fields(connection, run))
+    value["control_state"] = control_state(connection, run["tenant_id"], run["task_id"])
+    if value["control_state"] != "active":
+        value["state"] = value["control_state"]
     return value

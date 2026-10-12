@@ -1,0 +1,33 @@
+Minkops 0.6.9 — Windows release candidate
+12 October 2026
+
+Source Discovery setup has more compact controls and consistent spacing. Results
+summarize companies and master types with counts, search and pagination. Shared
+workflow progress shows active, completed and waiting stages, loading feedback
+and a compact current activity. Workflows support Pause, Resume and Stop.
+
+Bill Entry honors the selected review mode. Only exceptions permits supported
+clean bills to proceed; All outputs retains approval. Company-scoped native
+master references resolve evidenced aliases, script and spelling differences to
+canonical names. Uncertain classifications and genuinely missing suppliers stay
+in shared, audited attention.
+
+Supported accounting Purchase vouchers can preserve separate evidenced tax
+allocations, including CGST and SGST. Every selected master is rechecked and each
+saved allocation is verified independently. Older companions are instructed to
+update before receiving split-tax plans. Duplicate replay never adds a voucher.
+
+Discovery retains full native master records and explicit ledger/inventory
+history allocations, with inclusive voucher-date filtering. Tally date rejection
+is distinguished from an uncertain write; imports are never automatically resent.
+
+Inventory, bill/payment/cost allocations and statutory filing readiness remain
+outside this bounded accounting contract. AI matching can still require review;
+manual accounting corrections belong in Tally or the original system.
+
+Windows 10/11 x64. Windows 11 installed upgrade verified; Windows 10 device testing
+remains deferred. This release candidate is unsigned; Windows may display a
+publisher warning. It opens https://app.minkops.com using your existing profile.
+
+SHA-256:
+9a7fbe29ba14a207c0257323a7aeabba9800e512d03e60bfae9c27b8bb93d878

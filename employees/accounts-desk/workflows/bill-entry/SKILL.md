@@ -55,11 +55,23 @@ capabilities. Look up actual historical voucher records for unclear handwriting
 or stock-item names. History supplies candidates, never replacement amounts or
 tax evidence. Unsupported inventory/allocation structures require handoff.
 
+Use master_lookup_path when supplied: its company-scoped type/GUID/name index
+points to candidate records by file path and zero-based offset. Native statutory
+and default definitions remain available but are not supplier accounts. Never
+merge companies or arbitrarily select among same-name candidates. Collapsed
+identical records retain source_record_indexes for raw-export provenance; older
+manifests without this index retain their original lookup files.
+
 Company mode is locked or infer. Locked mode uses the user-selected company GUID
 for every bill; contradictory buyer evidence requires handoff. Infer mode may
 choose any discovered company using buyer identity and evidenced client context;
 a shared supplier name alone is insufficient. Save company_guid and explain the
 selection in company_evidence on every proposed record. Ambiguity is unresolved.
+When master_selection_version is 1, select ledger_refs identities in master_refs
+with evidence; the backend supplies canonical names before validation and writes.
+Use full masters, aliases, identifiers and relevant voucher history to recognize
+the same supplier across spelling, spacing, scan quality and language differences.
+A resolved formatting difference does not require a manual decision.
 Resolve logical buyer identity using full company masters and confirmed context.
 Allow minor spelling, spacing, punctuation, legal-suffix and evidenced trading-name
 differences when matching GSTIN or other corroborating identity evidence uniquely

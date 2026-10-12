@@ -42,7 +42,11 @@ class SchemaContextTests(unittest.TestCase):
             self.assertEqual(len({row['task_id'] for row in children}),1)
 
     def test_metadata_only_catalog_requires_complete_rediscovery(self):
-        discovery = self.tally_discovery("company-1", schema=True)
+        discovery = self.tally_discovery("company-1")
+        from psycopg.types.json import Jsonb
+        with psycopg.connect(URL) as connection:
+            old = {'format_version': '1', 'partial': False, 'sources': [{'tool': 'tally', 'snapshot': {'company': 'Test', 'port': 9000, 'schema_tables': [], 'collections': []}}]}
+            connection.execute('UPDATE discovery_runs SET catalog=%s WHERE id=%s', (Jsonb(old), discovery))
         response = self.client.post(
             self.base + "/runs",
             headers=self.csrf,

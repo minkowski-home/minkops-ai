@@ -58,6 +58,8 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
     from .tally_writes import complete_run
 
     run = run_for(connection, tenant["id"], run_id, True)
+    from minkops_platform.run_controls import require_active
+    require_active(connection, tenant["id"], run["task_id"])
     if run["actor_id"] != user["id"]:
         raise ServiceError("forbidden", "Only this run's operator can resolve its bills.")
     if run["state"] != "review" or run["workflow_key"] != "bill-entry":
@@ -154,6 +156,7 @@ def reconcile_once(url):
     with psycopg.connect(url, row_factory=dict_row) as connection:
         parents = connection.execute("""SELECT * FROM account_runs WHERE
             config->>'batch'='true' AND state IN ('queued','executing')
+            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=account_runs.tenant_id AND t.id=account_runs.task_id AND t.control_state='active')
             FOR UPDATE SKIP LOCKED""").fetchall()
         for parent in parents:
             children = connection.execute(
@@ -199,11 +202,16 @@ def reconcile_once(url):
                         }
                     )
                 else:
-                    proposal = child["result"]
+                    proposal = copy.deepcopy(child["result"])
+                    # A child's findings concern its one selected input, not
+                    # unrelated siblings. Preserve them as blocking evidence on
+                    # its records; client-wide policy is reapplied below.
+                    for record in proposal["records"]:
+                        record["findings"] = list(dict.fromkeys([
+                            *record["findings"], *proposal["findings"]]))
                     result["records"].extend(previous or proposal["records"])
                     if previous and file_id == parent["config"].get("retry_file_id"):
                         result["records"].extend(proposal["records"])
-                    result["findings"].extend(proposal["findings"])
                     result["unresolved"].extend(proposal.get("unresolved", []))
             # A single-input run also becomes a batch only when retrying a held
             # extraction. Retain unrelated outcomes not represented by children.
@@ -238,3 +246,7 @@ def reconcile_once(url):
                 f"{pending} bill entries ready; {len(result['unresolved'])} bills need attention.",
                 70,
             )
+            if parent["config"].get("tally_target"):
+                from .tally_writes import prepare_automatic
+
+                prepare_automatic(connection, parent, result)

@@ -29,10 +29,11 @@ import {
   tallyProbe,
   inspectExcel,
   excelSchemaBytes,
-  discoverTally,
+  readTallyReferences,
   discoverClientContext,
   saveDiscoveryPackage,
   recoveringTallyRequest,
+  ensureTallyDiscovery,
   inspectTallyAttention,
   tallyCompanyNumber,
   captureTallyProcess,
@@ -43,7 +44,7 @@ import {
   commitTallyBill,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
-import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
+import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
 import {
   trustedOrigin,
@@ -147,11 +148,13 @@ function startWorker() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
+        "X-Minkops-Plan-Version": "2",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok) {
-      const error = new Error("Companion request failed.");
+      const body = await response.json().catch(() => null);
+      const error = new Error(typeof body?.detail === "string" ? body.detail.slice(0,300) : "Companion request failed.");
       error.status = response.status;
       throw error;
     }
@@ -162,6 +165,7 @@ function startWorker() {
     execute: async (job) => {
       if (state.device !== identity) throw new Error("PC connection changed.");
       const tallyRequest = recoveringTallyRequest({
+        preserveCompanyScope: job.operation === "sources.discover",
         capture: async () => {
           const observed = await captureTallyProcess().catch(() => null);
           if (observed) {
@@ -185,6 +189,7 @@ function startWorker() {
           const record = {
             ...diagnostic,
             observed: undefined,
+            company_scope: diagnostic.observed?.company_scope,
             job_id: job.id,
             collected_at: new Date().toISOString(),
             windows_events: await tallyCrashEvents(),
@@ -212,23 +217,26 @@ function startWorker() {
           inventory,
           inspectExcel,
           excelSchemaBytes,
-          discoverTally: (config, options) =>
-            discoverTally(config, { ...options, request: tallyRequest }),
-          discoverClientContext: (config, options) =>
-            discoverClientContext(config, {
+          discoverClientContext: async (config, options) => {
+            const startup = await ensureTallyDiscovery(config);
+            state.tally_startup = startup;
+            await persist();
+            return discoverClientContext(config, {
               ...options,
               request: tallyRequest,
-            }),
-          onProgress: async (source_key, status, category = null) => {
+            });
+          },
+          onProgress: async (source_key, status, category = null, progress = null) => {
             try {
-              await request(`/api/desktop/worker/jobs/${job.id}/progress`, {
+              await reportDiscoveryProgress(() => request(`/api/desktop/worker/jobs/${job.id}/progress`, {
                 claim_token: job.claim_token,
                 source_key,
                 status,
                 category,
-              });
+                ...(progress ? { progress } : {}),
+              }));
             } catch (error) {
-              if ([401, 404, 409].includes(error.status)) throw error;
+              if (error.code === "TASK_STOPPED" || [401, 404, 409].includes(error.status)) throw error;
             }
           },
         });
@@ -277,7 +285,7 @@ function startWorker() {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        return discoverTally(plan, { request: tallyRequest });
+        return readTallyReferences(plan, { request: tallyRequest });
       }
       if (job.operation === "tally.save") {
         const plan = await request(
@@ -287,10 +295,15 @@ function startWorker() {
           return await commitTallyBill(plan, { request: tallyRequest });
         } catch (error) {
           if (!error.tallyAmbiguous) throw error;
-          return commitTallyBill(plan, {
+          const reconciled = await commitTallyBill(plan, {
             request: tallyRequest,
             reconciliationOnly: true,
           });
+          if (reconciled.outcome === "attention" && error.tallyLineError)
+            reconciled.message = /date/i.test(error.tallyLineError)
+              ? "Tally rejected the voucher date. Check the source bill and Tally date settings, then use Resume saves."
+              : "Tally rejected this bill. Check its voucher settings in Tally, then use Resume saves.";
+          return reconciled;
         }
       }
       if (job.operation !== "accounts.save")

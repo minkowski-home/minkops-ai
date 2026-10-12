@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
+import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 
 interface Item {
   id: string;
@@ -26,24 +27,26 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
     [notice, setNotice] = useState("");
   const base = `/api/tenants/${tenant}/attention`;
   const query = `?status=${status}&offset=${offset}&group=${group}&sort=${sort}`;
+  const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
+    setLoading(true);
     const poll = async () => {
       try {
         const value = await api<Item[]>(base + query);
-        if (active) setItems(value);
+        if (active) { setItems(value); setLoadError(""); }
       } catch {
-        if (active) setNotice("Could not load attention items");
+        if (active) setLoadError("Could not refresh attention items. Retrying automatically.");
       }
-      if (active) timer = setTimeout(() => void poll(), 5000);
+      if (active) { setLoading(false); timer = setTimeout(() => void poll(), 5000); }
     };
     void poll();
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [base, query]);
+  }, [base, query, attempt]);
   async function action(path: string) {
     if (!user) return;
     setBusy(true);
@@ -75,13 +78,15 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
   return (
     <section className="route-screen">
       <h2>Attention items</h2>
+      {loading && <LoadingIndicator>Loading attention items…</LoadingIndicator>}
+      {loadError && <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>}
       <div className="accounts-toolbar">
         <button
           className="button button-ghost"
           disabled={busy}
           onClick={() => void action("/refresh")}
         >
-          Refresh pending items
+          {busy && <Spinner />}Refresh pending items
         </button>
         <label className="config-field">
           Status
@@ -164,7 +169,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
             ))}
         </section>
       ))}
-      {!items.length && <p>No items</p>}
+      {!items.length && !loading && !loadError && <p className="quiet-state">No items</p>}
       <button
         className="button button-ghost"
         disabled={busy || offset === 0}

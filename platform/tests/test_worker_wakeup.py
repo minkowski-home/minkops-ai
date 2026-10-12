@@ -75,6 +75,24 @@ class WorkerWakeupTests(unittest.TestCase):
                 c.execute("SELECT generation=acknowledged FROM worker_wakeup").fetchone()[0]
             )
 
+    def test_runner_publishes_lease_before_submitting_any_lane(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from unittest.mock import patch
+        from minkops_platform.worker_hosting import drain
+
+        testcase = self
+
+        class ObservedPool(ThreadPoolExecutor):
+            def submit(self, fn, *args, **kwargs):
+                with psycopg.connect(testcase.url) as c:
+                    testcase.assertIsNotNone(
+                        c.execute("SELECT lease_until FROM worker_wakeup").fetchone()[0]
+                    )
+                return super().submit(fn, *args, **kwargs)
+
+        with patch("minkops_platform.worker_hosting.ThreadPoolExecutor", ObservedPool):
+            self.assertEqual(drain(self.url, work=lambda _: False, cleanup=lambda _: False), 0)
+
     def test_drain_replenishes_idle_lanes_without_waiting_for_slow_sibling(self):
         from minkops_platform.worker_hosting import drain
 

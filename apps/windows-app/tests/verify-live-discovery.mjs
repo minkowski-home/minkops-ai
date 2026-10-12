@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   inventory,
   inspectExcel,
-  discoverTally,
+  discoverClientContext,
 } from "../../../connectors/desktop/src/index.js";
 import { collectSources } from "../../../platform/desktop-runtime/src/discovery.js";
 const origin = process.env.MINKOPS_SMOKE_URL ?? "http://127.0.0.1:8117";
@@ -87,7 +87,7 @@ async function refresh(cfg) {
     },
     inventory,
     inspectExcel,
-    discoverTally,
+    discoverClientContext,
     onProgress: (source_key, status, category = null) =>
       api(
         `/api/desktop/worker/jobs/${claim.id}/progress`,

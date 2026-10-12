@@ -90,6 +90,14 @@ button { cursor: pointer; }
 .switch-row input { width: 18px; height: 18px; margin: 0; accent-color: var(--action-primary-bg); }
 .config-panel > .button { justify-self: start; }
 .form-message { overflow-wrap: anywhere; color: var(--text-secondary); font: var(--type-body-sm); }
+.loading-feedback { display: flex; align-items: center; justify-content: inherit; gap: 10px; min-height: 40px; color: var(--text-secondary); font: var(--type-body-sm); }
+.retry-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.config-panel > .config-field { max-width: 360px; width: 100%; }
+.button { gap: 8px; }
+.run-controls { margin: 0 0 var(--sp-5); }
+.run-controls small { flex: 1; min-width: 200px; color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.5; }
+.status--stopped, .task-dot--stopped { color: var(--text-muted); }
+.task-dot--paused { background: var(--status-warn); }
 .related-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; border-bottom: var(--rule); color: var(--text-primary); font: var(--type-label); }
 .related-row small { display: block; margin-top: 4px; color: var(--text-muted); font: var(--type-body-sm); }
 
@@ -157,11 +165,11 @@ button { cursor: pointer; }
   .console-sidebar { position: sticky; top: 0; z-index: 5; flex-direction: row; align-items: center; border-right: 0; border-bottom: var(--rule); }
   .console-brand-row { width: auto; padding: 0 12px; border: 0; }
   .console-wordmark span:last-child, .sidebar-collapse, .console-account-copy, .human-avatar { display: none; }
-  .console-nav { display: flex; flex: 1; justify-content: center; gap: 0; padding: 0; }
-  .console-nav-item { justify-content: center; min-width: 50px; min-height: 52px; padding: 0 9px; border-radius: 0; }
+  .console-nav { display: flex; flex: 1; min-width: 0; justify-content: center; gap: 0; padding: 0; }
+  .console-nav-item { flex: 1; justify-content: center; min-width: 36px; min-height: 52px; padding: 0 6px; border-radius: 0; }
   .console-nav-item span { display: none; }
   .console-nav-item b { position: absolute; margin: -27px 0 0 28px; }
-  .console-account { margin: 0; padding: 0 9px; border: 0; }
+  .console-account { flex-shrink: 0; margin: 0; padding: 0 9px; border: 0; }
   .account-logout, .is-collapsed .account-logout { display: grid; margin: 0; }
   .console-main { min-height: calc(100dvh - 52px); }
   .console-view { overflow: visible; }

@@ -298,13 +298,19 @@ def _bound_source(connection, device, source_id):
     return source
 
 
-def _save_spec(connection, device, payload, *, pending=True):
+def _save_spec(connection, device, payload, *, pending=True, underway=False):
     run = connection.execute(
         "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
         (device["tenant_id"], payload["run_id"]),
     ).fetchone()
     if not run or run["actor_id"] != device["owner_id"]:
         raise ServiceError("not_found", "Approved run not found for this account.")
+    if pending and not underway:
+        from .run_controls import require_active
+        require_active(connection, device["tenant_id"], run["task_id"])
+    selected = run["config"].get("destination_device_id")
+    if selected and selected != str(device["id"]):
+        raise ServiceError("conflict", "This approved save belongs to a different destination PC.")
     spec = connection.execute(
         "SELECT * FROM account_writes WHERE tenant_id=%s AND run_id=%s AND id=%s FOR UPDATE",
         (device["tenant_id"], payload["run_id"], payload["write_id"]),
@@ -447,6 +453,7 @@ def claim(connection, device):
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
            (state='executing' AND operation NOT IN ('accounts.save','tally.save','attention.supplier') AND lease_until<now()))
+           AND (operation='attention.refresh' OR EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id AND t.control_state='active'))
            ORDER BY CASE WHEN operation='tally.save' THEN
              (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
              ELSE '' END, created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
@@ -487,8 +494,11 @@ def _claimed_job(connection, device, job_id, claim_token):
     return job
 
 
-def plan(connection, device, job_id, claim_token):
+def plan(connection, device, job_id, claim_token, plan_version=1):
     job = _claimed_job(connection, device, job_id, claim_token)
+    from .run_controls import control_state
+    if job["operation"] != "attention.refresh" and control_state(connection, device["tenant_id"], job["task_id"]) == "stopped":
+        raise ServiceError("conflict", "This task was stopped before the operation began.")
     if job["state"] == "executing" and job["operation"].startswith("attention."):
         from .attention import plan as attention_plan
         return attention_plan(connection, device, job)
@@ -504,7 +514,9 @@ def plan(connection, device, job_id, claim_token):
         from .accounts.bills import recheck_target
         from .accounts.tally_writes import spec
 
-        run, write = spec(connection, device, job["input"])
+        run, write = spec(connection, device, job["input"], underway=True)
+        if write["plan"].get("format_version", 1) > plan_version:
+            raise ServiceError("conflict", "Update Minkops to version 0.6.9 or later to save separate tax allocations.")
         recheck_target(
             connection,
             {"id": device["tenant_id"]},
@@ -514,7 +526,7 @@ def plan(connection, device, job_id, claim_token):
         return write["plan"]
     if job["state"] != "executing" or job["operation"] != "accounts.save":
         raise ServiceError("conflict", "This save is no longer running.")
-    _, spec = _save_spec(connection, device, job["input"])
+    _, spec = _save_spec(connection, device, job["input"], underway=True)
     return {
         "source_id": spec["source_id"],
         "path": spec["path"],

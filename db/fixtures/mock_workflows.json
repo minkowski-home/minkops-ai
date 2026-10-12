@@ -1,7 +1,6 @@
 {
   "source-discovery": {
     "destination_mode": "tally",
-    "discovery_depth": "business_mappings",
     "max_files": 100
   },
   "bill-entry": {

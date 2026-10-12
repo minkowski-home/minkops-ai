@@ -139,6 +139,10 @@ def work_once(url, store: RunStore, process):
                 process(connection, current)
             except Exception as error:
                 connection.rollback()
+                from minkops_platform.errors import ServiceError
+                from minkops_platform.run_controls import control_state
+                if isinstance(error, ServiceError) and control_state(connection, run["tenant_id"], run["task_id"]) != "active":
+                    continue
                 record(
                     connection,
                     run,

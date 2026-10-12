@@ -140,8 +140,43 @@ class WorkflowArchitectureTests(unittest.TestCase):
         self.assertEqual(approved.json()["state"], "completed")
         self.assertEqual(approved.json()["writes"], [])
 
+    def test_future_workflow_destination_is_authorized_and_not_a_tool_grant(self):
+        root, key = self.temporary_definition("skill.proposal")
+        pc = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
+            json={"name": "Future workflow PC", "installation_id": str(accounts.uuid.uuid4())}).json()
+        with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
+            run, body = self.launch(key, destination_device_id=pc["id"])
+            self.assertEqual(run["config"]["destination_device_id"], pc["id"])
+            self.assertEqual({grant["capability"] for grant in run["config"]["authorized_bindings"]}, {"files.snapshot"})
+            retry = self.client.post(self.base + "/runs", headers=self.csrf, json=body)
+            self.assertEqual(retry.json()["id"], run["id"])
+            changed = {**body, "destination_device_id": str(accounts.uuid.uuid4())}
+            conflict = self.client.post(self.base + "/runs", headers=self.csrf, json=changed)
+            self.assertEqual(conflict.status_code, 409, conflict.text)
+            changed["request_key"] = str(accounts.uuid.uuid4())
+            unknown = self.client.post(self.base + "/runs", headers=self.csrf, json=changed)
+            self.assertEqual(unknown.status_code, 404, unknown.text)
+            changed["destination_device_id"] = pc["id"]
+            self.client.delete(f"/api/tenants/mock-tenant/desktop/devices/{pc['id']}", headers=self.csrf)
+            revoked = self.client.post(self.base + "/runs", headers=self.csrf, json=changed)
+            self.assertEqual(revoked.status_code, 409, revoked.text)
+
+    def test_optional_destination_preserves_legacy_launch_fingerprint(self):
+        import hashlib
+
+        root, key = self.temporary_definition("skill.proposal")
+        with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
+            run, body = self.launch(key)
+            expected = {**body, "catalog_id": None, "config": {}}
+            with psycopg.connect(URL) as connection:
+                fingerprint = connection.execute("SELECT request_hash FROM workflow_runs WHERE id=%s", (run["id"],)).fetchone()[0]
+            self.assertEqual(fingerprint, hashlib.sha256(json.dumps(expected, sort_keys=True).encode()).hexdigest())
+            response = self.client.post(self.base + "/runs", headers=self.csrf, json={**body, "destination_device_id": None})
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertEqual(response.json()["id"], run["id"])
+
     def test_request_cannot_inject_a_handler_or_resource_grant(self):
-        for field in ("runtime_binding", "authorized_bindings", "execution_snapshot"):
+        for field in ("runtime_binding", "authorized_bindings", "execution_snapshot", "destination_device_id"):
             response = self.client.post(
                 self.base + "/runs",
                 headers=self.csrf,

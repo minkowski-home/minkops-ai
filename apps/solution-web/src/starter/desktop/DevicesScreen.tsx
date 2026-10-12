@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { desktopBridge, type DesktopStatus } from "./bridge";
+import { LoadingIndicator, RetryMessage } from "../components/Feedback";
 
 interface Device {
   id: string;
@@ -25,7 +26,9 @@ export function DevicesScreen({
   const [devices, setDevices] = useState<Device[]>([]);
   const [native, setNative] = useState<DesktopStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
   const refresh = useCallback(async () => {
     const [loaded, status] = await Promise.all([
       api<Device[]>(`/api/tenants/${tenant}/desktop/devices`),
@@ -36,20 +39,22 @@ export function DevicesScreen({
   }, [tenant]);
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        if (active) await refresh();
+        if (active) { await refresh(); setLoadError(""); }
       } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : "Could not load your PCs.");
+        if (active) setLoadError(e instanceof Error ? e.message : "Could not load your PCs.");
+      } finally {
+        if (active) { setLoading(false); timer = setTimeout(() => void poll(), 5000); }
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), 5000);
     return () => {
       active = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
-  }, [refresh]);
+  }, [refresh, attempt]);
   async function action(work: () => Promise<unknown>) {
     setBusy(true);
     setError("");
@@ -72,10 +77,12 @@ export function DevicesScreen({
           <p className="eyebrow">Connected PCs</p>
           <h2>Your PCs</h2>
           <p>
-            Keep Minkops running on a connected PC to work with its Tally and local files.
+            Keep Minkops running on a connected PC to run workflows with its connected tools and local files.
           </p>
         </div>
       </header>
+      {loadError && <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>}
+      {loading && <LoadingIndicator>Loading connected PCs…</LoadingIndicator>}
       {native ? (
         <article className="device-connect-card">
           <div>
@@ -123,15 +130,21 @@ export function DevicesScreen({
               </div>
               <p>
                 {online
-                  ? "Ready to check Tally on this PC."
+                  ? "Ready for local workflow tasks."
                   : expired
                     ? "Open the desktop app to reconnect this PC."
                     : "Open Minkops on this PC. Queued work starts when it reconnects."}
               </p>
-              <button
-                className="button button-primary"
-                disabled={busy || expired}
-                onClick={() =>
+              <button className="button button-primary" disabled={busy || expired}
+                aria-expanded={checking === device.id} aria-controls={`connections-${device.id}`}
+                onClick={() => setChecking(current => current === device.id ? null : device.id)}>Check connections</button>
+              {checking === device.id && <section id={`connections-${device.id}`} className="device-connections" aria-label={`Connections on ${device.name}`}>
+                <h4>Tools on {device.name}</h4>
+                <p>Choose a tool to check for a workflow. Checks read connection status without changing business data.</p>
+                {!online && <p role="status">This PC is offline. The check waits until it reconnects.</p>}
+                <h5>Tally · Accounts workflows</h5>
+                <p>Check the existing Tally connection on this PC.</p>
+                <button className="button button-ghost" disabled={busy || expired} onClick={() =>
                   void action(async () => {
                     const job = await api<{ task_id: string }>(
                       `/api/tenants/${tenant}/desktop/jobs`,
@@ -148,10 +161,8 @@ export function DevicesScreen({
                     );
                     navigate(`/${routeSlug}/tasks/${job.task_id}`);
                   })
-                }
-              >
-                Check Tally
-              </button>
+                }>Check Tally connection</button>
+              </section>}
               <button
                 className="button button-ghost"
                 disabled={busy}

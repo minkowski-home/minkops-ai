@@ -10,10 +10,11 @@ import Login, { InvitePage, JoinPage, SignupPage, VerifyPage } from "./pages/Log
 import { ThemeProvider } from "./theme/ThemeContext";
 import { DevicesScreen } from './desktop/DevicesScreen';
 import { Attention } from './workspace/Attention';
+import { LoadingIndicator } from './components/Feedback';
 
 function HomeRedirect() {
   const { user, isLoading } = useAuth();
-  if (isLoading) return <main className="loading-state">Opening Minkops…</main>;
+  if (isLoading) return <main className="loading-state"><LoadingIndicator>Opening Minkops…</LoadingIndicator></main>;
   if (!user) return <Navigate to="/login" replace />;
   if (user.memberships[0]) return <Navigate to={`/${user.memberships[0].slug}/dashboard`} replace />;
   if (user.is_platform_admin) return <Navigate to="/pr-infra/dashboard" replace />;
@@ -54,11 +55,12 @@ function Console() {
     return () => clearInterval(timer);
   }, [user, refreshWorkspace, location.pathname]);
 
-  if (isLoading) return <main className="loading-state">Opening Minkops…</main>;
+  if (isLoading) return <main className="loading-state"><LoadingIndicator>Opening Minkops…</LoadingIndicator></main>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
   if (error) return <main className="access-state"><h1>Workspace unavailable</h1><p>{error}</p>
+    <button className="button button-ghost" onClick={() => void refreshWorkspace()}>Retry loading</button>
     <Link className="button button-primary" to="/join">Request access</Link></main>;
-  if (!workspace) return <main className="loading-state">Loading workspace…</main>;
+  if (!workspace) return <main className="loading-state"><LoadingIndicator>Loading workspace…</LoadingIndicator></main>;
 
   function runTest(workflow: Workflow) {
     setWorkflowError("");
