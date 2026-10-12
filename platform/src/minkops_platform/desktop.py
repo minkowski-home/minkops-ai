@@ -494,7 +494,7 @@ def _claimed_job(connection, device, job_id, claim_token):
     return job
 
 
-def plan(connection, device, job_id, claim_token):
+def plan(connection, device, job_id, claim_token, plan_version=1):
     job = _claimed_job(connection, device, job_id, claim_token)
     from .run_controls import control_state
     if job["operation"] != "attention.refresh" and control_state(connection, device["tenant_id"], job["task_id"]) == "stopped":
@@ -515,6 +515,8 @@ def plan(connection, device, job_id, claim_token):
         from .accounts.tally_writes import spec
 
         run, write = spec(connection, device, job["input"], underway=True)
+        if write["plan"].get("format_version", 1) > plan_version:
+            raise ServiceError("conflict", "Update Minkops to version 0.6.9 or later to save separate tax allocations.")
         recheck_target(
             connection,
             {"id": device["tenant_id"]},

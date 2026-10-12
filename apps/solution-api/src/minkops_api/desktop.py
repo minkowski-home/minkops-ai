@@ -4,7 +4,7 @@ import json
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from minkops_platform import desktop
 from minkops_platform.errors import ServiceError
 from pydantic import BaseModel, ConfigDict, Field
@@ -139,5 +139,6 @@ async def finish(job_id: UUID, request: Request, device: Device, connection: Db)
 
 
 @router.get("/api/desktop/worker/jobs/{job_id}/plan")
-def plan(job_id: UUID, claim_token: UUID, device: Device, connection: Db):
-    return call(desktop.plan, connection, device, job_id, claim_token)
+def plan(job_id: UUID, claim_token: UUID, device: Device, connection: Db,
+         plan_version: Annotated[int, Header(alias="X-Minkops-Plan-Version", ge=1, le=100)] = 1):
+    return call(desktop.plan, connection, device, job_id, claim_token, plan_version)

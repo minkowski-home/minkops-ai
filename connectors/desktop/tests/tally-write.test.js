@@ -42,6 +42,36 @@ test("lost acknowledgement replay reads existing bill and performs no second imp
   assert.equal(io.calls.length, 1);
 });
 
+test("split tax rejects unbalanced or duplicate allocations before any native call", async () => {
+  for (const allocations of [
+    [{ledger:'CGST',amount:8},{ledger:'SGST',amount:9}],
+    [{ledger:'CGST',amount:9},{ledger:'CGST',amount:9}],
+    [{ledger:'CGST',amount:-9},{ledger:'SGST',amount:27}],
+  ]) {
+    const io=fake([]);
+    await assert.rejects(commitTallyBill({...plan,format_version:2,references:{company_guid:'company',ledgers:{}},data:{...data,tax_ledger:null},tax_allocations:allocations},io));
+    assert.equal(io.calls.length,0);
+  }
+});
+
+test("split tax rechecks each master, imports separate lines and verifies all amounts on replay", async () => {
+  const names=['Supplier','Purchases','CGST','SGST'];
+  const references={company_guid:'company-guid',ledgers:Object.fromEntries(names.map(name=>[name,{GUID:name+'-guid',PARENT:'Group',ALTERID:'12'}]))};
+  const refs=[exportReply(['<COMPANY NAME="Test"/>']),exportReply(['<COMPANY NAME="Test"><GUID>company-guid</GUID></COMPANY>']),
+    exportReply(names.map(name=>`<LEDGER NAME="${name}"><GUID>${name}-guid</GUID><PARENT>Group</PARENT><ALTERID>12</ALTERID></LEDGER>`))];
+  const splitVoucher=voucher().replace('<LEDGERNAME>Tax</LEDGERNAME><AMOUNT>-18</AMOUNT>',
+    '<LEDGERNAME>CGST</LEDGERNAME><AMOUNT>-9</AMOUNT></ALLLEDGERENTRIES.LIST><ALLLEDGERENTRIES.LIST><LEDGERNAME>SGST</LEDGERNAME><AMOUNT>-9</AMOUNT>');
+  const approved={...plan,format_version:2,references,data:{...data,tax_ledger:null},tax_allocations:[{ledger:'CGST',amount:9},{ledger:'SGST',amount:9}]};
+  const io=fake([...refs,exportReply(),'<RESPONSE><CREATED>1</CREATED><ERRORS>0</ERRORS></RESPONSE>',exportReply([splitVoucher])]);
+  assert.equal((await commitTallyBill(approved,io)).outcome,'saved');
+  assert.ok(io.calls[4].includes('<LEDGERNAME>CGST</LEDGERNAME>'));
+  assert.ok(io.calls[4].includes('<LEDGERNAME>SGST</LEDGERNAME>'));
+  const replay=fake([...refs,exportReply([splitVoucher])]);
+  assert.equal((await commitTallyBill(approved,replay)).outcome,'duplicate');
+  assert.ok(replay.calls.every(body=>!body.includes('Import Data')));
+  await assert.rejects(commitTallyBill(approved,fake([...refs,exportReply(),'<RESPONSE><CREATED>1</CREATED><ERRORS>0</ERRORS></RESPONSE>',exportReply([voucher()])])),/readback differs/);
+});
+
 test("amounts beyond exact native cents are rejected before touching Tally", async () => {
   const io = fake([]);
   await assert.rejects(
@@ -187,6 +217,7 @@ test('post-crash reconciliation cannot import a missing bill or repeat an applie
     const io=fake([exportReply(existing?[voucher()]:[])]);
     const result=await commitTallyBill(plan,{...io,reconciliationOnly:true});
     assert.equal(result.outcome,existing?'duplicate':'attention');
+    if (!existing) assert.doesNotMatch(result.message, /restarted/i);
     assert.equal(io.calls.length,1);
     assert.ok(!io.calls.some(body=>body.includes('Import Data')));
   }

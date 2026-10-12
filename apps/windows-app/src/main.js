@@ -148,11 +148,13 @@ function startWorker() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
+        "X-Minkops-Plan-Version": "2",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok) {
-      const error = new Error("Companion request failed.");
+      const body = await response.json().catch(() => null);
+      const error = new Error(typeof body?.detail === "string" ? body.detail.slice(0,300) : "Companion request failed.");
       error.status = response.status;
       throw error;
     }
@@ -293,10 +295,15 @@ function startWorker() {
           return await commitTallyBill(plan, { request: tallyRequest });
         } catch (error) {
           if (!error.tallyAmbiguous) throw error;
-          return commitTallyBill(plan, {
+          const reconciled = await commitTallyBill(plan, {
             request: tallyRequest,
             reconciliationOnly: true,
           });
+          if (reconciled.outcome === "attention" && error.tallyLineError)
+            reconciled.message = /date/i.test(error.tallyLineError)
+              ? "Tally rejected the voucher date. Check the source bill and Tally date settings, then use Resume saves."
+              : "Tally rejected this bill. Check its voucher settings in Tally, then use Resume saves.";
+          return reconciled;
         }
       }
       if (job.operation !== "accounts.save")

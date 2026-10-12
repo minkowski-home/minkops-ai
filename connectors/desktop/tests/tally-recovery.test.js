@@ -311,3 +311,21 @@ test("JSON failure responses are diagnosed without replay", async () => {
   assert.equal(attempts, 1);
   assert.equal(diagnostics, 1);
 });
+
+test("a rejected import retains its reason without claiming a process restart", async () => {
+  let attempts = 0, restarts = 0;
+  const request = recoveringTallyRequest({
+    request: async () => {
+      attempts++;
+      return new Response('<RESPONSE><ERRORS>1</ERRORS><LINEERROR>Voucher date is missing</LINEERROR></RESPONSE>');
+    },
+    capture: async () => ({exe: "known"}),
+    isRunning: async () => true,
+    restart: async () => { restarts++; },
+    diagnose: async () => {},
+  });
+  await assert.rejects(request("http://127.0.0.1:9000", {body: '<TALLYREQUEST>Import Data</TALLYREQUEST>'}),
+    error => error.tallyAmbiguous === true && error.tallyLineError === 'Voucher date is missing');
+  assert.equal(attempts, 1);
+  assert.equal(restarts, 0);
+});

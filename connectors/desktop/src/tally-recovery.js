@@ -318,6 +318,7 @@ export function recoveringTallyRequest({
           "Tally write outcome is unknown. Reconcile the approved bill before another write.",
         );
         ambiguous.tallyAmbiguous = true;
+        ambiguous.tallyLineError = error.tallyLineError;
         throw ambiguous;
       }
       throw error;
