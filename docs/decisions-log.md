@@ -1385,3 +1385,14 @@ verified outputs and completed-turn recovery; their total times were 50.8s and
 36.5s. These are capability checks, not customer batch benchmarks. Production
 rollout and measured customer latency remain separate; Cloud Run's initial startup
 and bill reasoning still contribute to elapsed time.
+
+
+### 2026-10-12 — Consistent workflow configuration and truthful outcomes
+
+**Situation:** Workflow-specific launch forms and a generic settings panel exposed overlapping controls with different state lifetimes. Tally approval copy contradicted exception-only execution, and findings could conceal verified saves.
+
+**Task:** Make the frontend reflect durable execution semantics without changing accounting rules or destination selection.
+
+**Action:** Consolidated editable defaults into a shared run-options component, kept schema-declared defaults separate from resource selections, isolated workflow administration, and made previous-run reuse explicit. Save outcomes take precedence over findings, with attention linked separately. Added regression coverage for default persistence boundaries, failed saves, role restrictions, resource routing and responsive layouts.
+
+**Result:** Run options have one visible home; saving defaults never changes availability or an executing run. Discovery identifies run-only options explicitly. Verification and attention remain separate, and displayed wall time derives from recorded timestamps rather than estimates.

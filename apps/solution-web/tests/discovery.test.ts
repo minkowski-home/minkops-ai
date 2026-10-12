@@ -63,7 +63,7 @@ test("progress distinguishes PC wait, measured collection, hosted work, review a
   const interpreting = discoveryProgress(run({ catalog, state: "executing" }));
   assert.equal(interpreting.current, 1);
   assert.equal(interpreting.percent, null, "AI duration is unknown");
-  assert.equal(interpreting.activity, "Checking context and mappings");
+  assert.equal(interpreting.activity, "Source collection finished. Analyzing client context and mappings before review.");
   assert.equal(discoveryProgress(run({ catalog, state: "review" })).states[2], "attention");
   assert.equal(discoveryProgress(run({ catalog, state: "completed", ready: true })).percent, 100);
 });

@@ -1,3 +1,4 @@
+import { billOutcome } from "../workflows/runSettings";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
@@ -111,7 +112,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
         )
       );
     } catch {
-      setError("Action unavailable. Use Do nothing.");
+      setError("Could not complete this action. Check the current outcome before trying again.");
     } finally {
       setBusy(false);
     }
@@ -195,11 +196,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
                 `${line.ledger ?? "Pending ledger"} · ${new Intl.NumberFormat("en-IN").format(line.amount)}`).join(" · ")}</p>}
               <span role="status">
                 {" "}
-                {missingSupplier
-                  ? "Missing supplier"
-                  : needsAttention
-                    ? "Needs review"
-                    : (r.status ?? "Ready")}
+                {missingSupplier && pending ? "Missing supplier" : billOutcome(r.status, needsAttention)}
               </span>
               {pending && run.state === "review" && ownsRun && (
                 <div className="accounts-toolbar">

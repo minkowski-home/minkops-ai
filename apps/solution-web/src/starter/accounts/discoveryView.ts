@@ -152,7 +152,7 @@ export function discoveryProgress(run: DiscoveryRun): TaskProgressView {
   const latest = run.observations.at(-1);
   if (["paused", "stopped"].includes(run.state)) {
     const current = run.catalog && !run.catalog.partial ? 2 : run.observations.length ? 1 : 0;
-    return { stages: ["Get ready", "Work", "Review", "Finished"],
+    return { stages: ["Get ready", run.catalog && run.config.ai_context !== false ? "Analyze context" : "Collect sources", "Review sources", "Finished"],
       states: [0, 1, 2, 3].map(i => i < current ? "done" : i > current ? "upcoming" : run.state === "paused" ? "waiting" : "failed"),
       current, finished: false, running: false, percent: null, label: run.state === "paused" ? "Paused" : "Stopped",
       meterLabel: "Source discovery", activity: run.state === "paused" ? "Resume to continue. An operation already underway may finish." : "Remaining work stopped. Completed saves remain." };
@@ -170,12 +170,12 @@ export function discoveryProgress(run: DiscoveryRun): TaskProgressView {
     : partial ? "Collected results are saved. Resolve unavailable sources, then run again."
       : review ? "Check the results below, then confirm sources"
         : run.state === "completed" ? "This catalog is not confirmed for reuse"
-          : !native ? waiting ? "Waiting to check context and mappings" : "Checking context and mappings"
+          : !native ? waiting ? "Waiting to check context and mappings" : "Source collection finished. Analyzing client context and mappings before review."
             : measured ? [measured.activity, measured.item].filter(Boolean).join(" · ")
               : latest ? `${latest.status === "ready" ? "Collected" : latest.status === "unavailable" ? "Source needs attention" : "Reading"} · ${latest.category ?? (latest.key === "tally" ? "Tally" : "Excel folder")}`
                 : "Keep Minkops open on the selected PC. This page updates automatically.";
   return {
-    stages: ["Get ready", "Work", "Review", "Finished"], states, current, finished, running,
+    stages: ["Get ready", run.catalog && run.config.ai_context !== false ? "Analyze context" : "Collect sources", "Review sources", "Finished"], states, current, finished, running,
     label: finished ? "Finished and checked" : partial || failed ? "Needs attention" : review ? "Ready for your review" : waiting ? native ? "Waiting for your PC" : "Preparing review" : native ? "Collecting your sources" : "Preparing review",
     activity, percent, meterLabel: finished ? "Discovery complete" : native ? "Source collection" : "Context and mapping review",
     countLabel: hasMeasure ? `${measured.completed} of ${measured.total} ${latest?.key === "tally" ? "native reads" : "workbooks"}` : undefined

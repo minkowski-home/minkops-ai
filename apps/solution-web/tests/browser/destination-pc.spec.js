@@ -19,7 +19,7 @@ test('web destination selection scopes catalogs, persists routing and never fall
     let body=null,status=200;
     if(path==='/api/auth/session') body={id:'user',name:'Synthetic User',email:'qa@example.test',memberships:[{slug:'mock-tenant',name:'Mock',role:'admin'}],csrf_token:'csrf'};
     else if(path.endsWith('/workspace')) body={tenant:{slug:'mock-tenant',name:'Synthetic multi-PC workspace'},can_edit:true,employees:[],tasks:[],workflows:[
-      {id:'bill',key:'bill-entry',presentation:'accounts-bill',name:'Bill entry',status:'active',employee_ids:[],config_values:{output_mode:'tally_in_place',input_format:'mixed',review_mode:'all_outputs'},config_schema:{properties:{output_mode:{type:'string',title:'Output platform',enum:['tally_in_place','excel_in_place']}}}},
+      {id:'bill',key:'bill-entry',presentation:'accounts-bill',name:'Bill entry',status:'active',employee_ids:[],config_values:{output_mode:'tally_in_place',input_format:'mixed',review_mode:'all_outputs'},config_schema:{properties:{output_mode:{type:'string',title:'Save bills to',enum:['tally_in_place','excel_in_place']}}}},
       {id:'future',key:'future-example',presentation:'proposal',name:'Future workflow',status:'active',employee_ids:[],config_values:{},config_schema:{properties:{}},run_schema:{properties:{}}},
     ]};
     else if(path.endsWith('/desktop/devices')){body=devices;if(failPCs){status=503;body={detail:'Synthetic PCs unavailable'};}}
@@ -67,7 +67,7 @@ test('web destination selection scopes catalogs, persists routing and never fall
   const previous=runs.length;await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Bill entry',exact:true})}).getByRole('button',{name:'Run workflow',exact:true}).click();await page.waitForURL('**/workflows/bill');expect(runs.length).toBe(previous);
   await picker.selectOption('c');await expect(run).toBeDisabled();await page.getByText('Destination and checks',{exact:true}).click();
   await expect(page.getByText('Run and confirm complete Tally Source Discovery on PC C first.',{exact:true})).toBeVisible();
-  await picker.selectOption('a');await expect(run).toBeEnabled();await page.getByLabel('Output platform',{exact:true}).selectOption('excel_in_place');
+  await picker.selectOption('a');await expect(run).toBeEnabled();await page.getByLabel('Save bills to',{exact:true}).selectOption('excel_in_place');
   await expect(page.getByLabel('Confirmed sources',{exact:true})).toHaveValue('excel-a');expect(await page.getByLabel('Confirmed sources',{exact:true}).locator('option[value="excel-b"]').count()).toBe(0);
   await run.click();await page.waitForURL('**/tasks/task');expect(runs.at(-1).destination_device_id).toBe('a');expect(runs.at(-1).catalog_id).toBe('excel-a');
   // A persisted PC that disappears must remain an unavailable choice, even with one PC left.

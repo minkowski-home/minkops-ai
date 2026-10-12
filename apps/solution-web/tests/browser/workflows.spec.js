@@ -3,7 +3,7 @@ import { test } from '@playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 test('Bill entry and contextual PC checks preserve defaults, selections and safety', async ({ page, context }, testInfo) => {
-let member=false, failUpload=false, failRun=false, failLoad=false;
+let member=false, failDefaults=false, failUpload=false, failRun=false, failLoad=false;
 let sources=[{id:'upload',label:'Synthetic uploads',writable:false,files:[{id:'a',path:'invoice-a.PDF',sha256:'a'},{id:'b',path:'nested/receipt-b.jpg',sha256:'b'},{id:'unsupported',path:'notes.txt',sha256:'x'}]},{id:'folder',label:'Synthetic PC folder',writable:true,files:[{id:'c',path:'invoice-c.pdf',sha256:'c'},{id:'d',path:'long/nested/path/'+ 'long-name-'.repeat(15)+'.webp',sha256:'d'}]}];
 
 const schema=JSON.parse(fs.readFileSync(new URL('../../../../employees/accounts-desk/workflows/bill-entry/tenant-config.schema.json', import.meta.url)));
@@ -26,7 +26,7 @@ await context.route('**/api/**',async r=>{
  }
  else if(path.endsWith('/accounts/catalogs'))body=[{id:'excel',confirmed_at:'2026-10-12',catalog:{sheets:[{role:'destination'}]}}];
  else if(path.endsWith('/discovery/latest')||path.endsWith('/discovery/runs/discovery'))body=catalog;
- else if(path.endsWith('/workflows/bill')&&method==='PATCH'){assert.equal(req.headers()['x-csrf-token'],'synthetic-csrf');patches.push(req.postDataJSON());defaults=req.postDataJSON().config_values;body={};}
+ else if(path.endsWith('/workflows/bill')&&method==='PATCH'){assert.equal(req.headers()['x-csrf-token'],'synthetic-csrf');patches.push(req.postDataJSON());if(failDefaults){status=400;body={detail:'Synthetic default save failed'};}else{defaults=req.postDataJSON().config_values;body={};}}
  else if(path.endsWith('/accounts/runs')&&method==='POST'){runs.push(req.postDataJSON());assert.equal(req.headers()['x-csrf-token'],'synthetic-csrf');if(failRun){status=400;body={detail:'Synthetic run failed'};}else body={task_id:'run-task'};}
  else if(path.endsWith('/desktop/devices'))body=[{id:'pc',name:'QA PC',owner_id:'user',revoked_at:null,expires_at:'2099-01-01',last_seen_at:new Date().toISOString()},{id:'offline',name:'Offline PC',owner_id:'user',revoked_at:null,expires_at:'2099-01-01',last_seen_at:null},{id:'expired',name:'Expired PC',owner_id:'user',revoked_at:null,expires_at:'2000-01-01',last_seen_at:null},{id:'other',name:'Other owner PC',owner_id:'other',revoked_at:null,expires_at:'2099-01-01',last_seen_at:null}];
  else if(path.endsWith('/desktop/sources'))body=[{source_id:'folder',device_id:'pc'}];
@@ -42,8 +42,10 @@ async function open(){await page.goto(url);await page.getByRole('button',{name:'
 
 const selection=page.getByRole('region',{name:'Bill files',exact:true});
 const checks=()=>selection.getByRole('checkbox');
-await open();assert.match(await page.title(),/MinkOps/);assert.equal(await checks().count(),4);assert.equal(await page.getByRole('heading',{name:'Bill entry settings',exact:true}).count(),1);assert.equal(await page.getByText('Run configuration',{exact:true}).count(),0);
+await open();assert.match(await page.title(),/MinkOps/);assert.equal(await checks().count(),4);assert.equal(await page.getByRole('heading',{name:'Workflow administration',exact:true}).count(),1);assert.equal(await page.getByText('Run configuration',{exact:true}).count(),0);
 assert.equal(await page.getByLabel('Bill inputs',{exact:true}).count(),1);
+assert.equal(await page.getByText(/Tally runs always/).count(),0);
+assert.equal(await page.getByLabel('Review mode',{exact:true}).count(),1);
 await checks().nth(0).uncheck();assert.equal(await checks().nth(0).isChecked(),false);
 await page.getByRole('button',{name:'Clear selection',exact:true}).click();await page.reload();await page.getByRole('button',{name:'Run bill entry',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Run bill entry',exact:true}).isDisabled(),true);assert.equal(await checks().nth(0).isChecked(),false);
 await page.getByLabel('Find a bill').fill('receipt');assert.equal(await checks().count(),1);await page.getByRole('button',{name:'Select results',exact:true}).click();assert.equal(await checks().nth(0).isChecked(),true);
@@ -55,14 +57,17 @@ await page.getByLabel('Upload workflow files').setInputFiles({name:'new.pdf',mim
 failUpload=true;await page.getByLabel('Upload workflow files').setInputFiles({name:'failed.pdf',mimeType:'application/pdf',buffer:Buffer.from('synthetic')});await page.getByText('Synthetic upload failed',{exact:true}).waitFor();assert.equal(await checks().nth(4).isChecked(),false);failUpload=false;
 // Actual file chooser is keyboard activatable; no exposed native upload widget.
 const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Upload files',exact:true}).focus();await page.keyboard.press('Enter');await (await chooser).setFiles([]);
-await page.getByLabel('Bill inputs',{exact:true}).selectOption('pdf');await page.getByRole('button',{name:'Save defaults',exact:true}).click();await page.getByText('Settings saved.',{exact:true}).waitFor();assert.equal(patches.at(-1).config_values.input_format,'pdf');
+await page.getByLabel('Bill inputs',{exact:true}).selectOption('pdf');await page.getByRole('button',{name:'Save as defaults',exact:true}).click();await page.getByText('Defaults saved. This run keeps your selected options.',{exact:true}).waitFor();assert.equal(patches.at(-1).config_values.input_format,'pdf');
 await page.getByLabel('Bill inputs',{exact:true}).selectOption('image');assert.equal(defaults.input_format,'pdf');
+failDefaults=true;await page.getByRole('button',{name:'Save as defaults',exact:true}).click();await page.getByText('Synthetic default save failed',{exact:true}).waitFor();assert.equal(defaults.input_format,'pdf');assert.equal(await page.getByLabel('Bill inputs',{exact:true}).inputValue(),'image');failDefaults=false;
+await page.getByRole('button',{name:'Reset to defaults',exact:true}).click();assert.equal(await page.getByLabel('Bill inputs',{exact:true}).inputValue(),'pdf');
+await page.getByLabel('Bill inputs',{exact:true}).selectOption('image');
 await page.getByText('Destination and checks',{exact:true}).click();await page.getByLabel('Company selection',{exact:true}).selectOption('locked');assert.equal(await page.getByLabel('Company for all bills',{exact:true}).inputValue(),'company');
 await page.screenshot({path:testInfo.outputPath('bills-settings.png'),fullPage:true});
 await page.locator('.console-view').evaluate(node => { node.scrollTop=0; });
 await page.screenshot({path:testInfo.outputPath('bills-desktop.png'),fullPage:false});
 failRun=true;await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.getByText('Synthetic run failed',{exact:true}).waitFor();assert.equal(runs.at(-1).config.input_format,'image');assert.equal(runs.at(-1).config.review_mode,'only_exceptions');assert.equal(runs.at(-1).config.company_mode,'locked');assert.equal(runs.at(-1).config.locked_company_guid,'company');assert.equal(runs.at(-1).catalog_id,null);assert.equal(runs.at(-1).file_ids.includes('new'),false);
-await page.getByLabel('Default review mode',{exact:true}).selectOption('all_outputs');
+await page.getByLabel('Review mode',{exact:true}).selectOption('all_outputs');
 failRun=false;await page.getByRole('button',{name:'Run bill entry',exact:true}).click();await page.waitForURL('**/tasks/run-task');assert.equal(runs.at(-1).config.review_mode,'all_outputs');
 await open();assert.equal(await page.getByLabel('Bill inputs',{exact:true}).inputValue(),'pdf');
 // Responsive layout and dark theme tokens.
@@ -75,7 +80,7 @@ await page.getByRole('button',{name:'Check Tally connection',exact:true}).click(
 await page.goto('http://127.0.0.1:3000/mock-tenant/connections');await page.getByRole('heading',{name:'Offline PC',exact:true}).waitFor();const offline=page.getByRole('article').filter({has:page.getByRole('heading',{name:'Offline PC',exact:true})});await offline.getByRole('button',{name:'Check connections',exact:true}).click();await page.getByText('This PC is offline. The check waits until it reconnects.').waitFor();const expired=page.getByRole('article').filter({has:page.getByRole('heading',{name:'Expired PC',exact:true})});assert.equal(await expired.getByRole('button',{name:'Check connections',exact:true}).isDisabled(),true);
 await page.setViewportSize({width:390,height:844});await page.screenshot({path:testInfo.outputPath('connections-mobile.png'),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
 // Member run overrides must never gain saved-default/status editing privileges.
-member=true;await open();assert.equal(await page.getByRole('button',{name:'Save defaults',exact:true}).count(),0);assert.equal(await page.getByLabel('Status',{exact:true}).isDisabled(),true);await page.getByLabel('Bill inputs',{exact:true}).selectOption('mixed');assert.equal(defaults.input_format,'pdf');
+member=true;await open();assert.equal(await page.getByRole('button',{name:'Save as defaults',exact:true}).count(),0);assert.equal(await page.getByLabel('Status',{exact:true}).isDisabled(),true);await page.getByLabel('Bill inputs',{exact:true}).selectOption('mixed');assert.equal(defaults.input_format,'pdf');
 // Explicit empty and stale choices persist; invalid values recover.
 for(const [raw,expected] of [['[]',0],['["upload:gone.pdf"]',0],['{}',5],['null',5],['[1]',5]]){
  await page.evaluate(raw=>localStorage.setItem('mock-tenant:bill-entry:selections:v1',raw),raw);await page.reload();await page.getByRole('button',{name:'Run bill entry',exact:true}).waitFor();await page.waitForFunction(expected=>document.querySelector('[aria-label="Bill files"]')?.textContent?.includes(`${expected} of 5 selected`),expected);assert.equal(await checks().evaluateAll(inputs=>inputs.filter(i=>i.checked).length),expected);
@@ -95,8 +100,8 @@ sources=[];await page.reload();await page.getByText('No supported bills yet. Upl
 sources=[{id:'upload',label:'Synthetic uploads',writable:false,files:[{id:'a',path:'invoice-a.PDF',sha256:'a'}]}];
 await page.evaluate(()=>localStorage.removeItem('mock-tenant:bill-entry:selections:v1'));
 defaults={...defaults,company_mode:'locked',locked_company_guid:'missing'};await open();assert.equal(await page.getByRole('button',{name:'Run bill entry',exact:true}).isDisabled(),true);
-assert.equal(await page.getByRole('option',{name:'Excel',exact:true}).evaluate(option=>option.disabled),true);
-assert.equal(await page.getByRole('option',{name:'Both',exact:true}).evaluate(option=>option.disabled),true);
+assert.equal(await page.getByRole('option',{name:'Excel',exact:true}).count(),0);
+assert.equal(await page.getByRole('option',{name:'Both',exact:true}).count(),0);
 defaults={...defaults,company_mode:'infer'};catalog.ready=false;await open();assert.equal(await page.getByRole('button',{name:'Run bill entry',exact:true}).isDisabled(),true);catalog.ready=true;
 assert.equal(await page.locator('vite-error-overlay').count(),0);
 // Browser preference storage may be blocked without blocking an authorized run.
