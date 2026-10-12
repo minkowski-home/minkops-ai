@@ -20,6 +20,81 @@ class DiscoveryTests(unittest.TestCase):
     setUp = test_desktop.DesktopTests.setUp
     pair = test_desktop.DesktopTests.pair
 
+    def test_tally_without_ai_goes_directly_to_review_and_confirms_full_catalog(self):
+        run, _ = self.start(ai_context=False)
+        current = self.collect(run)
+        self.assertEqual(current["state"], "review")
+        self.assertIsNone(current["mapping_run"])
+        self.assertFalse(current["ready"])
+        self.assertEqual(current["catalog"]["context_notes"], [])
+        confirmed = self.client.post(self.discovery + f"/runs/{current['id']}/confirm",
+                                     headers=self.csrf, json={})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertTrue(confirmed.json()["ready"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            saved = c.execute("SELECT catalog,mapping_run_id FROM discovery_runs WHERE id=%s",
+                              (current["id"],)).fetchone()
+        self.assertIsNone(saved["mapping_run_id"])
+        company = saved["catalog"]["sources"][0]["snapshot"]["companies"][0]
+        self.assertEqual(company["masters"], {"status": "ready", "count": 0, "records": []})
+        self.assertEqual(company["vouchers"], {"status": "ready", "count": 0, "records": []})
+        self.assertNotIn("master_summary", company)
+
+    def test_partial_tally_without_ai_cannot_be_confirmed(self):
+        run, _ = self.start(ai_context=False)
+        current = self.collect(run, partial=True)
+        self.assertIsNone(current["mapping_run"])
+        self.assertTrue(current["catalog"]["partial"])
+        self.assertEqual(self.client.post(self.discovery + f"/runs/{run['id']}/confirm",
+                                         headers=self.csrf, json={}).status_code, 409)
+
+    def test_excel_without_ai_saves_structure_without_creating_entry_mappings(self):
+        from minkops_connectors.excel import schema_projection
+        from openpyxl import Workbook, load_workbook
+
+        initial, _ = self.start()
+        self.client.post(f"/api/tenants/{self.slug}/tasks/{initial['task_id']}/control",
+                         headers=self.csrf, json={"action": "stop"}).raise_for_status()
+        book = Workbook()
+        book.active.append(["Vendor", "Total"])
+        book.active["C2"] = "=SUM(B2:B10)"
+        output = BytesIO()
+        book.save(output)
+        content, structure = schema_projection(output.getvalue())
+        source = self.client.post(f"/api/tenants/{self.slug}/accounts/sources", headers=self.csrf,
+                                  data={"paths": '["register.xlsx"]', "writable": "true"},
+                                  files=[("files", ("register.xlsx", content))]).json()
+        self.client.post(self.base + f"/devices/{self.device['id']}/sources/{source['id']}",
+                         headers=self.csrf).raise_for_status()
+        response = self.client.post(self.discovery + "/runs", headers=self.csrf, json={
+            "device_id": self.device["id"], "request_key": str(uuid.uuid4()),
+            "config": {"depth": "client_context", "ai_context": False,
+                       "excel_source_ids": [source["id"]], "tally": None},
+        })
+        self.assertEqual(response.status_code, 202, response.text)
+        run = response.json()
+        claim = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+        self.client.post(self.worker_base + f"/jobs/{claim['id']}/finish", headers=self.worker, json={
+            "claim_token": claim["claim_token"], "result": {"sources": [{
+                "key": source["id"], "tool": "excel", "status": "ready",
+                "files": [{"path": "register.xlsx", "content": base64.b64encode(content).decode()}],
+                "workbooks": [{"path": "register.xlsx", "status": "ready", "structure": structure,
+                               "sha256": hashlib.sha256(content).hexdigest()}],
+            }]},
+        }).raise_for_status()
+        current = self.client.get(self.discovery + f"/runs/{run['id']}").json()
+        self.assertEqual(current["state"], "review")
+        self.assertIsNone(current["mapping_run"])
+        self.assertIsNone(current["catalog"]["excel_mappings"])
+        confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm",
+                                     headers=self.csrf, json={}).json()
+        self.assertTrue(confirmed["ready"])
+        self.assertNotIn("excel_catalog_id", confirmed["catalog"])
+        file_id = confirmed["catalog"]["sources"][0]["workbooks"][0]["file_id"]
+        with psycopg.connect(URL) as c:
+            saved = c.execute("SELECT content FROM account_files WHERE id=%s", (file_id,)).fetchone()[0]
+        self.assertEqual(load_workbook(BytesIO(bytes(saved))).active["C2"].value, "=SUM(B2:B10)")
+
     def test_explicit_source_choice_must_match_selected_tools(self):
         _, body = self.start()
         body["request_key"] = str(uuid.uuid4())
@@ -258,7 +333,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(changed["state"], "queued")
         self.assertFalse(changed["ready"])
 
-    def start(self, **extra):
+    def start(self, ai_context=None, **extra):
         self.pair()
         from minkops_platform.resources import REPOSITORY_ROOT
         from minkops_platform.workflows import load_definition, register_workflow
@@ -289,6 +364,8 @@ class DiscoveryTests(unittest.TestCase):
                 "tally": {"port": 9000, "period": {"from": "2026-10-01", "to": "2026-10-02"}},
             },
         }
+        if ai_context is not None:
+            body["config"]["ai_context"] = ai_context
         body.update(extra)
         r = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
         self.assertEqual(r.status_code, 202, r.text)

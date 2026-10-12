@@ -1336,3 +1336,24 @@ writes, heartbeat timing, missing IDs on resumed streams, IDs first supplied on
 a chunk, and disconnects retaining final activity counts. Existing runtime and
 hosted-adapter tests pass. Production rollout and measured latency improvement
 remain separate; this change does not remove cloud startup or model execution time.
+
+## Separate complete source collection from optional AI interpretation (12 October 2026)
+
+**Situation:** Native discovery finished before the cloud worker started, but
+operators had to wait for subjective context notes and Excel meanings before
+reviewing otherwise complete evidence.
+
+**Task:** Permit deterministic-only discovery without implying that collected
+Excel structure is a reviewed accounting destination or changing Bill Entry routing.
+
+**Action:** Add an optional per-run boolean that defaults to AI-on for old callers.
+AI-off retains full native collection, structure projection, completeness checks,
+input bounds, persistence and explicit confirmation, and skips hosted dispatch.
+Restore the choice from the previous run. Keep raw Excel structure without creating
+semantic mappings or a destination catalog, and explain that consequence in setup
+and review. Preserve Bill Entry's existing confirmed-catalog selection and pinning.
+
+**Result:** PostgreSQL regressions verify direct review, confirmation, partial-scope
+rejection and Excel formula preservation without a hosted run or fabricated mappings.
+Browser coverage exercises all three source modes, choice restoration, AI-on selection,
+confirmation and responsive layout. Production rollout remains separate.

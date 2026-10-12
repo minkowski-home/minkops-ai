@@ -66,7 +66,7 @@
 .discovery-connection .config-field { width: 160px; margin-top: 12px; }
 .discovery-folder-list { display: grid; gap: 10px; max-height: 260px; overflow-y: auto; margin: 16px 0; }
 .discovery-folder-list .accounts-check { margin: 0; padding: 10px 0; }
-.discovery-folder-list small { display: block; margin-top: 4px; color: var(--text-muted); }
+.discovery-folder-list small, .discovery-ai-context small { display: block; margin-top: 4px; color: var(--text-muted); }
 .discovery-config-source > .discovery-limit { font: var(--type-body-sm); margin: 16px 0 0; color: var(--text-muted); }
 .discovery-setup-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 16px 24px; margin-top: 28px; padding-top: 24px; border-top: var(--rule-default); }
 .discovery-setup-footer p { margin: 0; max-width: 48ch; font: var(--type-body-sm); color: var(--text-muted); }

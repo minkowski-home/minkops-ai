@@ -30,6 +30,17 @@ retry with bounded backoff. Motion respects the reduced-motion preference.
 
 ## Collection and interpretation
 
+Each run has an **AI context analysis** toggle, on by default. The optional
+`ai_context` collection-config boolean defaults to true for older callers.
+When off, native Tally masters/vouchers and deterministic Excel structure are
+still collected and saved, but no hosted run is dispatched. Complete results go
+directly to review and still require confirmation. Excel structure-only catalogs
+have no new semantic column mappings or Bill Entry destination catalog; they
+cannot supply a new Excel entry destination. The prior run's toggle is restored
+by setup and preserved by quick refresh. Partial/oversized collection safeguards
+and downstream input limits remain enforced. This option never samples records
+or silently reuses interpretation from an AI-enabled run.
+
 Source Discovery always uses `client_context`; depth and category selectors are
 removed. The upgrade migration removes retired depth settings from installed
 workflows while preserving immutable historical run catalogs.

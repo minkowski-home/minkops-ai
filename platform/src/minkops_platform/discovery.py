@@ -647,7 +647,7 @@ def collect(connection, device, job, result):
             (row["tenant_id"], row["actor_id"], "0.4.0", Jsonb(remapped)),
         ).fetchone()
         catalog["excel_catalog_id"] = str(linked["id"])
-    elif not partial and control_state(connection, row["tenant_id"], row["task_id"]) != "stopped":
+    elif config.get("ai_context", True) and not partial and control_state(connection, row["tenant_id"], row["task_id"]) != "stopped":
         connection.execute(
             "UPDATE discovery_runs SET catalog=%s WHERE id=%s", (Jsonb(catalog), row["id"])
         )

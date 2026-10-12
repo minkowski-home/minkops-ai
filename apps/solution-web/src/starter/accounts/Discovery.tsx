@@ -24,6 +24,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
   const [bindings, setBindings] = useState<Binding[]>([]);
   const [deviceId, setDeviceId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [aiContext, setAiContext] = useState(true);
   const [destinationMode, setDestinationMode] = useState<"excel" | "tally" | "both">((workflow.config_values.destination_mode ?? "tally") as "excel" | "tally" | "both");
   const tally = destinationMode !== "excel";
   const excel = destinationMode !== "tally";
@@ -50,6 +51,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
       setDevices(owned); setSources(ss); setBindings(bb);
       setDeviceId(owned.find(d => d.id === latest?.device_id)?.id ?? owned.find(d => destinationAvailable(d))?.id ?? "");
       if (latest) {
+        setAiContext(latest.config.ai_context ?? true);
         setSelected(latest.config.excel_source_ids);
         setDestinationMode(latest.config.destination_mode ?? (latest.config.tally ? latest.config.excel_source_ids.length ? "both" : "tally" : "excel"));
         if (latest.config.tally) {
@@ -78,6 +80,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
       if (desktopBridge() && !desktopBridge()?.discoveryPackages) throw new Error("Update Minkops to version 0.5.0 for complete discovery packages.");
       const config: Config = {
         destination_mode: destinationMode, depth: "client_context",
+        ai_context: aiContext,
         excel_source_ids: excel ? selected.filter(id => bindings.some(b => b.source_id === id && b.device_id === deviceId)) : [],
         tally: tally ? { port, period: { from: periodFrom, to: periodTo } } : null
       };
@@ -124,6 +127,10 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow }: { tenant: strin
         <p className="discovery-limit">Up to 45 workbooks / 8 MB per run.</p>
       </section>}
     </div>
+    <label className="accounts-check discovery-ai-context">
+      <input type="checkbox" checked={aiContext} disabled={Boolean(busy)} onChange={event => setAiContext(event.target.checked)} />
+      <span>AI context analysis<small>{excel ? "Find client conventions and propose Excel column mappings. When off, save structure only; no new Excel entry mappings are created." : "Find client conventions and exceptions. Turn off to review collected sources directly."}</small></span>
+    </label>
     {error && <p role="alert" className="form-message">{error} {!devices.length && <button type="button" className="button button-ghost" onClick={() => setAttempt(value => value + 1)}>Retry loading</button>}</p>}
     <footer className="discovery-setup-footer"><button type="submit" className="button button-primary" disabled={Boolean(busy) || workflow.status !== "active" || !destinationAvailable(devices.find(d => d.id === deviceId)) || (excel && !selectedFolders.length) || (tally && (!validPeriod || !Number.isInteger(port) || port < 1 || port > 65535))}>
       {busy === "launch" && <Spinner />}{busy === "launch" ? "Starting discovery…" : "Discover sources"}
@@ -195,6 +202,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
               : run.state === "failed" ? "Check source access on your PC, then run discovery again." : "Check the collected counts and mappings, then confirm."}</p></header>
       {run.catalog?.sources.map(source => source.snapshot?.scope_error && <p role="alert" className="form-message" key={source.key}>{source.snapshot.scope_error}</p>)}
       {run.catalog?.context_error && <p role="alert" className="form-message">{run.catalog.context_error}</p>}
+      {run.catalog && run.config.ai_context === false && <p className="quiet-state">AI analysis is off. Review the collected sources{run.config.excel_source_ids.length ? "; Excel structure is saved without entry mappings" : ""}.</p>}
       <DiscoveryResults run={controlState === "active" ? run : { ...run, state: controlState }} />
       {run.state === "review" && edited && edited.sheets.length > 0 && <div className="discovery-mapping-review">
         <label className="config-field">Find a workbook, sheet or table<input type="search" value={filter} onChange={event => setFilter(event.target.value)} /></label>

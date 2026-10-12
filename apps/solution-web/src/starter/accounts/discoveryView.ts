@@ -4,6 +4,7 @@ import type { ProgressState, TaskProgressView } from "../workspace/progress";
 export interface Config {
   destination_mode?: "excel" | "tally" | "both";
   depth: "client_context";
+  ai_context?: boolean;
   excel_source_ids: string[];
   tally: { port: number; period: { from: string; to: string } } | null;
 }
