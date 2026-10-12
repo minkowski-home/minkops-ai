@@ -1,6 +1,7 @@
 """Thin OpenAI-hosted session adapter; no workflow-specific reasoning loop."""
 
 import base64
+import hashlib
 import json
 from contextlib import suppress
 from io import BytesIO
@@ -10,6 +11,45 @@ from zipfile import ZipFile
 from openai import NotFoundError, OpenAI
 
 RESULT_PATH = "/workspace/outputs/result.json"
+
+
+def workspace_inputs(files, context, root="/workspace"):
+    """Bind execution paths without changing any uploaded business evidence."""
+    paths = {f"/workspace/inputs/{f['id']}{Path(f['path']).suffix.lower()}":
+             f"{root}/inputs/{f['id']}{Path(f['path']).suffix.lower()}" for f in files}
+    hashes = {}
+
+    def bind(value):
+        if isinstance(value, list):
+            return [bind(item) for item in value]
+        if isinstance(value, dict):
+            result = {key: paths.get(item, item) if key in ("path", "master_lookup_path")
+                      and isinstance(item, str) else bind(item) for key, item in value.items()}
+            if isinstance(value.get("path"), str) and value["path"] in hashes and "sha256" in value:
+                result["sha256"] = hashes[value["path"]]
+            return result
+        return value
+
+    uploaded = []
+    for file in files:
+        original = f"/workspace/inputs/{file['id']}{Path(file['path']).suffix.lower()}"
+        content = bytes(file["content"])
+        if root != "/workspace" and file.get("workspace_references"):
+            content = json.dumps(bind(json.loads(content)), sort_keys=True, ensure_ascii=False).encode()
+            hashes[original] = hashlib.sha256(content).hexdigest()
+        uploaded.append({"type": "inline", "path": paths[original],
+                         "data": base64.b64encode(content).decode()})
+    return uploaded, bind(context)
+
+
+def skill_configuration(name, description, files):
+    archive_bytes = BytesIO()
+    with ZipFile(archive_bytes, "w") as archive:
+        for path, content in files.items():
+            archive.writestr(f"{name}/{path}", content)
+    return [{"type": "inline", "name": name, "description": description,
+             "source": {"type": "base64", "media_type": "application/zip",
+                        "data": base64.b64encode(archive_bytes.getvalue()).decode()}}]
 
 
 def reconcile_turn(session_id, *, client=None):
@@ -23,7 +63,7 @@ def reconcile_turn(session_id, *, client=None):
 
 
 def close_session(session_id, *, client=None):
-    """Release the hosted environment after its result is durably stored."""
+    """Detach this conversation after its result is durably stored."""
     # An earlier cleanup may have succeeded before its receipt was saved.
     with suppress(NotFoundError):
         (client or OpenAI(timeout=30, max_retries=0)).beta.agents.sessions.delete(session_id)
@@ -46,6 +86,8 @@ def execute(
     client=None,
     session_id=None,
     turn_id=None,
+    environment_lease=None,
+    workspace=None,
 ):
     """Persist IDs as events arrive and recover saved artifacts after a restart.
 
@@ -53,6 +95,9 @@ def execute(
     Results are accepted only from the completed turn's exact artifact path.
     """
     client = client or OpenAI(timeout=60, max_retries=0)
+    workspace = workspace or context.get("config", {}).get("hosted_workspace")
+    if workspace:
+        result_path = workspace["result_path"]
     if session_id:
         turn = client.beta.agents.sessions.turns.retrieve(turn_id, session_id=session_id)
         if turn.status in ("failed", "cancelled"):
@@ -61,19 +106,13 @@ def execute(
             return read_result(client, session_id, turn_id, result_path=result_path)
         events = client.beta.agents.sessions.events.stream(session_id)
     else:
-        uploaded = [
-            {
-                "type": "inline",
-                "path": f"/workspace/inputs/{f['id']}{Path(f['path']).suffix.lower()}",
-                "data": base64.b64encode(bytes(f["content"])).decode(),
-            }
-            for f in files
-        ]
+        root = environment_lease.workspace["root"] if environment_lease else "/workspace"
+        uploaded, bound_context = workspace_inputs(files, context, root)
         uploaded.append(
             {
                 "type": "inline",
-                "path": "/workspace/context.json",
-                "data": base64.b64encode(json.dumps(context).encode()).decode(),
+                "path": root + "/context.json",
+                "data": base64.b64encode(json.dumps(bound_context).encode()).decode(),
             }
         )
         sizes = [len(base64.b64decode(f["data"])) for f in uploaded]
@@ -81,34 +120,45 @@ def execute(
             raise ValueError(
                 "Selected files and catalog context exceed hosted upload limits. Select a smaller scope."
             )
-        skill_zip = BytesIO()
         skill_name = skill_name or key
-        with ZipFile(skill_zip, "w") as archive:
-            for path, content in (skill_files or {"SKILL.md": instructions}).items():
-                archive.writestr(f"{skill_name}/{path}", content)
+        skill_description = skill_description or instructions.split("description: ", 1)[1].splitlines()[0]
+        skill_files = skill_files or {"SKILL.md": instructions}
+        environment = {"type": "openai_hosted", "network": {"access": "disabled"},
+                       "packages": {"python": packages}, "files": uploaded,
+                       "skills": skill_configuration(skill_name, skill_description, skill_files)}
+        if environment_lease:
+            result_path = environment_lease.workspace["result_path"]
+
+            def bind_instructions(text):
+                return text.replace("/workspace/outputs/", "/workspace/outputs/" + root.rsplit("/", 1)[-1] + "/").replace(
+                    "/workspace/context.json", root + "/context.json").replace("/workspace/inputs/", root + "/inputs/")
+
+            instructions, execution_instructions = map(bind_instructions, (instructions, execution_instructions))
+            skill_root = f"{root}/skills/{skill_name}"
+            # Native skill routing is stable; the full pinned procedure/resources
+            # are fresh per run, including any scripts with absolute input paths.
+            routing = f"---\nname: {skill_name}\ndescription: {json.dumps(skill_description)}\n---\n" + (
+                "Follow the complete pinned workflow skill at the path specified in this session's input. "
+                "Use that run's resources and context exclusively; do not use previous runs' files.\n")
+            environment_id = environment_lease.prepare(client, {
+                "type": "openai_hosted", "network": {"access": "disabled"},
+                "packages": {"python": packages},
+                "skills": skill_configuration(skill_name, skill_description, {"SKILL.md": routing}),
+            })
+            for path, content in skill_files.items():
+                uploaded.append({"type": "inline", "path": f"{skill_root}/{path}",
+                                 "data": base64.b64encode(bind_instructions(content).encode()).decode()})
+            for file in uploaded:
+                client.beta.agents.environments.files.create(environment_id, **file)
+            environment_lease.check_start()
+            environment = {"type": "openai_hosted", "environment_id": environment_id}
+            execution_instructions += f"\nWorkflow resources and working directory: {skill_root}."
         events = client.beta.agents.sessions.create(
             agent={"model": model, "instructions": instructions + "\n" + execution_instructions},
-            environment={
-                "type": "openai_hosted",
-                "network": {"access": "disabled"},
-                "packages": {"python": packages},
-                "files": uploaded,
-                "skills": [
-                    {
-                        "type": "inline",
-                        "name": skill_name,
-                        "description": skill_description
-                        or instructions.split("description: ", 1)[1].splitlines()[0],
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/zip",
-                            "data": base64.b64encode(skill_zip.getvalue()).decode(),
-                        },
-                    }
-                ],
-            },
-            input="Perform the workflow using /workspace/context.json and the supplied files. "
-            f"Publish the required JSON at {result_path}. "
+            environment=environment,
+            input=f"Perform the workflow using {root}/context.json and the supplied files. "
+            + (f"Read {skill_root}/SKILL.md and its supporting resources first. " if environment_lease else "")
+            + f"Publish the required JSON at {result_path}. "
             "Read your saved JSON back and verify it before completing.",
             stream=True,
         )

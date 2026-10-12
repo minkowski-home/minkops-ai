@@ -296,7 +296,7 @@ def context_assets(catalog):
     if catalog.get("master_lookup_version") == "1":
         manifest["master_lookup_version"] = "1"
 
-    def add(name, value):
+    def add(name, value, *, workspace_references=False):
         content = json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
         if len(content) > 4_000_000:
             raise ValueError("An individual discovery record exceeds hosted limits.")
@@ -306,7 +306,8 @@ def context_assets(catalog):
         )
         digest = hashlib.sha256(content).hexdigest()
         files.append(
-            {"id": identifier, "path": name + ".json", "content": content, "sha256": digest}
+            {"id": identifier, "path": name + ".json", "content": content, "sha256": digest,
+             **({"workspace_references": True} if workspace_references else {})}
         )
         manifest["files"].append(
             {"kind": name, "path": "/workspace/inputs/" + identifier + ".json", "sha256": digest}
@@ -363,7 +364,8 @@ def context_assets(catalog):
                     for kind, entry in lookup["by_type"].items()
                 },
             }
-            manifest["companies"][-1]["master_lookup_path"] = add(f"company-{index}-master-index-v1", lookup_index)
+            manifest["companies"][-1]["master_lookup_path"] = add(
+                f"company-{index}-master-index-v1", lookup_index, workspace_references=True)
             manifest["companies"][-1]["master_summary"] = lookup["summary"]
     return files, manifest
 

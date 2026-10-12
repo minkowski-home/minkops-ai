@@ -32,6 +32,8 @@ RESERVED = {
     "retry_file_id",
     "superseded",
     "user_input",
+    "hosted_workspace",
+    "hosted_session_closed",
 }
 
 
