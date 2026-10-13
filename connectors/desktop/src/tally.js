@@ -298,7 +298,7 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
       message:
         "Existing voucher has allocations this bill mapping cannot preserve. Correct it in Tally, then reconcile.",
     };
-  if (reconciliationOnly) return {outcome:"attention",message:"Tally did not confirm the write. The approved version is not present; review Tally, then use Resume saves to reconcile before importing."};
+  if (reconciliationOnly) return {outcome:"attention",message:"Tally did not confirm the write, and the approved version is not present. Review Tally, then use Retry save; it checks Tally again before importing."};
   const entry = (ledger, amount) =>
     `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${amount < 0 ? "Yes" : "No"}</ISDEEMEDPOSITIVE><AMOUNT>${(amount / 100).toFixed(2)}</AMOUNT></ALLLEDGERENTRIES.LIST>`;
   const guid = current?.guid || remote_id;

@@ -6,11 +6,19 @@ import { useAuth } from "../contexts/AuthContext";
 import { CatalogReview } from "./CatalogReview";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
-import { inputsWithoutProposal } from "./billView";
+import { billActions, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
 import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { progressView } from "../workspace/progress";
+
+const ACTION_LABELS: Record<BillAction, string> = {
+  guess: "Best guess write",
+  supplier: "Create this ledger",
+  nothing: "Do nothing",
+  retry: "Recheck bill",
+  retry_save: "Retry save",
+};
 
 /** Decisions only. Accounting edits and corrections belong in original tools. */
 function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string; taskId: string; controlState?: string }) {
@@ -162,16 +170,9 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       )}
       {!discovery &&
         records.map((r, index) => {
-          const pending = !["saved", "duplicate", "rejected", "writing"].includes(
-            r.status ?? ""
-          );
-          const needsAttention = Boolean(
-            r.findings.length ||
-            result?.unresolved?.some((i) => i.source_file_id === r.source_file_id)
-          );
-          const missingSupplier = (!r.master_refs || r.master_refs.vendor?.new_supplier === true) && r.findings.some((f) =>
-            f.includes("missing from the confirmed Tally ledgers")
-          );
+          const pending = isPending(r);
+          const attention = needsAttention(r, result);
+          const supplierMissing = missingSupplier(r);
           const decide = (action: string) =>
             act(`/api/tenants/${tenant}/attention/bills/${run.id}/${r.source_file_id}`, {
               action
@@ -195,46 +196,20 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
                 `${line.ledger ?? "Pending ledger"} · ${new Intl.NumberFormat("en-IN").format(line.amount)}`).join(" · ")}</p>}
               <span role="status">
                 {" "}
-                {missingSupplier && pending ? "Missing supplier" : billOutcome(r.status, needsAttention)}
+                {supplierMissing && pending ? "Missing supplier" : billOutcome(r.status, attention)}
               </span>
               {pending && run.state === "review" && ownsRun && (
                 <div className="accounts-toolbar">
-                  {!missingSupplier && (
+                  {billActions(r, result).map((action) => (
                     <button
+                      key={action}
                       className="button button-ghost"
                       disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide("guess")}
+                      onClick={() => void decide(action)}
                     >
-                      {needsAttention ? "Best guess write" : "Write bill"}
+                      {action === "guess" && !attention ? "Write bill" : ACTION_LABELS[action]}
                     </button>
-                  )}
-                  {missingSupplier && r.data.tax === 0 && (
-                    <button
-                      className="button button-ghost"
-                      disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide("supplier")}
-                    >
-                      Create this ledger
-                    </button>
-                  )}
-                  <button
-                    className="button button-ghost"
-                    disabled={busy || controlState !== "active" || Boolean(loadError)}
-                    onClick={() => void decide("nothing")}
-                  >
-                    Do nothing
-                  </button>
-                  {result?.unresolved?.some(
-                    (i) => i.source_file_id === r.source_file_id
-                  ) && (
-                    <button
-                      className="button button-ghost"
-                      disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide("retry")}
-                    >
-                      Recheck bill
-                    </button>
-                  )}
+                  ))}
                 </div>
               )}
             </article>

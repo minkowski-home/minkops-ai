@@ -116,7 +116,9 @@ complete a batch with pending or held bills.
 Consequential jobs are not automatically repeated after lease expiry. Explicit
 Resume saves first reconciles the destination, handling an already applied write
 without adding it again. Persisted receipts are replayed before another native
-job. Cancellation releases pending reservations and preserves applied changes.
+job. A save that finished but was refused or held by its destination returns
+to review with Retry save, which re-sends the same proposal after the fix.
+Cancellation releases pending reservations and preserves applied changes.
 A late cancelled receipt records what was saved without restoring success or
 rewinding newer observed workbook bytes. Independent external writers can still
 race Tally's separate read/import calls: ambiguous matches or mismatched readback

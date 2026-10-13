@@ -91,6 +91,34 @@ class AttentionTests(unittest.TestCase):
             review=c.execute("SELECT status FROM attention_items WHERE task_id=%s AND kind='review'",(run["task_id"],)).fetchone()
         self.assertEqual(review["status"],"pending")
 
+    def test_retry_save_resends_the_same_plan_without_a_review_item(self):
+        run,bill,_=self.ready()
+        claim,route,plan=self.tally_job(self.decision(run,bill,"guess").json())
+        rejection="Tally rejected the voucher date. Check the source bill and Tally date settings, then use Retry save."
+        response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"error":rejection})
+        self.assertEqual(response.status_code,200,response.text)
+        held=self.client.get(self.base+f"/runs/{run['id']}").json()
+        record=held["result"]["records"][0]
+        self.assertEqual((held["state"],record["status"],record["save_hold"]),("review","held",rejection))
+        self.assertEqual(self.decision(run,bill,"guess").status_code,422)
+        retried=self.decision(run,bill,"retry_save")
+        self.assertEqual(retried.status_code,200,retried.text)
+        self.assertEqual((retried.json()["state"],len(retried.json()["tally_writes"])),("writing",2))
+        claim,route,replayed=self.tally_job(retried.json())
+        self.assertEqual((replayed["remote_id"],replayed["data"]),(plan["remote_id"],plan["data"]))
+        response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(replayed)}})
+        self.assertEqual(response.status_code,200,response.text)
+        final=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual((final["state"],final["result"]["records"][0]["findings"]),("completed",[]))
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            items={r["kind"]:r["status"] for r in c.execute("SELECT kind,status FROM attention_items WHERE task_id=%s",(run["task_id"],))}
+        self.assertEqual(items,{"bill":"done"})
+
+    def test_retry_save_requires_a_held_save(self):
+        run,bill,_=self.ready()
+        response=self.decision(run,bill,"retry_save")
+        self.assertEqual(response.status_code,422,response.text)
+
     def test_accounting_edits_and_prompt_input_rejected(self):
         run,bill,result=self.ready()
         result["records"][0]["data"]["total"]=999

@@ -25,7 +25,7 @@ def hold_save(connection, run, record, reason, *, title=None):
     record["status"] = "held"
     record["save_hold"] = reason
     record["findings"] = list(dict.fromkeys([*record["findings"], reason]))
-    flag(connection, run, record, title=title)
+    return flag(connection, run, record, title=title)
 
 
 def prepare_automatic(connection, run, result):
@@ -170,10 +170,8 @@ def prepare(connection, run, result, *, approved=False):
             from .attention import flag
             flag(connection, run, record)
         except UniqueViolation:
-            record["status"] = "held"
-            record["findings"].append(
-                "Another approved run is reconciling this bill. Finish it, then resume this review."
-            )
+            hold_save(connection, run, record,
+                      "Another approved run is reconciling this bill. Finish it, then use Retry save.")
     return result
 
 
@@ -360,7 +358,12 @@ def accept(connection, device, payload, receipt):
         record["current"] = current
     from .attention import flag
     if outcome in ("correction", "attention"):
-        item = flag(connection, run, record, title="Review in Tally")
+        # A different existing voucher is a correction decision. Any other native
+        # refusal is fixed in Tally, then cleared by retrying the same plan.
+        item = (flag(connection, run, record, title="Review in Tally") if outcome == "correction"
+                else hold_save(connection, run, record,
+                               str(receipt.get("message", "Tally write needs attention."))[:300],
+                               title="Review in Tally"))
         from ..attention import audit
         audit(connection,item,run['actor_id'],outcome,receipt.get('message','Existing voucher needs review.'))
     # Best-guess review starts after verified write, using exact native identity.
@@ -373,12 +376,8 @@ def accept(connection, device, payload, receipt):
         record["findings"].append(
             "Exact duplicate already exists; no additional voucher was created."
         )
-    elif outcome in ("correction", "attention"):
-        record["findings"].append(
-            "Review in Tally."
-            if outcome == "correction"
-            else str(receipt.get("message", "Tally write needs attention."))[:300]
-        )
+    elif outcome == "correction":
+        record["findings"].append("Review in Tally.")
     connection.execute(
         "UPDATE account_tally_writes SET outcome=%s,receipt=%s,finished_at=now(),verified_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s",
         (outcome, Jsonb(receipt), outcome in ("saved", "duplicate"), write["id"]),

@@ -1,5 +1,29 @@
 # Decision Logs
 
+## Separate destination holds from interpretation holds (13 October 2026)
+
+**Situation:** When Tally refused a supported bill (for example its date
+settings), the run returned to review with only Best guess write available,
+although the companion's message pointed to a Resume saves button that was not
+shown. Retrying through Best guess write opened a human-review item for what was
+a technical failure.
+
+**Task:** Give destination failures a one-click recovery that repeats the
+authorized plan without creating review work or bypassing checks.
+
+**Action:** Holds caused by the destination now carry a `save_hold` reason. Those
+are native refusals, unavailable PCs and reservation conflicts; interpretation
+uncertainty never sets it. Retry save, limited to the run's operator, clears
+only those holds and re-sends the proposal through normal approval. It relies on
+the native save's read-first idempotency: an equal voucher is skipped and a
+different one becomes a correction. The UI derives buttons from one tested view
+function, and the server refuses Best guess write for a held save.
+
+**Result:** Database regressions prove a rejected save is retried with the same
+plan and Tally ID, and completes without a review item. A PC-unavailable hold
+reports 409 while the PC is offline and completes after the same installation
+reconnects.
+
 ## Derive bill completion from record outcomes, not the clearing action (13 October 2026)
 
 **Situation:** A Tally bill saved through Best guess write could stay listed as

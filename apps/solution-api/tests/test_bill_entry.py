@@ -84,6 +84,26 @@ class BillEntryTests(unittest.TestCase):
             self.assertEqual(record["status"], "held")
             self.assertIn("PC is unavailable", record["save_hold"])
 
+    def test_retry_save_after_reconnecting_an_unavailable_pc(self):
+        did = self.tally_discovery()
+        bill = self.upload_bill()
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        self.client.delete(f"{self.native}/devices/{self.device['id']}", headers=self.csrf)
+        self.process(run, self.tally_result(run, bill))
+        held = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual((held["state"], held["result"]["records"][0]["status"]), ("review", "held"))
+        offline = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
+                                   headers=self.csrf, json={"action": "retry_save"})
+        self.assertEqual(offline.status_code, 409, offline.text)
+        self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
+            "name": "Bill PC", "installation_id": self.device["installation_id"]}).json()
+        self.worker = {"Authorization": "Bearer " + self.device["credential"]}
+        retried = self.decide(run, bill, "retry_save")
+        self.assertEqual(retried["state"], "writing")
+        self.save_receipt(retried, "MOCK-1")
+        self.assertEqual(self.client.get(self.base + f"/runs/{run['id']}").json()["state"], "completed")
+
     def test_batch_reconciliation_isolates_an_unexpected_parent_failure(self):
         from unittest import mock
 

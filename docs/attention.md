@@ -40,6 +40,16 @@ mandatory data or unsupported accounting
 structures cannot be overridden by the button. Observed corrections can be
 authorized with one click; the application selects the operation, not the user.
 
+Retry save replaces Best guess write when a supported bill was held by its
+destination, not by its interpretation. Examples are Tally refusing a voucher
+date, an unconfirmed import, ambiguous existing vouchers, an unavailable PC or
+another run reserving the same bill. After the operator fixes Tally or reconnects
+the PC, the run's original operator re-sends the same proposal. It goes through
+the normal validation and native read-first save, so an equal voucher is
+skipped and a different one becomes a correction decision. As a technical retry
+it opens no best-guess review. An existing voucher with different values
+remains a correction decision through Best guess write.
+
 Create this ledger is currently bounded to a missing, evidenced supplier for a
 supported non-tax Purchase bill. It creates a Sundry Creditors master through
 Tally's native import, verifies the master and queues that bill's normal save.

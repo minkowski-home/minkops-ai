@@ -41,7 +41,7 @@ def refresh_one(slug: str, item_id: UUID, request: Request, user: User, connecti
 
 
 class Decision(BaseModel):
-    action: Literal["nothing", "guess", "supplier", "retry"]
+    action: Literal["nothing", "guess", "supplier", "retry", "retry_save"]
 
 
 @router.post("/bills/{run_id}/{file_id}")

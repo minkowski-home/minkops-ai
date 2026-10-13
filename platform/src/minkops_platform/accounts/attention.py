@@ -78,6 +78,10 @@ def decide(connection, tenant, user, run_id, file_id, action):
         raise ServiceError("conflict", "Bill already handled.")
     if action == "retry":
         return resolve_bill(connection, tenant, user, run_id, file_id, "", False)
+    if action == "retry_save":
+        return _retry_save(connection, tenant, user, run, record)
+    if record.get("save_hold") and action in ("guess", "supplier"):
+        raise ServiceError("invalid", "Fix the destination, then use Retry save.")
     if action == "nothing":
         item = flag(connection, run, record, actor=user["id"])
         attention.audit(connection, item, user["id"], "deferred", "No write. Manual handling required.")
@@ -140,6 +144,32 @@ def decide(connection, tenant, user, run_id, file_id, action):
         return approve_run(connection, tenant, user, run_id, {"result": result, "acknowledge_findings": True})
     except (ValueError, KeyError, TypeError) as error:
         raise ServiceError("invalid", "No supported write. Use Do nothing.") from error
+
+
+def _retry_save(connection, tenant, user, run, record):
+    """Re-send a held bill's supported proposal after the destination is fixed.
+
+    This is a technical retry under the original authorization, not a new
+    interpretation, so it opens no best-guess review. Native saves read the
+    destination first: an equal voucher is skipped and a different one is
+    offered as a correction rather than overwritten.
+    """
+    from .service import approve_run
+    # Scope to held saves only; another proposal from the same file keeps its own decision.
+    retried = {index for index, row in enumerate(run["result"]["records"])
+               if row["source_file_id"] == record["source_file_id"]
+               and row.get("status") == "held" and row.get("save_hold")}
+    if not retried:
+        raise ServiceError("invalid", "Only a held save can be retried.")
+    for index in retried:
+        row = run["result"]["records"][index]
+        reason = row.pop("save_hold")
+        row["findings"] = [finding for finding in row["findings"] if finding != reason]
+    connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
+    result = copy.deepcopy(run["result"])
+    for index, row in enumerate(result["records"]):
+        row["decision"] = "approve" if index in retried else "hold"
+    return approve_run(connection, tenant, user, run["id"], {"result": result, "acknowledge_findings": True})
 
 
 def check_observation(item, observation):
