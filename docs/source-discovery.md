@@ -81,6 +81,16 @@ Notes may be empty. Routine vendor/item relationships remain in the actual vouch
 files for later lookup, rather than becoming hundreds of prose rules. Confirmation
 validates note references and accepts the package and any Excel mappings.
 
+Confirmation authorizes the company scope, Excel structure and approved meanings,
+and the configuration. A later refresh with the same authority reuses it
+automatically, even when vouchers or masters changed, including vouchers Minkops
+saved. Confirmed notes are re-validated against the new collection, and a note
+whose evidence disappeared requires review again. A changed company identity or
+scope, Excel layout or configuration still needs confirmation. Catalogs confirmed
+before this rule used a fuller fingerprint, so their first refresh asks once. If optional AI context analysis fails for a Tally-only
+collection, the complete native sources can still be confirmed without notes;
+that confirmation closes the failed analysis's attention item with an audit.
+
 Excel discovery projects selected `.xlsx` workbooks into fresh packages containing
 sheets, table/header definitions and formula text. Cached formula results,
 business rows, comments, links, images and named constants are excluded. Formula

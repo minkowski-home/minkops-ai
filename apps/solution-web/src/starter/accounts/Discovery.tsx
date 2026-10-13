@@ -9,7 +9,7 @@ import { CatalogReview } from "./CatalogReview";
 import { desktopBridge } from "../desktop/bridge";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { Spinner } from "../components/Feedback";
-import { discoveryProgress, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
+import { canConfirm, discoveryProgress, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
 import { DiscoveryResults } from "./DiscoveryResults";
 
 import { DestinationPCPicker } from '../desktop/DestinationPC';
@@ -223,6 +223,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
               : run.state === "failed" ? "Check source access on your PC, then run discovery again." : "Check the collected counts and mappings, then confirm."}</p></header>
       {run.catalog?.sources.map(source => source.snapshot?.scope_error && <p role="alert" className="form-message" key={source.key}>{source.snapshot.scope_error}</p>)}
       {run.catalog?.context_error && <p role="alert" className="form-message">{run.catalog.context_error}</p>}
+      {run.analysis_failed && <p className="quiet-state">AI context analysis was unavailable. Confirm the collected Tally sources without context notes, or run discovery again.</p>}
       {run.catalog && run.config.ai_context === false && <p className="quiet-state">AI analysis is off. Review the collected sources{run.config.excel_source_ids.length ? "; Excel structure is saved without entry mappings" : ""}.</p>}
       <DiscoveryResults run={controlState === "active" ? run : { ...run, state: controlState }} />
       {run.state === "review" && edited && edited.sheets.length > 0 && <div className="discovery-mapping-review">
@@ -235,7 +236,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
           <p>{note.observation} · {note.certainty}</p><p className="quiet-state">Evidence: {note.evidence_ids.join(", ")}</p>
         </li>)}</ul></details> : null}
       <div className="accounts-toolbar discovery-review-actions">
-        {run.state === "review" && <button className="button button-primary" disabled={controlState !== "active" || Boolean(busy) || Boolean(loadError) || run.catalog?.partial || Boolean(run.mapping_run && !edited)} onClick={() => void confirm()}>
+        {run.state === "review" && <button className="button button-primary" disabled={controlState !== "active" || Boolean(busy) || Boolean(loadError) || !canConfirm(run, Boolean(edited))} onClick={() => void confirm()}>
           {busy === "confirm" && <Spinner />}{busy === "confirm" ? "Confirming sources…" : "Confirm sources"}
         </button>}
         {run.catalog && (desktopBridge()?.saveCatalog ? <button className="button button-ghost" disabled={Boolean(busy)} onClick={() => void saveCatalog()}>{busy === "export" && <Spinner />}{busy === "export" ? "Saving catalog…" : "Save source catalog"}</button>
