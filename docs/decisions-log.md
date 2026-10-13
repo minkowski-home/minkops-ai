@@ -1,5 +1,68 @@
 # Decision Logs
 
+## Measure the hold rate with a labelled holdout and a free replay (13 October 2026)
+
+**Situation:** The main complaint was too many held bills, and several releases
+had changed prompts and lifecycle code without a measured end-to-end run. A
+held bill could be the model's fault, the pipeline's, the provider's or a
+correct exception, and every paid rerun to tell them apart cost money.
+
+**Task:** Measure Bill Entry 0.12 on realistic documents, separate model errors
+from pipeline errors, and fix what the measurement shows without trading holds
+for silent accounting errors.
+
+**Action:** Built one tool on two existing seams. `replay` feeds a run the
+answers a correct agent returns through the worker's executor parameter, so
+validation, master selection, aggregation, attention and the companion's
+read-first Tally save run on real PDFs without a model. `score` grades each
+input against a labelled package and treats wrong saves, missed exceptions and
+double saves as critical. A dry replay of 36 labelled bills passed 36/36 before
+any paid run. The paid gpt-6-luna run of 39 bills (36 labelled plus a
+two-invoice PDF with an e-way bill, a quotation and an off-day date) then
+isolated each remaining failure. Two were provider errors: a dropped stream now
+reattaches to the existing turn, while an ambiguous session creation stays an
+explicit Recheck. Three were instruction gaps, fixed as general rules: supplier
+identity must come from printed identity, not purpose or history (a bill
+printing only a shared leading name had been saved to one of two suppliers);
+the split-tax capability is named by its exact path; and a scanned GSTIN that
+fails its check character is re-read as a misread, not treated as a conflict.
+Exercising the one-click decisions live surfaced four product bugs, each fixed
+test first: Do nothing on a non-bill made every later approval fail, stopping a
+batch duplicated every bill in Attention, a busy run answered decisions with a
+permission error, and a re-held bill stayed marked Done.
+
+**Result:** 31 of 36 labelled bills passed on the first paid pass (two provider
+errors, two unnecessary holds, one missed exception). Every other saved voucher
+matched the ground truth on company, supplier, ledger, date, amounts and each
+tax line; the edge cases passed 3/3. After the fixes and
+targeted reruns all 36 reach their expected outcome, including Create this
+ledger, an in-place correction and Recheck after provider failures. A free
+rerun of all 36 created no voucher. One bill saved before the supplier rule
+remains in the test company under the more plausible supplier.
+
+## Version delivered context so pinned runs keep their exact bytes (13 October 2026)
+
+**Situation:** After one 39-bill batch, a discovery refresh of three small test
+companies exceeded the 8 MB hosted context budget and was marked partial, which
+blocks confirmation and therefore Bill Entry. About half of each native voucher
+record's bytes were empty tags. Every launched run pins the SHA-256 of each
+context file, and execution refuses inputs that differ from that snapshot.
+
+**Task:** Shrink the delivered context without discarding evidence, breaking
+record offsets used by the master index and cited notes, or failing runs
+launched before the change.
+
+**Action:** Added a versioned compact record format. New discovery catalogs are
+stamped with it; delivery then drops empty strings, nulls and empty containers
+but keeps every list position and meaningful values such as 0 and "No".
+Unstamped catalogs keep the previous serialization, so earlier pinned hashes
+still match. The stored native export is unchanged.
+
+**Result:** The measured package fell from 8.35 MB to 4.78 MB and the refresh
+was complete and reused its confirmation. This doubles headroom, not unbounded
+scale: larger customers will need per-bill context retrieval rather than full
+history delivery.
+
 ## Trace a misleading Tally rejection to company settings (13 October 2026)
 
 **Situation:** Two clean, correctly extracted March bills failed natively with

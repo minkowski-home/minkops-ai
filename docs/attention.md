@@ -43,7 +43,7 @@ before aggregation; bills that were never read open none.
 Do nothing never writes, retains a source identifier in attention and permits
 other bills to continue. It is final for that run: the input is recorded as
 deferred data, not a run-level finding, so exception-only saves of its siblings
-continue and the run can complete. Best guess write accepts an existing supported proposal,
+continue, later decisions in the run stay valid and the run can complete. Best guess write accepts an existing supported proposal,
 with the same required values, ledger identity and native verification checks.
 After verified save, its exact voucher/row fingerprint becomes the review
 baseline. It remains pending until manual Done or a changed, valid destination

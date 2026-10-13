@@ -48,6 +48,14 @@ def load_expected(packages):
             bill["purchase_guid"] = bill.get("purchase_guid") or guids.get("purchase_ledger")
             bill["package"] = Path(package).name
             bills[bill["sha256"]] = bill
+    # Two copies of one bill in a batch: whichever is processed first is saved.
+    for bill in bills.values():
+        if bill.get("duplicate_of") is not None:
+            pair = (bill["package"], bill["duplicate_of"])
+            bill["pair"] = pair
+            for other in bills.values():
+                if (other["package"], other["id"]) == pair:
+                    other["pair"] = pair
     return bills
 
 
@@ -85,7 +93,12 @@ def replay_output(bill, file_id, target):
         record["tax_allocations"] = [
             {"ref": refs[line["guid"]], "amount": float(line["amount"]), "evidence": f"Printed {line['label']}."}
             for line in bill["tax_allocations"]]
-    if case == "missing_supplier":
+    created = next((ref for ref, master in company["ledger_refs"].items()
+                    if case == "missing_supplier" and master["name"] == bill["supplier"]), None)
+    if created:
+        # On a rerun after Create this ledger, the supplier is an existing master.
+        record["master_refs"]["vendor"] = {"ref": created, "evidence": "Printed supplier matches this master."}
+    elif case == "missing_supplier":
         data["vendor"] = bill["supplier"]
         record["master_refs"]["vendor"] = {"ref": None, "new_supplier": True,
                                            "evidence": "No discovered ledger matches the printed supplier."}
@@ -154,6 +167,11 @@ def grade(bill, records, issue, deferred, rerun, dry=False):
     if dry and ready and (want != "attention" or bill["case"] == "conflicting_version"):
         mismatch = compare(bill, records[0])
         return ("wrong_proposal!", "; ".join(mismatch)) if mismatch else ("correct_ready", "")
+    if rerun and "saved" in statuses:
+        return "double_save!", "a rerun created another voucher"
+    if rerun and want == "attention" and statuses == ["duplicate"] and bill["case"] in (
+            "missing_supplier", "conflicting_version"):
+        return "correct", "resolved by its decision; now a duplicate"
     if want == "attention":
         if any(s in ("saved",) for s in statuses):
             return "missed_exception!", f"saved; expected {bill['case']}"
@@ -169,9 +187,7 @@ def grade(bill, records, issue, deferred, rerun, dry=False):
     if record.get("status") in ("saved", "duplicate"):
         if mismatch:
             return "wrong_save!", "; ".join(mismatch)
-        if record["status"] != want and not (want == "duplicate" and rerun):
-            # A first-run 'create' that Tally reports as an exact duplicate means
-            # the voucher already existed; it is not an accounting error.
+        if record["status"] != {"create": "saved"}.get(want, want) and not bill.get("pair"):
             return "unexpected_" + record["status"], ""
         return "correct", record["status"]
     hold = record.get("save_hold") or " ".join(record.get("findings", []))
@@ -207,7 +223,7 @@ def score(run_id, expected, rerun, dry=False):
         failed = {c["file_ids"][0]: c["error"] for c in connection.execute(
             "SELECT file_ids,error FROM account_runs WHERE parent_run_id=%s AND state='failed'", (run_id,))}
     result = run["result"] or {}
-    rows, verdicts = [], Counter()
+    rows, verdicts, outcomes = [], Counter(), []
     for file_id in run["file_ids"]:
         bill = expected.get(files[file_id]["sha256"])
         if bill is None:
@@ -221,7 +237,13 @@ def score(run_id, expected, rerun, dry=False):
         else:
             verdict, detail = grade(bill, records, issue, deferred, rerun, dry)
         verdicts[verdict] += 1
+        outcomes.append((bill, verdict, records[0].get("status") if records else None))
         rows.append((bill["file"], bill["expected"], verdict, detail))
+    saved = Counter(bill["pair"] for bill, verdict, status in outcomes if bill.get("pair") and status == "saved")
+    for pair, count in saved.items():
+        if count > 1:
+            verdicts["double_save!"] += 1
+            rows.append((f"pair {pair}", "one save", "double_save!", f"{count} saves"))
     for row in rows:
         print(" | ".join(map(str, row)))
     total = sum(verdicts.values())

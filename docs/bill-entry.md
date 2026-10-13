@@ -152,6 +152,12 @@ rewinding newer observed workbook bytes. Independent external writers can still
 race Tally's separate read/import calls: ambiguous matches or mismatched readback
 require reconciliation, never a claimed successful save.
 
+A provider stream that drops after the bill's turn started is reattached to
+the same turn, up to three times, and its result read as usual; no session or
+input is resubmitted. A failure before the turn exists is ambiguous, so the
+bill stays unresolved for an explicit Recheck bill. While saves wait for the
+destination PC, the run names that PC and asks to keep Minkops running there.
+
 ## Supported mapping
 
 Excel uses actual confirmed headers, sheet/table boundaries and types; it does
