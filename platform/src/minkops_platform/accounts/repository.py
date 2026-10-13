@@ -106,11 +106,20 @@ def list_catalogs(connection, tenant):
 
 
 def list_runs(connection, tenant):
-    rows = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s AND parent_run_id IS NULL ORDER BY updated_at DESC LIMIT 50",
+    """Recent top-level runs as summaries; full detail is fetched per run.
+
+    Each run pins multi-megabyte discovery snapshots in its config, so a list of
+    full runs outgrew hosted response limits after a few dozen runs.
+    """
+    return connection.execute(
+        """SELECT r.id, r.task_id, r.workflow_key, r.definition_version, r.state, r.error, r.updated_at,
+               t.control_state,
+               CASE WHEN jsonb_typeof(r.result->'records')='array' THEN jsonb_array_length(r.result->'records') ELSE 0 END AS records,
+               CASE WHEN jsonb_typeof(r.result->'unresolved')='array' THEN jsonb_array_length(r.result->'unresolved') ELSE 0 END AS unresolved
+        FROM account_runs r JOIN tasks t ON t.tenant_id=r.tenant_id AND t.id=r.task_id
+        WHERE r.tenant_id=%s AND r.parent_run_id IS NULL ORDER BY r.updated_at DESC LIMIT 50""",
         (tenant["id"],),
     ).fetchall()
-    return [public_run(connection, row) for row in rows]
 
 
 def task_run(connection, tenant, task_id):
