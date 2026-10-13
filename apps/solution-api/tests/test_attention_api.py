@@ -139,6 +139,25 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual((reopened["status"],reopened["label"],reopened["done_at"]),("pending","Review in Tally",None))
         self.assertIn("reopened",events)
 
+    def test_deferring_an_input_without_a_proposal_keeps_later_decisions_valid(self):
+        from minkops_platform.accounts.batch import reconcile_once
+        did=self.tally_discovery("company-attention")
+        quote,bill=self.upload_bill("quotation.pdf"),self.upload_bill("bill.pdf")
+        root,_=self.launch("bill-entry",file_ids=[quote,bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            children={r["file_ids"][0]:r for r in c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s",(root["id"],))}
+        self.process(children[quote],{"records":[],"exceptions":[],"unresolved":[
+            {"source_file_id":quote,"code":"not_a_bill","reason":"Quotation, not a bill."}]})
+        self.process(children[bill],self.tally_result(root,bill))
+        reconcile_once(URL)
+        self.assertEqual(self.decision(root,quote,"nothing").status_code,200)
+        approved=self.decision(root,bill,"guess")
+        self.assertEqual(approved.status_code,200,approved.text)
+        self.assertEqual(approved.json()["result"]["deferred"],[{"source_file_id":quote}])
+        claim,route,plan=self.tally_job(approved.json())
+        self.client.post(route+"/finish",headers=self.worker,
+                         json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})
+
     def test_two_undecided_bills_in_one_file_need_an_explicit_choice(self):
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("two-bills.pdf")

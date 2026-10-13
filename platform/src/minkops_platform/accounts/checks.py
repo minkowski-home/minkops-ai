@@ -57,7 +57,8 @@ def check_records(result, catalog, input_ids, contents, checks):
         for s in catalog["sheets"]
         if s["role"] == "destination"
     }
-    seen = set()
+    # Do nothing defers an input as server-owned data; it stays accounted for.
+    seen = {i["source_file_id"] for i in result.get("deferred", []) if i.get("source_file_id") in input_ids}
     for issue in result.get("unresolved", []):
         if (
             not isinstance(issue, dict)
