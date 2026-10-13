@@ -165,6 +165,18 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual((final["state"],record["status"],record["findings"]),("completed","duplicate",[]))
         self.assertIn("Exact duplicate",record["notes"][0])
 
+    def test_a_busy_run_refuses_decisions_as_a_conflict_not_a_permission_error(self):
+        run,bill,_=self.ready()
+        approved=self.decision(run,bill,"guess")
+        self.assertEqual(approved.status_code,200,approved.text)
+        busy=self.decision(run,bill,"nothing")
+        self.assertEqual(busy.status_code,409,busy.text)
+        self.assertIn("still saving",busy.json()["detail"])
+        # Finish the save so the pending-write reservation does not leak.
+        claim,route,plan=self.tally_job(approved.json())
+        self.client.post(route+"/finish",headers=self.worker,
+                         json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})
+
     def test_retry_save_requires_a_held_save(self):
         run,bill,_=self.ready()
         response=self.decision(run,bill,"retry_save")

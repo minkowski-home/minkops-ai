@@ -114,8 +114,11 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     run = run_for(connection, tenant["id"], run_id, True)
     from minkops_platform.run_controls import require_active
     require_active(connection, tenant["id"], run["task_id"])
-    if run["actor_id"] != user["id"] or run["state"] != "review":
+    if run["actor_id"] != user["id"]:
         raise ServiceError("forbidden", "Only this run's operator can authorize bill writes.")
+    if run["state"] != "review":
+        # Saving or rechecking: decisions resume when the run returns to review.
+        raise ServiceError("conflict", "This run is still saving or rechecking bills. Decide once it is ready.")
     index = _proposal(run, file_id, proposal)
     original = None if index is None else run["result"]["records"][index]
     issue = next((i for i in run["result"].get("unresolved", []) if i["source_file_id"] == file_id), None)
