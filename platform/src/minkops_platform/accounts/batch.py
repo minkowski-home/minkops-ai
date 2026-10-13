@@ -279,7 +279,9 @@ def _reconcile(connection, parent):
     result = enforce_policies(parent["config"], result)
     from .attention import flag, issue_record
     for issue in result.get("unresolved", []):
-        flag(connection, parent, issue_record(result, issue))
+        # Re-aggregation restates carried issues; only a recheck is a new event.
+        flag(connection, parent, issue_record(result, issue),
+             reopen=issue["source_file_id"] == parent["config"].get("retry_file_id"))
     connection.execute(
         "UPDATE account_runs SET result=%s,config=config-'aggregation_failures' WHERE id=%s",
         (Jsonb(result), parent["id"]),

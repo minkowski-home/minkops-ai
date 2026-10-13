@@ -117,6 +117,28 @@ class AttentionTests(unittest.TestCase):
             items={r["kind"]:r["status"] for r in c.execute("SELECT kind,status FROM attention_items WHERE task_id=%s",(run["task_id"],))}
         self.assertEqual(items,{"bill":"done"})
 
+    def test_a_new_hold_reopens_attention_but_restating_one_does_not(self):
+        run,bill,_=self.ready()
+        claim,route,_=self.tally_job(self.decision(run,bill,"guess").json())
+        self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"error":"Interrupted"})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            item=c.execute("SELECT * FROM attention_items WHERE task_id=%s AND kind='bill'",(run["task_id"],)).fetchone()
+        self.assertEqual(self.client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/done",headers=self.csrf).status_code,200)
+        # Restating the hold while finalizing the run is not a new event.
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            from minkops_platform.accounts.tally_writes import complete_run
+            stored=c.execute("SELECT * FROM account_runs WHERE id=%s FOR UPDATE",(run["id"],)).fetchone()
+            complete_run(c,stored,stored["result"])
+            self.assertEqual(c.execute("SELECT status FROM attention_items WHERE id=%s",(item["id"],)).fetchone()["status"],"done")
+        claim,route,_=self.tally_job(self.decision(run,bill,"retry_save").json())
+        rejection="Tally rejected the voucher date. Check Tally date settings, then use Retry save."
+        self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"error":rejection})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            reopened=c.execute("SELECT * FROM attention_items WHERE id=%s",(item["id"],)).fetchone()
+            events=[e["action"] for e in c.execute("SELECT action FROM attention_events WHERE item_id=%s ORDER BY id",(item["id"],))]
+        self.assertEqual((reopened["status"],reopened["label"],reopened["done_at"]),("pending","Review in Tally",None))
+        self.assertIn("reopened",events)
+
     def test_two_undecided_bills_in_one_file_need_an_explicit_choice(self):
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("two-bills.pdf")

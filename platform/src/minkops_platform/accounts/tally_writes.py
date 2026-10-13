@@ -25,7 +25,7 @@ def hold_save(connection, run, record, reason, *, title=None):
     record["status"] = "held"
     record["save_hold"] = reason
     record["findings"] = list(dict.fromkeys([*record["findings"], reason]))
-    return flag(connection, run, record, title=title)
+    return flag(connection, run, record, title=title, reopen=True)
 
 
 def prepare_automatic(connection, run, result):
@@ -46,13 +46,15 @@ def prepare_automatic(connection, run, result):
     from .attention import flag
 
     unresolved = {issue["source_file_id"] for issue in result.get("unresolved", [])}
+    rechecked = run["config"].get("retry_file_id")
     for record in result["records"]:
         if record.get("findings") or record["source_file_id"] in unresolved:
             if record.get("status") not in ("saved", "duplicate", "writing", "rejected"):
                 record["decision"] = "hold"
                 # Under standing authorization the exceptions are the work; they
                 # belong in shared attention, not only in this run's review.
-                flag(connection, run, record)
+                # Only a rechecked input's hold is new; siblings are restated.
+                flag(connection, run, record, reopen=record["source_file_id"] == rechecked)
     prepare(connection, run, result)
     complete_run(connection, run, result)
     return True
@@ -174,7 +176,7 @@ def prepare(connection, run, result, *, approved=False):
             from .bills import note_hold
             record["status"] = "held"
             note_hold(record, error)
-            flag(connection, run, record)
+            flag(connection, run, record, reopen=True)
         except UniqueViolation:
             hold_save(connection, run, record,
                       "Another approved run is reconciling this bill. Finish it, then use Retry save.",
@@ -367,7 +369,7 @@ def accept(connection, device, payload, receipt):
     if outcome in ("correction", "attention"):
         # A different existing voucher is a correction decision. Any other native
         # refusal is fixed in Tally, then cleared by retrying the same plan.
-        item = (flag(connection, run, record, title="Review in Tally") if outcome == "correction"
+        item = (flag(connection, run, record, title="Review in Tally", reopen=True) if outcome == "correction"
                 else hold_save(connection, run, record,
                                str(receipt.get("message", "Tally write needs attention."))[:300],
                                title="Review in Tally"))
