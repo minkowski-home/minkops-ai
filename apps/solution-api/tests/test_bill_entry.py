@@ -265,6 +265,21 @@ class BillEntryTests(unittest.TestCase):
                 "SELECT kind,status FROM attention_items WHERE task_id=%s", (run["task_id"],))}
         self.assertEqual(items, {"bill": "done", "review": "pending"})
 
+    def test_bill_before_the_company_books_is_held_before_any_import(self):
+        did = self.tally_discovery(books_from="20261005")
+        bill = self.upload_bill()
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        self.assertEqual(run["config"]["tally_target"]["companies"][0]["books_from"], "2026-10-05")
+        self.process(run, self.tally_result(run, bill))  # Bill dated 2026-10-01.
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual((loaded["state"], loaded["tally_writes"]), ("review", []))
+        self.assertIn("before Test's books begin on 2026-10-05", loaded["result"]["records"][0]["findings"][0])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT label FROM attention_items WHERE event_key=%s",
+                             (f"bill:{run['id']}:{bill}:bill",)).fetchone()
+        self.assertEqual(item["label"], "Before books begin")
+
     def test_recheck_does_not_restore_an_issue_the_operator_already_decided(self):
         _, guessed, _, loaded = self.guess_then_recheck_sibling("Tally rejected the voucher date.")
         record = next(r for r in loaded["result"]["records"] if r["source_file_id"] == guessed)
@@ -587,6 +602,7 @@ class BillEntryTests(unittest.TestCase):
         extra_ledgers=(),
         reuse_device=False,
         multiple=False,
+        books_from=None,
     ):
         self.native = "/api/tenants/mock-tenant/desktop"
         if not reuse_device:
@@ -646,7 +662,8 @@ class BillEntryTests(unittest.TestCase):
             receipt["sources"][0]["snapshot"]["collections"][0]["records"][0]["GUID"] = company_guid
         original = receipt["sources"][0]["snapshot"]
         guid = company_guid or self.device["id"] + "-company"
-        identity = {"NAME": "Test", "GUID": guid, "COMPANYNUMBER": "100000"}
+        identity = {"NAME": "Test", "GUID": guid, "COMPANYNUMBER": "100000",
+                    **({"BOOKSFROM": books_from} if books_from else {})}
         company = {
             "company": "Test",
             "company_guid": guid,

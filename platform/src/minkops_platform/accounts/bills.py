@@ -15,6 +15,21 @@ from psycopg.types.json import Jsonb
 from minkops_platform.errors import ServiceError
 
 
+class HoldReason(ValueError):
+    """A deterministic server-side hold with a stable code for attention labels."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def note_hold(record, error):
+    """Record why a proposal is held, keeping a coded reason for its label."""
+    record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
+    if getattr(error, "code", None):
+        record["exception_codes"] = list(dict.fromkeys([*record.get("exception_codes", []), error.code]))
+
+
 def normalized(value):
     return str(value).strip().casefold()
 
@@ -434,6 +449,14 @@ def validate_tally(data, target, allocations=None):
         raise ValueError(
             "Cost allocations require a supported mapping; leave this bill for review."
         )
+    books_from = target.get("books_from")
+    if books_from and data["date"] < books_from:
+        # Tally refuses vouchers before its books begin. Never move the source date.
+        raise HoldReason(
+            "date_before_books",
+            f"Bill date {data['date']} is before {target['company']}'s books begin on "
+            f"{books_from}; Tally cannot record it without a change to the company's books.",
+        )
     return identity
 
 
@@ -458,12 +481,11 @@ def capture_tally_findings(result, target):
                 record["company_name"] = selected["company"]
             validate_tally(record["data"], selected, record.get("tax_allocations"))
         except ValueError as error:
-            reason = str(error)
-            if reason not in record["findings"]:
-                record["findings"].append(reason)
+            note_hold(record, error)
             record["decision"] = "hold"
             if not any(i["source_file_id"] == record["source_file_id"] for i in unresolved):
-                unresolved.append({"source_file_id": record["source_file_id"], "reason": reason})
+                unresolved.append({"source_file_id": record["source_file_id"], "reason": str(error),
+                                   **({"code": error.code} if getattr(error, "code", None) else {})})
     return result
 
 

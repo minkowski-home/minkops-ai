@@ -5,7 +5,8 @@ from minkops_connectors.excel import sheet_records
 from .catalog import validate_data
 from .repository import digest_bytes
 
-# Short attention labels for the agent's closed set of genuine blockers.
+# Short attention labels for coded holds: the agent's closed set of genuine
+# blockers plus deterministic server-side reasons.
 EXCEPTION_LABELS = {
     "source_unreadable": "Unreadable bill",
     "not_a_bill": "Not a bill",
@@ -17,6 +18,7 @@ EXCEPTION_LABELS = {
     "supplier_missing": "Missing supplier",
     "classification_uncertain": "Ledger unclear",
     "unsupported_structure": "Manual entry needed",
+    "date_before_books": "Before books begin",
 }
 
 

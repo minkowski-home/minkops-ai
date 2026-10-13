@@ -60,4 +60,4 @@ def test_labels_come_from_codes_and_every_listed_code_has_one():
     record = {"exception_codes": ["supplier_missing"], "findings": ["Buyer company text."]}
     assert exception_label(record) == "Missing supplier"
     codes = SCHEMA["$defs"]["exception_code"]["enum"]
-    assert set(codes) == set(EXCEPTION_LABELS)
+    assert set(codes) <= set(EXCEPTION_LABELS)

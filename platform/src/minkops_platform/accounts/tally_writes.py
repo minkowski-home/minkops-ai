@@ -170,9 +170,10 @@ def prepare(connection, run, result, *, approved=False):
             record["status"] = "writing"
             seen[key] = index
         except ValueError as error:
-            record["status"] = "held"
-            record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
             from .attention import flag
+            from .bills import note_hold
+            record["status"] = "held"
+            note_hold(record, error)
             flag(connection, run, record)
         except UniqueViolation:
             hold_save(connection, run, record,

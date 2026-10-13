@@ -243,18 +243,34 @@ def targets_from_snapshot(snapshot, device_id, discovery_id):
             collections.append({"category": category, "status": "ready", "records": records})
         from .bills import target_from_references
 
-        targets.append(
-            target_from_references(
-                {
-                    "company": company["company"],
-                    "port": company["port"],
-                    "collections": collections,
-                },
-                device_id,
-                discovery_id,
-            )
+        target = target_from_references(
+            {
+                "company": company["company"],
+                "port": company["port"],
+                "collections": collections,
+            },
+            device_id,
+            discovery_id,
         )
+        books_from = books_beginning(company["identity"])
+        if books_from:
+            target["books_from"] = books_from
+        targets.append(target)
     return targets
+
+
+def books_beginning(identity):
+    """Tally's "Books beginning from" date as ISO text, when the export has one.
+
+    Older companions or exports without it simply skip the date preflight.
+    """
+    from datetime import date
+
+    value = str(text(identity.get("BOOKSFROM")) or "").strip()
+    try:
+        return date(int(value[:4]), int(value[4:6]), int(value[6:8])).isoformat() if len(value) == 8 else None
+    except ValueError:
+        return None
 
 
 def select_target(record, target):

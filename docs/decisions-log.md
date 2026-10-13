@@ -1,5 +1,25 @@
 # Decision Logs
 
+## Trace a misleading Tally rejection to company settings (13 October 2026)
+
+**Situation:** Two clean, correctly extracted March bills failed natively with
+"Voucher date is missing". The message was first mistaken for a Tally restart,
+then for an unknown date-setting problem. Each attempt consumed a review decision.
+
+**Task:** Find the real cause and stop the bill before an import attempt,
+without ever changing a source date to make Tally accept it.
+
+**Action:** Comparing the native company exports showed two of the three
+companies' books begin on 1 April 2026, so Tally refuses March vouchers. The
+companion already fetched every company field during discovery, so no
+desktop release was needed. Bill targets now carry the books-beginning date
+from the discovered identity. Validation holds an earlier bill with a coded
+"Before books begin" reason through the same path used before approval and
+again before dispatch. Snapshots without the field skip the check.
+
+**Result:** Unit and database tests hold a pre-books bill before any write
+intent, with a specific Attention label. Older pinned runs are unaffected.
+
 ## Enforce what may block a bill in the model's output schema (13 October 2026)
 
 **Situation:** Under Only exceptions, any free-text finding held a bill. Local

@@ -51,6 +51,11 @@ contain one bill plus copies and companion documents (e-way bill, IRN
 acknowledgement, challan, PO); those corroborate a single record. Runs pinned to
 earlier versions keep their free-text contract.
 
+Before any import, a bill dated before its company's Tally "Books beginning from"
+date (collected in discovery's company identity) is held as **Before books
+begin**. Tally cannot record such a voucher; Minkops never moves the source date.
+Older discovery snapshots without the date skip this preflight.
+
 The grouped file selector supports individual/group/all selection and search.
 Selections persist in this browser by source ID and path, including an explicitly
 empty selection. Refresh preserves choices when snapshot IDs change, removes
