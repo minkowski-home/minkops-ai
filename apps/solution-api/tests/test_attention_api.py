@@ -132,6 +132,17 @@ class AttentionTests(unittest.TestCase):
         statuses=[r.get("status") for r in deferred.json()["result"]["records"]]
         self.assertEqual((statuses,deferred.json()["state"]),([None,"rejected"],"review"))
 
+    def test_native_duplicate_is_an_observation_not_attention(self):
+        run,bill,_=self.ready()
+        claim,route,plan=self.tally_job(self.decision(run,bill,"guess").json())
+        response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],
+            "result":{"outcome":"duplicate","current":self.current(plan)}})
+        self.assertEqual(response.status_code,200,response.text)
+        final=self.client.get(self.base+f"/runs/{run['id']}").json()
+        record=final["result"]["records"][0]
+        self.assertEqual((final["state"],record["status"],record["findings"]),("completed","duplicate",[]))
+        self.assertIn("Exact duplicate",record["notes"][0])
+
     def test_retry_save_requires_a_held_save(self):
         run,bill,_=self.ready()
         response=self.decision(run,bill,"retry_save")

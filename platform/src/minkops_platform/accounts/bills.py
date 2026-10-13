@@ -30,6 +30,11 @@ def note_hold(record, error):
         record["exception_codes"] = list(dict.fromkeys([*record.get("exception_codes", []), error.code]))
 
 
+def add_note(record, text):
+    """An internal observation about a bill; notes never hold it or ask for attention."""
+    record["notes"] = list(dict.fromkeys([*record.get("notes", []), text]))
+
+
 def normalized(value):
     return str(value).strip().casefold()
 
@@ -424,30 +429,33 @@ def validate_tally(data, target, allocations=None):
             )
             or values[2] <= 0
         ):
-            raise ValueError(
-                "Amounts must be positive money values with at most two decimal places."
+            raise HoldReason(
+                "source_values_conflict",
+                "Amounts must be positive money values with at most two decimal places.",
             )
         if values[0] + values[1] != values[2]:
-            raise ValueError("Subtotal plus tax must equal total exactly.")
+            raise HoldReason("source_values_conflict", "Subtotal plus tax must equal total exactly.")
     except (InvalidOperation, TypeError, KeyError) as error:
-        raise ValueError("Invalid bill amounts.") from error
+        raise HoldReason("source_values_conflict", "Invalid bill amounts.") from error
     taxes = allocation_entries(data, allocations)
     for key in ("vendor", "purchase_ledger"):
         if data.get(key) not in target["ledgers"]:
             if key == "vendor":
-                raise ValueError(
+                raise HoldReason(
+                    "supplier_missing",
                     f"Supplier '{data.get(key)}' is missing from the confirmed Tally ledgers. "
-                    "Add or map the supplier, refresh Source discovery, then continue this bill."
+                    "Add or map the supplier, refresh Source discovery, then continue this bill.",
                 )
-            raise ValueError(f"{key} must match a discovered ledger exactly.")
+            raise HoldReason("classification_uncertain", f"{key} must match a discovered ledger exactly.")
     if any(line["ledger"] not in target["ledgers"] for line in taxes):
-        raise ValueError("Tax allocations must match discovered ledgers exactly.")
+        raise HoldReason("classification_uncertain", "Tax allocations must match discovered ledgers exactly.")
     selected = [data["vendor"], data["purchase_ledger"], *(line["ledger"] for line in taxes)]
     if len(set(selected)) != len(selected):
-        raise ValueError("Supplier, purchase and tax allocations require distinct ledgers.")
+        raise HoldReason("classification_uncertain", "Supplier, purchase and tax allocations require distinct ledgers.")
     if data.get("cost_code"):
-        raise ValueError(
-            "Cost allocations require a supported mapping; leave this bill for review."
+        raise HoldReason(
+            "unsupported_structure",
+            "Cost allocations require a supported mapping; leave this bill for review.",
         )
     books_from = target.get("books_from")
     if books_from and data["date"] < books_from:

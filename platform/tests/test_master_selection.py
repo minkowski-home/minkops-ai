@@ -133,3 +133,45 @@ def test_bill_dated_before_the_company_books_is_held_with_a_specific_reason():
         validate_tally(data, {**t, "books_from": "2026-04-01"})
     assert held.value.code == "date_before_books" and "2026-03-15" in str(held.value)
     validate_tally({**data, "date": "2026-04-01"}, {**t, "books_from": "2026-04-01"})
+
+
+@pytest.mark.parametrize("field,selection,code", [
+    ("purchase_ledger", {"ref": "foreign", "evidence": "Similar purpose."}, "classification_uncertain"),
+    ("vendor", {"ref": "foreign", "evidence": "Similar name."}, "supplier_unresolved"),
+    ("vendor", {"ref": None, "evidence": "Two suppliers fit."}, "supplier_unresolved"),
+])
+def test_server_holds_carry_codes_so_labels_do_not_guess_from_wording(field, selection, code):
+    from minkops_platform.accounts.attention import exception_label
+    from minkops_platform.accounts.bills import HoldReason, note_hold
+
+    t = target()
+    r = record(t)
+    r["master_refs"][field] = selection
+    with pytest.raises(HoldReason) as held:
+        resolve_masters(r, t, required=True)
+    assert held.value.code == code
+    # Previously "outside this company's pinned discovery" was labelled "Unknown company".
+    held_record = {"source_file_id": "bill", "findings": []}
+    note_hold(held_record, held.value)
+    assert exception_label(held_record) != "Unknown company"
+
+
+def test_changed_native_identity_and_bill_arithmetic_have_specific_codes():
+    from minkops_platform.accounts.bills import HoldReason, validate_tally
+
+    t = target()
+    r = record(t)
+    changed = copy.deepcopy(t)
+    changed["references"]["ledgers"]["Office Purchases"] = {"GUID": "purchase", "ALTERID": "99"}
+    with pytest.raises(HoldReason) as held:
+        resolve_masters(r, changed, required=True)
+    assert held.value.code == "destination_changed"
+    data = {"vendor": "A M Office Solutions", "purchase_ledger": "Office Purchases", "tax": 0,
+            "tax_ledger": None, "invoice_number": "INV-1", "date": "2026-10-01",
+            "subtotal": 100, "total": 101, "cost_code": None}
+    with pytest.raises(HoldReason) as held:
+        validate_tally(data, t)
+    assert held.value.code == "source_values_conflict"
+    with pytest.raises(HoldReason) as held:
+        validate_tally({**data, "total": 100, "vendor": "Unknown Traders"}, t)
+    assert held.value.code == "supplier_missing"

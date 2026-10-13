@@ -13,9 +13,11 @@ export const isUnresolved = (record: BillRecord, result: BillResult | null) =>
 export const needsAttention = (record: BillRecord, result: BillResult | null) =>
   record.findings.length > 0 || isUnresolved(record, result);
 
+/** A positively new supplier; older runs without codes are recognised by their message. */
 export const missingSupplier = (record: BillRecord) =>
   (!record.master_refs || record.master_refs.vendor?.new_supplier === true) &&
-  record.findings.some((f) => f.includes("missing from the confirmed Tally ledgers"));
+  (Boolean(record.exception_codes?.includes("supplier_missing")) ||
+    record.findings.some((f) => f.includes("missing from the confirmed Tally ledgers")));
 
 export function billActions(record: BillRecord, result: BillResult | null): BillAction[] {
   if (!isPending(record)) return [];

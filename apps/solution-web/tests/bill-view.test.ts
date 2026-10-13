@@ -31,4 +31,6 @@ test("held saves offer Retry save instead of Best guess write", () => {
   assert.deepEqual(billActions(record("new", { findings: missing, data: { tax: 0 }, master_refs: newSupplier }), result), ["supplier", "nothing"]);
   assert.deepEqual(billActions(record("taxed", { findings: missing, master_refs: newSupplier }), result), ["nothing"]);
   assert.deepEqual(billActions(record("saved", { status: "saved" }), result), []);
+  assert.deepEqual(billActions(record("coded", { findings: ["Supplier is new."], exception_codes: ["supplier_missing"],
+    data: { tax: 0 }, master_refs: newSupplier }), result), ["supplier", "nothing"]);
 });

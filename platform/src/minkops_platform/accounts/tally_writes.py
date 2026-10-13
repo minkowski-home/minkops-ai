@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
 
-from .bills import validate_tally, allocation_entries
+from .bills import add_note, allocation_entries, validate_tally
 from .repository import observe, run_for
 
 PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
@@ -177,7 +177,8 @@ def prepare(connection, run, result, *, approved=False):
             flag(connection, run, record)
         except UniqueViolation:
             hold_save(connection, run, record,
-                      "Another approved run is reconciling this bill. Finish it, then use Retry save.")
+                      "Another approved run is reconciling this bill. Finish it, then use Retry save.",
+                      title="Save waiting")
     return result
 
 
@@ -355,11 +356,11 @@ def accept(connection, device, payload, receipt):
     for sibling in result["records"]:
         if sibling.get("duplicate_of") == write["record_index"]:
             sibling["status"] = "duplicate" if outcome in ("saved", "duplicate") else "held"
-            sibling["findings"].append(
-                "Repeated bill in this batch was skipped."
-                if outcome in ("saved", "duplicate")
-                else "The original bill needs attention; this repeated input was not written."
-            )
+            if outcome in ("saved", "duplicate"):
+                add_note(sibling, "Repeated bill in this batch was skipped.")
+            else:
+                sibling["findings"].append(
+                    "The original bill needs attention; this repeated input was not written.")
     if current:
         record["current"] = current
     from .attention import flag
@@ -379,9 +380,7 @@ def accept(connection, device, payload, receipt):
         connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
             (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":
-        record["findings"].append(
-            "Exact duplicate already exists; no additional voucher was created."
-        )
+        add_note(record, "Exact duplicate already exists; no additional voucher was created.")
     elif outcome == "correction":
         record["findings"].append("Review in Tally.")
     connection.execute(

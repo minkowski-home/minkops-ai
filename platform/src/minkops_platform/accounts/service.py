@@ -293,9 +293,8 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
                                 }
                         if classification == "duplicate":
                             record["status"] = "duplicate"
-                            record["findings"].append(
-                                "Exact duplicate already exists; no additional row was created."
-                            )
+                            from .bills import add_note
+                            add_note(record, "Exact duplicate already exists; no additional row was created.")
                             continue
                         if classification == "ambiguous" or (
                             classification == "correction" and record["operation"] != "update"

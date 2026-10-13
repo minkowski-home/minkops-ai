@@ -19,6 +19,7 @@ EXCEPTION_LABELS = {
     "classification_uncertain": "Ledger unclear",
     "unsupported_structure": "Manual entry needed",
     "date_before_books": "Before books begin",
+    "destination_changed": "Tally changed",
 }
 
 

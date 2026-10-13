@@ -10,6 +10,11 @@ targets. `attention_events` preserves short internal explanations and actors for
 authorization, deferral, native failures, refresh and manual/verified completion.
 The UI shows filenames, short labels, status and contextual buttons; audit logs
 and extraction evidence explanations are not a user-facing reasoning transcript.
+Bill labels come from exception codes, whether the model or a deterministic
+server check raised them, such as "Ledger unclear", "Missing supplier", "Before
+books begin" or "Tally changed". They no longer depend on message wording.
+Verified duplicates and repeated batch inputs are recorded as internal notes, so
+they never ask for attention.
 The warehouse is future work; current audit records live in PostgreSQL.
 Confirmed discovery catalogs also remain authoritative PostgreSQL snapshots.
 Exact company GUIDs, masters and write contracts need deterministic lookup; a

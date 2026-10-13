@@ -938,6 +938,8 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(done["state"], "completed")
         self.assertEqual(done["writes"], [])
         self.assertEqual(done["result"]["records"][0]["status"], "duplicate")
+        self.assertFalse(any("Exact duplicate" in f for f in done["result"]["records"][0]["findings"]))
+        self.assertIn("Exact duplicate", done["result"]["records"][0]["notes"][0])
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
         result["records"][0]["data"]["Amount"] = 24
         self.process(run, result)
@@ -1043,6 +1045,8 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(
             sorted(r["status"] for r in done["result"]["records"]), ["duplicate", "saved", "saved"]
         )
+        repeated = next(r for r in done["result"]["records"] if r["status"] == "duplicate")
+        self.assertEqual((repeated["findings"], repeated["notes"]), ([], ["Repeated bill in this batch was skipped."]))
 
     def test_locked_company_conflict_cannot_be_approved_into_a_write(self):
         did = self.tally_discovery("alpha-guid", multiple=True)
