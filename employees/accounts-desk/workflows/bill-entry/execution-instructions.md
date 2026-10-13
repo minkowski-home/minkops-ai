@@ -106,7 +106,12 @@ its supplied masters files: modern Tally may keep GST registration in a TAXUNIT
 record (GSTREGNUMBER or TAXREGISTRATION), not the COMPANY identity fields.
 Use only tax units belonging to that discovered company; supplier ledger GSTINs
 are not buyer evidence. Preserve any effective-date limitations separately from
-the legal identity comparison. Matching GSTIN is strong evidence despite spacing,
+the legal identity comparison. A GSTIN's 15th character is a check character:
+map 0-9 to 0-9 and A-Z to 10-35, multiply the first 14 values alternately by 1
+and 2 (starting with 1), and sum each product's quotient and remainder by 36;
+the check value is (36 - sum mod 36) mod 36. A GSTIN read from a scan that fails
+this check is a misread, never a conflict: re-read that region (zoom or crop)
+before comparing identities. Only a valid printed GSTIN can contradict a company. Matching GSTIN is strong evidence despite spacing,
 punctuation, abbreviations (Pvt. Ltd. / Private Limited), a trading/display name,
 or minor spelling differences. If GSTIN is absent, require corroborating legal
 name, address or confirmed alias evidence that identifies exactly one company;

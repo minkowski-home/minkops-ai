@@ -58,7 +58,9 @@ unclear, because purpose and purchase history may choose an expense ledger but
 never a creditor. Split CGST/SGST is checked against the run's capability flag
 before any hold. Itemized goods posted to a ledger that the company's own
 history books as plain accounting vouchers follow that practice rather than
-being held for inventory.
+being held for inventory. Workflow 0.12.2 validates a scanned GSTIN's check
+character before comparing it: a read that fails the check is re-read as an OCR
+error instead of being treated as a conflicting buyer.
 
 Before any import, a bill dated before its company's Tally "Books beginning from"
 date (collected in discovery's company identity) is held as **Before books
