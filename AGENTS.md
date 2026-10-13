@@ -4,7 +4,7 @@
 - Respect the boundaries created by platform/, solutions/, employees/, and apps/ - each layer has a purpose, never mix up. Avoid spaghetti code, and prefer few deep modules over many shallow ones.
 - Follow test-driven development, avoid massive commits and keep commit sizes maintainable, and test your work before calling it done.
 - Before finishing, think of obscure edge cases, other perspectives, and always build with production environment in mind.
-- Only create/merge PRs when explicitly asked to do so, and only always merge into `staging` branch, never `main`.
+- Only create/merge PRs when explicitly asked to do so, and only always merge into `staging` branch, never `main`. In case of exceptions, when the user explicitly asks to merge into `staging` or `main`, gracefully delete any stale branches that are no longer needed.
 - Never mentioned "Co-authored by Claude" or any references to Claude/Codex in commit/PR messages.
 - Always design systems like a senior engineer, avoiding shallow practices and entry-level mistakes, or creative shortcuts.
 - Code should be well documented with meaningful comments without causing clutter.
