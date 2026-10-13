@@ -117,3 +117,75 @@ class RunLifecycleTests(TestCase):
         store.mark_closed.assert_not_called()
         close_run(connection, store, run, close_session=MagicMock())
         store.mark_closed.assert_called_once_with(connection, run)
+
+    def test_stream_chunks_are_aggregated_without_repeated_session_writes(self):
+        from minkops_platform.runtime.lifecycle import execute_proposal
+
+        connection, store = MagicMock(), MagicMock()
+        run = self.make_run(config={"execution_snapshot": {}}, workflow_key="test")
+        run["config"]["execution_snapshot"] = {"present": True}
+
+        def execute(key, files, context, event, **kwargs):
+            event("agent.session.turn.created", "session", "turn")
+            for _ in range(500):
+                event("agent.session.turn.output_text.delta", "session", "turn")
+            event("agent.session.turn.completed", "session", "turn")
+            return {}
+
+        with patch("minkops_platform.runtime.lifecycle.time.monotonic", return_value=0), \
+             patch("minkops_platform.runtime.lifecycle.record") as audit:
+            execute_proposal(connection, store, run, [], {}, execute)
+        store.save_session.assert_called_once_with(connection, run, "session", "turn")
+        self.assertEqual(connection.commit.call_count, 2)  # IDs, then raw result.
+        self.assertEqual(audit.call_count, 3)  # Creation, aggregate, completion.
+        activity = audit.call_args_list[1]
+        self.assertEqual(activity.args[2], "hosted.activity")
+        self.assertEqual(activity.kwargs["details"]["event_counts"],
+                         {"agent.session.turn.output_text.delta": 500})
+
+    def test_stream_heartbeat_is_bounded_and_retains_recovery_ids(self):
+        from minkops_platform.runtime.lifecycle import execute_proposal
+
+        connection, store = MagicMock(), MagicMock()
+        run = self.make_run(config={"execution_snapshot": {"present": True}},
+                            workflow_key="test", session_id="session", turn_id="turn")
+        clock = [0]
+
+        def execute(key, files, context, event, **kwargs):
+            clock[0] = 5
+            event("agent.output.command_execution_output.delta", None, None)
+            store.save_session.assert_not_called()
+            clock[0] = 10
+            event("agent.session.turn.item.done", None, None)
+            store.save_session.assert_called_once_with(connection, run, "session", "turn")
+            event("agent.session.turn.output_text.delta", None, None)
+            return {}
+
+        with patch("minkops_platform.runtime.lifecycle.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("minkops_platform.runtime.lifecycle.record") as audit:
+            execute_proposal(connection, store, run, [], {}, execute)
+        self.assertEqual(audit.call_count, 2)  # Timed aggregate, final remainder.
+        self.assertEqual(run["session_id"], "session")
+        self.assertEqual(run["turn_id"], "turn")
+
+    def test_recovery_ids_are_committed_even_when_first_seen_on_a_chunk(self):
+        from minkops_platform.runtime.lifecycle import execute_proposal
+
+        connection, store = MagicMock(), MagicMock()
+        run = self.make_run(config={"execution_snapshot": {"present": True}}, workflow_key="test")
+
+        def execute(key, files, context, event, **kwargs):
+            event("agent.session.created", "session", None)
+            event("agent.session.turn.output_text.delta", "session", "turn")
+            self.assertEqual(store.save_session.call_count, 2)
+            self.assertEqual(connection.commit.call_count, 2)
+            raise RuntimeError("Provider disconnected")
+
+        with patch("minkops_platform.runtime.lifecycle.time.monotonic", return_value=0), \
+             patch("minkops_platform.runtime.lifecycle.record") as audit:
+            with self.assertRaisesRegex(RuntimeError, "Provider disconnected"):
+                execute_proposal(connection, store, run, [], {}, execute)
+        store.save_result.assert_not_called()
+        self.assertEqual(audit.call_args.args[2], "hosted.activity")
+        self.assertEqual(audit.call_args.kwargs["details"]["event_counts"],
+                         {"agent.session.turn.output_text.delta": 1})

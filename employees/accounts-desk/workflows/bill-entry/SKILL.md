@@ -16,13 +16,12 @@ parsing. Application functions own deterministic validation and reliable writes.
 Recognizing the right file, sheet and named table is part of your reasoning.
 Use actual business context and source evidence across the confirmed catalog,
 not fixed client filenames or schema-specific routing. Explain ambiguous
-recognition through unresolved items; the application must not save guesses.
+recognition through coded exceptions; the application must not save guesses.
 
 Perform selected checks through confirmed mappings to business concepts. If
-a check lacks the necessary mapping or reference records, report insufficient
-evidence rather than guessing field names. Keep derived
-values distinguishable through evidence and findings. Check duplicates and
-arithmetic using application tools. Never infer payment or approval from an
+a check lacks the necessary mapping or reference records, note insufficient
+evidence rather than guessing field names. Keep derived values distinguishable
+through evidence and notes. The application checks duplicates and arithmetic. Never infer payment or approval from an
 existing bill alone. Missing PO or receipt data means those matches are not
 established; do not claim full procurement reconciliation.
 
@@ -31,11 +30,12 @@ confirmed destination file IDs, sheet names, operations and field evidence.
 The legacy draft path uses output.schema.json. Put business fields inside
 each record's `data` object, using the confirmed schema. Only the legacy draft
 envelope echoes catalog version, schema ID, and schema version. Hosted output has
-only records, findings and unresolved; run metadata is supplied by the application.
+only records, exceptions, notes and unresolved; run metadata is supplied by the
+application. Only coded exceptions block a bill; notes never do.
 The application validates the envelope
 and business data separately. Observe
-the run's review policy and request review for ambiguous matches, missing
-required data, duplicates, and validation failures. An agent's confidence alone
+the run's review policy and raise coded exceptions for ambiguous matches, missing
+required data and unsupported structures. Duplicates are decided natively. An agent's confidence alone
 does not authorize a write. The application verifies results and produces Excel
 updates after required review. The browser applies the approved workbook content
 to the granted local file and reads it back; completion requires verification.
@@ -45,7 +45,7 @@ Tally Purchase vouchers. For Tally use the supplied catalog contract and exact
 discovered ledger names. The adapter owns XML, bill identity, duplicate checks,
 correction handoff and saved-voucher readback. Never send writes from the hosted
 session. When cost allocations or statutory details exceed the supported
-contract, leave the bill unresolved instead of inventing an accounting entry.
+contract, raise unsupported_structure instead of inventing an accounting entry.
 
 For format_version 2 discovery, use the supplied reusable manifest, masters,
 recent vouchers and context notes. Do not discover schema or fetch reference
@@ -66,7 +66,7 @@ Company mode is locked or infer. Locked mode uses the user-selected company GUID
 for every bill; contradictory buyer evidence requires handoff. Infer mode may
 choose any discovered company using buyer identity and evidenced client context;
 a shared supplier name alone is insufficient. Save company_guid and explain the
-selection in company_evidence on every proposed record. Ambiguity is unresolved.
+selection in company_evidence on every proposed record. Ambiguity is a company_unresolved exception.
 When master_selection_version is 1, select ledger_refs identities in master_refs
 with evidence; the backend supplies canonical names before validation and writes.
 Use full masters, aliases, identifiers and relevant voucher history to recognize

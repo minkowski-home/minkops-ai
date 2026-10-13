@@ -18,6 +18,9 @@ undated masters and detailed vouchers for an inclusive date period, plus fresh
 workbook projections containing headers, tables and formula text. Excel business
 rows and cached results stay out of discovery. Hosted interpretation proposes
 evidenced obscure Tally conventions and provisional Excel mappings for review.
+The run's AI context toggle can skip this interpretation for both sources;
+collection then goes directly to review. Excel structure remains saved without
+new semantic mappings, so it cannot supply a new Bill Entry Excel destination.
 The tenant owns its immutable version 2 package; new Tally bill runs pin its full
 lookup evidence and company GUIDs without collecting references themselves.
 Native imports still recheck current company and master identities. Legacy

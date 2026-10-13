@@ -70,7 +70,7 @@ async function onConnectedPC(tenant: string, deviceId: string, operation: string
 export async function chooseFolder(tenant: string, csrf: string, existing?: Source, schemaOnly = false): Promise<Source> {
   const native = desktopBridge();
   if (native) {
-    if (schemaOnly && !native.schemaOnlyFolders) throw new Error('Update Minkops to version 0.4.0 or later for schema-only discovery.');
+    if (schemaOnly && !native.schemaOnlyFolders) throw new Error('Update the Windows app to enable workbook structure discovery.');
     const chosen = await native.pickFolder(tenant, existing?.id, schemaOnly);
     if (!chosen) throw new Error('Folder selection cancelled.');
     const form = nativeFilesForm(chosen.files, chosen.label, existing?.id);

@@ -162,7 +162,7 @@ class AccountsTests(unittest.TestCase):
         )
         data = {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24}
         result = {
-            "findings": [],
+            "exceptions": [],
             "records": [
                 {
                     "source_file_id": bill,
@@ -174,7 +174,7 @@ class AccountsTests(unittest.TestCase):
                         {"field": key, "page": 1, "quote": str(value)}
                         for key, value in data.items()
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
                 for file_id in [self.file_id, second_id]
             ],
@@ -213,10 +213,11 @@ class AccountsTests(unittest.TestCase):
             from psycopg.types.json import Jsonb
 
             definition = load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry')
-            # This fixture exercises the unrestricted core variant. Dedicated
-            # client-composition tests retain the installed mock-client policy.
+            # This fixture exercises the unrestricted core variant with explicit
+            # review; tests opt into only_exceptions. Dedicated client-composition
+            # tests retain the installed mock-client policy and defaults.
             c.execute("""UPDATE workflows SET config_schema=%s,execution_binding=execution_binding-'solution',
-                config_values=jsonb_set(config_values,'{output_mode}','"excel_in_place"')
+                config_values=config_values || '{"output_mode":"excel_in_place","review_mode":"all_outputs"}'::jsonb
                 WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
                 (Jsonb(definition.tenant_schema),))
             c.execute(
@@ -364,10 +365,10 @@ class AccountsTests(unittest.TestCase):
                         {"field": k, "page": 1, "quote": str(v)}
                         for k, v in {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24}.items()
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
 
         def fake(*args, **kwargs):

@@ -9,7 +9,19 @@
         "tally",
         "both"
       ],
-      "title": "Source systems"
+      "title": "Source systems",
+      "x-option-tools": {
+        "excel": [
+          "excel"
+        ],
+        "tally": [
+          "tally"
+        ],
+        "both": [
+          "excel",
+          "tally"
+        ]
+      }
     },
     "max_files": {
       "type": "integer",

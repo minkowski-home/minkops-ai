@@ -15,6 +15,26 @@ from psycopg.types.json import Jsonb
 from minkops_platform.errors import ServiceError
 
 
+class HoldReason(ValueError):
+    """A deterministic server-side hold with a stable code for attention labels."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def note_hold(record, error):
+    """Record why a proposal is held, keeping a coded reason for its label."""
+    record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
+    if getattr(error, "code", None):
+        record["exception_codes"] = list(dict.fromkeys([*record.get("exception_codes", []), error.code]))
+
+
+def add_note(record, text):
+    """An internal observation about a bill; notes never hold it or ask for attention."""
+    record["notes"] = list(dict.fromkeys([*record.get("notes", []), text]))
+
+
 def normalized(value):
     return str(value).strip().casefold()
 
@@ -409,30 +429,41 @@ def validate_tally(data, target, allocations=None):
             )
             or values[2] <= 0
         ):
-            raise ValueError(
-                "Amounts must be positive money values with at most two decimal places."
+            raise HoldReason(
+                "source_values_conflict",
+                "Amounts must be positive money values with at most two decimal places.",
             )
         if values[0] + values[1] != values[2]:
-            raise ValueError("Subtotal plus tax must equal total exactly.")
+            raise HoldReason("source_values_conflict", "Subtotal plus tax must equal total exactly.")
     except (InvalidOperation, TypeError, KeyError) as error:
-        raise ValueError("Invalid bill amounts.") from error
+        raise HoldReason("source_values_conflict", "Invalid bill amounts.") from error
     taxes = allocation_entries(data, allocations)
     for key in ("vendor", "purchase_ledger"):
         if data.get(key) not in target["ledgers"]:
             if key == "vendor":
-                raise ValueError(
+                raise HoldReason(
+                    "supplier_missing",
                     f"Supplier '{data.get(key)}' is missing from the confirmed Tally ledgers. "
-                    "Add or map the supplier, refresh Source discovery, then continue this bill."
+                    "Add or map the supplier, refresh Source discovery, then continue this bill.",
                 )
-            raise ValueError(f"{key} must match a discovered ledger exactly.")
+            raise HoldReason("classification_uncertain", f"{key} must match a discovered ledger exactly.")
     if any(line["ledger"] not in target["ledgers"] for line in taxes):
-        raise ValueError("Tax allocations must match discovered ledgers exactly.")
+        raise HoldReason("classification_uncertain", "Tax allocations must match discovered ledgers exactly.")
     selected = [data["vendor"], data["purchase_ledger"], *(line["ledger"] for line in taxes)]
     if len(set(selected)) != len(selected):
-        raise ValueError("Supplier, purchase and tax allocations require distinct ledgers.")
+        raise HoldReason("classification_uncertain", "Supplier, purchase and tax allocations require distinct ledgers.")
     if data.get("cost_code"):
-        raise ValueError(
-            "Cost allocations require a supported mapping; leave this bill for review."
+        raise HoldReason(
+            "unsupported_structure",
+            "Cost allocations require a supported mapping; leave this bill for review.",
+        )
+    books_from = target.get("books_from")
+    if books_from and data["date"] < books_from:
+        # Tally refuses vouchers before its books begin. Never move the source date.
+        raise HoldReason(
+            "date_before_books",
+            f"Bill date {data['date']} is before {target['company']}'s books begin on "
+            f"{books_from}; Tally cannot record it without a change to the company's books.",
         )
     return identity
 
@@ -458,12 +489,11 @@ def capture_tally_findings(result, target):
                 record["company_name"] = selected["company"]
             validate_tally(record["data"], selected, record.get("tax_allocations"))
         except ValueError as error:
-            reason = str(error)
-            if reason not in record["findings"]:
-                record["findings"].append(reason)
+            note_hold(record, error)
             record["decision"] = "hold"
             if not any(i["source_file_id"] == record["source_file_id"] for i in unresolved):
-                unresolved.append({"source_file_id": record["source_file_id"], "reason": reason})
+                unresolved.append({"source_file_id": record["source_file_id"], "reason": str(error),
+                                   **({"code": error.code} if getattr(error, "code", None) else {})})
     return result
 
 

@@ -30,7 +30,7 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
       ? ["Get ready", "Work", "Review", "Finished"]
       : mode === "simple"
         ? ["Get ready", "Work", "Finished"]
-        : ["Get ready", "Work", "Review", "Save", "Finished"];
+        : ["Get ready", "Read bills", "Review", "Save", "Finished"];
   const event = task.events
     .filter((e) => !["failed", "cancelled"].includes(e.event_type) && !e.event_type.startsWith("control."))
     .at(-1)?.event_type;

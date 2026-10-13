@@ -1,3 +1,4 @@
+import { billOutcome } from "../workflows/runSettings";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
@@ -5,10 +6,19 @@ import { useAuth } from "../contexts/AuthContext";
 import { CatalogReview } from "./CatalogReview";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
+import { billActions, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
 import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { progressView } from "../workspace/progress";
+
+const ACTION_LABELS: Record<BillAction, string> = {
+  guess: "Best guess write",
+  supplier: "Create this ledger",
+  nothing: "Do nothing",
+  retry: "Recheck bill",
+  retry_save: "Retry save",
+};
 
 /** Decisions only. Accounting edits and corrections belong in original tools. */
 function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string; taskId: string; controlState?: string }) {
@@ -111,7 +121,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
         )
       );
     } catch {
-      setError("Action unavailable. Use Do nothing.");
+      setError("Could not complete this action. Check the current outcome before trying again.");
     } finally {
       setBusy(false);
     }
@@ -124,9 +134,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
   const provenance = run.config.file_provenance as { id: string; path: string }[];
   const name = (id: string) => provenance?.find((f) => f.id === id)?.path ?? id;
   const records = result?.records ?? [];
-  const unmatched = (result?.unresolved ?? []).filter(
-    (i) => !records.some((r) => r.source_file_id === i.source_file_id)
-  );
+  const { unresolved: unmatched, deferred } = inputsWithoutProposal(result);
   return (
     <section className="accounts-panel" aria-label="Workflow result">
       {discovery && <TaskProgress view={progressView({
@@ -162,19 +170,13 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       )}
       {!discovery &&
         records.map((r, index) => {
-          const pending = !["saved", "duplicate", "rejected", "writing"].includes(
-            r.status ?? ""
-          );
-          const needsAttention = Boolean(
-            r.findings.length ||
-            result?.unresolved?.some((i) => i.source_file_id === r.source_file_id)
-          );
-          const missingSupplier = (!r.master_refs || r.master_refs.vendor?.new_supplier === true) && r.findings.some((f) =>
-            f.includes("missing from the confirmed Tally ledgers")
-          );
+          const pending = isPending(r);
+          const attention = needsAttention(r, result);
+          const supplierMissing = missingSupplier(r);
+          // A file can hold several bills; each decision names its own proposal.
           const decide = (action: string) =>
             act(`/api/tenants/${tenant}/attention/bills/${run.id}/${r.source_file_id}`, {
-              action
+              action, proposal: index
             });
           return (
             <article className="accounts-bill" key={`${r.source_file_id}:${index}`}>
@@ -195,50 +197,20 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
                 `${line.ledger ?? "Pending ledger"} · ${new Intl.NumberFormat("en-IN").format(line.amount)}`).join(" · ")}</p>}
               <span role="status">
                 {" "}
-                {missingSupplier
-                  ? "Missing supplier"
-                  : needsAttention
-                    ? "Needs review"
-                    : (r.status ?? "Ready")}
+                {supplierMissing && pending ? "Missing supplier" : billOutcome(r.status, attention)}
               </span>
               {pending && run.state === "review" && ownsRun && (
                 <div className="accounts-toolbar">
-                  {!missingSupplier && (
+                  {billActions(r, result).map((action) => (
                     <button
+                      key={action}
                       className="button button-ghost"
                       disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide("guess")}
+                      onClick={() => void decide(action)}
                     >
-                      {needsAttention ? "Best guess write" : "Write bill"}
+                      {action === "guess" && !attention ? "Write bill" : ACTION_LABELS[action]}
                     </button>
-                  )}
-                  {missingSupplier && r.data.tax === 0 && (
-                    <button
-                      className="button button-ghost"
-                      disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide("supplier")}
-                    >
-                      Create this ledger
-                    </button>
-                  )}
-                  <button
-                    className="button button-ghost"
-                    disabled={busy || controlState !== "active" || Boolean(loadError)}
-                    onClick={() => void decide("nothing")}
-                  >
-                    Do nothing
-                  </button>
-                  {result?.unresolved?.some(
-                    (i) => i.source_file_id === r.source_file_id
-                  ) && (
-                    <button
-                      className="button button-ghost"
-                      disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide("retry")}
-                    >
-                      Recheck bill
-                    </button>
-                  )}
+                  ))}
                 </div>
               )}
             </article>
@@ -273,6 +245,13 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
             >
               Recheck bill
             </button>
+          </article>
+        ))}
+      {!discovery &&
+        deferred.map((i) => (
+          <article className="accounts-bill" key={i.source_file_id}>
+            <h4>{name(i.source_file_id)}</h4>
+            <p>Not written</p>
           </article>
         ))}
       {!discovery &&

@@ -10,6 +10,11 @@ targets. `attention_events` preserves short internal explanations and actors for
 authorization, deferral, native failures, refresh and manual/verified completion.
 The UI shows filenames, short labels, status and contextual buttons; audit logs
 and extraction evidence explanations are not a user-facing reasoning transcript.
+Bill labels come from exception codes, whether the model or a deterministic
+server check raised them, such as "Ledger unclear", "Missing supplier", "Before
+books begin" or "Tally changed". They no longer depend on message wording.
+Verified duplicates and repeated batch inputs are recorded as internal notes, so
+they never ask for attention.
 The warehouse is future work; current audit records live in PostgreSQL.
 Confirmed discovery catalogs also remain authoritative PostgreSQL snapshots.
 Exact company GUIDs, masters and write contracts need deterministic lookup; a
@@ -26,8 +31,19 @@ Grouping and sorting happen before pagination (200 items per page). Bulk refresh
 queues at most 200 eligible pending items per click, rotating by last check;
 offline and unsupported items remain available for manual Done.
 
+Decisions name one bill. A file holding several invoices gets a decision per
+bill, and its attention item closes only when every bill from it is settled.
+Each bill input has one item per run and kind. Finalizing or re-aggregating a
+run only restates its holds, so an operator's Done survives a sibling's recheck.
+A new hold event reopens a Done item with its current reason: a destination
+refusal (including a Retry save refused again), a correction, an interrupted
+save, a save-time validation failure or a rechecked input. Stopping a batch
+opens items under the batch run only, including bills its children had read
+before aggregation; bills that were never read open none.
 Do nothing never writes, retains a source identifier in attention and permits
-other bills to continue. Best guess write accepts an existing supported proposal,
+other bills to continue. It is final for that run: the input is recorded as
+deferred data, not a run-level finding, so exception-only saves of its siblings
+continue, later decisions in the run stay valid and the run can complete. Best guess write accepts an existing supported proposal,
 with the same required values, ledger identity and native verification checks.
 After verified save, its exact voucher/row fingerprint becomes the review
 baseline. It remains pending until manual Done or a changed, valid destination
@@ -37,6 +53,16 @@ event remains pending. Ambiguous identities, multiple matching records, missing
 mandatory data or unsupported accounting
 structures cannot be overridden by the button. Observed corrections can be
 authorized with one click; the application selects the operation, not the user.
+
+Retry save replaces Best guess write when a supported bill was held by its
+destination, not by its interpretation. Examples are Tally refusing a voucher
+date, an unconfirmed import, ambiguous existing vouchers, an unavailable PC or
+another run reserving the same bill. After the operator fixes Tally or reconnects
+the PC, the run's original operator re-sends the same proposal. It goes through
+the normal validation and native read-first save, so an equal voucher is
+skipped and a different one becomes a correction decision. As a technical retry
+it opens no best-guess review. An existing voucher with different values
+remains a correction decision through Best guess write.
 
 Create this ledger is currently bounded to a missing, evidenced supplier for a
 supported non-tax Purchase bill. It creates a Sundry Creditors master through

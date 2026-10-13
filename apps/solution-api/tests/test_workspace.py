@@ -36,6 +36,30 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200, login.text)
         self.csrf = self.client.get("/api/auth/me").json()["csrf_token"]
 
+    def test_reseeding_repairs_saved_choices_for_a_paused_tool(self):
+        import psycopg
+        from psycopg.types.json import Jsonb
+
+        with psycopg.connect(URL) as c:
+            for key, name, value in (("bill-entry", "output_mode", "excel_in_place"),
+                                     ("source-discovery", "destination_mode", "both")):
+                c.execute("""UPDATE workflows SET config_values=jsonb_set(config_values,%s,%s)
+                    WHERE key=%s AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
+                          ([name], Jsonb(value), key))
+        subprocess.run(
+            [sys.executable, str(ROOT / "db" / "seed_demo.py")],
+            env={**os.environ, "DATABASE_URL": URL, "DEMO_PASSWORD": PASSWORD},
+            check=True, capture_output=True, text=True,
+        )
+        with psycopg.connect(URL) as c:
+            rows = dict(c.execute("""SELECT key, config_values FROM workflows WHERE key IN
+                ('bill-entry','source-discovery') AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""").fetchall())
+            schema = c.execute("""SELECT config_schema FROM workflows WHERE key='source-discovery'
+                AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""").fetchone()[0]
+        self.assertEqual(rows["bill-entry"]["output_mode"], "tally_in_place")
+        self.assertEqual(rows["source-discovery"]["destination_mode"], "tally")
+        self.assertEqual(schema["properties"]["destination_mode"]["x-enabled-options"], ["tally"])
+
     def test_pr_infra_empty_and_mock_has_linked_catalog(self):
         pr = self.client.get("/api/tenants/pr-infra/workspace")
         self.assertEqual(pr.status_code, 200, pr.text)

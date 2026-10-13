@@ -1,3 +1,4 @@
+import { RunSettings, type RunSettingsProps } from "../workflows/RunSettings";
 import { Spinner } from '../components/Feedback';
 import { BillFileSelection } from './BillFileSelection';
 import { restoreSelection, reconcileSelection, selectionKeys } from './fileSelection';
@@ -15,7 +16,7 @@ import type { Run, Source, SavedCatalog } from './types';
 interface NativeCatalog { id:string; ready:boolean; device_id:string; config:{tally:{company?:string}|null};catalog?:{excel_catalog_id?:string;format_version?:string;sources:{tool:string;snapshot?:{companies?:{company:string;company_guid:string}[]}}[]} }
 const discoveredCompanies = (catalog:NativeCatalog|null) => catalog?.catalog?.sources.flatMap(s=>s.tool==='tally' ? s.snapshot?.companies ?? [] : []) ?? [];
 
-function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destination }: { tenant: string; routeSlug: string; workflow: Workflow; onConfigChange?: (values: Workflow["config_values"]) => void; destination?: DestinationPCState }) {
+function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destination, settings }: RunSettingsProps & { routeSlug: string; destination?: DestinationPCState }) {
   const { user } = useAuth(); const navigate = useNavigate();
   const [sources, setSources] = useState<Source[]>([]);
   const [catalogs, setCatalogs] = useState<SavedCatalog[]>([]);
@@ -107,7 +108,7 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
   }
   return <section className="accounts-panel bill-launch" aria-label="Run workflow">
     <div className="section-heading"><div><h3>Enter bills</h3>
-      <p>Read bills in parallel, review entries, and save to your connected Excel or Tally.</p></div></div>
+      <p>Read selected bills, resolve exceptions, and verify saves in your configured destination.</p></div></div>
     <BillFileSelection sources={sources} selected={selected} loading={loadState === 'loading'} loadFailed={loadState === 'failed'} onRetry={() => void action()} busy={busy} canConnect={supportsLocalFolder()}
       onSelect={setSelected} onUpload={files => void upload(files)}
       onConnect={() => user && void action(() => chooseFolder(tenant,user.csrf_token))}
@@ -119,6 +120,9 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
         {outputMode==='tally_in_place'&&<><label>Company selection<select aria-label="Company selection" value={companyMode} onChange={e=>onConfigChange?.({...workflow.config_values,company_mode:e.target.value})}><option value="infer">Infer from each bill · any discovered company</option><option value="locked">Use one company for this run</option></select></label>{companyMode==='locked'&&<label>Company for all bills<select aria-label="Company for all bills" value={lockedCompanyGuid} onChange={e=>onConfigChange?.({...workflow.config_values,locked_company_guid:e.target.value})}><option value="">Choose a company</option>{discoveredCompanies(nativeCatalog).map(c=><option key={c.company_guid} value={c.company_guid}>{c.company}</option>)}</select></label>}</>}
         {outputMode!=='tally_in_place'&&<fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>}
     </div></details>
+    <RunSettings tenant={tenant} workflow={workflow} onConfigChange={onConfigChange} settings={settings} exclude={["company_mode", "locked_company_guid"]} busy={busy} />
+    {!selected.length && <p className="quiet-state">Select at least one bill to run.</p>}
+    {workflow.status !== "active" && <p className="quiet-state">This workflow is unavailable for new runs.</p>}
     {nativeError && <p role="alert" className="form-message">{nativeError}</p>}
     {error && <p role="alert" className="form-message">{error}</p>}
     <button className="button button-primary" disabled={!loaded || !destination?.available || busy || workflow.status !== 'active' || !selected.length || (outputMode==='tally_in_place'? !nativeCatalog?.ready||!discoveredCompanies(nativeCatalog).length||(companyMode==='locked'&&!discoveredCompanies(nativeCatalog).some(company=>company.company_guid===lockedCompanyGuid)) : !destinationCatalogId || !nativeCatalog?.ready)} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
@@ -149,6 +153,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       try { selectedPC = JSON.parse(localStorage.getItem(destinationPreference(tenant, user.id, workflow.key)) ?? 'null'); }
       catch { /* Unknown preferences require an explicit destination choice. */ }
       if (!target.device_id || selectedPC !== target.device_id) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
+      if (target.output_mode !== workflow.config_values.output_mode) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
       const tally=target.output_mode==='tally_in_place';
       let selections: string[] = [];
       try {
@@ -179,7 +184,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       if (!files.length) throw new Error('Your saved selection is unavailable. Open workflow details to select files.');
       const loaded = await api<Run>(base+'/runs', {method:'POST',body:JSON.stringify({
         key:workflow.key,request_key:crypto.randomUUID(),destination_device_id:target.device_id,file_ids:files,catalog_id:tally ? null : target.catalog_id??catalogs[0].id,
-        config:tally?{output_mode:'tally_in_place',discovery_id:target.discovery_id,company_mode:target.company_mode??'infer',locked_company_guid:target.locked_company_guid??null}:{output_mode:'excel_in_place'},
+        config:tally?{...workflow.config_values,output_mode:'tally_in_place',discovery_id:target.discovery_id,company_mode:target.company_mode??'infer',locked_company_guid:target.locked_company_guid??null}:{...workflow.config_values,output_mode:'excel_in_place'},
       })},user.csrf_token);
       navigate(`/${routeSlug}/tasks/${loaded.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Open workflow details to reconnect your folder.'); }
@@ -189,6 +194,6 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     {error && <p role="alert" className="form-message">{error}</p>}</div>;
 }
 
-export function AccountsLaunch(props:{tenant:string;routeSlug:string;workflow:Workflow;destination?: DestinationPCState;onConfigChange?: (values: Workflow["config_values"]) => void}) {
+export function AccountsLaunch(props:RunSettingsProps & {routeSlug:string;destination?: DestinationPCState}) {
   return presentationFor(props.workflow)==='accounts-discovery'?<DiscoveryLaunch {...props}/>:<BillEntryLaunch {...props}/>;
 }

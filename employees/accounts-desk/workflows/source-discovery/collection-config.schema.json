@@ -7,6 +7,10 @@
     "tally"
   ],
   "properties": {
+    "ai_context": {
+      "type": "boolean",
+      "default": true
+    },
     "destination_mode": {
       "type": "string",
       "enum": [

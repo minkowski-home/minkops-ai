@@ -40,6 +40,8 @@ workflow implementation remains Git history, not a parallel methodology to
 preserve. Existing deterministic adapters and checks remain where they enforce
 real integration or correctness requirements.
 
+Typically, we want to use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred and best-guess outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are currently internal; independent AI steps should use bounded parallelism without weakening correctness.
+
 `main` contains the consolidated workflow and Windows companion architecture;
 the earlier `platform-ai/bill-entry-architecture` branch was merged and removed.
 See [branch convergence and upgrade](docs/branch-convergence.md) for the

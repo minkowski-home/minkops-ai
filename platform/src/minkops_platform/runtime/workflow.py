@@ -4,7 +4,8 @@ from .bundles import validate_snapshot
 from .openai_hosted import execute as hosted_execute
 
 
-def execute(key, files, context, on_event, *, client=None, session_id=None, turn_id=None):
+def execute(key, files, context, on_event, *, client=None, session_id=None, turn_id=None,
+            environment_lease=None):
     snapshot = validate_snapshot(context["config"]["execution_snapshot"])
     if snapshot["key"] != key:
         raise ValueError("Execution bundle does not belong to this workflow.")
@@ -28,4 +29,5 @@ def execute(key, files, context, on_event, *, client=None, session_id=None, turn
         client=client,
         session_id=session_id,
         turn_id=turn_id,
+        environment_lease=environment_lease,
     )

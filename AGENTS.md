@@ -1,10 +1,9 @@
 - Keep the Product Vision in README.md in mind while building any feature.
-- Product rule: automate truthfully, use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred and best-guess outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are internal; independent AI steps should use bounded parallelism without weakening correctness.
 - Important: Always keep the bigger system picture in mind. Prioritize long-term codebase sanity over shipping speed. Follow industry standard best practices to keep the codebase and repo maintainable as it grows, and avoid LOC explosion.
 - Respect the boundaries created by platform/, solutions/, employees/, and apps/ - each layer has a purpose, never mix up. Avoid spaghetti code, and prefer few deep modules over many shallow ones.
 - Follow test-driven development, avoid massive commits and keep commit sizes maintainable, and test your work before calling it done.
 - Before finishing, think of obscure edge cases, other perspectives, and always build with production environment in mind.
-- Only create/merge PRs when explicitly asked to do so, and only always merge into `staging` branch, never `main`.
+- Only create/merge PRs when explicitly asked to do so, and only always merge into `staging` branch, never `main`. In case of exceptions, when the user explicitly asks to merge into `staging` or `main`, gracefully delete any stale branches that are no longer needed.
 - Never mentioned "Co-authored by Claude" or any references to Claude/Codex in commit/PR messages.
 - Always design systems like a senior engineer, avoiding shallow practices and entry-level mistakes, or creative shortcuts.
 - Code should be well documented with meaningful comments without causing clutter.

@@ -51,6 +51,267 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(loaded["state"], "writing")
         self.assertEqual(len(loaded["tally_writes"]), 1)
         self.assertEqual(loaded["result"]["unresolved"][0]["source_file_id"], inputs[1])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            waiting = c.execute("SELECT summary FROM task_events WHERE task_id=%s ORDER BY id DESC LIMIT 1",
+                                (root["task_id"],)).fetchone()["summary"]
+        # An offline PC leaves saves queued; the status names the PC to start.
+        self.assertIn(self.device["name"], waiting)
+        self.assertIn("Keep Minkops running", waiting)
+
+    def test_stopping_a_batch_opens_one_attention_item_per_read_bill(self):
+        did = self.tally_discovery()
+        inputs = [self.upload_bill(f"stop-{i}.pdf") for i in range(3)]
+        root, _ = self.launch("bill-entry", file_ids=inputs, config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "all_outputs"})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = {c_["file_ids"][0]: c_ for c_ in c.execute(
+                "SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],))}
+        # Two bills are read; the third is still waiting when the operator stops.
+        self.process(children[inputs[0]], self.tally_result(root, inputs[0]))
+        held = self.tally_result(root, inputs[1])
+        held["records"][0]["master_refs"]["vendor"]["ref"] = "foreign-catalog"
+        self.process(children[inputs[1]], held)
+        stop = self.client.post(f"/api/tenants/mock-tenant/tasks/{root['task_id']}/control",
+                                headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stop.status_code, 200, stop.text)
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            keys = [r["event_key"] for r in c.execute(
+                "SELECT event_key FROM attention_items WHERE task_id=%s ORDER BY event_key", (root["task_id"],))]
+        self.assertEqual(keys, sorted(f"bill:{root['id']}:{f}:bill" for f in inputs[:2]))
+
+    def exception_only_batch(self, count=2):
+        did = self.tally_discovery()
+        inputs = [self.upload_bill(f"bill-{i}.pdf") for i in range(count)]
+        root, _ = self.launch("bill-entry", file_ids=inputs, config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()
+        return root, inputs, children
+
+    def numbered_result(self, run, bill, invoice):
+        result = self.tally_result(run, bill)
+        result["records"][0]["data"]["invoice_number"] = invoice
+        for evidence in result["records"][0]["evidence"]:
+            if evidence["field"] == "invoice_number":
+                evidence["quote"] = invoice
+        return result
+
+    def test_unavailable_destination_pc_holds_clean_bills_for_retry(self):
+        from minkops_platform.accounts.batch import reconcile_once
+        root, inputs, children = self.exception_only_batch()
+        for child in children:
+            self.process(child, self.numbered_result(root, child["file_ids"][0], f"PC-{child['file_ids'][0]}"))
+        disconnected = self.client.delete(f"{self.native}/devices/{self.device['id']}", headers=self.csrf)
+        self.assertEqual(disconnected.status_code, 200, disconnected.text)
+        reconcile_once(URL)  # Must not raise into the shared worker loop.
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["state"], "review")
+        self.assertEqual(loaded["tally_writes"], [])
+        for record in loaded["result"]["records"]:
+            self.assertEqual(record["status"], "held")
+            self.assertIn("PC is unavailable", record["save_hold"])
+
+    def test_retry_save_after_reconnecting_an_unavailable_pc(self):
+        did = self.tally_discovery()
+        bill = self.upload_bill()
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        self.client.delete(f"{self.native}/devices/{self.device['id']}", headers=self.csrf)
+        self.process(run, self.tally_result(run, bill))
+        held = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual((held["state"], held["result"]["records"][0]["status"]), ("review", "held"))
+        offline = self.client.post(f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
+                                   headers=self.csrf, json={"action": "retry_save"})
+        self.assertEqual(offline.status_code, 409, offline.text)
+        self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
+            "name": "Bill PC", "installation_id": self.device["installation_id"]}).json()
+        self.worker = {"Authorization": "Bearer " + self.device["credential"]}
+        retried = self.decide(run, bill, "retry_save")
+        self.assertEqual(retried["state"], "writing")
+        self.save_receipt(retried, "MOCK-1")
+        self.assertEqual(self.client.get(self.base + f"/runs/{run['id']}").json()["state"], "completed")
+
+    def test_batch_reconciliation_isolates_an_unexpected_parent_failure(self):
+        from unittest import mock
+
+        from minkops_platform.accounts import batch, tally_writes
+        broken, _, broken_children = self.exception_only_batch()
+        healthy, _, healthy_children = self.exception_only_batch()
+        for root, children in ((broken, broken_children), (healthy, healthy_children)):
+            for child in children:
+                self.process(child, self.numbered_result(root, child["file_ids"][0], f"ISO-{child['file_ids'][0]}"))
+        real = tally_writes.prepare_automatic
+
+        def flaky(connection, run, result):
+            if str(run["id"]) == broken["id"]:
+                raise RuntimeError("unexpected aggregation defect")
+            return real(connection, run, result)
+
+        with mock.patch.object(tally_writes, "prepare_automatic", flaky):
+            for _ in range(batch.AGGREGATION_ATTEMPTS):
+                batch.reconcile_once(URL)
+        self.assertEqual(self.client.get(self.base + f"/runs/{healthy['id']}").json()["state"], "writing")
+        failed = self.client.get(self.base + f"/runs/{broken['id']}").json()
+        self.assertEqual(failed["state"], "failed")
+        self.assertEqual(failed["tally_writes"], [])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            diagnostic = c.execute(
+                "SELECT details FROM workflow_run_diagnostics WHERE run_id=%s AND event_type='batch.aggregation_failed'",
+                (broken["id"],),
+            ).fetchone()
+            item = c.execute("SELECT status FROM attention_items WHERE event_key=%s", (f"run:{broken['id']}",)).fetchone()
+        self.assertEqual(diagnostic["details"]["error_type"], "RuntimeError")
+        self.assertEqual(item["status"], "pending")
+
+    def decide(self, run, bill, action):
+        response = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
+            headers=self.csrf, json={"action": action},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def save_receipt(self, run, invoice, error=None):
+        claim, route, plan = self.tally_job(run)
+        current = {**self.current(plan), "invoice_number": invoice}
+        response = self.client.post(route + "/finish", headers=self.worker, json={
+            "claim_token": claim["claim_token"],
+            **({"error": error} if error else {"result": {"outcome": "saved", "current": current}})})
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def guess_then_recheck_sibling(self, save_error=None):
+        """Best-guess one unresolved bill, then recheck a failed sibling."""
+        from minkops_platform.accounts.batch import reconcile_once
+
+        did = self.tally_discovery()
+        guessed, failed = self.upload_bill("guess.pdf"), self.upload_bill("failed.pdf")
+        root, _ = self.launch("bill-entry", file_ids=[guessed, failed], config={
+            "output_mode": "tally_in_place", "discovery_id": did})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = {r["file_ids"][0]: r for r in c.execute(
+                "SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()}
+            c.execute("UPDATE account_runs SET state='failed',error='Unreadable' WHERE id=%s",
+                      (children[failed]["id"],))
+        proposal = self.numbered_result(root, guessed, "GUESS-1")
+        proposal["records"][0]["exceptions"] = [
+            {"code": "classification_uncertain", "detail": "Expense ledger is a best guess."}]
+        proposal["unresolved"] = [{"source_file_id": guessed, "code": "classification_uncertain",
+                                   "reason": "Expense ledger is a best guess."}]
+        self.process(children[guessed], proposal)
+        reconcile_once(URL)
+        self.save_receipt(self.decide(root, guessed, "guess"), "GUESS-1", save_error)
+        self.decide(root, failed, "retry")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            retry = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND state='queued'",
+                              (root["id"],)).fetchone()
+        self.process(retry, self.numbered_result(root, failed, "RETRY-1"))
+        reconcile_once(URL)
+        return root, guessed, failed, self.client.get(self.base + f"/runs/{root['id']}").json()
+
+    def test_saved_best_guess_stays_resolved_when_a_sibling_is_rechecked(self):
+        root, _, failed, loaded = self.guess_then_recheck_sibling()
+        self.assertEqual(loaded["result"]["unresolved"], [], loaded["result"])
+        self.save_receipt(self.decide(root, failed, "guess"), "RETRY-1")
+        self.assertEqual(self.client.get(self.base + f"/runs/{root['id']}").json()["state"], "completed")
+
+    def test_do_nothing_defers_input_without_blocking_exception_only_saves(self):
+        from minkops_platform.accounts.batch import reconcile_once
+
+        root, inputs, _ = self.exception_only_batch()
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='failed',error='Unreadable' WHERE parent_run_id=%s",
+                      (root["id"],))
+        reconcile_once(URL)
+        self.decide(root, inputs[0], "nothing")
+        self.decide(root, inputs[1], "retry")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            retry = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND state='queued'",
+                              (root["id"],)).fetchone()
+        self.process(retry, self.numbered_result(root, inputs[1], "AFTER-DEFER"))
+        reconcile_once(URL)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["state"], "writing", loaded["result"])
+        self.assertEqual(len(loaded["tally_writes"]), 1)
+        self.assertEqual(loaded["result"]["findings"], [])
+        self.assertEqual(loaded["result"]["deferred"], [{"source_file_id": inputs[0]}])
+
+    def test_notes_never_hold_exception_only_bills_but_coded_exceptions_reach_attention(self):
+        from minkops_platform.accounts.batch import reconcile_once
+
+        root, inputs, children = self.exception_only_batch()
+        for child in children:
+            file_id = child["file_ids"][0]
+            proposal = self.numbered_result(root, file_id, f"NOTE-{file_id}")
+            if file_id == inputs[0]:
+                # Observations that previously became blocking findings.
+                proposal["records"][0]["notes"] = [
+                    "Subtotal plus tax reconciles.", "Optional cost code absent.",
+                    "Resembles DEMO26-C1-B1; the native duplicate check decides."]
+            else:
+                proposal["records"][0]["exceptions"] = [{
+                    "code": "classification_uncertain",
+                    "detail": "Office Maintenance and Site Services both fit this purchase."}]
+            self.process(child, proposal)
+        reconcile_once(URL)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        records = {r["source_file_id"]: r for r in loaded["result"]["records"]}
+        self.assertEqual((records[inputs[0]]["status"], records[inputs[0]]["findings"]), ("writing", []))
+        self.assertEqual(records[inputs[1]]["decision"], "hold")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT label,status FROM attention_items WHERE event_key=%s",
+                             (f"bill:{root['id']}:{inputs[1]}:bill",)).fetchone()
+        self.assertEqual((item["label"], item["status"]), ("Ledger unclear", "pending"))
+
+    def test_each_bill_in_a_multi_bill_file_gets_its_own_decision(self):
+        did = self.tally_discovery()
+        bill = self.upload_bill("statement.pdf")
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        proposal = self.numbered_result(run, bill, "MULTI-1")
+        second = copy.deepcopy(self.numbered_result(run, bill, "MULTI-2")["records"][0])
+        second["exceptions"] = [{"code": "classification_uncertain", "detail": "Two ledgers fit."}]
+        proposal["records"].append(second)
+        self.process(run, proposal)
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.save_receipt(loaded, "MULTI-1")
+        item_key = f"bill:{run['id']}:{bill}:bill"
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT status FROM attention_items WHERE event_key=%s", (item_key,)).fetchone()
+        self.assertEqual(item["status"], "pending")  # The second bill still needs a decision.
+        route = f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}"
+        self.assertEqual(self.client.post(route, headers=self.csrf, json={"action": "guess", "proposal": 0}).status_code, 409)
+        self.assertEqual(self.client.post(route, headers=self.csrf, json={"action": "guess", "proposal": 7}).status_code, 422)
+        decided = self.client.post(route, headers=self.csrf, json={"action": "guess", "proposal": 1})
+        self.assertEqual(decided.status_code, 200, decided.text)
+        self.assertEqual(len(decided.json()["tally_writes"]), 2)
+        self.save_receipt(decided.json(), "MULTI-2")
+        final = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual(final["state"], "completed")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            items = {r["kind"]: r["status"] for r in c.execute(
+                "SELECT kind,status FROM attention_items WHERE task_id=%s", (run["task_id"],))}
+        self.assertEqual(items, {"bill": "done", "review": "pending"})
+
+    def test_bill_before_the_company_books_is_held_before_any_import(self):
+        did = self.tally_discovery(books_from="20261005")
+        bill = self.upload_bill()
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        self.assertEqual(run["config"]["tally_target"]["companies"][0]["books_from"], "2026-10-05")
+        self.process(run, self.tally_result(run, bill))  # Bill dated 2026-10-01.
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual((loaded["state"], loaded["tally_writes"]), ("review", []))
+        self.assertIn("before Test's books begin on 2026-10-05", loaded["result"]["records"][0]["findings"][0])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT label FROM attention_items WHERE event_key=%s",
+                             (f"bill:{run['id']}:{bill}:bill",)).fetchone()
+        self.assertEqual(item["label"], "Before books begin")
+
+    def test_recheck_does_not_restore_an_issue_the_operator_already_decided(self):
+        _, guessed, _, loaded = self.guess_then_recheck_sibling("Tally rejected the voucher date.")
+        record = next(r for r in loaded["result"]["records"] if r["source_file_id"] == guessed)
+        self.assertEqual(record["status"], "held")
+        self.assertNotIn(guessed, [i["source_file_id"] for i in loaded["result"]["unresolved"]])
 
     def split_result(self, run, bill, amounts=(9,9)):
         result=self.tally_result(run,bill)
@@ -107,7 +368,8 @@ class BillEntryTests(unittest.TestCase):
         for child in children:
             proposal = self.tally_result(root, child["file_ids"][0])
             if child["file_ids"][0] == inputs[1]:
-                proposal["findings"] = ["This input has contradictory source evidence."]
+                proposal["exceptions"] = [{"code": "source_values_conflict",
+                                           "detail": "This input has contradictory source evidence."}]
             self.process(child, proposal)
         reconcile_once(URL)
         loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
@@ -304,8 +566,8 @@ class BillEntryTests(unittest.TestCase):
             run,
             {
                 "records": [],
-                "findings": [],
-                "unresolved": [{"source_file_id": bill, "reason": "Supplier missing"}],
+                "exceptions": [],
+                "unresolved": [{"source_file_id": bill, "code": "supplier_missing", "reason": "Supplier missing"}],
             },
         )
         self.tally_discovery("replacement-company", reuse_device=True)
@@ -335,10 +597,10 @@ class BillEntryTests(unittest.TestCase):
                     "operation": operation,
                     "data": {"Invoice": invoice, "Vendor": "Acme", "Amount": amount},
                     "evidence": [],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
 
     def process(self, run, result):
@@ -367,6 +629,7 @@ class BillEntryTests(unittest.TestCase):
         extra_ledgers=(),
         reuse_device=False,
         multiple=False,
+        books_from=None,
     ):
         self.native = "/api/tenants/mock-tenant/desktop"
         if not reuse_device:
@@ -426,7 +689,8 @@ class BillEntryTests(unittest.TestCase):
             receipt["sources"][0]["snapshot"]["collections"][0]["records"][0]["GUID"] = company_guid
         original = receipt["sources"][0]["snapshot"]
         guid = company_guid or self.device["id"] + "-company"
-        identity = {"NAME": "Test", "GUID": guid, "COMPANYNUMBER": "100000"}
+        identity = {"NAME": "Test", "GUID": guid, "COMPANYNUMBER": "100000",
+                    **({"BOOKSFROM": books_from} if books_from else {})}
         company = {
             "company": "Test",
             "company_guid": guid,
@@ -530,10 +794,10 @@ class BillEntryTests(unittest.TestCase):
                         for k, v in data.items()
                         if v is not None
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
 
     def tally_job(self, run):
@@ -693,14 +957,16 @@ class BillEntryTests(unittest.TestCase):
             "operation": "append",
             "data": {"Invoice": "A-1", "Vendor": "Acme", "Amount": 12},
             "evidence": [],
-            "findings": [],
+            "exceptions": [],
         }
-        result = {"records": [record], "findings": []}
+        result = {"records": [record], "exceptions": []}
         self.process(run, result)
         done = self.approve(run, result)
         self.assertEqual(done["state"], "completed")
         self.assertEqual(done["writes"], [])
         self.assertEqual(done["result"]["records"][0]["status"], "duplicate")
+        self.assertFalse(any("Exact duplicate" in f for f in done["result"]["records"][0]["findings"]))
+        self.assertIn("Exact duplicate", done["result"]["records"][0]["notes"][0])
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
         result["records"][0]["data"]["Amount"] = 24
         self.process(run, result)
@@ -806,6 +1072,8 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(
             sorted(r["status"] for r in done["result"]["records"]), ["duplicate", "saved", "saved"]
         )
+        repeated = next(r for r in done["result"]["records"] if r["status"] == "duplicate")
+        self.assertEqual((repeated["findings"], repeated["notes"]), ([], ["Repeated bill in this batch was skipped."]))
 
     def test_locked_company_conflict_cannot_be_approved_into_a_write(self):
         did = self.tally_discovery("alpha-guid", multiple=True)
@@ -948,8 +1216,8 @@ class BillEntryTests(unittest.TestCase):
                 if child["file_ids"] == [good]
                 else {
                     "records": [],
-                    "findings": [],
-                    "unresolved": [{"source_file_id": bad, "reason": "Unreadable invoice number"}],
+                    "exceptions": [],
+                    "unresolved": [{"source_file_id": bad, "code": "source_unreadable", "reason": "Unreadable invoice number"}],
                 }
             )
             self.process(child, proposal)

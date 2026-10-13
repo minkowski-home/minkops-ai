@@ -1,6 +1,7 @@
 {
-  "bill-entry": {
-    "allowed_output_modes": ["tally_in_place"],
-    "description": "This workspace currently saves bills to Tally only."
+  "enabled_tools": ["tally"],
+  "workflows": {
+    "bill-entry": {"description": "This workspace currently saves bills to Tally only."},
+    "source-discovery": {"description": "This workspace currently discovers Tally only."}
   }
 }

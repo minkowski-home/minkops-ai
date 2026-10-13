@@ -10,8 +10,10 @@ import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
 import { Icon } from "./Icon";
 import { progressView, type ProgressMode } from '../workspace/progress';
+import { RunTiming } from "../workspace/RunTiming";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { RunControls } from "../workspace/RunControls";
+import { sourceModes } from "../accounts/discoveryView";
 import { LoadingIndicator, Spinner } from "../components/Feedback";
 
 const statusText: Record<string, string> = {
@@ -29,23 +31,23 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
     <h3>{title}</h3><p>{detail}</p></div>;
 }
 
-function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, onValuesChange }: {
+function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = false }: {
   item: Employee | Workflow;
   kind: "employees" | "workflows";
   tenantSlug: string;
   canEdit: boolean;
   onSaved: () => Promise<void>;
-  onValuesChange?: (values: Workflow["config_values"]) => void;
+  statusOnly?: boolean;
 }) {
   const { user } = useAuth();
   const [savedValues, setValues] = useState(item.config_values);
-  const values = onValuesChange ? item.config_values : savedValues;
+  const values = savedValues;
   const [status, setStatus] = useState(item.status);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const fields = Object.entries(item.config_schema.properties).filter(([key]) => !onValuesChange || !['company_mode', 'locked_company_guid'].includes(key));
+  const fields = statusOnly ? [] : Object.entries(item.config_schema.properties);
   function update(next: Workflow['config_values']) {
-    setValues(next); onValuesChange?.(next);
+    setValues(next);
   }
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -55,7 +57,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, onValuesChange 
     try {
       await api(`/api/tenants/${encodeURIComponent(tenantSlug)}/${kind}/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status, config_values: values }),
+        body: JSON.stringify(statusOnly ? {status} : { status, config_values: values }),
       }, user.csrf_token);
       await onSaved();
       setMessage("Settings saved.");
@@ -64,8 +66,8 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, onValuesChange 
     } finally { setBusy(false); }
   }
   return <form className="config-panel" onSubmit={(event) => void save(event)}>
-    <div className="section-heading"><div><h2>{onValuesChange ? "Bill entry settings" : "Settings"}</h2><p>{onValuesChange ? "Start with saved defaults. Changes apply to this run unless you save them as defaults." : `Simple controls for this ${kind === "employees" ? "employee" : "workflow"}.`}</p></div>
-      {!canEdit && <span className="read-only-note">{onValuesChange ? "Run overrides only" : "View only"}</span>}
+    <div className="section-heading"><div><h2>{statusOnly ? "Workflow administration" : "Settings"}</h2><p>{statusOnly ? "Availability applies to future runs. Pause or stop an existing run from its task page." : `Simple controls for this ${kind === "employees" ? "employee" : "workflow"}.`}</p></div>
+      {!canEdit && <span className="read-only-note">View only</span>}
     </div>
     <label className="config-field"><span>Status</span>
       <select aria-label="Status" value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value as typeof status)}>
@@ -78,21 +80,20 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, onValuesChange 
       {spec.description && <small>{spec.description}</small>}
       {spec.type === "boolean"
         ? <span className="switch-row"><input type="checkbox" checked={Boolean(values[key])}
-          disabled={!canEdit && !onValuesChange} onChange={(event) => update({ ...values, [key]: event.target.checked })} />
+          disabled={!canEdit} onChange={(event) => update({ ...values, [key]: event.target.checked })} />
           {values[key] ? "On" : "Off"}</span>
         : spec.enum
-          ? <select aria-label={spec.title ?? key} value={String(values[key] ?? "")} disabled={!canEdit && !onValuesChange}
+          ? <select aria-label={spec.title ?? key} value={String(values[key] ?? "")} disabled={!canEdit}
             onChange={(event) => update({ ...values, [key]: event.target.value })}>
               {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft',all_outputs:'Approve every output',only_exceptions:'Only exceptions',pdf:'PDFs',image:'Images',mixed:'PDFs and images'} as Record<string,string>)[String(option)] ?? option}</option>)}
             </select>
           : <input aria-label={spec.title ?? key} type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
-            disabled={!canEdit && !onValuesChange} onChange={(event) => update({
+            disabled={!canEdit} onChange={(event) => update({
               ...values, [key]: spec.type === "integer" ? Number(event.target.value) : event.target.value,
             })} />}
     </label>)}
-    {!fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
-    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : onValuesChange ? "Save defaults" : "Save settings"}</button>}
-    {onValuesChange && values.output_mode === "tally_in_place" && <p className="quiet-state">Tally runs always require approval of every output, regardless of the saved review default.</p>}
+    {!statusOnly && !fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
+    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : statusOnly ? "Save availability" : "Save settings"}</button>}
     {message && <p role="status" className="form-message">{message}</p>}
   </form>;
 }
@@ -174,7 +175,12 @@ export function WorkflowsScreen({ workspace, routeSlug }: { workspace: Workspace
   </section>;
 }
 
-export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
+export function WorkflowDetail(props: { workspace: Workspace; routeSlug: string; id: string; onSaved: () => Promise<void> }) {
+  const { user } = useAuth();
+  return <WorkflowDetailContent key={`${props.workspace.tenant.slug}:${user?.id}:${props.id}`} {...props} />;
+}
+
+function WorkflowDetailContent({ workspace, routeSlug, id, onSaved }: {
   workspace: Workspace; routeSlug: string; id: string; onSaved: () => Promise<void>;
 }) {
   const [overrides, setOverrides] = useState<Workflow['config_values']>({});
@@ -182,15 +188,15 @@ export function WorkflowDetail({ workspace, routeSlug, id, onSaved }: {
   const item = workspace.workflows.find((workflow) => workflow.id === id);
   if (!item) return <section className="route-screen"><EmptyState title="Workflow not found" detail="This workflow is not in your workspace." /></section>;
   const linked = workspace.employees.filter((employee) => item.employee_ids.includes(employee.id));
-  const bill = presentationFor(item) === 'accounts-bill';
-  const runWorkflow = bill ? { ...item, config_values: { ...item.config_values, ...overrides } } : item;
+  const executable = Boolean(presentationFor(item));
+  const runWorkflow = { ...item, config_values: { ...item.config_values, ...overrides } };
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
-    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? 'Collect reusable context from Tally and Excel.' : item.description}</p></div><Status value={item.status} /></header>
+    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? `Collect reusable context from ${sourceModes(item.config_schema.properties.destination_mode, null).modes.includes('excel') ? 'Tally and Excel' : 'Tally'}.` : item.description}</p></div><Status value={item.status} /></header>
     {presentationFor(item) && <WorkflowLaunch key={item.id}
-      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={runWorkflow} onConfigChange={bill ? setOverrides : undefined} />}
-    <div className="detail-grid"><ConfigPanel key={item.id} item={runWorkflow} kind="workflows" tenantSlug={workspace.tenant.slug}
-      canEdit={workspace.can_edit} onSaved={onSaved} onValuesChange={bill ? setOverrides : undefined} />
+      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={runWorkflow} onConfigChange={setOverrides} settings={{canEdit: workspace.can_edit, savedValues: item.config_values, onSaved}} />}
+    <div className="detail-grid"><ConfigPanel key={`${item.id}:${item.status}`} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
+      canEdit={workspace.can_edit} onSaved={onSaved} statusOnly={executable} />
       <aside className="related-panel"><h2>Employees</h2>
         {linked.map((employee) => <Link key={employee.id} to={`/${routeSlug}/employees/${employee.id}`}
           className="related-row"><span>{employee.name}</span><Icon name="chevronRight" size={16} /></Link>)}
@@ -317,6 +323,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
     <header className="detail-heading"><div><h2>{detail.title}</h2></div>
       <Status value={detail.status} /></header>
+    <RunTiming task={detail} />
     <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { controlRevision.current++; setDetail(task); setAttempt(value => value + 1); }} />
     {mode !== 'source-discovery' && <TaskProgress view={progress} stale={Boolean(error)} />}
     <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} controlState={detail.control_state ?? 'active'} />

@@ -7,7 +7,7 @@ from pathlib import Path
 import psycopg
 from jsonschema import ValidationError
 from minkops_platform.installation import install, load_solution, register_employee
-from minkops_platform.solution_policy import validate_destination
+from minkops_platform.solution_policy import validate_option
 from psycopg.types.json import Jsonb
 from pwdlib import PasswordHash
 
@@ -145,24 +145,26 @@ def seed_demo(url: str, password: str | None = None) -> str:
                     (mock, workflow_ids[key], employee_ids[owner]),
                 )
 
-        existing = connection.execute(
-            "SELECT config_values FROM workflows WHERE tenant_id=%s AND key='bill-entry' FOR UPDATE",
-            (mock,),
-        ).fetchone()
-        if existing:
+        # Explicit demo composition retains mock-client's enabled tools without
+        # discarding other preferences. The production installer still rejects
+        # saved settings that a newly paused tool would invalidate.
+        for key, name, fallback in (
+            ("bill-entry", "output_mode", "tally_in_place"),
+            ("source-discovery", "destination_mode", "tally"),
+        ):
+            existing = connection.execute(
+                "SELECT config_values FROM workflows WHERE tenant_id=%s AND key=%s FOR UPDATE",
+                (mock, key),
+            ).fetchone()
+            if not existing or name not in existing[0]:
+                continue
             try:
-                validate_destination(
-                    composition.workflows["bill-entry"].tenant_schema, existing[0]["output_mode"]
-                )
+                validate_option(composition.workflows[key].tenant_schema, name, existing[0][name])
             except ValidationError:
-                # Explicit demo composition retains the Bill Entry branch's
-                # Tally-only mock policy without discarding other preferences.
-                # The production installer still rejects incompatible settings.
                 connection.execute(
-                    """UPDATE workflows SET config_values=jsonb_set(config_values,
-                    '{output_mode}', '"tally_in_place"'), config_version=config_version+1
-                    WHERE tenant_id=%s AND key='bill-entry'""",
-                    (mock,),
+                    """UPDATE workflows SET config_values=jsonb_set(config_values, %s, %s),
+                    config_version=config_version+1 WHERE tenant_id=%s AND key=%s""",
+                    ([name], Jsonb(fallback), mock, key),
                 )
         install(connection, composition, actor_email="demo@example.com")
 

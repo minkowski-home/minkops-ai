@@ -243,18 +243,34 @@ def targets_from_snapshot(snapshot, device_id, discovery_id):
             collections.append({"category": category, "status": "ready", "records": records})
         from .bills import target_from_references
 
-        targets.append(
-            target_from_references(
-                {
-                    "company": company["company"],
-                    "port": company["port"],
-                    "collections": collections,
-                },
-                device_id,
-                discovery_id,
-            )
+        target = target_from_references(
+            {
+                "company": company["company"],
+                "port": company["port"],
+                "collections": collections,
+            },
+            device_id,
+            discovery_id,
         )
+        books_from = books_beginning(company["identity"])
+        if books_from:
+            target["books_from"] = books_from
+        targets.append(target)
     return targets
+
+
+def books_beginning(identity):
+    """Tally's "Books beginning from" date as ISO text, when the export has one.
+
+    Older companions or exports without it simply skip the date preflight.
+    """
+    from datetime import date
+
+    value = str(text(identity.get("BOOKSFROM")) or "").strip()
+    try:
+        return date(int(value[:4]), int(value[4:6]), int(value[6:8])).isoformat() if len(value) == 8 else None
+    except ValueError:
+        return None
 
 
 def select_target(record, target):
@@ -274,12 +290,34 @@ def select_target(record, target):
     return matches[0]
 
 
+# Catalogs stamped with this format deliver records without empty values.
+CONTEXT_RECORD_FORMAT = "1"
+
+
+def compact_record(value):
+    """Drop empty strings, nulls and empty containers; keep every list position.
+
+    Native exports repeat hundreds of empty tags per voucher, roughly half of
+    each record. Empty and absent carry the same evidence, while list offsets
+    stay valid for the master index and cited context notes. Values such as 0,
+    False and "No" are kept: they carry meaning.
+    """
+    if isinstance(value, dict):
+        kept = {key: compact_record(item) for key, item in value.items()}
+        return {key: item for key, item in kept.items() if item not in ("", None, [], {})}
+    if isinstance(value, list):
+        return [compact_record(item) for item in value]
+    return value
+
+
 def context_assets(catalog):
     """Full records live in lookup files; the manifest is small enough to read first.
 
     Split at record boundaries for hosted file limits. Never discard records.
-    File IDs and bytes derive only from the immutable server-owned catalog.
+    File IDs and bytes derive only from the immutable server-owned catalog, so
+    only catalogs stamped with the compact format change delivered bytes.
     """
+    compact = catalog.get("context_record_format") == CONTEXT_RECORD_FORMAT
     if catalog.get("format_version") != "2":
         return [], copy.deepcopy(catalog)
     if catalog.get("master_lookup_version") not in (None, "1"):
@@ -296,7 +334,7 @@ def context_assets(catalog):
     if catalog.get("master_lookup_version") == "1":
         manifest["master_lookup_version"] = "1"
 
-    def add(name, value):
+    def add(name, value, *, workspace_references=False):
         content = json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
         if len(content) > 4_000_000:
             raise ValueError("An individual discovery record exceeds hosted limits.")
@@ -306,7 +344,8 @@ def context_assets(catalog):
         )
         digest = hashlib.sha256(content).hexdigest()
         files.append(
-            {"id": identifier, "path": name + ".json", "content": content, "sha256": digest}
+            {"id": identifier, "path": name + ".json", "content": content, "sha256": digest,
+             **({"workspace_references": True} if workspace_references else {})}
         )
         manifest["files"].append(
             {"kind": name, "path": "/workspace/inputs/" + identifier + ".json", "sha256": digest}
@@ -340,6 +379,8 @@ def context_assets(catalog):
                         locations.extend({"path": path, "offset": offset} for offset in range(len(chunk)))
 
                 for record in records:
+                    if compact:
+                        record = compact_record(record)
                     length = (
                         len(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()) + 2
                     )
@@ -363,7 +404,8 @@ def context_assets(catalog):
                     for kind, entry in lookup["by_type"].items()
                 },
             }
-            manifest["companies"][-1]["master_lookup_path"] = add(f"company-{index}-master-index-v1", lookup_index)
+            manifest["companies"][-1]["master_lookup_path"] = add(
+                f"company-{index}-master-index-v1", lookup_index, workspace_references=True)
             manifest["companies"][-1]["master_summary"] = lookup["summary"]
     return files, manifest
 

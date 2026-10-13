@@ -47,7 +47,14 @@ def audit(connection, item, actor, action, summary):
     )
 
 
-def record(connection, run, event_key, identifier, title, *, kind="manual", target=None, actor=None):
+def record(connection, run, event_key, identifier, title, *, kind="manual", target=None, actor=None, reopen=False):
+    """Open the item for an event key, or return the existing one.
+
+    Callers restate holds whenever a run is finalized or re-aggregated; that
+    must not undo an operator's Done. `reopen` marks a new event, such as a
+    retried save refused again: the item returns to pending with its new
+    reason and destination target, because the old resolution no longer holds.
+    """
     row = connection.execute(
         """INSERT INTO attention_items(tenant_id,task_id,event_key,identifier,label,kind,target,authorized_by)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (tenant_id,event_key)
@@ -56,9 +63,18 @@ def record(connection, run, event_key, identifier, title, *, kind="manual", targ
     ).fetchone()
     if row:
         audit(connection, row, actor, "opened", title)
-    else:
-        row = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s",
-                                 (run["tenant_id"], event_key)).fetchone()
+        return row
+    row = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s FOR UPDATE",
+                             (run["tenant_id"], event_key)).fetchone()
+    if reopen and (row["status"] == "done" or row["label"] != title):
+        was_done = row["status"] == "done"
+        row = connection.execute(
+            """UPDATE attention_items SET status='pending',done_by=NULL,done_at=NULL,label=%s,
+            target=CASE WHEN %s::jsonb='{}'::jsonb THEN target ELSE %s::jsonb END,updated_at=now()
+            WHERE id=%s RETURNING *""",
+            (title, Jsonb(target or {}), Jsonb(target or {}), row["id"]),
+        ).fetchone()
+        audit(connection, row, actor, "reopened" if was_done else "relabelled", title)
     return row
 
 

@@ -1,6 +1,6 @@
 # Source Discovery: reusable client context
 
-Source Discovery 0.8.1 and Windows companion 0.6.6 collect a versioned package
+Source Discovery 0.8.2 and Windows companion 0.6.6 collect a versioned package
 before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.
@@ -29,6 +29,17 @@ browser poll failures preserve the last results, show interrupted updates and
 retry with bounded backoff. Motion respects the reduced-motion preference.
 
 ## Collection and interpretation
+
+Each run has an **AI context analysis** toggle, on by default. The optional
+`ai_context` collection-config boolean defaults to true for older callers.
+When off, native Tally masters/vouchers and deterministic Excel structure are
+still collected and saved, but no hosted run is dispatched. Complete results go
+directly to review and still require confirmation. Excel structure-only catalogs
+have no new semantic column mappings or Bill Entry destination catalog; they
+cannot supply a new Excel entry destination. The prior run's toggle is restored
+by setup and preserved by quick refresh. Partial/oversized collection safeguards
+and downstream input limits remain enforced. This option never samples records
+or silently reuses interpretation from an AI-enabled run.
 
 Source Discovery always uses `client_context`; depth and category selectors are
 removed. The upgrade migration removes retired depth settings from installed
@@ -69,6 +80,16 @@ actual collected master/voucher evidence and whether it is observed or inferred.
 Notes may be empty. Routine vendor/item relationships remain in the actual voucher
 files for later lookup, rather than becoming hundreds of prose rules. Confirmation
 validates note references and accepts the package and any Excel mappings.
+
+Confirmation authorizes the company scope, Excel structure and approved meanings,
+and the configuration. A later refresh with the same authority reuses it
+automatically, even when vouchers or masters changed, including vouchers Minkops
+saved. Confirmed notes are re-validated against the new collection, and a note
+whose evidence disappeared requires review again. A changed company identity or
+scope, Excel layout or configuration still needs confirmation. Catalogs confirmed
+before this rule used a fuller fingerprint, so their first refresh asks once. If optional AI context analysis fails for a Tally-only
+collection, the complete native sources can still be confirmed without notes;
+that confirmation closes the failed analysis's attention item with an audit.
 
 Excel discovery projects selected `.xlsx` workbooks into fresh packages containing
 sheets, table/header definitions and formula text. Cached formula results,

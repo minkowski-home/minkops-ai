@@ -19,7 +19,7 @@ export default function DownloadPage() {
       <Section id="installation" narrow title="Before you install">
         <p>Windows 10 or 11, 64-bit. This release candidate is unsigned and Windows may display a publisher warning. Windows 11 installation is verified; Windows 10 testing is deferred.</p>
         <p>Open the intended companies in Tally and enable its local HTTP/XML service on port 9000. Source Discovery collects their masters and detailed vouchers for your chosen period. Excel discovery collects workbook structure and headers.</p>
-        <p>Use a test company for your first run. Selected source context is processed by Minkops; your original files and Tally remain on your PC. Bill Entry asks for approval and verifies each save.</p>
+        <p>Use a test company for your first run. Selected source context is processed by Minkops; your original files and Tally remain on your PC. Bill Entry follows your selected review mode and client policies, and verifies each save.</p>
         <ButtonLink to="https://app.minkops.com" variant="secondary">Open the web console</ButtonLink>
       </Section>
       <Section id="release" narrow title="Release details">

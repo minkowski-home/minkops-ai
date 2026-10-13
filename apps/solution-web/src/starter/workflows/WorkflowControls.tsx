@@ -7,20 +7,22 @@ import { AccountsReview } from "../accounts/AccountsReview";
 import type { Source } from "../accounts/types";
 import { useAuth } from "../contexts/AuthContext";
 import { DestinationPCPicker, useDestinationPC, type DestinationPCState } from '../desktop/DestinationPC';
+import { RunSettings, type RunSettingsProps } from "./RunSettings";
 import { presentationFor } from "./presentation";
 import { LoadingIndicator, Spinner, RetryMessage } from "../components/Feedback";
 
-type LaunchProps = { tenant: string; routeSlug: string; workflow: Workflow; destination?: DestinationPCState; onConfigChange?: (values: Workflow["config_values"]) => void };
+type LaunchProps = RunSettingsProps & { routeSlug: string; destination?: DestinationPCState };
 
 /** Schema-driven fallback for reviewed proposals using existing file grants. */
-function ProposalLaunch({ tenant, routeSlug, workflow, destination }: LaunchProps) {
+function ProposalLaunch({ tenant, routeSlug, workflow, destination, onConfigChange, settings }: LaunchProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [sources, setSources] = useState<Source[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [values, setValues] = useState<Record<string, unknown>>({ ...workflow.run_defaults, ...workflow.config_values });
+  const values = { ...workflow.run_defaults, ...workflow.config_values };
+  const setValues = (update: (current: typeof values) => typeof values) => onConfigChange?.(update(values) as Workflow["config_values"]);
   const [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
@@ -31,7 +33,7 @@ function ProposalLaunch({ tenant, routeSlug, workflow, destination }: LaunchProp
     return () => { active = false; };
   }, [tenant, attempt]);
   const properties = (workflow.run_schema?.properties ?? {}) as Record<string, { type?: string; title?: string; enum?: string[] }>;
-  const fields = Object.entries(properties).filter(([key]) => ! ["source_ids", "destination_device_id"].includes(key));
+  const fields = Object.entries(properties).filter(([key]) => ! ["source_ids", "destination_device_id", ...Object.keys(workflow.config_schema.properties)].includes(key));
   async function launch() {
     if (!user) return;
     setBusy(true); setError("");
@@ -58,6 +60,7 @@ function ProposalLaunch({ tenant, routeSlug, workflow, destination }: LaunchProp
           : <input type={spec.type === "integer" || spec.type === "number" ? "number" : "text"} value={String(values[key] ?? "")}
             onChange={(event) => setValues((current) => ({ ...current, [key]: spec.type === "integer" || spec.type === "number" ? Number(event.target.value) : event.target.value }))} />}
     </label>)}
+    <RunSettings tenant={tenant} workflow={workflow} settings={settings} onConfigChange={onConfigChange} busy={busy} />
     {error && <p role="alert">{error}</p>}
     <button className="button button-primary" disabled={busy || destination?.loading || Boolean(destination?.deviceId && !destination.available) || !selected.length || workflow.status !== "active"} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Starting…' : 'Run workflow'}</button>
   </section>;
@@ -109,7 +112,7 @@ function DestinationWorkflowLaunch(props: LaunchProps) {
         onChange={destination.select} required={!proposal} loading={destination.state.loading} />
       {destination.state.error && <><p role="alert">{destination.state.error}</p>
         <button className="button button-ghost" onClick={() => void destination.refresh()}>Retry loading PCs</button></>}
-      <p className="quiet-state">{proposal ? 'Processing uses the hosted runtime. PC selection does not grant tools or writes.' : 'Destination reads and approved writes use this PC. Bill recognition runs in the hosted environment.'}</p>
+      <p className="quiet-state">{proposal ? 'This workflow processes selected files online. Choose a PC only when needed for its destination.' : 'Selected sources and destination saves use this PC. Bill recognition runs online.'}</p>
     </section>
     {proposal ? <ProposalLaunch {...props} destination={destination.state} /> : <AccountsLaunch {...props} destination={destination.state} />}
   </>;

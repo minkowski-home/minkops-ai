@@ -20,10 +20,12 @@ def bill_prompt():
     return (WORKFLOWS / "bill-entry/execution-instructions.md").read_text()
 
 
-def execute(key, files, context, on_event, *, client=None, session_id=None, turn_id=None):
+def execute(key, files, context, on_event, *, client=None, session_id=None, turn_id=None,
+            environment_lease=None):
     if context["config"].get("execution_snapshot"):
         return workflow_execute(
-            key, files, context, on_event, client=client, session_id=session_id, turn_id=turn_id
+            key, files, context, on_event, client=client, session_id=session_id, turn_id=turn_id,
+            environment_lease=environment_lease,
         )
     if not session_id:
         # Direct callers may use the current definition. Durable workers require
@@ -33,7 +35,8 @@ def execute(key, files, context, on_event, *, client=None, session_id=None, turn
             **context,
             "config": {**context["config"], "execution_snapshot": definition.execution_snapshot},
         }
-        return workflow_execute(key, files, bound_context, on_event, client=client)
+        return workflow_execute(key, files, bound_context, on_event, client=client,
+                                environment_lease=environment_lease)
     # Legacy sessions already have their instructions and environment. Recovery
     # must not reread a newer checkout, create a session, or send another input.
     return hosted_execute(

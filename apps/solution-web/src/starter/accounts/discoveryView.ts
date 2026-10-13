@@ -1,9 +1,11 @@
+import type { SettingSpec } from "../api";
 import type { Catalog, Run } from "./types";
 import type { ProgressState, TaskProgressView } from "../workspace/progress";
 
 export interface Config {
   destination_mode?: "excel" | "tally" | "both";
   depth: "client_context";
+  ai_context?: boolean;
   excel_source_ids: string[];
   tally: { port: number; period: { from: string; to: string } } | null;
 }
@@ -68,6 +70,8 @@ export interface DiscoveryRun {
   ready: boolean;
   observations: { key: string; status: string; category?: string; progress?: CollectionProgress }[];
   mapping_run: Run | null;
+  /** Optional AI context analysis failed for a Tally-only collection. */
+  analysis_failed?: boolean;
   catalog: {
     context_error?: string;
     context_notes?: { company_guid: string; observation: string; certainty: string; evidence_ids: string[] }[];
@@ -151,7 +155,7 @@ export function discoveryProgress(run: DiscoveryRun): TaskProgressView {
   const latest = run.observations.at(-1);
   if (["paused", "stopped"].includes(run.state)) {
     const current = run.catalog && !run.catalog.partial ? 2 : run.observations.length ? 1 : 0;
-    return { stages: ["Get ready", "Work", "Review", "Finished"],
+    return { stages: ["Get ready", run.catalog && run.config.ai_context !== false ? "Analyze context" : "Collect sources", "Review sources", "Finished"],
       states: [0, 1, 2, 3].map(i => i < current ? "done" : i > current ? "upcoming" : run.state === "paused" ? "waiting" : "failed"),
       current, finished: false, running: false, percent: null, label: run.state === "paused" ? "Paused" : "Stopped",
       meterLabel: "Source discovery", activity: run.state === "paused" ? "Resume to continue. An operation already underway may finish." : "Remaining work stopped. Completed saves remain." };
@@ -169,14 +173,30 @@ export function discoveryProgress(run: DiscoveryRun): TaskProgressView {
     : partial ? "Collected results are saved. Resolve unavailable sources, then run again."
       : review ? "Check the results below, then confirm sources"
         : run.state === "completed" ? "This catalog is not confirmed for reuse"
-          : !native ? waiting ? "Waiting to check context and mappings" : "Checking context and mappings"
+          : !native ? waiting ? "Waiting to check context and mappings" : "Source collection finished. Analyzing client context and mappings before review."
             : measured ? [measured.activity, measured.item].filter(Boolean).join(" · ")
               : latest ? `${latest.status === "ready" ? "Collected" : latest.status === "unavailable" ? "Source needs attention" : "Reading"} · ${latest.category ?? (latest.key === "tally" ? "Tally" : "Excel folder")}`
                 : "Keep Minkops open on the selected PC. This page updates automatically.";
   return {
-    stages: ["Get ready", "Work", "Review", "Finished"], states, current, finished, running,
+    stages: ["Get ready", run.catalog && run.config.ai_context !== false ? "Analyze context" : "Collect sources", "Review sources", "Finished"], states, current, finished, running,
     label: finished ? "Finished and checked" : partial || failed ? "Needs attention" : review ? "Ready for your review" : waiting ? native ? "Waiting for your PC" : "Preparing review" : native ? "Collecting your sources" : "Preparing review",
     activity, percent, meterLabel: finished ? "Discovery complete" : native ? "Source collection" : "Context and mapping review",
     countLabel: hasMeasure ? `${measured.completed} of ${measured.total} ${latest?.key === "tally" ? "native reads" : "workbooks"}` : undefined
   };
+}
+
+export type SourceMode = "tally" | "excel" | "both";
+const SOURCE_MODES: SourceMode[] = ["tally", "excel", "both"];
+
+/** Source choices the workspace enables; a paused saved choice falls back to the first enabled one. */
+export function sourceModes(spec: SettingSpec | undefined, saved: unknown) {
+  const enabled = spec?.["x-enabled-options"];
+  const modes = SOURCE_MODES.filter((mode) => !enabled || enabled.includes(mode));
+  return { modes, selected: modes.find((mode) => mode === saved) ?? modes[0] };
+}
+
+/** Complete sources can be confirmed once mappings are ready, or without notes after a failed analysis. */
+export function canConfirm(run: DiscoveryRun, mappingsReady: boolean) {
+  return run.state === "review" && Boolean(run.catalog) && !run.catalog?.partial
+    && (!run.mapping_run || mappingsReady || Boolean(run.analysis_failed));
 }
