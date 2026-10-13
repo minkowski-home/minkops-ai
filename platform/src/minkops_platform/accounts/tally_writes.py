@@ -239,8 +239,14 @@ def complete_run(connection, run, result):
         "UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s",
         (Jsonb(result), run["tenant_id"], run["id"]),
     )
+    device = pending_tally and connection.execute(
+        "SELECT name FROM desktop_devices WHERE tenant_id=%s AND id=%s",
+        (run["tenant_id"], run["config"].get("tally_target", {}).get("device_id")),
+    ).fetchone()
     summary = {
-        "writing": "Approved entries are waiting for verified destination writes.",
+        # Saves wait for the destination PC; an offline PC is the usual cause.
+        "writing": f"Saving to Tally on {device['name']}. Keep Minkops running on that PC." if device
+        else "Approved entries are waiting for verified destination writes.",
         "review": "Successful entries are preserved. Review only the bills needing attention.",
         "completed": "Bill entries verified. Exact duplicates were skipped without adding records.",
     }[state]

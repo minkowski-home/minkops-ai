@@ -51,6 +51,12 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(loaded["state"], "writing")
         self.assertEqual(len(loaded["tally_writes"]), 1)
         self.assertEqual(loaded["result"]["unresolved"][0]["source_file_id"], inputs[1])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            waiting = c.execute("SELECT summary FROM task_events WHERE task_id=%s ORDER BY id DESC LIMIT 1",
+                                (root["task_id"],)).fetchone()["summary"]
+        # An offline PC leaves saves queued; the status names the PC to start.
+        self.assertIn(self.device["name"], waiting)
+        self.assertIn("Keep Minkops running", waiting)
 
     def test_stopping_a_batch_opens_one_attention_item_per_read_bill(self):
         did = self.tally_discovery()
