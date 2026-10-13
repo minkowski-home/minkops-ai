@@ -108,6 +108,34 @@ class DiscoveryTests(unittest.TestCase):
                 rejected = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
                 self.assertEqual(rejected.status_code, 422, rejected.text)
 
+    def test_paused_excel_tool_is_rejected_server_side(self):
+        from minkops_platform.resources import REPOSITORY_ROOT
+        from minkops_platform.solution_policy import bind_definition
+        from minkops_platform.workflows import load_definition
+        from psycopg.types.json import Jsonb
+
+        _, body = self.start()
+        bound = bind_definition(load_definition(
+            REPOSITORY_ROOT / "employees/accounts-desk/workflows/source-discovery"), "mock-client")
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE workflows SET config_schema=%s WHERE key='source-discovery' AND tenant_id=(SELECT id FROM tenants WHERE slug=%s)",
+                      (Jsonb(bound.tenant_schema), self.slug))
+        source = self.client.post(f"/api/tenants/{self.slug}/accounts/sources", headers=self.csrf,
+                                  data={"paths": '["register.xlsx"]', "writable": "true"},
+                                  files=[("files", ("register.xlsx", workbook()))]).json()
+        self.client.post(self.base + f"/devices/{self.device['id']}/sources/{source['id']}",
+                         headers=self.csrf).raise_for_status()
+        for tally in (None, body["config"]["tally"]):
+            with self.subTest(tally=bool(tally)):
+                rejected = self.client.post(self.discovery + "/runs", headers=self.csrf, json={
+                    **body, "request_key": str(uuid.uuid4()),
+                    "config": {**body["config"], "excel_source_ids": [source["id"]], "tally": tally}})
+                self.assertEqual(rejected.status_code, 422, rejected.text)
+                self.assertIn("does not use the selected source system", rejected.text)
+        accepted = self.client.post(self.discovery + "/runs", headers=self.csrf,
+                                    json={**body, "request_key": str(uuid.uuid4())})
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+
     def test_damaged_workbook_is_a_validation_error_not_a_backend_crash(self):
         r = self.client.post(
             f"/api/tenants/{self.slug}/accounts/sources",

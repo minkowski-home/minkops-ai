@@ -1,3 +1,4 @@
+import type { SettingSpec } from "../api";
 import type { Catalog, Run } from "./types";
 import type { ProgressState, TaskProgressView } from "../workspace/progress";
 
@@ -180,4 +181,14 @@ export function discoveryProgress(run: DiscoveryRun): TaskProgressView {
     activity, percent, meterLabel: finished ? "Discovery complete" : native ? "Source collection" : "Context and mapping review",
     countLabel: hasMeasure ? `${measured.completed} of ${measured.total} ${latest?.key === "tally" ? "native reads" : "workbooks"}` : undefined
   };
+}
+
+export type SourceMode = "tally" | "excel" | "both";
+const SOURCE_MODES: SourceMode[] = ["tally", "excel", "both"];
+
+/** Source choices the workspace enables; a paused saved choice falls back to the first enabled one. */
+export function sourceModes(spec: SettingSpec | undefined, saved: unknown) {
+  const enabled = spec?.["x-enabled-options"];
+  const modes = SOURCE_MODES.filter((mode) => !enabled || enabled.includes(mode));
+  return { modes, selected: modes.find((mode) => mode === saved) ?? modes[0] };
 }

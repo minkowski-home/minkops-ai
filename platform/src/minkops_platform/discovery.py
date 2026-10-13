@@ -203,6 +203,14 @@ def launch(connection, tenant, user, body):
     ).fetchone()
     if not workflow:
         raise ServiceError("conflict", "Source discovery is not active in this workspace.")
+    from .solution_policy import validate_option
+
+    try:
+        # The workspace's enabled tools bind the registered schema; enforce the
+        # sources actually requested, not only the UI's displayed choice.
+        validate_option(workflow["config_schema"], "destination_mode", observed_mode)
+    except ValidationError as error:
+        raise ServiceError("invalid", "This workspace does not use the selected source system.") from error
     for source_id in config["excel_source_ids"]:
         desktop._bound_source(connection, device, source_id)
     if (
