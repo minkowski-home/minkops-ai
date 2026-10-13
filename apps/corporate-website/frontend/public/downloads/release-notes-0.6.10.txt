@@ -1,0 +1,35 @@
+Minkops 0.6.10 — Windows release candidate
+13 October 2026
+
+Bill Entry holds a bill only for a typed exception: unreadable source, not a
+bill, unclear bill count, missing or conflicting values, unclear company or
+supplier, missing supplier, uncertain ledger or an unsupported structure.
+Routine observations and possible duplicates no longer hold bills; Tally's own
+read-before-write check decides duplicates. A file with several invoices gets
+a decision per bill, while e-way bills, IRN acknowledgements and copies count
+as one bill. Supplier identity comes from what the bill prints, so a name that
+fits two suppliers is held instead of guessed.
+
+Bills Tally refuses, bills waiting for an offline PC and bills reserved by
+another run offer Retry save once the cause is fixed in Tally; the same plan is
+re-sent and nothing is imported twice. Bills dated before a company's books
+begin are held before any import. Do nothing defers a bill without blocking the
+rest of the run, and Attention reopens a bill that is held again.
+
+Source Discovery keeps its confirmation when only vouchers or masters change,
+such as entries Minkops saved, and a failed optional AI analysis no longer
+blocks a complete Tally collection. Delivered context is about half its
+previous size. Excel is paused for this workspace.
+
+Measured on 36 labelled synthetic bills across three companies: every bill
+reaches its expected outcome, and a repeated run created no voucher.
+
+Inventory, bill/payment/cost allocations, round-off lines and statutory filing
+readiness remain outside this bounded accounting contract.
+
+Windows 10/11 x64. Windows 11 installed upgrade verified; Windows 10 device testing
+remains deferred. This release candidate is unsigned; Windows may display a
+publisher warning. It opens https://app.minkops.com using your existing profile.
+
+SHA-256:
+7c9860322cfdb8f9c04ce6aae5eeb0a46619e23e16b1f1d65d832cab65b82776
