@@ -116,6 +116,61 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(diagnostic["details"]["error_type"], "RuntimeError")
         self.assertEqual(item["status"], "pending")
 
+    def decide(self, run, bill, action):
+        response = self.client.post(
+            f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
+            headers=self.csrf, json={"action": action},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def save_receipt(self, run, invoice, error=None):
+        claim, route, plan = self.tally_job(run)
+        current = {**self.current(plan), "invoice_number": invoice}
+        response = self.client.post(route + "/finish", headers=self.worker, json={
+            "claim_token": claim["claim_token"],
+            **({"error": error} if error else {"result": {"outcome": "saved", "current": current}})})
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def guess_then_recheck_sibling(self, save_error=None):
+        """Best-guess one unresolved bill, then recheck a failed sibling."""
+        from minkops_platform.accounts.batch import reconcile_once
+
+        did = self.tally_discovery()
+        guessed, failed = self.upload_bill("guess.pdf"), self.upload_bill("failed.pdf")
+        root, _ = self.launch("bill-entry", file_ids=[guessed, failed], config={
+            "output_mode": "tally_in_place", "discovery_id": did})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = {r["file_ids"][0]: r for r in c.execute(
+                "SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()}
+            c.execute("UPDATE account_runs SET state='failed',error='Unreadable' WHERE id=%s",
+                      (children[failed]["id"],))
+        proposal = self.numbered_result(root, guessed, "GUESS-1")
+        proposal["records"][0]["findings"] = ["Expense ledger is a best guess."]
+        proposal["unresolved"] = [{"source_file_id": guessed, "reason": "Expense ledger is a best guess."}]
+        self.process(children[guessed], proposal)
+        reconcile_once(URL)
+        self.save_receipt(self.decide(root, guessed, "guess"), "GUESS-1", save_error)
+        self.decide(root, failed, "retry")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            retry = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND state='queued'",
+                              (root["id"],)).fetchone()
+        self.process(retry, self.numbered_result(root, failed, "RETRY-1"))
+        reconcile_once(URL)
+        return root, guessed, failed, self.client.get(self.base + f"/runs/{root['id']}").json()
+
+    def test_saved_best_guess_stays_resolved_when_a_sibling_is_rechecked(self):
+        root, _, failed, loaded = self.guess_then_recheck_sibling()
+        self.assertEqual(loaded["result"]["unresolved"], [], loaded["result"])
+        self.save_receipt(self.decide(root, failed, "guess"), "RETRY-1")
+        self.assertEqual(self.client.get(self.base + f"/runs/{root['id']}").json()["state"], "completed")
+
+    def test_recheck_does_not_restore_an_issue_the_operator_already_decided(self):
+        _, guessed, _, loaded = self.guess_then_recheck_sibling("Tally rejected the voucher date.")
+        record = next(r for r in loaded["result"]["records"] if r["source_file_id"] == guessed)
+        self.assertEqual(record["status"], "held")
+        self.assertNotIn(guessed, [i["source_file_id"] for i in loaded["result"]["unresolved"]])
+
     def split_result(self, run, bill, amounts=(9,9)):
         result=self.tally_result(run,bill)
         record=result["records"][0]

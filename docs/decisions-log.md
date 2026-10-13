@@ -1,5 +1,27 @@
 # Decision Logs
 
+## Derive bill completion from record outcomes, not the clearing action (13 October 2026)
+
+**Situation:** A Tally bill saved through Best guess write could stay listed as
+unresolved forever. The decision cleared a copied list, but approval rebuilt the
+result from the stored proposal, so run completion still saw the issue. Batch
+re-aggregation also re-read each child's original output when a sibling was
+rechecked, restoring issues the operator had already decided. A saved bill shows
+no buttons, so the run could only be stopped.
+
+**Task:** Make run state follow verified outcomes, keep operator decisions
+authoritative across rechecks, and preserve the separate best-guess review.
+
+**Action:** Add one invariant, applied wherever results are finalized: an input
+is unresolved only while some proposal for it is still pending or held. A held
+save stays visible, and Recheck bill stays available. After the first
+aggregation, only the rechecked input adopts its child's new output; every other
+input keeps the parent's decided state.
+
+**Result:** Database regressions cover a single run and a batch recheck with a
+saved and with a held sibling. The saved bill completes the run while its
+best-guess review stays pending in Attention.
+
 ## Contain one batch's failure inside the shared worker (13 October 2026)
 
 **Situation:** An attention audit review found that batch aggregation ran every

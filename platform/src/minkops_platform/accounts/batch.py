@@ -236,13 +236,16 @@ def _reconcile(connection, parent):
             previous = [
                 r for r in previous if r.get("status") in ("saved", "duplicate", "rejected")
             ]
+        # The first aggregation adopts each child's outcome. Afterwards the parent
+        # also holds operator decisions, so only the rechecked input is re-read.
+        fresh = not prior or file_id == parent["config"].get("retry_file_id")
+        carried = [i for i in prior.get("unresolved", []) if i["source_file_id"] == file_id]
         if child["state"] == "failed":
             result["records"].extend(previous)
-            result["unresolved"].append(
-                {
-                    "source_file_id": child["file_ids"][0],
-                    "reason": child["error"] or "Extraction needs attention.",
-                }
+            result["unresolved"].extend(
+                [{"source_file_id": file_id, "reason": child["error"] or "Extraction needs attention."}]
+                if fresh
+                else carried
             )
         else:
             proposal = copy.deepcopy(child["result"])
@@ -255,7 +258,7 @@ def _reconcile(connection, parent):
             result["records"].extend(previous or proposal["records"])
             if previous and file_id == parent["config"].get("retry_file_id"):
                 result["records"].extend(proposal["records"])
-            result["unresolved"].extend(proposal.get("unresolved", []))
+            result["unresolved"].extend(proposal.get("unresolved", []) if fresh else carried)
     # A single-input run also becomes a batch only when retrying a held
     # extraction. Retain unrelated outcomes not represented by children.
     covered = {c["file_ids"][0] for c in children}
@@ -266,6 +269,9 @@ def _reconcile(connection, parent):
         i for i in prior.get("unresolved", []) if i["source_file_id"] not in covered
     )
     result["findings"] = list(dict.fromkeys(result["findings"]))
+    from .tally_writes import settle_unresolved
+
+    settle_unresolved(result)
     from minkops_platform.workflow_policies import enforce_policies
 
     # The parent review carries the same immutable client policy as its

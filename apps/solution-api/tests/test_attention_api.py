@@ -71,6 +71,26 @@ class AttentionTests(unittest.TestCase):
             with psycopg.connect(URL) as c:
                 self.assertEqual(c.execute("SELECT status FROM attention_items WHERE id=%s",(item["id"],)).fetchone()[0],expected)
 
+    def test_best_guess_on_unresolved_bill_completes_run_once_saved(self):
+        did=self.tally_discovery("company-attention")
+        bill=self.upload_bill("attention.pdf")
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        result=self.tally_result(run,bill)
+        result["records"][0]["findings"]=["Expense ledger is a best guess."]
+        result["unresolved"]=[{"source_file_id":bill,"reason":"Expense ledger is a best guess."}]
+        self.process(run,result)
+        response=self.decision(run,bill,"guess")
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()["result"]["unresolved"],[])
+        claim,route,plan=self.tally_job(response.json())
+        receipt=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})
+        self.assertEqual(receipt.status_code,200,receipt.text)
+        loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual(loaded["state"],"completed",loaded["result"])
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            review=c.execute("SELECT status FROM attention_items WHERE task_id=%s AND kind='review'",(run["task_id"],)).fetchone()
+        self.assertEqual(review["status"],"pending")
+
     def test_accounting_edits_and_prompt_input_rejected(self):
         run,bill,result=self.ready()
         result["records"][0]["data"]["total"]=999

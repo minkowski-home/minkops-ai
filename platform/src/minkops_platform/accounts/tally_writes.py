@@ -177,8 +177,29 @@ def prepare(connection, run, result, *, approved=False):
     return result
 
 
+SETTLED = ("writing", "saved", "duplicate", "rejected")
+
+
+def settle_unresolved(result):
+    """An input stops being unresolved once every proposal for it is settled.
+
+    Approval rebuilds results from the stored proposal, so state must follow
+    record outcomes rather than whichever action cleared an issue. Inputs with
+    a held or pending proposal stay unresolved, keeping Recheck bill available.
+    """
+    statuses = {}
+    for record in result["records"]:
+        statuses.setdefault(record["source_file_id"], []).append(record.get("status"))
+    result["unresolved"] = [
+        issue for issue in result.get("unresolved", [])
+        if not all(status in SETTLED for status in statuses.get(issue["source_file_id"], [None]))
+    ]
+    return result
+
+
 def complete_run(connection, run, result):
     from .attention import flag
+    settle_unresolved(result)
     for record in result["records"]:
         if record.get("status") == "held":
             flag(connection, run, record)
