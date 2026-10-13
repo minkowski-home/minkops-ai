@@ -165,6 +165,27 @@ class BillEntryTests(unittest.TestCase):
         self.save_receipt(self.decide(root, failed, "guess"), "RETRY-1")
         self.assertEqual(self.client.get(self.base + f"/runs/{root['id']}").json()["state"], "completed")
 
+    def test_do_nothing_defers_input_without_blocking_exception_only_saves(self):
+        from minkops_platform.accounts.batch import reconcile_once
+
+        root, inputs, _ = self.exception_only_batch()
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='failed',error='Unreadable' WHERE parent_run_id=%s",
+                      (root["id"],))
+        reconcile_once(URL)
+        self.decide(root, inputs[0], "nothing")
+        self.decide(root, inputs[1], "retry")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            retry = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND state='queued'",
+                              (root["id"],)).fetchone()
+        self.process(retry, self.numbered_result(root, inputs[1], "AFTER-DEFER"))
+        reconcile_once(URL)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["state"], "writing", loaded["result"])
+        self.assertEqual(len(loaded["tally_writes"]), 1)
+        self.assertEqual(loaded["result"]["findings"], [])
+        self.assertEqual(loaded["result"]["deferred"], [{"source_file_id": inputs[0]}])
+
     def test_recheck_does_not_restore_an_issue_the_operator_already_decided(self):
         _, guessed, _, loaded = self.guess_then_recheck_sibling("Tally rejected the voucher date.")
         record = next(r for r in loaded["result"]["records"] if r["source_file_id"] == guessed)

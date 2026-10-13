@@ -63,7 +63,7 @@ def create_child(connection, run, file_id):
 
 def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
     from .repository import public_run
-    from .tally_writes import complete_run
+    from .tally_writes import complete_run, defer_input
 
     run = run_for(connection, tenant["id"], run_id, True)
     from minkops_platform.run_controls import require_active
@@ -82,9 +82,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
         )
-        run["result"]["unresolved"] = [i for i in unresolved if i["source_file_id"] != file_id]
-        run["result"]["findings"].append(f"Operator rejected input {file_id}; it was not written.")
-        complete_run(connection, run, run["result"])
+        complete_run(connection, run, defer_input(run["result"], file_id))
     else:
         if user_input.strip():
             raise ServiceError("invalid", "Edit the original system, refresh discovery, then retry.")
@@ -226,8 +224,8 @@ def _reconcile(connection, parent):
                 20 + int(45 * len(done) / len(children)),
             )
         return
-    result = {"records": [], "findings": [], "unresolved": []}
     prior = parent.get("result") or {}
+    result = {"records": [], "findings": [], "unresolved": [], "deferred": list(prior.get("deferred", []))}
     result["findings"].extend(prior.get("findings", []))
     for child in children:
         file_id = child["file_ids"][0]

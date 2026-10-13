@@ -6,6 +6,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { CatalogReview } from "./CatalogReview";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
+import { inputsWithoutProposal } from "./billView";
 import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";
@@ -125,9 +126,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
   const provenance = run.config.file_provenance as { id: string; path: string }[];
   const name = (id: string) => provenance?.find((f) => f.id === id)?.path ?? id;
   const records = result?.records ?? [];
-  const unmatched = (result?.unresolved ?? []).filter(
-    (i) => !records.some((r) => r.source_file_id === i.source_file_id)
-  );
+  const { unresolved: unmatched, deferred } = inputsWithoutProposal(result);
   return (
     <section className="accounts-panel" aria-label="Workflow result">
       {discovery && <TaskProgress view={progressView({
@@ -270,6 +269,13 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
             >
               Recheck bill
             </button>
+          </article>
+        ))}
+      {!discovery &&
+        deferred.map((i) => (
+          <article className="accounts-bill" key={i.source_file_id}>
+            <h4>{name(i.source_file_id)}</h4>
+            <p>Not written</p>
           </article>
         ))}
       {!discovery &&

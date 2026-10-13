@@ -90,8 +90,8 @@ def decide(connection, tenant, user, run_id, file_id, action):
         for row in result["records"]:
             if row["source_file_id"] == file_id:
                 row.update(decision="reject", status="rejected")
-        from .tally_writes import complete_run
-        complete_run(connection, run, result)
+        from .tally_writes import complete_run, defer_input
+        complete_run(connection, run, defer_input(result, file_id))
         return public_run(connection, run_for(connection, tenant["id"], run_id))
     if not original:
         raise ServiceError("invalid", "No supported proposal. Handle this bill in the original system.")

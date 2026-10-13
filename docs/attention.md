@@ -27,7 +27,9 @@ queues at most 200 eligible pending items per click, rotating by last check;
 offline and unsupported items remain available for manual Done.
 
 Do nothing never writes, retains a source identifier in attention and permits
-other bills to continue. Best guess write accepts an existing supported proposal,
+other bills to continue. It is final for that run: the input is recorded as
+deferred data, not a run-level finding, so exception-only saves of its siblings
+continue and the run can complete. Best guess write accepts an existing supported proposal,
 with the same required values, ledger identity and native verification checks.
 After verified save, its exact voucher/row fingerprint becomes the review
 baseline. It remains pending until manual Done or a changed, valid destination

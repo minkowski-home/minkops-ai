@@ -197,6 +197,19 @@ def settle_unresolved(result):
     return result
 
 
+def defer_input(result, file_id):
+    """Record Do nothing as data, final for this run.
+
+    A run-level finding would block exception-only automation for every later
+    sibling. The actor and the pending manual handoff live in attention.
+    """
+    deferred = result.setdefault("deferred", [])
+    if not any(item["source_file_id"] == file_id for item in deferred):
+        deferred.append({"source_file_id": file_id})
+    result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != file_id]
+    return result
+
+
 def complete_run(connection, run, result):
     from .attention import flag
     settle_unresolved(result)
