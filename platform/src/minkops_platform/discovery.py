@@ -852,6 +852,11 @@ def require_ready(connection, tenant_id, run_id, required_tools):
     if latest["id"] != row["id"] and (
         not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]
     ):
+        if latest["state"] in ("queued", "executing"):
+            raise ServiceError(
+                "conflict",
+                "A newer Source discovery is still collecting. Wait for it to finish, then start again.",
+            )
         raise ServiceError(
             "conflict", "Source discovery has a newer run. Review the latest catalog first."
         )

@@ -687,5 +687,7 @@ class DiscoveryTests(unittest.TestCase):
                 require_ready(c, tenant["id"], run["id"], ["excel"])
         body["request_key"] = str(uuid.uuid4())
         self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
-        with psycopg.connect(URL, row_factory=dict_row) as c, self.assertRaises(ServiceError):
+        with psycopg.connect(URL, row_factory=dict_row) as c, self.assertRaises(ServiceError) as raised:
             require_ready(c, tenant["id"], run["id"], ["tally"])
+        # A refresh still waiting for its PC has nothing to review yet.
+        self.assertIn("still collecting", str(raised.exception))
