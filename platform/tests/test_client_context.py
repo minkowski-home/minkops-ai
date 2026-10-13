@@ -289,3 +289,26 @@ def test_context_notes_require_actual_collected_evidence():
         validate_notes([{**note, "evidence_ids": ["invented"]}], catalog)
     with pytest.raises(ValueError, match="undiscovered"):
         validate_notes([{**note, "company_guid": "unknown"}], catalog)
+
+
+def test_compact_record_format_drops_empty_values_but_keeps_offsets_and_meaning():
+    import json
+
+    value = snapshot()
+    record = value["companies"][0]["masters"]["records"][0]["data"]
+    record.update({"NARRATION": "", "ADDRESS.LIST": [], "OPENINGBALANCE": 0, "ISDEEMEDPOSITIVE": "No",
+                   "ALLOCATIONS.LIST": [{"LEDGERNAME": "", "AMOUNT": "0"}, {}]})
+    plain = {"run_id": "run", "format_version": "2", "master_lookup_version": "1",
+             "sources": [{"tool": "tally", "snapshot": value}]}
+    compact = {**plain, "context_record_format": "1"}
+    before, after = context_assets(plain)[0], context_assets(compact)[0]
+    # Catalogs pinned before the format existed keep their exact authorized bytes.
+    assert [f["sha256"] for f in before] == [f["sha256"] for f in context_assets(copy.deepcopy(plain))[0]]
+    assert sum(len(f["content"]) for f in after) < sum(len(f["content"]) for f in before)
+    masters = json.loads(next(f for f in after if f["path"] == "company-0-masters-lookup-v1-0.json")["content"])
+    data = masters[0]["data"]
+    assert "NARRATION" not in data and "ADDRESS.LIST" not in data
+    assert (data["OPENINGBALANCE"], data["ISDEEMEDPOSITIVE"]) == (0, "No")
+    assert data["ALLOCATIONS.LIST"] == [{"AMOUNT": "0"}, {}]
+    assert len(masters) == len(json.loads(next(
+        f for f in before if f["path"] == "company-0-masters-lookup-v1-0.json")["content"]))

@@ -212,7 +212,7 @@ def _observe(connection, job, state, summary, progress):
                 records = [records[index]]
             for record in records:
                 if record.get('status') == 'writing':
-                    item = flag(connection,run,record,title='Save interrupted')
+                    item = flag(connection,run,record,title='Save interrupted',reopen=True)
                     audit(connection,item,job['actor_id'],'failed',summary)
         event = {
             "queued": "local_waiting",

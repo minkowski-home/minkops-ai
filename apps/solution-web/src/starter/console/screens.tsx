@@ -13,6 +13,7 @@ import { progressView, type ProgressMode } from '../workspace/progress';
 import { RunTiming } from "../workspace/RunTiming";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { RunControls } from "../workspace/RunControls";
+import { sourceModes } from "../accounts/discoveryView";
 import { LoadingIndicator, Spinner } from "../components/Feedback";
 
 const statusText: Record<string, string> = {
@@ -191,7 +192,7 @@ function WorkflowDetailContent({ workspace, routeSlug, id, onSaved }: {
   const runWorkflow = { ...item, config_values: { ...item.config_values, ...overrides } };
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
-    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? 'Collect reusable context from Tally and Excel.' : item.description}</p></div><Status value={item.status} /></header>
+    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? `Collect reusable context from ${sourceModes(item.config_schema.properties.destination_mode, null).modes.includes('excel') ? 'Tally and Excel' : 'Tally'}.` : item.description}</p></div><Status value={item.status} /></header>
     {presentationFor(item) && <WorkflowLaunch key={item.id}
       tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={runWorkflow} onConfigChange={setOverrides} settings={{canEdit: workspace.can_edit, savedValues: item.config_values, onSaved}} />}
     <div className="detail-grid"><ConfigPanel key={`${item.id}:${item.status}`} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}

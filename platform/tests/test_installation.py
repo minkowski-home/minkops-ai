@@ -27,6 +27,15 @@ class SolutionDefinitionTests(unittest.TestCase):
         self.assertEqual(
             installation.bindings["bill-entry"]["defaults"]["output_mode"], "tally_in_place"
         )
+        # The demo workspace grants standing exception-only authorization; the
+        # reusable definition keeps explicit review of every output by default.
+        self.assertEqual(
+            installation.bindings["bill-entry"]["defaults"]["review_mode"], "only_exceptions"
+        )
+        self.assertEqual(
+            installation.workflows["bill-entry"].metadata["tenant_defaults"]["review_mode"],
+            "all_outputs",
+        )
 
     def test_path_escape_cannot_select_a_solution(self):
         with self.assertRaises(ValueError):

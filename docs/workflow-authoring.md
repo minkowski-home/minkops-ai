@@ -189,9 +189,13 @@ workers. This removes repeated sandbox provisioning within active batches;
 Cloud Run startup, file uploads, model processing and native writes still take time.
 Review, full-batch duplicate preflight and ordered writes remain unchanged.
 
-Client destination restrictions in `solutions/<id>/workflow-policy.json` are
-applied by declarative installation to the registered schema. Mock-client keeps
-Bill Entry Tally-only; the reusable workflow retains its Excel/Tally choices.
+A client's `enabled_tools` in `solutions/<id>/workflow-policy.json` is the single
+switch for which business systems its workspace uses. Workflow schemas declare
+each option's tools with `x-option-tools`. Installation then disables every
+option that needs a paused tool in the registered schema, and launches enforce
+it server-side. Mock-client currently enables Tally only, which pauses Excel
+discovery sources and Excel bill destinations. The reusable workflows keep their
+Excel/Tally choices.
 Run snapshots and deterministic threshold policies survive batch aggregation,
 review, retries, and later installation changes. Explicit approval is required
 before preparing Tally writes, which independently enforce pinned review policy.

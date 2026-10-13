@@ -1,5 +1,184 @@
 # Decision Logs
 
+## Measure the hold rate with a labelled holdout and a free replay (13 October 2026)
+
+**Situation:** The main complaint was too many held bills, and several releases
+had changed prompts and lifecycle code without a measured end-to-end run. A
+held bill could be the model's fault, the pipeline's, the provider's or a
+correct exception, and every paid rerun to tell them apart cost money.
+
+**Task:** Measure Bill Entry 0.12 on realistic documents, separate model errors
+from pipeline errors, and fix what the measurement shows without trading holds
+for silent accounting errors.
+
+**Action:** Built one tool on two existing seams. `replay` feeds a run the
+answers a correct agent returns through the worker's executor parameter, so
+validation, master selection, aggregation, attention and the companion's
+read-first Tally save run on real PDFs without a model. `score` grades each
+input against a labelled package and treats wrong saves, missed exceptions and
+double saves as critical. A dry replay of 36 labelled bills passed 36/36 before
+any paid run. The paid gpt-6-luna run of 39 bills (36 labelled plus a
+two-invoice PDF with an e-way bill, a quotation and an off-day date) then
+isolated each remaining failure. Two were provider errors: a dropped stream now
+reattaches to the existing turn, while an ambiguous session creation stays an
+explicit Recheck. Three were instruction gaps, fixed as general rules: supplier
+identity must come from printed identity, not purpose or history (a bill
+printing only a shared leading name had been saved to one of two suppliers);
+the split-tax capability is named by its exact path; and a scanned GSTIN that
+fails its check character is re-read as a misread, not treated as a conflict.
+Exercising the one-click decisions live surfaced four product bugs, each fixed
+test first: Do nothing on a non-bill made every later approval fail, stopping a
+batch duplicated every bill in Attention, a busy run answered decisions with a
+permission error, and a re-held bill stayed marked Done.
+
+**Result:** 31 of 36 labelled bills passed on the first paid pass (two provider
+errors, two unnecessary holds, one missed exception). Every other saved voucher
+matched the ground truth on company, supplier, ledger, date, amounts and each
+tax line; the edge cases passed 3/3. After the fixes and
+targeted reruns all 36 reach their expected outcome, including Create this
+ledger, an in-place correction and Recheck after provider failures. A free
+rerun of all 36 created no voucher. One bill saved before the supplier rule
+remains in the test company under the more plausible supplier.
+
+## Version delivered context so pinned runs keep their exact bytes (13 October 2026)
+
+**Situation:** After one 39-bill batch, a discovery refresh of three small test
+companies exceeded the 8 MB hosted context budget and was marked partial, which
+blocks confirmation and therefore Bill Entry. About half of each native voucher
+record's bytes were empty tags. Every launched run pins the SHA-256 of each
+context file, and execution refuses inputs that differ from that snapshot.
+
+**Task:** Shrink the delivered context without discarding evidence, breaking
+record offsets used by the master index and cited notes, or failing runs
+launched before the change.
+
+**Action:** Added a versioned compact record format. New discovery catalogs are
+stamped with it; delivery then drops empty strings, nulls and empty containers
+but keeps every list position and meaningful values such as 0 and "No".
+Unstamped catalogs keep the previous serialization, so earlier pinned hashes
+still match. The stored native export is unchanged.
+
+**Result:** The measured package fell from 8.35 MB to 4.78 MB and the refresh
+was complete and reused its confirmation. This doubles headroom, not unbounded
+scale: larger customers will need per-bill context retrieval rather than full
+history delivery.
+
+## Trace a misleading Tally rejection to company settings (13 October 2026)
+
+**Situation:** Two clean, correctly extracted March bills failed natively with
+"Voucher date is missing". The message was first mistaken for a Tally restart,
+then for an unknown date-setting problem. Each attempt consumed a review decision.
+
+**Task:** Find the real cause and stop the bill before an import attempt,
+without ever changing a source date to make Tally accept it.
+
+**Action:** Comparing the native company exports showed two of the three
+companies' books begin on 1 April 2026, so Tally refuses March vouchers. The
+companion already fetched every company field during discovery, so no
+desktop release was needed. Bill targets now carry the books-beginning date
+from the discovered identity. Validation holds an earlier bill with a coded
+"Before books begin" reason through the same path used before approval and
+again before dispatch. Snapshots without the field skip the check.
+
+**Result:** Unit and database tests hold a pre-books bill before any write
+intent, with a specific Attention label. Older pinned runs are unaffected.
+
+## Enforce what may block a bill in the model's output schema (13 October 2026)
+
+**Situation:** Under Only exceptions, any free-text finding held a bill. Local
+runs held routine bills for "arithmetic reconciles", "optional cost code absent"
+and speculative duplicate warnings that misquoted invoice references. Three
+releases of prompt wording reduced but could not eliminate this, because prose
+cannot enforce severity.
+
+**Task:** Make routine observations structurally unable to block a supported
+bill, without hiding genuine uncertainty or weakening deterministic checks.
+
+**Action:** Bill Entry 0.12.0 replaces findings with typed exceptions drawn from
+a closed list of ten genuine blockers, plus non-blocking notes. Possible
+duplicates have no code; native reconciliation decides them. One adapter maps
+exceptions to the existing internal blocking findings plus codes, so storage,
+review, batch aggregation and older pinned runs are unchanged. Attention labels
+now come from codes instead of keyword guesses. Bills held under exception-only
+authorization are flagged in shared Attention, which they previously were not.
+
+**Result:** Schema tests reject free-text findings and unlisted codes. A
+database regression shows a bill carrying the former noise saving automatically
+while its sibling's uncertain ledger holds with a "Ledger unclear" Attention
+item. A live run is still required to measure the model's adherence.
+
+## Separate destination holds from interpretation holds (13 October 2026)
+
+**Situation:** When Tally refused a supported bill (for example its date
+settings), the run returned to review with only Best guess write available,
+although the companion's message pointed to a Resume saves button that was not
+shown. Retrying through Best guess write opened a human-review item for what was
+a technical failure.
+
+**Task:** Give destination failures a one-click recovery that repeats the
+authorized plan without creating review work or bypassing checks.
+
+**Action:** Holds caused by the destination now carry a `save_hold` reason. Those
+are native refusals, unavailable PCs and reservation conflicts; interpretation
+uncertainty never sets it. Retry save, limited to the run's operator, clears
+only those holds and re-sends the proposal through normal approval. It relies on
+the native save's read-first idempotency: an equal voucher is skipped and a
+different one becomes a correction. The UI derives buttons from one tested view
+function, and the server refuses Best guess write for a held save.
+
+**Result:** Database regressions prove a rejected save is retried with the same
+plan and Tally ID, and completes without a review item. A PC-unavailable hold
+reports 409 while the PC is offline and completes after the same installation
+reconnects.
+
+## Derive bill completion from record outcomes, not the clearing action (13 October 2026)
+
+**Situation:** A Tally bill saved through Best guess write could stay listed as
+unresolved forever. The decision cleared a copied list, but approval rebuilt the
+result from the stored proposal, so run completion still saw the issue. Batch
+re-aggregation also re-read each child's original output when a sibling was
+rechecked, restoring issues the operator had already decided. A saved bill shows
+no buttons, so the run could only be stopped.
+
+**Task:** Make run state follow verified outcomes, keep operator decisions
+authoritative across rechecks, and preserve the separate best-guess review.
+
+**Action:** Add one invariant, applied wherever results are finalized: an input
+is unresolved only while some proposal for it is still pending or held. A held
+save stays visible, and Recheck bill stays available. After the first
+aggregation, only the rechecked input adopts its child's new output; every other
+input keeps the parent's decided state.
+
+**Result:** Database regressions cover a single run and a batch recheck with a
+saved and with a held sibling. The saved bill completes the run while its
+best-guess review stays pending in Attention.
+
+## Contain one batch's failure inside the shared worker (13 October 2026)
+
+**Situation:** An attention audit review found that batch aggregation ran every
+tenant's bill batches in one transaction with no error handling. A Tally batch
+whose destination PC was revoked raised `ServiceError` from job enqueueing, which
+was not a `ValueError`. It escaped to the worker lanes, stopped the process, and
+repeated on every restart. Hosted runs for all tenants stalled with it.
+
+**Task:** Make one tenant's defect unable to stop others, and turn the known
+cause into a truthful, recoverable bill outcome without weakening authorization.
+
+**Action:** Each parent now aggregates inside its own savepoint. Unexpected errors
+are rolled back to that savepoint, recorded as internal diagnostics, retried for
+a bounded three ticks, then fail that run visibly with an attention item.
+Background dispatch to an offline PC holds the bill with a `save_hold` reason for
+an explicit retry. An operator's own approval still gets the immediate
+"Reconnect this PC" error. Database tests then showed the diagnostic itself was
+missing: the parent's `FOR UPDATE` lock blocked the separate diagnostics
+transaction's foreign-key check. Switching to `FOR NO KEY UPDATE`, the pattern
+already used by `run_for`, still serializes aggregators.
+
+**Result:** Regression tests prove a revoked PC holds clean bills instead of
+raising. They also prove an injected defect in one batch leaves another batch
+writing, and fails only the broken run after three attempts with its diagnostic
+and attention item.
+
 ## Keep display projections outside discovery confirmation fingerprints (11 October 2026)
 
 **Situation:** Database integration tests found that confirming discovery saved

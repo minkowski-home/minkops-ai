@@ -39,6 +39,34 @@ an unresolved match is not a new supplier. Purchase classification excludes the
 current invoice's own voucher as supporting history. Similar references retain
 every token; similar dates or amounts alone do not establish duplicate identity.
 
+Workflow 0.12.0 replaces free-text findings with typed exceptions. The model can
+block a bill only with a code from a closed list of genuine blockers (unreadable
+source, not a bill, unclear bill count, missing value, conflicting values,
+unclear company or supplier, missing supplier, uncertain ledger, unsupported
+structure). Everything else is a non-blocking internal note: successful checks,
+absent optional values, and similarity to an existing voucher. Native
+reconciliation alone decides duplicates. Attention labels come from the code.
+Under Only exceptions, held bills are flagged in shared Attention. A file may
+contain one bill plus copies and companion documents (e-way bill, IRN
+acknowledgement, challan, PO); those corroborate a single record. Runs pinned to
+earlier versions keep their free-text contract.
+
+Workflow 0.12.1 closes three gaps found by the 39-bill paid evaluation. Supplier
+identity must come from what the bill prints; when a printed name such as a
+shared leading word fits two supplier ledgers, the bill is held as Supplier
+unclear, because purpose and purchase history may choose an expense ledger but
+never a creditor. Split CGST/SGST is checked against the run's capability flag
+before any hold. Itemized goods posted to a ledger that the company's own
+history books as plain accounting vouchers follow that practice rather than
+being held for inventory. Workflow 0.12.2 validates a scanned GSTIN's check
+character before comparing it: a read that fails the check is re-read as an OCR
+error instead of being treated as a conflicting buyer.
+
+Before any import, a bill dated before its company's Tally "Books beginning from"
+date (collected in discovery's company identity) is held as **Before books
+begin**. Tally cannot record such a voucher; Minkops never moves the source date.
+Older discovery snapshots without the date skip this preflight.
+
 The grouped file selector supports individual/group/all selection and search.
 Selections persist in this browser by source ID and path, including an explicitly
 empty selection. Refresh preserves choices when snapshot IDs change, removes
@@ -116,11 +144,19 @@ complete a batch with pending or held bills.
 Consequential jobs are not automatically repeated after lease expiry. Explicit
 Resume saves first reconciles the destination, handling an already applied write
 without adding it again. Persisted receipts are replayed before another native
-job. Cancellation releases pending reservations and preserves applied changes.
+job. A save that finished but was refused or held by its destination returns
+to review with Retry save, which re-sends the same proposal after the fix.
+Cancellation releases pending reservations and preserves applied changes.
 A late cancelled receipt records what was saved without restoring success or
 rewinding newer observed workbook bytes. Independent external writers can still
 race Tally's separate read/import calls: ambiguous matches or mismatched readback
 require reconciliation, never a claimed successful save.
+
+A provider stream that drops after the bill's turn started is reattached to
+the same turn, up to three times, and its result read as usual; no session or
+input is resubmitted. A failure before the turn exists is ambiguous, so the
+bill stays unresolved for an explicit Recheck bill. While saves wait for the
+destination PC, the run names that PC and asks to keep Minkops running there.
 
 ## Supported mapping
 
@@ -264,3 +300,24 @@ values, Tally writes/readback, schema discovery, extraction into exact complex
 Excel headers, a native workbook save and repeated receipts. A provider rate
 limit interrupted the blank-image turn; explicit retry isolated that image and
 retained three verified sibling saves.
+
+### Scoring and replaying labelled fixture packages
+
+A fixture package holds `bills/*.pdf` and `evidence/expected-bills.json` with
+the expected outcome of every input. Select only `bills/` as inputs.
+`scripts/bill_entry_fixtures.py` grades a finished run per input as correct,
+an unnecessary hold, a wrong reason, a wrong save or a missed exception. The
+last two are critical and make the command exit nonzero. Use `--rerun` when
+the inputs were already saved and every create should now be a duplicate, and
+`--dry` for an All outputs run graded before saving. Educational Tally accepts
+only voucher dates on the 1st, 2nd and 31st; a correct bill held solely for its
+date passes.
+
+`replay` processes a launched run with the answers a correct agent returns,
+so everything after extraction is exercised on real documents without paid
+sessions. Stop the normal worker first; replay claims only the named run.
+
+```sh
+uv run --all-packages python scripts/bill_entry_fixtures.py replay RUN_ID packages/<package>
+uv run --all-packages python scripts/bill_entry_fixtures.py score RUN_ID packages/<package> [--dry|--rerun]
+```

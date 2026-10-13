@@ -293,9 +293,8 @@ def prepare_writes(connection, run, result, catalog, files, contents, *, approve
                                 }
                         if classification == "duplicate":
                             record["status"] = "duplicate"
-                            record["findings"].append(
-                                "Exact duplicate already exists; no additional row was created."
-                            )
+                            from .bills import add_note
+                            add_note(record, "Exact duplicate already exists; no additional row was created.")
                             continue
                         if classification == "ambiguous" or (
                             classification == "correction" and record["operation"] != "update"
@@ -395,7 +394,7 @@ def verify_write(connection, tenant, run_id, write_id, content):
                 result["records"][index]["status"] = "saved"
                 from .attention import excel_baseline, written
                 excel_baseline(connection, run, result["records"][index], content)
-                written(connection, run, result["records"][index])
+                written(connection, run, result["records"][index], result)
         if run["state"] == "writing":
             from .tally_writes import complete_run
 

@@ -127,8 +127,8 @@ class SchemaContextTests(unittest.TestCase):
             run,
             {
                 "records": [],
-                "findings": [],
-                "unresolved": [{"source_file_id": bill, "reason": "Supplier missing"}],
+                "exceptions": [],
+                "unresolved": [{"source_file_id": bill, "code": "supplier_missing", "reason": "Supplier missing"}],
             },
         )
         self.tally_discovery("company-2", reuse_device=True)

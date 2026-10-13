@@ -35,6 +35,8 @@ class DiscoveryTests(unittest.TestCase):
             saved = c.execute("SELECT catalog,mapping_run_id FROM discovery_runs WHERE id=%s",
                               (current["id"],)).fetchone()
         self.assertIsNone(saved["mapping_run_id"])
+        # New catalogs deliver compact records; the stored export stays complete.
+        self.assertEqual(saved["catalog"]["context_record_format"], "1")
         company = saved["catalog"]["sources"][0]["snapshot"]["companies"][0]
         self.assertEqual(company["masters"], {"status": "ready", "count": 0, "records": []})
         self.assertEqual(company["vouchers"], {"status": "ready", "count": 0, "records": []})
@@ -107,6 +109,34 @@ class DiscoveryTests(unittest.TestCase):
                 body["config"]["destination_mode"] = mode
                 rejected = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
                 self.assertEqual(rejected.status_code, 422, rejected.text)
+
+    def test_paused_excel_tool_is_rejected_server_side(self):
+        from minkops_platform.resources import REPOSITORY_ROOT
+        from minkops_platform.solution_policy import bind_definition
+        from minkops_platform.workflows import load_definition
+        from psycopg.types.json import Jsonb
+
+        _, body = self.start()
+        bound = bind_definition(load_definition(
+            REPOSITORY_ROOT / "employees/accounts-desk/workflows/source-discovery"), "mock-client")
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE workflows SET config_schema=%s WHERE key='source-discovery' AND tenant_id=(SELECT id FROM tenants WHERE slug=%s)",
+                      (Jsonb(bound.tenant_schema), self.slug))
+        source = self.client.post(f"/api/tenants/{self.slug}/accounts/sources", headers=self.csrf,
+                                  data={"paths": '["register.xlsx"]', "writable": "true"},
+                                  files=[("files", ("register.xlsx", workbook()))]).json()
+        self.client.post(self.base + f"/devices/{self.device['id']}/sources/{source['id']}",
+                         headers=self.csrf).raise_for_status()
+        for tally in (None, body["config"]["tally"]):
+            with self.subTest(tally=bool(tally)):
+                rejected = self.client.post(self.discovery + "/runs", headers=self.csrf, json={
+                    **body, "request_key": str(uuid.uuid4()),
+                    "config": {**body["config"], "excel_source_ids": [source["id"]], "tally": tally}})
+                self.assertEqual(rejected.status_code, 422, rejected.text)
+                self.assertIn("does not use the selected source system", rejected.text)
+        accepted = self.client.post(self.discovery + "/runs", headers=self.csrf,
+                                    json={**body, "request_key": str(uuid.uuid4())})
+        self.assertEqual(accepted.status_code, 202, accepted.text)
 
     def test_damaged_workbook_is_a_validation_error_not_a_backend_crash(self):
         r = self.client.post(
@@ -371,7 +401,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(r.status_code, 202, r.text)
         return r.json(), body
 
-    def collect(self, run, partial=False):
+    def collect(self, run, partial=False, *, vouchers=(), masters=(), number="100000", analyze=True):
         claim = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
         result = {
             "sources": [
@@ -386,7 +416,7 @@ class DiscoveryTests(unittest.TestCase):
                             {
                                 "company": "Test",
                                 "company_guid": "test-guid",
-                                "company_number": "100000",
+                                "company_number": number,
                             }
                         ],
                         "companies": [
@@ -407,10 +437,10 @@ class DiscoveryTests(unittest.TestCase):
                                 "identity": {
                                     "NAME": "Test",
                                     "GUID": "test-guid",
-                                    "COMPANYNUMBER": "100000",
+                                    "COMPANYNUMBER": number,
                                 },
-                                "masters": {"status": "ready", "count": 0, "records": []},
-                                "vouchers": {"status": "ready", "count": 0, "records": []},
+                                "masters": {"status": "ready", "count": len(masters), "records": list(masters)},
+                                "vouchers": {"status": "ready", "count": len(vouchers), "records": list(vouchers)},
                             }
                         ],
                         "partial": partial,
@@ -425,7 +455,7 @@ class DiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200, r.text)
         current = self.client.get(self.discovery + f"/runs/{run['id']}").json()
-        if current["mapping_run"]:
+        if current["mapping_run"] and analyze:
             from minkops_platform.accounts.worker import process
 
             with psycopg.connect(URL, row_factory=dict_row) as c:
@@ -509,6 +539,50 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(
                 require_ready(c, tenant["id"], run["id"], ["tally"])["run_id"], run["id"]
             )
+
+    def test_routine_tally_changes_keep_confirmation_but_company_changes_need_review(self):
+        from minkops_platform.discovery import require_ready
+
+        run, body = self.start(ai_context=False)
+        self.collect(run)
+        confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        # A voucher Minkops saved and a ledger created in Tally are routine data.
+        voucher = {"type": "VOUCHER", "data": {"GUID": "saved-voucher", "DATE": "20261001"}}
+        ledger = {"type": "LEDGER", "data": {"NAME": "New supplier", "GUID": "new-ledger",
+                                            "PARENT": "Sundry Creditors"}}
+        body["request_key"] = str(uuid.uuid4())
+        refresh = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body).json()
+        again = self.collect(refresh, vouchers=[voucher], masters=[ledger])
+        self.assertEqual((again["state"], again["ready"]), ("completed", True))
+        self.assertEqual(again["catalog"]["review"]["reused_from"], run["id"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            tenant = c.execute("SELECT id FROM tenants WHERE slug=%s", (self.slug,)).fetchone()
+            self.assertEqual(require_ready(c, tenant["id"], run["id"], ["tally"])["run_id"], run["id"])
+        body["request_key"] = str(uuid.uuid4())
+        changed = self.client.post(self.discovery + "/runs", headers=self.csrf, json=body).json()
+        reviewed = self.collect(changed, number="100009")
+        self.assertEqual((reviewed["state"], reviewed["ready"]), ("review", False))
+
+    def test_failed_optional_analysis_leaves_a_complete_tally_collection_confirmable(self):
+        from minkops_platform.accounts.run_store import AccountsRunStore
+
+        run, _ = self.start()
+        current = self.collect(run, analyze=False)
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            mapping = c.execute("SELECT * FROM account_runs WHERE id=%s",
+                                (current["mapping_run"]["id"],)).fetchone()
+            AccountsRunStore().fail(c, mapping, "Hosted workflow failed (APIError).")
+        failed = self.client.get(self.discovery + f"/runs/{run['id']}").json()
+        self.assertEqual((failed["state"], failed["analysis_failed"]), ("review", True))
+        confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertTrue(confirmed.json()["ready"])
+        self.assertEqual(confirmed.json()["catalog"]["context_notes"], [])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT status FROM attention_items WHERE event_key=%s",
+                             (f"run:{mapping['id']}",)).fetchone()
+        self.assertEqual(item["status"], "done")
 
     def test_scope_receipts_and_configuration_cannot_escape_the_requested_sources(self):
         run, _ = self.start()
@@ -613,5 +687,7 @@ class DiscoveryTests(unittest.TestCase):
                 require_ready(c, tenant["id"], run["id"], ["excel"])
         body["request_key"] = str(uuid.uuid4())
         self.client.post(self.discovery + "/runs", headers=self.csrf, json=body)
-        with psycopg.connect(URL, row_factory=dict_row) as c, self.assertRaises(ServiceError):
+        with psycopg.connect(URL, row_factory=dict_row) as c, self.assertRaises(ServiceError) as raised:
             require_ready(c, tenant["id"], run["id"], ["tally"])
+        # A refresh still waiting for its PC has nothing to review yet.
+        self.assertIn("still collecting", str(raised.exception))

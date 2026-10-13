@@ -39,21 +39,49 @@ def target_for(connection, run, record):
             "baseline": record.get("current")}
 
 
-def flag(connection, run, record, *, title=None, kind="bill", actor=None):
+def exception_label(record):
+    """Coded exceptions name themselves; older free-text findings use the keyword fallback."""
+    from .checks import EXCEPTION_LABELS
+    codes = record.get("exception_codes") or []
+    return EXCEPTION_LABELS[codes[0]] if codes else attention.label(" ".join(record.get("findings", [])))
+
+
+def issue_record(result, issue):
+    """The proposal for an unresolved input, or a placeholder carrying its reason."""
+    return next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
+                {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]],
+                 "exception_codes": [issue["code"]] if issue.get("code") else []})
+
+
+def flag(connection, run, record, *, title=None, kind="bill", actor=None, reopen=False):
+    """Attention for one input file; `reopen` only for a new hold event (see attention.record)."""
     file_id = record["source_file_id"]
     name = next((f["path"] for f in run["config"].get("file_provenance", []) if f["id"] == file_id), file_id)
     return attention.record(connection, run, f"bill:{run['id']}:{file_id}:{kind}", name,
-        title or attention.label(" ".join(record.get("findings", []))), kind=kind,
-        target=target_for(connection, run, record), actor=actor)
+        title or exception_label(record), kind=kind,
+        target=target_for(connection, run, record), actor=actor, reopen=reopen)
 
 
 def stopped(connection, run, actor):
-    """Retain both proposals and unresolved inputs when automation is stopped."""
-    result = run.get("result") or {}
-    records = {record["source_file_id"]: record for record in result.get("records", [])}
-    for issue in result.get("unresolved", []):
-        records.setdefault(issue["source_file_id"], {"source_file_id": issue["source_file_id"],
-                                                   "findings": [issue["reason"]], "data": {}})
+    """Retain both proposals and unresolved inputs when automation is stopped.
+
+    A batch stopped before aggregation holds its read bills only in children,
+    so their outcomes are included for inputs the parent has not combined yet.
+    Inputs that were never read have no proposal and open no item.
+    """
+    results = [run.get("result") or {}]
+    if run.get("config", {}).get("batch"):
+        results += [child["result"] for child in connection.execute(
+            """SELECT result FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND result IS NOT NULL
+            AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0""",
+            (run["tenant_id"], run["id"]))]
+    records = {}
+    for result in results:
+        # The parent's combined outcome comes first and wins for each input.
+        for record in result.get("records", []):
+            records.setdefault(record["source_file_id"], record)
+        for issue in result.get("unresolved", []):
+            records.setdefault(issue["source_file_id"], issue_record({"records": []}, issue))
     for record in records.values():
         if record.get("status") not in ("saved", "duplicate", "rejected"):
             item = flag(connection, run, record, title="Run stopped", actor=actor)
@@ -61,35 +89,59 @@ def stopped(connection, run, actor):
                             "Remaining automation stopped. Verify the original destination before further action.")
 
 
-def decide(connection, tenant, user, run_id, file_id, action):
+def _proposal(run, file_id, proposal):
+    """The one proposal a decision applies to; an input file can hold several bills.
+
+    Without an explicit index, only a file with a single undecided proposal is
+    unambiguous. Inputs without any proposal return None.
+    """
+    from .tally_writes import SETTLED
+    records = run["result"]["records"]
+    indexes = [i for i, r in enumerate(records) if r["source_file_id"] == file_id]
+    if proposal is not None:
+        if proposal not in indexes:
+            raise ServiceError("invalid", "Bill not awaiting a decision.")
+        return proposal
+    pending = [i for i in indexes if records[i].get("status") not in SETTLED]
+    if len(pending) > 1:
+        raise ServiceError("invalid", "Choose which bill in this file to decide.")
+    return (pending or indexes or [None])[0]
+
+
+def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     from .service import approve_run
     from .batch import resolve_bill
     run = run_for(connection, tenant["id"], run_id, True)
     from minkops_platform.run_controls import require_active
     require_active(connection, tenant["id"], run["task_id"])
-    if run["actor_id"] != user["id"] or run["state"] != "review":
+    if run["actor_id"] != user["id"]:
         raise ServiceError("forbidden", "Only this run's operator can authorize bill writes.")
-    original = next((r for r in run["result"]["records"] if r["source_file_id"] == file_id), None)
+    if run["state"] != "review":
+        # Saving or rechecking: decisions resume when the run returns to review.
+        raise ServiceError("conflict", "This run is still saving or rechecking bills. Decide once it is ready.")
+    index = _proposal(run, file_id, proposal)
+    original = None if index is None else run["result"]["records"][index]
     issue = next((i for i in run["result"].get("unresolved", []) if i["source_file_id"] == file_id), None)
     if not original and not issue:
         raise ServiceError("invalid", "Bill not awaiting a decision.")
-    record = original or {"source_file_id": file_id, "data": {}, "findings": [issue["reason"]]}
+    record = original or issue_record({"records": []}, issue)
     if record.get("status") in ("saved", "duplicate", "rejected", "writing"):
         raise ServiceError("conflict", "Bill already handled.")
     if action == "retry":
         return resolve_bill(connection, tenant, user, run_id, file_id, "", False)
+    if action == "retry_save":
+        return _retry_save(connection, tenant, user, run, index)
+    if record.get("save_hold") and action in ("guess", "supplier"):
+        raise ServiceError("invalid", "Fix the destination, then use Retry save.")
     if action == "nothing":
         item = flag(connection, run, record, actor=user["id"])
         attention.audit(connection, item, user["id"], "deferred", "No write. Manual handling required.")
-        if issue:
-            if original:
-                original.update(decision="reject", status="rejected")
-                connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
+        if not original:
+            # An input without any proposal is deferred as a whole.
             return resolve_bill(connection, tenant, user, run_id, file_id, "", True)
+        # Only this proposal is final; the input settles once all of its bills do.
         result = copy.deepcopy(run["result"])
-        for row in result["records"]:
-            if row["source_file_id"] == file_id:
-                row.update(decision="reject", status="rejected")
+        result["records"][index].update(decision="reject", status="rejected")
         from .tally_writes import complete_run
         complete_run(connection, run, result)
         return public_run(connection, run_for(connection, tenant["id"], run_id))
@@ -134,12 +186,32 @@ def decide(connection, tenant, user, run_id, file_id, action):
                 record["expected_excel"] = record["current_excel"]
             connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
         result = copy.deepcopy(run["result"])
-        result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != file_id]
-        for row in result["records"]:
-            row["decision"] = "approve" if row["source_file_id"] == file_id else "hold"
+        for position, row in enumerate(result["records"]):
+            row["decision"] = "approve" if position == index else "hold"
         return approve_run(connection, tenant, user, run_id, {"result": result, "acknowledge_findings": True})
     except (ValueError, KeyError, TypeError) as error:
         raise ServiceError("invalid", "No supported write. Use Do nothing.") from error
+
+
+def _retry_save(connection, tenant, user, run, index):
+    """Re-send a held bill's supported proposal after the destination is fixed.
+
+    This is a technical retry under the original authorization, not a new
+    interpretation, so it opens no best-guess review. Native saves read the
+    destination first: an equal voucher is skipped and a different one is
+    offered as a correction rather than overwritten.
+    """
+    from .service import approve_run
+    row = None if index is None else run["result"]["records"][index]
+    if not row or row.get("status") != "held" or not row.get("save_hold"):
+        raise ServiceError("invalid", "Only a held save can be retried.")
+    reason = row.pop("save_hold")
+    row["findings"] = [finding for finding in row["findings"] if finding != reason]
+    connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
+    result = copy.deepcopy(run["result"])
+    for position, other in enumerate(result["records"]):
+        other["decision"] = "approve" if position == index else "hold"
+    return approve_run(connection, tenant, user, run["id"], {"result": result, "acknowledge_findings": True})
 
 
 def check_observation(item, observation):
@@ -202,8 +274,16 @@ def excel_baseline(connection, run, record, content):
                                (Jsonb(observation["current"]), item["id"]))
 
 
-def written(connection, run, record):
-    """A verified save resolves the blocked-write event, never the review event."""
+def written(connection, run, record, result):
+    """A verified save resolves the blocked-write event, never the review event.
+
+    The event belongs to the input file, which can hold several bills; it stays
+    open while any other proposal from that file still awaits a decision.
+    """
+    from .tally_writes import SETTLED
+    if any(r["source_file_id"] == record["source_file_id"] and r.get("status") not in SETTLED
+           for r in result["records"]):
+        return
     item = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s AND status='pending' FOR UPDATE",
         (run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:bill")).fetchone()
     if item:
@@ -225,8 +305,11 @@ def supplier_created(connection, item, job, observation):
     from .client_context import select_target
     from .tally_writes import prepare, complete_run
     result = copy.deepcopy(run["result"])
-    record = next(r for r in result["records"] if r["source_file_id"] == target["file_id"])
-    if item["status"] == "done" or record.get("status") in ("saved", "duplicate", "rejected", "writing"):
+    from .tally_writes import SETTLED
+    # The supplier item belongs to the file; continue the undecided bill naming this supplier.
+    record = next((r for r in result["records"] if r["source_file_id"] == target["file_id"]
+                   and r["data"].get("vendor") == target["vendor"] and r.get("status") not in SETTLED), None)
+    if item["status"] == "done" or record is None:
         return
     selected = select_target(record, run["config"]["tally_target"])
     master = next(m for m in observation["masters"] if m.get("@_NAME", m.get("NAME")) == target["vendor"])

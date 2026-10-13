@@ -1,3 +1,4 @@
+import type { SettingSpec } from "../api";
 import type { Catalog, Run } from "./types";
 import type { ProgressState, TaskProgressView } from "../workspace/progress";
 
@@ -69,6 +70,8 @@ export interface DiscoveryRun {
   ready: boolean;
   observations: { key: string; status: string; category?: string; progress?: CollectionProgress }[];
   mapping_run: Run | null;
+  /** Optional AI context analysis failed for a Tally-only collection. */
+  analysis_failed?: boolean;
   catalog: {
     context_error?: string;
     context_notes?: { company_guid: string; observation: string; certainty: string; evidence_ids: string[] }[];
@@ -180,4 +183,20 @@ export function discoveryProgress(run: DiscoveryRun): TaskProgressView {
     activity, percent, meterLabel: finished ? "Discovery complete" : native ? "Source collection" : "Context and mapping review",
     countLabel: hasMeasure ? `${measured.completed} of ${measured.total} ${latest?.key === "tally" ? "native reads" : "workbooks"}` : undefined
   };
+}
+
+export type SourceMode = "tally" | "excel" | "both";
+const SOURCE_MODES: SourceMode[] = ["tally", "excel", "both"];
+
+/** Source choices the workspace enables; a paused saved choice falls back to the first enabled one. */
+export function sourceModes(spec: SettingSpec | undefined, saved: unknown) {
+  const enabled = spec?.["x-enabled-options"];
+  const modes = SOURCE_MODES.filter((mode) => !enabled || enabled.includes(mode));
+  return { modes, selected: modes.find((mode) => mode === saved) ?? modes[0] };
+}
+
+/** Complete sources can be confirmed once mappings are ready, or without notes after a failed analysis. */
+export function canConfirm(run: DiscoveryRun, mappingsReady: boolean) {
+  return run.state === "review" && Boolean(run.catalog) && !run.catalog?.partial
+    && (!run.mapping_run || mappingsReady || Boolean(run.analysis_failed));
 }

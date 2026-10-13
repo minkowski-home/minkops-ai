@@ -18,7 +18,22 @@
         "both_in_place",
         "draft_excel"
       ],
-      "title": "Output platform and write mode"
+      "title": "Output platform and write mode",
+      "x-option-tools": {
+        "excel_in_place": [
+          "excel"
+        ],
+        "tally_in_place": [
+          "tally"
+        ],
+        "both_in_place": [
+          "excel",
+          "tally"
+        ],
+        "draft_excel": [
+          "excel"
+        ]
+      }
     },
     "input_format": {
       "type": "string",

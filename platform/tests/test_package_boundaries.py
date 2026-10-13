@@ -50,5 +50,5 @@ class PackageBoundaryTests(TestCase):
         )
         self.assertEqual(
             hashlib.sha256(bill_prompt().encode()).hexdigest(),
-            "b6830c5c55cbb7787ebc0040764b40d31385a38d7fe99d86c52417d9b27f22c6",
+            "a5bb1106e8ea86162b86ef7d7e20c8c7802d3eb89e9bdf46878e4e75969ec0a6",
         )

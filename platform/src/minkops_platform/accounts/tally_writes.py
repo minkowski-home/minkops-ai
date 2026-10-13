@@ -8,8 +8,24 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
 
-from .bills import validate_tally, allocation_entries
+from .bills import add_note, allocation_entries, validate_tally
 from .repository import observe, run_for
+
+PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
+
+
+def hold_save(connection, run, record, reason, *, title=None):
+    """Hold a supported proposal for a destination-side reason.
+
+    `save_hold` marks blockers that a retry of the same approved plan can clear
+    once the destination is fixed; interpretation uncertainty never sets it.
+    """
+    from .attention import flag
+
+    record["status"] = "held"
+    record["save_hold"] = reason
+    record["findings"] = list(dict.fromkeys([*record["findings"], reason]))
+    return flag(connection, run, record, title=title, reopen=True)
 
 
 def prepare_automatic(connection, run, result):
@@ -27,11 +43,18 @@ def prepare_automatic(connection, run, result):
             or result.get("findings")
             or control_state(connection, run["tenant_id"], run["task_id"]) != "active"):
         return False
+    from .attention import flag
+
     unresolved = {issue["source_file_id"] for issue in result.get("unresolved", [])}
+    rechecked = run["config"].get("retry_file_id")
     for record in result["records"]:
         if record.get("findings") or record["source_file_id"] in unresolved:
             if record.get("status") not in ("saved", "duplicate", "writing", "rejected"):
                 record["decision"] = "hold"
+                # Under standing authorization the exceptions are the work; they
+                # belong in shared attention, not only in this run's review.
+                # Only a rechecked input's hold is new; siblings are restated.
+                flag(connection, run, record, reopen=record["source_file_id"] == rechecked)
     prepare(connection, run, result)
     complete_run(connection, run, result)
     return True
@@ -118,42 +141,85 @@ def prepare(connection, run, result, *, approved=False):
             }
             if record.get("tax_allocations") is not None:
                 plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
-            with connection.transaction():
-                write = connection.execute(
-                    """INSERT INTO account_tally_writes
-                    (tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (
-                        run["tenant_id"],
-                        run["id"],
-                        target["device_id"],
-                        target["company"],
-                        identity,
-                        index,
-                        Jsonb(plan),
-                        target["destination_key"],
-                    ),
-                ).fetchone()
-                from minkops_platform.desktop import enqueue_approved
+            try:
+                with connection.transaction():
+                    write = connection.execute(
+                        """INSERT INTO account_tally_writes
+                        (tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                        (
+                            run["tenant_id"],
+                            run["id"],
+                            target["device_id"],
+                            target["company"],
+                            identity,
+                            index,
+                            Jsonb(plan),
+                            target["destination_key"],
+                        ),
+                    ).fetchone()
+                    from minkops_platform.desktop import enqueue_approved
 
-                enqueue_approved(connection, run, target["device_id"], "tally.save", write["id"])
+                    enqueue_approved(connection, run, target["device_id"], "tally.save", write["id"])
+            except ServiceError:
+                # An operator's click reports the offline PC immediately. Background
+                # dispatch has no one to answer, so the savepoint discards the
+                # intent and the bill waits for an explicit Retry save instead.
+                if approved:
+                    raise
+                hold_save(connection, run, record, PC_UNAVAILABLE, title="PC unavailable")
+                continue
             record["status"] = "writing"
             seen[key] = index
         except ValueError as error:
-            record["status"] = "held"
-            record["findings"] = list(dict.fromkeys([*record["findings"], str(error)]))
             from .attention import flag
-            flag(connection, run, record)
-        except UniqueViolation:
+            from .bills import note_hold
             record["status"] = "held"
-            record["findings"].append(
-                "Another approved run is reconciling this bill. Finish it, then resume this review."
-            )
+            note_hold(record, error)
+            flag(connection, run, record, reopen=True)
+        except UniqueViolation:
+            hold_save(connection, run, record,
+                      "Another approved run is reconciling this bill. Finish it, then use Retry save.",
+                      title="Save waiting")
+    return result
+
+
+SETTLED = ("writing", "saved", "duplicate", "rejected")
+
+
+def settle_unresolved(result):
+    """An input stops being unresolved once every proposal for it is settled.
+
+    Approval rebuilds results from the stored proposal, so state must follow
+    record outcomes rather than whichever action cleared an issue. Inputs with
+    a held or pending proposal stay unresolved, keeping Recheck bill available.
+    """
+    statuses = {}
+    for record in result["records"]:
+        statuses.setdefault(record["source_file_id"], []).append(record.get("status"))
+    result["unresolved"] = [
+        issue for issue in result.get("unresolved", [])
+        if not all(status in SETTLED for status in statuses.get(issue["source_file_id"], [None]))
+    ]
+    return result
+
+
+def defer_input(result, file_id):
+    """Record Do nothing as data, final for this run.
+
+    A run-level finding would block exception-only automation for every later
+    sibling. The actor and the pending manual handoff live in attention.
+    """
+    deferred = result.setdefault("deferred", [])
+    if not any(item["source_file_id"] == file_id for item in deferred):
+        deferred.append({"source_file_id": file_id})
+    result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != file_id]
     return result
 
 
 def complete_run(connection, run, result):
     from .attention import flag
+    settle_unresolved(result)
     for record in result["records"]:
         if record.get("status") == "held":
             flag(connection, run, record)
@@ -173,8 +239,14 @@ def complete_run(connection, run, result):
         "UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s",
         (Jsonb(result), run["tenant_id"], run["id"]),
     )
+    device = pending_tally and connection.execute(
+        "SELECT name FROM desktop_devices WHERE tenant_id=%s AND id=%s",
+        (run["tenant_id"], run["config"].get("tally_target", {}).get("device_id")),
+    ).fetchone()
     summary = {
-        "writing": "Approved entries are waiting for verified destination writes.",
+        # Saves wait for the destination PC; an offline PC is the usual cause.
+        "writing": f"Saving to Tally on {device['name']}. Keep Minkops running on that PC." if device
+        else "Approved entries are waiting for verified destination writes.",
         "review": "Successful entries are preserved. Review only the bills needing attention.",
         "completed": "Bill entries verified. Exact duplicates were skipped without adding records.",
     }[state]
@@ -292,34 +364,33 @@ def accept(connection, device, payload, receipt):
     for sibling in result["records"]:
         if sibling.get("duplicate_of") == write["record_index"]:
             sibling["status"] = "duplicate" if outcome in ("saved", "duplicate") else "held"
-            sibling["findings"].append(
-                "Repeated bill in this batch was skipped."
-                if outcome in ("saved", "duplicate")
-                else "The original bill needs attention; this repeated input was not written."
-            )
+            if outcome in ("saved", "duplicate"):
+                add_note(sibling, "Repeated bill in this batch was skipped.")
+            else:
+                sibling["findings"].append(
+                    "The original bill needs attention; this repeated input was not written.")
     if current:
         record["current"] = current
     from .attention import flag
     if outcome in ("correction", "attention"):
-        item = flag(connection, run, record, title="Review in Tally")
+        # A different existing voucher is a correction decision. Any other native
+        # refusal is fixed in Tally, then cleared by retrying the same plan.
+        item = (flag(connection, run, record, title="Review in Tally", reopen=True) if outcome == "correction"
+                else hold_save(connection, run, record,
+                               str(receipt.get("message", "Tally write needs attention."))[:300],
+                               title="Review in Tally"))
         from ..attention import audit
         audit(connection,item,run['actor_id'],outcome,receipt.get('message','Existing voucher needs review.'))
     # Best-guess review starts after verified write, using exact native identity.
     if current and outcome in ("saved", "duplicate"):
         from .attention import written
-        written(connection, run, record)
+        written(connection, run, record, result)
         connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
             (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":
-        record["findings"].append(
-            "Exact duplicate already exists; no additional voucher was created."
-        )
-    elif outcome in ("correction", "attention"):
-        record["findings"].append(
-            "Review in Tally."
-            if outcome == "correction"
-            else str(receipt.get("message", "Tally write needs attention."))[:300]
-        )
+        add_note(record, "Exact duplicate already exists; no additional voucher was created.")
+    elif outcome == "correction":
+        record["findings"].append("Review in Tally.")
     connection.execute(
         "UPDATE account_tally_writes SET outcome=%s,receipt=%s,finished_at=now(),verified_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s",
         (outcome, Jsonb(receipt), outcome in ("saved", "duplicate"), write["id"]),

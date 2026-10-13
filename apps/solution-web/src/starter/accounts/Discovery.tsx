@@ -9,13 +9,15 @@ import { CatalogReview } from "./CatalogReview";
 import { desktopBridge } from "../desktop/bridge";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { Spinner } from "../components/Feedback";
-import { discoveryProgress, type Config, type DiscoveryRun } from "./discoveryView";
+import { canConfirm, discoveryProgress, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
 import { DiscoveryResults } from "./DiscoveryResults";
 
 import { DestinationPCPicker } from '../desktop/DestinationPC';
 import { destinationAvailable, destinationDevices, initialDestination, type DestinationDevice as Device } from '../desktop/destinationPCs';
 
 interface Binding { source_id: string; device_id: string }
+
+const SOURCE_LABELS: Record<SourceMode, string> = { tally: "Tally", excel: "Excel", both: "Tally + Excel" };
 
 export function DiscoveryLaunch({ tenant, routeSlug, workflow, onConfigChange, settings }: RunSettingsProps & {routeSlug:string}) {
   const { user } = useAuth();
@@ -26,8 +28,9 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow, onConfigChange, s
   const [deviceId, setDeviceId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [aiContext, setAiContext] = useState(true);
-  const destinationMode = (workflow.config_values.destination_mode ?? "tally") as "excel" | "tally" | "both";
-  const setDestinationMode = (value: "excel" | "tally" | "both") => onConfigChange?.({...workflow.config_values, destination_mode: value});
+  const { modes: enabledModes, selected: destinationMode } = sourceModes(
+    workflow.config_schema.properties.destination_mode, workflow.config_values.destination_mode);
+  const setDestinationMode = (value: SourceMode) => onConfigChange?.({...workflow.config_values, destination_mode: value});
   const [previous, setPrevious] = useState<DiscoveryRun | null>(null);
   const tally = destinationMode !== "excel";
   const excel = destinationMode !== "tally";
@@ -112,11 +115,11 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow, onConfigChange, s
     {previous && <button type="button" className="button button-ghost" disabled={Boolean(busy)} onClick={usePrevious}>Use previous run settings</button>}
     <div className="discovery-setup-controls">
       <DestinationPCPicker devices={devices} value={deviceId} onChange={setDeviceId} busy={Boolean(busy)} />
-      <fieldset className="discovery-source-choice"><legend>Sources to discover</legend>
-        <div>{([ ["tally", "Tally"], ["excel", "Excel"], ["both", "Tally + Excel"] ] as const).map(([value, label]) => <label key={value} className={destinationMode === value ? "is-selected" : ""}>
-          <input type="radio" name="discovery-source-mode" value={value} checked={destinationMode === value} disabled={Boolean(busy)} onChange={() => setDestinationMode(value)} />{label}
+      {enabledModes.length > 1 && <fieldset className="discovery-source-choice"><legend>Sources to discover</legend>
+        <div>{enabledModes.map(value => <label key={value} className={destinationMode === value ? "is-selected" : ""}>
+          <input type="radio" name="discovery-source-mode" value={value} checked={destinationMode === value} disabled={Boolean(busy)} onChange={() => setDestinationMode(value)} />{SOURCE_LABELS[value]}
         </label>)}</div>
-      </fieldset>
+      </fieldset>}
     </div>
     {!devices.length && <p className="quiet-state">Connect this workspace in the Windows app to get started. <Link to={`/${routeSlug}/connections`}>Connected PCs</Link></p>}
     <div className={`discovery-setup-sources${tally && excel ? " has-both" : ""}`}>
@@ -220,6 +223,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
               : run.state === "failed" ? "Check source access on your PC, then run discovery again." : "Check the collected counts and mappings, then confirm."}</p></header>
       {run.catalog?.sources.map(source => source.snapshot?.scope_error && <p role="alert" className="form-message" key={source.key}>{source.snapshot.scope_error}</p>)}
       {run.catalog?.context_error && <p role="alert" className="form-message">{run.catalog.context_error}</p>}
+      {run.analysis_failed && <p className="quiet-state">AI context analysis was unavailable. Confirm the collected Tally sources without context notes, or run discovery again.</p>}
       {run.catalog && run.config.ai_context === false && <p className="quiet-state">AI analysis is off. Review the collected sources{run.config.excel_source_ids.length ? "; Excel structure is saved without entry mappings" : ""}.</p>}
       <DiscoveryResults run={controlState === "active" ? run : { ...run, state: controlState }} />
       {run.state === "review" && edited && edited.sheets.length > 0 && <div className="discovery-mapping-review">
@@ -232,7 +236,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
           <p>{note.observation} · {note.certainty}</p><p className="quiet-state">Evidence: {note.evidence_ids.join(", ")}</p>
         </li>)}</ul></details> : null}
       <div className="accounts-toolbar discovery-review-actions">
-        {run.state === "review" && <button className="button button-primary" disabled={controlState !== "active" || Boolean(busy) || Boolean(loadError) || run.catalog?.partial || Boolean(run.mapping_run && !edited)} onClick={() => void confirm()}>
+        {run.state === "review" && <button className="button button-primary" disabled={controlState !== "active" || Boolean(busy) || Boolean(loadError) || !canConfirm(run, Boolean(edited))} onClick={() => void confirm()}>
           {busy === "confirm" && <Spinner />}{busy === "confirm" ? "Confirming sources…" : "Confirm sources"}
         </button>}
         {run.catalog && (desktopBridge()?.saveCatalog ? <button className="button button-ghost" disabled={Boolean(busy)} onClick={() => void saveCatalog()}>{busy === "export" && <Spinner />}{busy === "export" ? "Saving catalog…" : "Save source catalog"}</button>

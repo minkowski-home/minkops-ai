@@ -9,26 +9,29 @@ from minkops_api.main import app
 import test_bill_entry as fixtures
 
 URL = fixtures.URL
+UNCLEAR = [{"code": "source_unreadable", "detail": "Unclear handwriting"}]
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL required")
 class AttentionTests(unittest.TestCase):
     for _method in ("setUp", "launch", "upload_bill", "process", "tally_discovery", "tally_result", "approve", "tally_job", "current"):
         locals()[_method] = getattr(fixtures.BillEntryTests, _method)
 
-    def ready(self, findings=None):
+    def ready(self, exceptions=None):
+        """A processed single-bill run; returns the stored internal result shape."""
+        from minkops_platform.accounts.checks import adopt_exceptions
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("attention.pdf")
         run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
         result=self.tally_result(run,bill)
-        result["records"][0]["findings"]=findings or []
+        result["records"][0]["exceptions"]=exceptions or []
         self.process(run,result)
-        return run,bill,result
+        return run,bill,adopt_exceptions(copy.deepcopy(result))
 
     def decision(self,run,bill,action):
         return self.client.post(f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",headers=self.csrf,json={"action":action})
 
     def test_do_nothing_records_identifier_and_never_queues_save(self):
-        run,bill,_=self.ready(["Unclear handwriting"])
+        run,bill,_=self.ready(UNCLEAR)
         response=self.decision(run,bill,"nothing")
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(response.json()["tally_writes"],[])
@@ -42,7 +45,7 @@ class AttentionTests(unittest.TestCase):
             self.assertIsNotNone(event["actor_id"])
 
     def test_guess_writes_but_review_remains_until_external_edit(self):
-        run,bill,_=self.ready(["Unclear handwriting"])
+        run,bill,_=self.ready(UNCLEAR)
         with psycopg.connect(URL,row_factory=dict_row) as c:
             from minkops_platform.accounts.attention import flag
             saved_run=c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone()
@@ -70,6 +73,133 @@ class AttentionTests(unittest.TestCase):
             self.assertEqual(result.status_code,200,result.text)
             with psycopg.connect(URL) as c:
                 self.assertEqual(c.execute("SELECT status FROM attention_items WHERE id=%s",(item["id"],)).fetchone()[0],expected)
+
+    def test_best_guess_on_unresolved_bill_completes_run_once_saved(self):
+        did=self.tally_discovery("company-attention")
+        bill=self.upload_bill("attention.pdf")
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        result=self.tally_result(run,bill)
+        result["records"][0]["exceptions"]=[{"code":"classification_uncertain","detail":"Expense ledger is a best guess."}]
+        result["unresolved"]=[{"source_file_id":bill,"code":"classification_uncertain","reason":"Expense ledger is a best guess."}]
+        self.process(run,result)
+        response=self.decision(run,bill,"guess")
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()["result"]["unresolved"],[])
+        claim,route,plan=self.tally_job(response.json())
+        receipt=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})
+        self.assertEqual(receipt.status_code,200,receipt.text)
+        loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual(loaded["state"],"completed",loaded["result"])
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            review=c.execute("SELECT status FROM attention_items WHERE task_id=%s AND kind='review'",(run["task_id"],)).fetchone()
+        self.assertEqual(review["status"],"pending")
+
+    def test_retry_save_resends_the_same_plan_without_a_review_item(self):
+        run,bill,_=self.ready()
+        claim,route,plan=self.tally_job(self.decision(run,bill,"guess").json())
+        rejection="Tally rejected the voucher date. Check the source bill and Tally date settings, then use Retry save."
+        response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"error":rejection})
+        self.assertEqual(response.status_code,200,response.text)
+        held=self.client.get(self.base+f"/runs/{run['id']}").json()
+        record=held["result"]["records"][0]
+        self.assertEqual((held["state"],record["status"],record["save_hold"]),("review","held",rejection))
+        self.assertEqual(self.decision(run,bill,"guess").status_code,422)
+        retried=self.decision(run,bill,"retry_save")
+        self.assertEqual(retried.status_code,200,retried.text)
+        self.assertEqual((retried.json()["state"],len(retried.json()["tally_writes"])),("writing",2))
+        claim,route,replayed=self.tally_job(retried.json())
+        self.assertEqual((replayed["remote_id"],replayed["data"]),(plan["remote_id"],plan["data"]))
+        response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(replayed)}})
+        self.assertEqual(response.status_code,200,response.text)
+        final=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual((final["state"],final["result"]["records"][0]["findings"]),("completed",[]))
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            items={r["kind"]:r["status"] for r in c.execute("SELECT kind,status FROM attention_items WHERE task_id=%s",(run["task_id"],))}
+        self.assertEqual(items,{"bill":"done"})
+
+    def test_a_new_hold_reopens_attention_but_restating_one_does_not(self):
+        run,bill,_=self.ready()
+        claim,route,_=self.tally_job(self.decision(run,bill,"guess").json())
+        self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"error":"Interrupted"})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            item=c.execute("SELECT * FROM attention_items WHERE task_id=%s AND kind='bill'",(run["task_id"],)).fetchone()
+        self.assertEqual(self.client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/done",headers=self.csrf).status_code,200)
+        # Restating the hold while finalizing the run is not a new event.
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            from minkops_platform.accounts.tally_writes import complete_run
+            stored=c.execute("SELECT * FROM account_runs WHERE id=%s FOR UPDATE",(run["id"],)).fetchone()
+            complete_run(c,stored,stored["result"])
+            self.assertEqual(c.execute("SELECT status FROM attention_items WHERE id=%s",(item["id"],)).fetchone()["status"],"done")
+        claim,route,_=self.tally_job(self.decision(run,bill,"retry_save").json())
+        rejection="Tally rejected the voucher date. Check Tally date settings, then use Retry save."
+        self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"error":rejection})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            reopened=c.execute("SELECT * FROM attention_items WHERE id=%s",(item["id"],)).fetchone()
+            events=[e["action"] for e in c.execute("SELECT action FROM attention_events WHERE item_id=%s ORDER BY id",(item["id"],))]
+        self.assertEqual((reopened["status"],reopened["label"],reopened["done_at"]),("pending","Review in Tally",None))
+        self.assertIn("reopened",events)
+
+    def test_deferring_an_input_without_a_proposal_keeps_later_decisions_valid(self):
+        from minkops_platform.accounts.batch import reconcile_once
+        did=self.tally_discovery("company-attention")
+        quote,bill=self.upload_bill("quotation.pdf"),self.upload_bill("bill.pdf")
+        root,_=self.launch("bill-entry",file_ids=[quote,bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            children={r["file_ids"][0]:r for r in c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s",(root["id"],))}
+        self.process(children[quote],{"records":[],"exceptions":[],"unresolved":[
+            {"source_file_id":quote,"code":"not_a_bill","reason":"Quotation, not a bill."}]})
+        self.process(children[bill],self.tally_result(root,bill))
+        reconcile_once(URL)
+        self.assertEqual(self.decision(root,quote,"nothing").status_code,200)
+        approved=self.decision(root,bill,"guess")
+        self.assertEqual(approved.status_code,200,approved.text)
+        self.assertEqual(approved.json()["result"]["deferred"],[{"source_file_id":quote}])
+        claim,route,plan=self.tally_job(approved.json())
+        self.client.post(route+"/finish",headers=self.worker,
+                         json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})
+
+    def test_two_undecided_bills_in_one_file_need_an_explicit_choice(self):
+        did=self.tally_discovery("company-attention")
+        bill=self.upload_bill("two-bills.pdf")
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        result=self.tally_result(run,bill)
+        second=copy.deepcopy(result["records"][0]);second["data"]["invoice_number"]="MOCK-2"
+        result["records"].append(second)
+        self.process(run,result)
+        self.assertEqual(self.decision(run,bill,"nothing").status_code,422)
+        route=f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}"
+        deferred=self.client.post(route,headers=self.csrf,json={"action":"nothing","proposal":1})
+        self.assertEqual(deferred.status_code,200,deferred.text)
+        statuses=[r.get("status") for r in deferred.json()["result"]["records"]]
+        self.assertEqual((statuses,deferred.json()["state"]),([None,"rejected"],"review"))
+
+    def test_native_duplicate_is_an_observation_not_attention(self):
+        run,bill,_=self.ready()
+        claim,route,plan=self.tally_job(self.decision(run,bill,"guess").json())
+        response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],
+            "result":{"outcome":"duplicate","current":self.current(plan)}})
+        self.assertEqual(response.status_code,200,response.text)
+        final=self.client.get(self.base+f"/runs/{run['id']}").json()
+        record=final["result"]["records"][0]
+        self.assertEqual((final["state"],record["status"],record["findings"]),("completed","duplicate",[]))
+        self.assertIn("Exact duplicate",record["notes"][0])
+
+    def test_a_busy_run_refuses_decisions_as_a_conflict_not_a_permission_error(self):
+        run,bill,_=self.ready()
+        approved=self.decision(run,bill,"guess")
+        self.assertEqual(approved.status_code,200,approved.text)
+        busy=self.decision(run,bill,"nothing")
+        self.assertEqual(busy.status_code,409,busy.text)
+        self.assertIn("still saving",busy.json()["detail"])
+        # Finish the save so the pending-write reservation does not leak.
+        claim,route,plan=self.tally_job(approved.json())
+        self.client.post(route+"/finish",headers=self.worker,
+                         json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})
+
+    def test_retry_save_requires_a_held_save(self):
+        run,bill,_=self.ready()
+        response=self.decision(run,bill,"retry_save")
+        self.assertEqual(response.status_code,422,response.text)
 
     def test_accounting_edits_and_prompt_input_rejected(self):
         run,bill,result=self.ready()

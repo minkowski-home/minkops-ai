@@ -3,14 +3,18 @@
 import base64
 import hashlib
 import json
+import time
 from contextlib import suppress
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
-from openai import NotFoundError, OpenAI
+from openai import APIError, NotFoundError, OpenAI
 
 RESULT_PATH = "/workspace/outputs/result.json"
+# Long turns outlive individual provider streams; re-reading a turn is free.
+STREAM_REATTACHMENTS = 3
+REATTACH_DELAY = 2
 
 
 def workspace_inputs(files, context, root="/workspace"):
@@ -163,23 +167,41 @@ def execute(
             stream=True,
         )
     completed = False
-    with events:
-        for event in events:
-            data = event.model_dump(mode="json")
-            session_id = data.get("session_id", session_id)
-            turn_id = data.get("turn_id", turn_id)
-            on_event(event.type, session_id, turn_id)
-            if event.type in (
-                "agent.session.turn.failed",
-                "agent.session.turn.cancelled",
-                "agent.session.environment.failed",
-            ):
-                raise ValueError(
-                    "The hosted workflow could not complete. Review the run and retry explicitly."
-                )
-            if event.type == "agent.session.turn.completed":
+    for attempt in range(STREAM_REATTACHMENTS + 1):
+        try:
+            with events:
+                for event in events:
+                    data = event.model_dump(mode="json")
+                    session_id = data.get("session_id", session_id)
+                    turn_id = data.get("turn_id", turn_id)
+                    on_event(event.type, session_id, turn_id)
+                    if event.type in (
+                        "agent.session.turn.failed",
+                        "agent.session.turn.cancelled",
+                        "agent.session.environment.failed",
+                    ):
+                        raise ValueError(
+                            "The hosted workflow could not complete. Review the run and retry explicitly."
+                        )
+                    if event.type == "agent.session.turn.completed":
+                        completed = True
+                        break
+            break
+        except APIError:
+            # The SDK raises transport and timeout failures as APIError subclasses.
+            # A dropped stream does not end the turn. Once the turn exists its
+            # events can be re-read, so no session or input is ever resubmitted.
+            # Before then, creation is ambiguous and stays an explicit retry.
+            if not (session_id and turn_id) or attempt == STREAM_REATTACHMENTS:
+                raise
+            time.sleep(REATTACH_DELAY * (attempt + 1))
+            turn = client.beta.agents.sessions.turns.retrieve(turn_id, session_id=session_id)
+            if turn.status in ("failed", "cancelled"):
+                raise ValueError(f"Agent turn {turn.status}.") from None
+            if turn.status == "completed":
                 completed = True
                 break
+            events = client.beta.agents.sessions.events.stream(session_id)
     if not completed:
         turn = client.beta.agents.sessions.turns.retrieve(turn_id, session_id=session_id)
         if turn.status != "completed":

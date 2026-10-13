@@ -73,9 +73,15 @@ def detail(connection, row, *, include_records=True):
             (row["tenant_id"], row["mapping_run_id"]),
         ).fetchone()
         mapping = public_run(connection, mapped)
+    # Optional AI context analysis cannot hold back a complete native Tally
+    # collection; Excel sources still need their analysed mappings.
+    analysis_failed = bool(
+        mapping and mapping["state"] == "failed" and row["catalog"]
+        and not any(s["tool"] == "excel" for s in row["catalog"]["sources"])
+    )
     state = row["state"]
     if state not in ("completed", "failed") and mapping:
-        state = mapping["state"]
+        state = "review" if analysis_failed else mapping["state"]
     control = control_state(connection, row["tenant_id"], row["task_id"])
     if control != "active":
         state = control
@@ -128,6 +134,7 @@ def detail(connection, row, *, include_records=True):
         "control_state": control,
         "catalog": catalog,
         "mapping_run": mapping,
+        "analysis_failed": analysis_failed,
         "ready": state == "completed" and bool(row["confirmed_at"]) and not catalog["partial"]
         if catalog
         else False,
@@ -203,6 +210,14 @@ def launch(connection, tenant, user, body):
     ).fetchone()
     if not workflow:
         raise ServiceError("conflict", "Source discovery is not active in this workspace.")
+    from .solution_policy import validate_option
+
+    try:
+        # The workspace's enabled tools bind the registered schema; enforce the
+        # sources actually requested, not only the UI's displayed choice.
+        validate_option(workflow["config_schema"], "destination_mode", observed_mode)
+    except ValidationError as error:
+        raise ServiceError("invalid", "This workspace does not use the selected source system.") from error
     for source_id in config["excel_source_ids"]:
         desktop._bound_source(connection, device, source_id)
     if (
@@ -362,6 +377,28 @@ def _validate_tally(snapshot, config):
         validate_snapshot(snapshot, config)
     except (ValueError, TypeError, KeyError) as error:
         raise ServiceError("invalid", str(error)) from error
+
+
+def _fingerprint(excel_files, mappings, sources, config):
+    """Fingerprint what confirmation authorizes, so an equal one reuses it.
+
+    That is the source scope, Excel structure and approved meanings, and the
+    configuration. Routine Tally data (vouchers and masters, including entries
+    Minkops saved) is evidence collected under that authority, not a new decision.
+    """
+    return _digest({
+        "excel": _structure(excel_files, mappings),
+        "tally": [_tally_authority(s) for s in sources if s["tool"] == "tally"],
+        "config": config,
+    })
+
+
+def _tally_authority(source):
+    snapshot = source.get("snapshot") or {}
+    if "company_scope" not in snapshot:
+        return source  # Older single-company snapshots keep their full fingerprint.
+    scope = sorted(snapshot["company_scope"], key=lambda c: (c["company"], c["company_number"]))
+    return {"key": source["key"], "company_scope": scope}
 
 
 def _structure(files, mappings=None):
@@ -592,16 +629,21 @@ def collect(connection, device, job, result):
         new = {(str(f["source_id"]), f["path"]): str(f["id"]) for f in excel_files}
         for m in remapped["sheets"]:
             m["file_id"] = new.get(old.get(m["file_id"]), m["file_id"])
-    signature = _digest(
-        {
-            "excel": _structure(excel_files, remapped),
-            "tally": [s for s in catalog_sources if s["tool"] == "tally"],
-            "config": config,
-        }
-    )
+    signature = _fingerprint(excel_files, remapped, catalog_sources, config)
     unchanged = previous and not partial and previous["fingerprint"] == signature
+    if unchanged and previous["catalog"].get("context_notes"):
+        from .accounts.client_context import validate_notes
+
+        try:
+            validate_notes(previous["catalog"]["context_notes"], {"sources": catalog_sources})
+        except ValueError:
+            # A confirmed note cites evidence that is no longer collected.
+            unchanged = False
+    from .accounts.client_context import CONTEXT_RECORD_FORMAT
+
     catalog = {
         "master_lookup_version": "1",
+        "context_record_format": CONTEXT_RECORD_FORMAT,
         "format_version": "2",
         "context_notes": copy.deepcopy(previous["catalog"].get("context_notes", []))
         if unchanged
@@ -725,7 +767,10 @@ def confirm(connection, tenant, user, run_id, body):
     # Persist native evidence, then apply approved mappings explicitly; display
     # fields must never change source fingerprints or invalidate review reuse.
     catalog = copy.deepcopy(row["catalog"])
-    if row["mapping_run_id"]:
+    if current["analysis_failed"]:
+        catalog["context_notes"] = []
+        _close_failed_analysis(connection, row, user)
+    elif row["mapping_run_id"]:
         mappings = body.get("excel_mappings") or current["mapping_run"]["result"]
         approved = accounts.approve_run(
             connection,
@@ -752,13 +797,7 @@ def confirm(connection, tenant, user, run_id, body):
         ],
     )
     catalog["review"]["status"] = "confirmed"
-    signature = _digest(
-        {
-            "excel": _structure(files, catalog.get("excel_mappings")),
-            "tally": [s for s in catalog["sources"] if s["tool"] == "tally"],
-            "config": row["config"],
-        }
-    )
+    signature = _fingerprint(files, catalog.get("excel_mappings"), catalog["sources"], row["config"])
     updated = connection.execute(
         "UPDATE discovery_runs SET state='completed',catalog=%s,fingerprint=%s,confirmed_at=now(),updated_at=now() WHERE id=%s RETURNING *",
         (Jsonb(catalog), signature, row["id"]),
@@ -771,6 +810,23 @@ def confirm(connection, tenant, user, run_id, body):
         100,
     )
     return detail(connection, updated)
+
+
+def _close_failed_analysis(connection, row, user):
+    """Confirming without context notes settles the failed analysis's attention."""
+    from .attention import audit
+
+    item = connection.execute(
+        "SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s AND status='pending' FOR UPDATE",
+        (row["tenant_id"], f"run:{row['mapping_run_id']}"),
+    ).fetchone()
+    if item:
+        connection.execute(
+            "UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
+            (user["id"], item["id"]),
+        )
+        audit(connection, item, user["id"], "confirmed_without_analysis",
+              "Tally sources confirmed without AI context notes.")
 
 
 def require_ready(connection, tenant_id, run_id, required_tools):
@@ -796,6 +852,11 @@ def require_ready(connection, tenant_id, run_id, required_tools):
     if latest["id"] != row["id"] and (
         not detail(connection, latest)["ready"] or latest["fingerprint"] != row["fingerprint"]
     ):
+        if latest["state"] in ("queued", "executing"):
+            raise ServiceError(
+                "conflict",
+                "A newer Source discovery is still collecting. Wait for it to finish, then start again.",
+            )
         raise ServiceError(
             "conflict", "Source discovery has a newer run. Review the latest catalog first."
         )

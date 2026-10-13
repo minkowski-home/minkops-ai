@@ -301,8 +301,8 @@ function startWorker() {
           });
           if (reconciled.outcome === "attention" && error.tallyLineError)
             reconciled.message = /date/i.test(error.tallyLineError)
-              ? "Tally rejected the voucher date. Check the source bill and Tally date settings, then use Resume saves."
-              : "Tally rejected this bill. Check its voucher settings in Tally, then use Resume saves.";
+              ? "Tally rejected the voucher date. Check the source bill and Tally date settings, then use Retry save."
+              : "Tally rejected this bill. Check its voucher settings in Tally, then use Retry save.";
           return reconciled;
         }
       }

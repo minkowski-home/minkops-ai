@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { discoveryProgress, discoverySources, sourcePage, type DiscoveryRun } from "../src/starter/accounts/discoveryView.ts";
+import { canConfirm, discoveryProgress, discoverySources, sourceModes, sourcePage, type DiscoveryRun } from "../src/starter/accounts/discoveryView.ts";
 
 const run = (extra: Partial<DiscoveryRun> = {}): DiscoveryRun => ({
   id: "run", task_id: "task", device_id: "pc", state: "queued", ready: false,
@@ -84,4 +84,20 @@ test("company activity is visible before the receipt and switching sources does 
   assert.equal(discoveryProgress(current).percent, null);
   assert.equal(discoveryProgress(current).activity, "Reading · Excel folder");
   assert.equal(discoverySources(run({ state: "failed" }))[0].status, "unavailable");
+});
+
+test("a workspace's enabled tools limit discovery source choices and repair a paused saved choice", () => {
+  const all = { type: "string" as const, enum: ["excel", "tally", "both"] };
+  assert.deepEqual(sourceModes(all, "both"), { modes: ["tally", "excel", "both"], selected: "both" });
+  assert.deepEqual(sourceModes({ ...all, "x-enabled-options": ["tally"] }, "excel"), { modes: ["tally"], selected: "tally" });
+  assert.deepEqual(sourceModes(undefined, undefined), { modes: ["tally", "excel", "both"], selected: "tally" });
+});
+
+test("a failed optional analysis still lets complete Tally sources be confirmed", () => {
+  const catalog = { partial: false, sources: [], review: { status: "required", reused_from: null }, excel_mappings: null };
+  const analysis = { id: "mapping" } as DiscoveryRun["mapping_run"];
+  assert.equal(canConfirm(run({ state: "review", catalog, mapping_run: analysis }), false), false);
+  assert.equal(canConfirm(run({ state: "review", catalog, mapping_run: analysis, analysis_failed: true }), false), true);
+  assert.equal(canConfirm(run({ state: "review", catalog: { ...catalog, partial: true }, analysis_failed: true }), false), false);
+  assert.equal(canConfirm(run({ state: "review", catalog }), false), true);
 });
