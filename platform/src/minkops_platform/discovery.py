@@ -639,8 +639,11 @@ def collect(connection, device, job, result):
         except ValueError:
             # A confirmed note cites evidence that is no longer collected.
             unchanged = False
+    from .accounts.client_context import CONTEXT_RECORD_FORMAT
+
     catalog = {
         "master_lookup_version": "1",
+        "context_record_format": CONTEXT_RECORD_FORMAT,
         "format_version": "2",
         "context_notes": copy.deepcopy(previous["catalog"].get("context_notes", []))
         if unchanged

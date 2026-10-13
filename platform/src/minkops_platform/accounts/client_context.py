@@ -290,12 +290,34 @@ def select_target(record, target):
     return matches[0]
 
 
+# Catalogs stamped with this format deliver records without empty values.
+CONTEXT_RECORD_FORMAT = "1"
+
+
+def compact_record(value):
+    """Drop empty strings, nulls and empty containers; keep every list position.
+
+    Native exports repeat hundreds of empty tags per voucher, roughly half of
+    each record. Empty and absent carry the same evidence, while list offsets
+    stay valid for the master index and cited context notes. Values such as 0,
+    False and "No" are kept: they carry meaning.
+    """
+    if isinstance(value, dict):
+        kept = {key: compact_record(item) for key, item in value.items()}
+        return {key: item for key, item in kept.items() if item not in ("", None, [], {})}
+    if isinstance(value, list):
+        return [compact_record(item) for item in value]
+    return value
+
+
 def context_assets(catalog):
     """Full records live in lookup files; the manifest is small enough to read first.
 
     Split at record boundaries for hosted file limits. Never discard records.
-    File IDs and bytes derive only from the immutable server-owned catalog.
+    File IDs and bytes derive only from the immutable server-owned catalog, so
+    only catalogs stamped with the compact format change delivered bytes.
     """
+    compact = catalog.get("context_record_format") == CONTEXT_RECORD_FORMAT
     if catalog.get("format_version") != "2":
         return [], copy.deepcopy(catalog)
     if catalog.get("master_lookup_version") not in (None, "1"):
@@ -357,6 +379,8 @@ def context_assets(catalog):
                         locations.extend({"path": path, "offset": offset} for offset in range(len(chunk)))
 
                 for record in records:
+                    if compact:
+                        record = compact_record(record)
                     length = (
                         len(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()) + 2
                     )
