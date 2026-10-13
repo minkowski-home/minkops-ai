@@ -58,6 +58,20 @@ class BillEntryTests(unittest.TestCase):
         self.assertIn(self.device["name"], waiting)
         self.assertIn("Keep Minkops running", waiting)
 
+    def test_run_list_is_a_bounded_summary_without_pinned_snapshots(self):
+        did = self.tally_discovery()
+        bill = self.upload_bill("listed.pdf")
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={"output_mode": "tally_in_place", "discovery_id": did})
+        self.process(run, self.tally_result(run, bill))
+        listed = self.client.get(self.base + "/runs")
+        self.assertEqual(listed.status_code, 200, listed.text)
+        summary = next(r for r in listed.json() if r["id"] == run["id"])
+        # Full runs pin multi-megabyte catalog snapshots; a list must not repeat them.
+        self.assertNotIn("config", summary)
+        self.assertNotIn("result", summary)
+        self.assertEqual((summary["task_id"], summary["state"], summary["records"], summary["unresolved"]),
+                         (run["task_id"], "review", 1, 0))
+
     def test_stopping_a_batch_opens_one_attention_item_per_read_bill(self):
         did = self.tally_discovery()
         inputs = [self.upload_bill(f"stop-{i}.pdf") for i in range(3)]
