@@ -63,11 +63,25 @@ def flag(connection, run, record, *, title=None, kind="bill", actor=None, reopen
 
 
 def stopped(connection, run, actor):
-    """Retain both proposals and unresolved inputs when automation is stopped."""
-    result = run.get("result") or {}
-    records = {record["source_file_id"]: record for record in result.get("records", [])}
-    for issue in result.get("unresolved", []):
-        records.setdefault(issue["source_file_id"], issue_record({"records": []}, issue))
+    """Retain both proposals and unresolved inputs when automation is stopped.
+
+    A batch stopped before aggregation holds its read bills only in children,
+    so their outcomes are included for inputs the parent has not combined yet.
+    Inputs that were never read have no proposal and open no item.
+    """
+    results = [run.get("result") or {}]
+    if run.get("config", {}).get("batch"):
+        results += [child["result"] for child in connection.execute(
+            """SELECT result FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND result IS NOT NULL
+            AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0""",
+            (run["tenant_id"], run["id"]))]
+    records = {}
+    for result in results:
+        # The parent's combined outcome comes first and wins for each input.
+        for record in result.get("records", []):
+            records.setdefault(record["source_file_id"], record)
+        for issue in result.get("unresolved", []):
+            records.setdefault(issue["source_file_id"], issue_record({"records": []}, issue))
     for record in records.values():
         if record.get("status") not in ("saved", "duplicate", "rejected"):
             item = flag(connection, run, record, title="Run stopped", actor=actor)

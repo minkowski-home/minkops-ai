@@ -74,7 +74,10 @@ def task_control(connection, tenant_id, user, task_id, action):
             connection.execute("UPDATE account_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL", (tenant_id, run["id"]))
             connection.execute("UPDATE account_tally_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL", (tenant_id, run["id"]))
             binding = run["config"].get("runtime_binding", {})
-            if binding.get("handler") == "accounts.bill" or (not binding and run.get("workflow_key") == "bill-entry"):
+            # A batch parent owns its bills' attention; its children would
+            # otherwise open a second item for each bill under their own keys.
+            if run.get("parent_run_id") is None and (binding.get("handler") == "accounts.bill"
+                                                    or (not binding and run.get("workflow_key") == "bill-entry")):
                 from .accounts.attention import stopped
                 stopped(connection, run, user["id"])
     task = connection.execute("UPDATE tasks SET control_state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s RETURNING *",

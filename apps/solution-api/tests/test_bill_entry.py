@@ -52,6 +52,27 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(len(loaded["tally_writes"]), 1)
         self.assertEqual(loaded["result"]["unresolved"][0]["source_file_id"], inputs[1])
 
+    def test_stopping_a_batch_opens_one_attention_item_per_read_bill(self):
+        did = self.tally_discovery()
+        inputs = [self.upload_bill(f"stop-{i}.pdf") for i in range(3)]
+        root, _ = self.launch("bill-entry", file_ids=inputs, config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "all_outputs"})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = {c_["file_ids"][0]: c_ for c_ in c.execute(
+                "SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],))}
+        # Two bills are read; the third is still waiting when the operator stops.
+        self.process(children[inputs[0]], self.tally_result(root, inputs[0]))
+        held = self.tally_result(root, inputs[1])
+        held["records"][0]["master_refs"]["vendor"]["ref"] = "foreign-catalog"
+        self.process(children[inputs[1]], held)
+        stop = self.client.post(f"/api/tenants/mock-tenant/tasks/{root['task_id']}/control",
+                                headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stop.status_code, 200, stop.text)
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            keys = [r["event_key"] for r in c.execute(
+                "SELECT event_key FROM attention_items WHERE task_id=%s ORDER BY event_key", (root["task_id"],))]
+        self.assertEqual(keys, sorted(f"bill:{root['id']}:{f}:bill" for f in inputs[:2]))
+
     def exception_only_batch(self, count=2):
         did = self.tally_discovery()
         inputs = [self.upload_bill(f"bill-{i}.pdf") for i in range(count)]
