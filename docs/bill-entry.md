@@ -51,6 +51,15 @@ contain one bill plus copies and companion documents (e-way bill, IRN
 acknowledgement, challan, PO); those corroborate a single record. Runs pinned to
 earlier versions keep their free-text contract.
 
+Workflow 0.12.1 closes three gaps found by the 39-bill paid evaluation. Supplier
+identity must come from what the bill prints; when a printed name such as a
+shared leading word fits two supplier ledgers, the bill is held as Supplier
+unclear, because purpose and purchase history may choose an expense ledger but
+never a creditor. Split CGST/SGST is checked against the run's capability flag
+before any hold. Itemized goods posted to a ledger that the company's own
+history books as plain accounting vouchers follow that practice rather than
+being held for inventory.
+
 Before any import, a bill dated before its company's Tally "Books beginning from"
 date (collected in discovery's company identity) is held as **Before books
 begin**. Tally cannot record such a voucher; Minkops never moves the source date.

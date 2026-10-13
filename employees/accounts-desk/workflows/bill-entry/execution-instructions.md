@@ -24,6 +24,11 @@ their native inventory counterparts. Inspect the full raw voucher's available
 subcollections before concluding allocation history is absent. AFFECTSSTOCK
 on a ledger alone does not prove a mandatory inventory allocation; assess the
 bill's content, voucher mode, company settings and comparable native history.
+When comparable vouchers posting to the selected purchase ledger in this company
+are accounting entries without inventory allocations, item quantities, HSN codes,
+enabled inventory or a stock-affecting ledger do not make the bill unsupported;
+follow that company practice. Raise unsupported_structure for inventory only when
+comparable vouchers for that ledger do carry inventory allocations.
 When master_lookup_path is present, consult that company's index first. by_type
 contains exact by_guid/by_name candidate lists with file paths and zero-based
 record offsets. Only consult relevant native types, including TAXUNIT for buyer
@@ -59,14 +64,22 @@ the same supplier may use different expense accounts for different purchases.
 Raise supplier_unresolved or company_unresolved for genuinely conflicting or
 insufficient identity evidence, naming the candidates in the exception detail. No customer-specific names or spellings
 are built into this matching procedure.
+Supplier identity comes from what the bill prints about the supplier: name,
+registered name, GSTIN, address or an alias that the printed text actually
+matches. When that printed identity fits two or more supplier masters equally,
+such as a shared leading name, raise supplier_unresolved. The bill's purpose,
+the expense ledger and purchase history may choose a purchase ledger; they
+never choose between suppliers, because a wrong creditor misstates payables.
 
 Extract invoice_number as the supplier's invoice reference,
 date as the invoice issue date in YYYY-MM-DD, subtotal as the assessed
 base after discounts, tax as this bill's current tax, tax_ledger as the supported
 allocation ledger (null for zero tax), total as this bill's gross payable amount,
 and cost_code only where meaningful. Keep amounts numeric and unknown optional
-values null. For targets with tax_allocation_version:1, distinct evidenced tax
-components (such as CGST and SGST) may be returned outside data as tax_allocations:
+values null. When config.tally_target.tax_allocation_version is 1 (check context.json
+before deciding), split tax is supported: distinct evidenced tax components (such
+as CGST and SGST) are returned outside data as tax_allocations, and separately
+printed components are then never unsupported_structure or classification_uncertain:
 [{"ref":"selected company ledger_refs key","amount":14400,"evidence":"page 1 CGST 14400.00 and native duty-head match"},
  {"ref":"separate ledger_refs key","amount":14400,"evidence":"page 1 SGST 14400.00 and native duty-head match"}].
 Set data.tax to their exact sum, data.tax_ledger:null and master_refs.tax_ledger:null.
