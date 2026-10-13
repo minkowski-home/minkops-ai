@@ -52,6 +52,70 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(len(loaded["tally_writes"]), 1)
         self.assertEqual(loaded["result"]["unresolved"][0]["source_file_id"], inputs[1])
 
+    def exception_only_batch(self, count=2):
+        did = self.tally_discovery()
+        inputs = [self.upload_bill(f"bill-{i}.pdf") for i in range(count)]
+        root, _ = self.launch("bill-entry", file_ids=inputs, config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()
+        return root, inputs, children
+
+    def numbered_result(self, run, bill, invoice):
+        result = self.tally_result(run, bill)
+        result["records"][0]["data"]["invoice_number"] = invoice
+        for evidence in result["records"][0]["evidence"]:
+            if evidence["field"] == "invoice_number":
+                evidence["quote"] = invoice
+        return result
+
+    def test_unavailable_destination_pc_holds_clean_bills_for_retry(self):
+        from minkops_platform.accounts.batch import reconcile_once
+        root, inputs, children = self.exception_only_batch()
+        for child in children:
+            self.process(child, self.numbered_result(root, child["file_ids"][0], f"PC-{child['file_ids'][0]}"))
+        disconnected = self.client.delete(f"{self.native}/devices/{self.device['id']}", headers=self.csrf)
+        self.assertEqual(disconnected.status_code, 200, disconnected.text)
+        reconcile_once(URL)  # Must not raise into the shared worker loop.
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["state"], "review")
+        self.assertEqual(loaded["tally_writes"], [])
+        for record in loaded["result"]["records"]:
+            self.assertEqual(record["status"], "held")
+            self.assertIn("PC is unavailable", record["save_hold"])
+
+    def test_batch_reconciliation_isolates_an_unexpected_parent_failure(self):
+        from unittest import mock
+
+        from minkops_platform.accounts import batch, tally_writes
+        broken, _, broken_children = self.exception_only_batch()
+        healthy, _, healthy_children = self.exception_only_batch()
+        for root, children in ((broken, broken_children), (healthy, healthy_children)):
+            for child in children:
+                self.process(child, self.numbered_result(root, child["file_ids"][0], f"ISO-{child['file_ids'][0]}"))
+        real = tally_writes.prepare_automatic
+
+        def flaky(connection, run, result):
+            if str(run["id"]) == broken["id"]:
+                raise RuntimeError("unexpected aggregation defect")
+            return real(connection, run, result)
+
+        with mock.patch.object(tally_writes, "prepare_automatic", flaky):
+            for _ in range(batch.AGGREGATION_ATTEMPTS):
+                batch.reconcile_once(URL)
+        self.assertEqual(self.client.get(self.base + f"/runs/{healthy['id']}").json()["state"], "writing")
+        failed = self.client.get(self.base + f"/runs/{broken['id']}").json()
+        self.assertEqual(failed["state"], "failed")
+        self.assertEqual(failed["tally_writes"], [])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            diagnostic = c.execute(
+                "SELECT details FROM workflow_run_diagnostics WHERE run_id=%s AND event_type='batch.aggregation_failed'",
+                (broken["id"],),
+            ).fetchone()
+            item = c.execute("SELECT status FROM attention_items WHERE event_key=%s", (f"run:{broken['id']}",)).fetchone()
+        self.assertEqual(diagnostic["details"]["error_type"], "RuntimeError")
+        self.assertEqual(item["status"], "pending")
+
     def split_result(self, run, bill, amounts=(9,9)):
         result=self.tally_result(run,bill)
         record=result["records"][0]

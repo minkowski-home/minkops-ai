@@ -11,6 +11,22 @@ from minkops_platform.errors import ServiceError
 from .bills import validate_tally, allocation_entries
 from .repository import observe, run_for
 
+PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
+
+
+def hold_save(connection, run, record, reason, *, title=None):
+    """Hold a supported proposal for a destination-side reason.
+
+    `save_hold` marks blockers that a retry of the same approved plan can clear
+    once the destination is fixed; interpretation uncertainty never sets it.
+    """
+    from .attention import flag
+
+    record["status"] = "held"
+    record["save_hold"] = reason
+    record["findings"] = list(dict.fromkeys([*record["findings"], reason]))
+    flag(connection, run, record, title=title)
+
 
 def prepare_automatic(connection, run, result):
     """The selected exception-only mode authorizes clean bills independently.
@@ -118,25 +134,34 @@ def prepare(connection, run, result, *, approved=False):
             }
             if record.get("tax_allocations") is not None:
                 plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
-            with connection.transaction():
-                write = connection.execute(
-                    """INSERT INTO account_tally_writes
-                    (tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (
-                        run["tenant_id"],
-                        run["id"],
-                        target["device_id"],
-                        target["company"],
-                        identity,
-                        index,
-                        Jsonb(plan),
-                        target["destination_key"],
-                    ),
-                ).fetchone()
-                from minkops_platform.desktop import enqueue_approved
+            try:
+                with connection.transaction():
+                    write = connection.execute(
+                        """INSERT INTO account_tally_writes
+                        (tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                        (
+                            run["tenant_id"],
+                            run["id"],
+                            target["device_id"],
+                            target["company"],
+                            identity,
+                            index,
+                            Jsonb(plan),
+                            target["destination_key"],
+                        ),
+                    ).fetchone()
+                    from minkops_platform.desktop import enqueue_approved
 
-                enqueue_approved(connection, run, target["device_id"], "tally.save", write["id"])
+                    enqueue_approved(connection, run, target["device_id"], "tally.save", write["id"])
+            except ServiceError:
+                # An operator's click reports the offline PC immediately. Background
+                # dispatch has no one to answer, so the savepoint discards the
+                # intent and the bill waits for an explicit Retry save instead.
+                if approved:
+                    raise
+                hold_save(connection, run, record, PC_UNAVAILABLE, title="PC unavailable")
+                continue
             record["status"] = "writing"
             seen[key] = index
         except ValueError as error:

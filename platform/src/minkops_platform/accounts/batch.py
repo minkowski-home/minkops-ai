@@ -5,6 +5,7 @@ outcomes. A failed extraction cannot erase successful sibling proposals.
 """
 
 import copy
+import logging
 from uuid import uuid4
 
 import psycopg
@@ -14,6 +15,10 @@ from psycopg.types.json import Jsonb
 from minkops_platform.errors import ServiceError
 
 from .repository import observe, run_for
+
+log = logging.getLogger(__name__)
+# Worker ticks a parent may fail before it is marked failed with attention.
+AGGREGATION_ATTEMPTS = 3
 
 
 def create_children(connection, run):
@@ -157,99 +162,135 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
 
 def reconcile_once(url):
     with psycopg.connect(url, row_factory=dict_row) as connection:
+        # NO KEY UPDATE still serializes aggregators and business mutations, but
+        # lets the separate diagnostics transaction check its run foreign key.
         parents = connection.execute("""SELECT * FROM account_runs WHERE
             config->>'batch'='true' AND state IN ('queued','executing')
             AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=account_runs.tenant_id AND t.id=account_runs.task_id AND t.control_state='active')
-            FOR UPDATE SKIP LOCKED""").fetchall()
+            FOR NO KEY UPDATE SKIP LOCKED""").fetchall()
         for parent in parents:
-            children = connection.execute(
-                "SELECT * FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0",
-                (parent["tenant_id"], parent["id"]),
-            ).fetchall()
-            done = [c for c in children if c["state"] in ("review", "failed")]
-            if len(done) != len(children):
-                # A retry can have the same ready count as the earlier batch.
-                # Enter Work again instead of leaving an active child labelled
-                # as waiting to start until its extraction finishes.
-                if parent["state"] == "queued" or parent["config"].get(
-                    "batch_finished_count"
-                ) != len(done):
-                    connection.execute(
-                        "UPDATE account_runs SET config=config || jsonb_build_object('batch_finished_count',%s::integer) WHERE id=%s",
-                        (len(done), parent["id"]),
-                    )
-                    observe(
-                        connection,
-                        parent,
-                        "executing",
-                        f"Reading bills: {len(done)} of {len(children)} ready. Other bills continue independently.",
-                        20 + int(45 * len(done) / len(children)),
-                    )
-                continue
-            result = {"records": [], "findings": [], "unresolved": []}
-            prior = parent.get("result") or {}
-            result["findings"].extend(prior.get("findings", []))
-            for child in children:
-                file_id = child["file_ids"][0]
-                previous = [r for r in prior.get("records", []) if r["source_file_id"] == file_id]
-                if file_id == parent["config"].get("retry_file_id"):
-                    previous = [
-                        r for r in previous if r.get("status") in ("saved", "duplicate", "rejected")
-                    ]
-                if child["state"] == "failed":
-                    result["records"].extend(previous)
-                    result["unresolved"].append(
-                        {
-                            "source_file_id": child["file_ids"][0],
-                            "reason": child["error"] or "Extraction needs attention.",
-                        }
-                    )
-                else:
-                    proposal = copy.deepcopy(child["result"])
-                    # A child's findings concern its one selected input, not
-                    # unrelated siblings. Preserve them as blocking evidence on
-                    # its records; client-wide policy is reapplied below.
-                    for record in proposal["records"]:
-                        record["findings"] = list(dict.fromkeys([
-                            *record["findings"], *proposal["findings"]]))
-                    result["records"].extend(previous or proposal["records"])
-                    if previous and file_id == parent["config"].get("retry_file_id"):
-                        result["records"].extend(proposal["records"])
-                    result["unresolved"].extend(proposal.get("unresolved", []))
-            # A single-input run also becomes a batch only when retrying a held
-            # extraction. Retain unrelated outcomes not represented by children.
-            covered = {c["file_ids"][0] for c in children}
-            result["records"].extend(
-                r for r in prior.get("records", []) if r["source_file_id"] not in covered
-            )
-            result["unresolved"].extend(
-                i for i in prior.get("unresolved", []) if i["source_file_id"] not in covered
-            )
-            result["findings"] = list(dict.fromkeys(result["findings"]))
-            from minkops_platform.workflow_policies import enforce_policies
+            # Every parent is a savepoint: one tenant's defect must not roll back
+            # or stall other batches, nor crash the shared worker lanes.
+            try:
+                with connection.transaction():
+                    _reconcile(connection, parent)
+            except Exception as error:
+                _aggregation_failed(connection, parent, error)
 
-            # The parent review carries the same immutable client policy as its
-            # independent children; aggregation cannot discard a review gate.
-            result = enforce_policies(parent["config"], result)
-            from .attention import flag
-            for issue in result.get("unresolved", []):
-                record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
-                              {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
-                flag(connection, parent, record)
+
+def _aggregation_failed(connection, parent, error):
+    """Retry a bounded number of ticks for transient faults, then fail visibly."""
+    from minkops_platform.runtime.diagnostics import error_details, record
+
+    from .run_store import AccountsRunStore
+
+    attempt = int(parent["config"].get("aggregation_failures", 0)) + 1
+    record(connection, parent, "batch.aggregation_failed",
+           f"Batch aggregation failed ({type(error).__name__}).", level="error",
+           details={**error_details(error), "attempt": attempt})
+    log.error("Batch %s aggregation failed: %s (attempt %s)", parent["id"], type(error).__name__, attempt)
+    connection.execute(
+        "UPDATE account_runs SET config=config || jsonb_build_object('aggregation_failures',%s::integer) WHERE id=%s",
+        (attempt, parent["id"]),
+    )
+    if attempt >= AGGREGATION_ATTEMPTS:
+        AccountsRunStore().fail(
+            connection,
+            parent,
+            "Bill results could not be combined. Any verified saves remain; start a new run for the other bills.",
+        )
+
+
+def _reconcile(connection, parent):
+    children = connection.execute(
+        "SELECT * FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0",
+        (parent["tenant_id"], parent["id"]),
+    ).fetchall()
+    done = [c for c in children if c["state"] in ("review", "failed")]
+    if len(done) != len(children):
+        # A retry can have the same ready count as the earlier batch.
+        # Enter Work again instead of leaving an active child labelled
+        # as waiting to start until its extraction finishes.
+        if parent["state"] == "queued" or parent["config"].get(
+            "batch_finished_count"
+        ) != len(done):
             connection.execute(
-                "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), parent["id"])
-            )
-            pending = sum(
-                r.get("status") not in ("saved", "duplicate", "rejected") for r in result["records"]
+                "UPDATE account_runs SET config=config || jsonb_build_object('batch_finished_count',%s::integer) WHERE id=%s",
+                (len(done), parent["id"]),
             )
             observe(
                 connection,
                 parent,
-                "review",
-                f"{pending} bill entries ready; {len(result['unresolved'])} bills need attention.",
-                70,
+                "executing",
+                f"Reading bills: {len(done)} of {len(children)} ready. Other bills continue independently.",
+                20 + int(45 * len(done) / len(children)),
             )
-            if parent["config"].get("tally_target"):
-                from .tally_writes import prepare_automatic
+        return
+    result = {"records": [], "findings": [], "unresolved": []}
+    prior = parent.get("result") or {}
+    result["findings"].extend(prior.get("findings", []))
+    for child in children:
+        file_id = child["file_ids"][0]
+        previous = [r for r in prior.get("records", []) if r["source_file_id"] == file_id]
+        if file_id == parent["config"].get("retry_file_id"):
+            previous = [
+                r for r in previous if r.get("status") in ("saved", "duplicate", "rejected")
+            ]
+        if child["state"] == "failed":
+            result["records"].extend(previous)
+            result["unresolved"].append(
+                {
+                    "source_file_id": child["file_ids"][0],
+                    "reason": child["error"] or "Extraction needs attention.",
+                }
+            )
+        else:
+            proposal = copy.deepcopy(child["result"])
+            # A child's findings concern its one selected input, not
+            # unrelated siblings. Preserve them as blocking evidence on
+            # its records; client-wide policy is reapplied below.
+            for record in proposal["records"]:
+                record["findings"] = list(dict.fromkeys([
+                    *record["findings"], *proposal["findings"]]))
+            result["records"].extend(previous or proposal["records"])
+            if previous and file_id == parent["config"].get("retry_file_id"):
+                result["records"].extend(proposal["records"])
+            result["unresolved"].extend(proposal.get("unresolved", []))
+    # A single-input run also becomes a batch only when retrying a held
+    # extraction. Retain unrelated outcomes not represented by children.
+    covered = {c["file_ids"][0] for c in children}
+    result["records"].extend(
+        r for r in prior.get("records", []) if r["source_file_id"] not in covered
+    )
+    result["unresolved"].extend(
+        i for i in prior.get("unresolved", []) if i["source_file_id"] not in covered
+    )
+    result["findings"] = list(dict.fromkeys(result["findings"]))
+    from minkops_platform.workflow_policies import enforce_policies
 
-                prepare_automatic(connection, parent, result)
+    # The parent review carries the same immutable client policy as its
+    # independent children; aggregation cannot discard a review gate.
+    result = enforce_policies(parent["config"], result)
+    from .attention import flag
+    for issue in result.get("unresolved", []):
+        record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
+                      {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
+        flag(connection, parent, record)
+    connection.execute(
+        "UPDATE account_runs SET result=%s,config=config-'aggregation_failures' WHERE id=%s",
+        (Jsonb(result), parent["id"]),
+    )
+    pending = sum(
+        r.get("status") not in ("saved", "duplicate", "rejected") for r in result["records"]
+    )
+    observe(
+        connection,
+        parent,
+        "review",
+        f"{pending} bill entries ready; {len(result['unresolved'])} bills need attention.",
+        70,
+    )
+    if parent["config"].get("tally_target"):
+        from .tally_writes import prepare_automatic
+
+        prepare_automatic(connection, parent, result)

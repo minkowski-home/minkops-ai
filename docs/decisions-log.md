@@ -1,5 +1,31 @@
 # Decision Logs
 
+## Contain one batch's failure inside the shared worker (13 October 2026)
+
+**Situation:** An attention audit review found that batch aggregation ran every
+tenant's bill batches in one transaction with no error handling. A Tally batch
+whose destination PC was revoked raised `ServiceError` from job enqueueing, which
+was not a `ValueError`. It escaped to the worker lanes, stopped the process, and
+repeated on every restart. Hosted runs for all tenants stalled with it.
+
+**Task:** Make one tenant's defect unable to stop others, and turn the known
+cause into a truthful, recoverable bill outcome without weakening authorization.
+
+**Action:** Each parent now aggregates inside its own savepoint. Unexpected errors
+are rolled back to that savepoint, recorded as internal diagnostics, retried for
+a bounded three ticks, then fail that run visibly with an attention item.
+Background dispatch to an offline PC holds the bill with a `save_hold` reason for
+an explicit retry. An operator's own approval still gets the immediate
+"Reconnect this PC" error. Database tests then showed the diagnostic itself was
+missing: the parent's `FOR UPDATE` lock blocked the separate diagnostics
+transaction's foreign-key check. Switching to `FOR NO KEY UPDATE`, the pattern
+already used by `run_for`, still serializes aggregators.
+
+**Result:** Regression tests prove a revoked PC holds clean bills instead of
+raising. They also prove an injected defect in one batch leaves another batch
+writing, and fails only the broken run after three attempts with its diagnostic
+and attention item.
+
 ## Keep display projections outside discovery confirmation fingerprints (11 October 2026)
 
 **Situation:** Database integration tests found that confirming discovery saved
