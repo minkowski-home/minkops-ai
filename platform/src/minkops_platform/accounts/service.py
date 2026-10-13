@@ -395,7 +395,7 @@ def verify_write(connection, tenant, run_id, write_id, content):
                 result["records"][index]["status"] = "saved"
                 from .attention import excel_baseline, written
                 excel_baseline(connection, run, result["records"][index], content)
-                written(connection, run, result["records"][index])
+                written(connection, run, result["records"][index], result)
         if run["state"] == "writing":
             from .tally_writes import complete_run
 

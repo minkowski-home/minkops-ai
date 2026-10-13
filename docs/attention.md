@@ -26,6 +26,8 @@ Grouping and sorting happen before pagination (200 items per page). Bulk refresh
 queues at most 200 eligible pending items per click, rotating by last check;
 offline and unsupported items remain available for manual Done.
 
+Decisions name one bill. A file holding several invoices gets a decision per
+bill, and its attention item closes only when every bill from it is settled.
 Do nothing never writes, retains a source identifier in attention and permits
 other bills to continue. It is final for that run: the input is recorded as
 deferred data, not a run-level finding, so exception-only saves of its siblings

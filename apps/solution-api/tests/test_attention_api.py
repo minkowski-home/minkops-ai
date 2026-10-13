@@ -117,6 +117,21 @@ class AttentionTests(unittest.TestCase):
             items={r["kind"]:r["status"] for r in c.execute("SELECT kind,status FROM attention_items WHERE task_id=%s",(run["task_id"],))}
         self.assertEqual(items,{"bill":"done"})
 
+    def test_two_undecided_bills_in_one_file_need_an_explicit_choice(self):
+        did=self.tally_discovery("company-attention")
+        bill=self.upload_bill("two-bills.pdf")
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        result=self.tally_result(run,bill)
+        second=copy.deepcopy(result["records"][0]);second["data"]["invoice_number"]="MOCK-2"
+        result["records"].append(second)
+        self.process(run,result)
+        self.assertEqual(self.decision(run,bill,"nothing").status_code,422)
+        route=f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}"
+        deferred=self.client.post(route,headers=self.csrf,json={"action":"nothing","proposal":1})
+        self.assertEqual(deferred.status_code,200,deferred.text)
+        statuses=[r.get("status") for r in deferred.json()["result"]["records"]]
+        self.assertEqual((statuses,deferred.json()["state"]),([None,"rejected"],"review"))
+
     def test_retry_save_requires_a_held_save(self):
         run,bill,_=self.ready()
         response=self.decision(run,bill,"retry_save")

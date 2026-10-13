@@ -2,7 +2,7 @@
 from uuid import UUID
 from typing import Literal
 from fastapi import APIRouter, Request, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from minkops_platform import attention
 from minkops_platform.accounts.attention import decide
 from .auth import Db, User, require_csrf, tenant_access
@@ -42,10 +42,12 @@ def refresh_one(slug: str, item_id: UUID, request: Request, user: User, connecti
 
 class Decision(BaseModel):
     action: Literal["nothing", "guess", "supplier", "retry", "retry_save"]
+    # Index of the bill in the run result; a file can hold several bills.
+    proposal: int | None = Field(default=None, ge=0)
 
 
 @router.post("/bills/{run_id}/{file_id}")
 def bill_decision(slug: str, run_id: UUID, file_id: UUID, body: Decision, request: Request, user: User, connection: Db):
     require_csrf(request)
     tenant, _ = tenant_access(slug, user, connection)
-    return _call(decide, connection, tenant, user, run_id, str(file_id), body.action)
+    return _call(decide, connection, tenant, user, run_id, str(file_id), body.action, body.proposal)

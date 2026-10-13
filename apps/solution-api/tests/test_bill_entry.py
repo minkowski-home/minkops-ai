@@ -235,6 +235,36 @@ class BillEntryTests(unittest.TestCase):
                              (f"bill:{root['id']}:{inputs[1]}:bill",)).fetchone()
         self.assertEqual((item["label"], item["status"]), ("Ledger unclear", "pending"))
 
+    def test_each_bill_in_a_multi_bill_file_gets_its_own_decision(self):
+        did = self.tally_discovery()
+        bill = self.upload_bill("statement.pdf")
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        proposal = self.numbered_result(run, bill, "MULTI-1")
+        second = copy.deepcopy(self.numbered_result(run, bill, "MULTI-2")["records"][0])
+        second["exceptions"] = [{"code": "classification_uncertain", "detail": "Two ledgers fit."}]
+        proposal["records"].append(second)
+        self.process(run, proposal)
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.save_receipt(loaded, "MULTI-1")
+        item_key = f"bill:{run['id']}:{bill}:bill"
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT status FROM attention_items WHERE event_key=%s", (item_key,)).fetchone()
+        self.assertEqual(item["status"], "pending")  # The second bill still needs a decision.
+        route = f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}"
+        self.assertEqual(self.client.post(route, headers=self.csrf, json={"action": "guess", "proposal": 0}).status_code, 409)
+        self.assertEqual(self.client.post(route, headers=self.csrf, json={"action": "guess", "proposal": 7}).status_code, 422)
+        decided = self.client.post(route, headers=self.csrf, json={"action": "guess", "proposal": 1})
+        self.assertEqual(decided.status_code, 200, decided.text)
+        self.assertEqual(len(decided.json()["tally_writes"]), 2)
+        self.save_receipt(decided.json(), "MULTI-2")
+        final = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual(final["state"], "completed")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            items = {r["kind"]: r["status"] for r in c.execute(
+                "SELECT kind,status FROM attention_items WHERE task_id=%s", (run["task_id"],))}
+        self.assertEqual(items, {"bill": "done", "review": "pending"})
+
     def test_recheck_does_not_restore_an_issue_the_operator_already_decided(self):
         _, guessed, _, loaded = self.guess_then_recheck_sibling("Tally rejected the voucher date.")
         record = next(r for r in loaded["result"]["records"] if r["source_file_id"] == guessed)

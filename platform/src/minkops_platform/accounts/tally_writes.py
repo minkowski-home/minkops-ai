@@ -374,7 +374,7 @@ def accept(connection, device, payload, receipt):
     # Best-guess review starts after verified write, using exact native identity.
     if current and outcome in ("saved", "duplicate"):
         from .attention import written
-        written(connection, run, record)
+        written(connection, run, record, result)
         connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
             (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":

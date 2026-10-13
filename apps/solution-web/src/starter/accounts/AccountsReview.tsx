@@ -173,9 +173,10 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
           const pending = isPending(r);
           const attention = needsAttention(r, result);
           const supplierMissing = missingSupplier(r);
+          // A file can hold several bills; each decision names its own proposal.
           const decide = (action: string) =>
             act(`/api/tenants/${tenant}/attention/bills/${run.id}/${r.source_file_id}`, {
-              action
+              action, proposal: index
             });
           return (
             <article className="accounts-bill" key={`${r.source_file_id}:${index}`}>

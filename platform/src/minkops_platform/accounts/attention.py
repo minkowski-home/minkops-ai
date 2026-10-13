@@ -74,7 +74,26 @@ def stopped(connection, run, actor):
                             "Remaining automation stopped. Verify the original destination before further action.")
 
 
-def decide(connection, tenant, user, run_id, file_id, action):
+def _proposal(run, file_id, proposal):
+    """The one proposal a decision applies to; an input file can hold several bills.
+
+    Without an explicit index, only a file with a single undecided proposal is
+    unambiguous. Inputs without any proposal return None.
+    """
+    from .tally_writes import SETTLED
+    records = run["result"]["records"]
+    indexes = [i for i, r in enumerate(records) if r["source_file_id"] == file_id]
+    if proposal is not None:
+        if proposal not in indexes:
+            raise ServiceError("invalid", "Bill not awaiting a decision.")
+        return proposal
+    pending = [i for i in indexes if records[i].get("status") not in SETTLED]
+    if len(pending) > 1:
+        raise ServiceError("invalid", "Choose which bill in this file to decide.")
+    return (pending or indexes or [None])[0]
+
+
+def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     from .service import approve_run
     from .batch import resolve_bill
     run = run_for(connection, tenant["id"], run_id, True)
@@ -82,7 +101,8 @@ def decide(connection, tenant, user, run_id, file_id, action):
     require_active(connection, tenant["id"], run["task_id"])
     if run["actor_id"] != user["id"] or run["state"] != "review":
         raise ServiceError("forbidden", "Only this run's operator can authorize bill writes.")
-    original = next((r for r in run["result"]["records"] if r["source_file_id"] == file_id), None)
+    index = _proposal(run, file_id, proposal)
+    original = None if index is None else run["result"]["records"][index]
     issue = next((i for i in run["result"].get("unresolved", []) if i["source_file_id"] == file_id), None)
     if not original and not issue:
         raise ServiceError("invalid", "Bill not awaiting a decision.")
@@ -92,23 +112,20 @@ def decide(connection, tenant, user, run_id, file_id, action):
     if action == "retry":
         return resolve_bill(connection, tenant, user, run_id, file_id, "", False)
     if action == "retry_save":
-        return _retry_save(connection, tenant, user, run, record)
+        return _retry_save(connection, tenant, user, run, index)
     if record.get("save_hold") and action in ("guess", "supplier"):
         raise ServiceError("invalid", "Fix the destination, then use Retry save.")
     if action == "nothing":
         item = flag(connection, run, record, actor=user["id"])
         attention.audit(connection, item, user["id"], "deferred", "No write. Manual handling required.")
-        if issue:
-            if original:
-                original.update(decision="reject", status="rejected")
-                connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
+        if not original:
+            # An input without any proposal is deferred as a whole.
             return resolve_bill(connection, tenant, user, run_id, file_id, "", True)
+        # Only this proposal is final; the input settles once all of its bills do.
         result = copy.deepcopy(run["result"])
-        for row in result["records"]:
-            if row["source_file_id"] == file_id:
-                row.update(decision="reject", status="rejected")
-        from .tally_writes import complete_run, defer_input
-        complete_run(connection, run, defer_input(result, file_id))
+        result["records"][index].update(decision="reject", status="rejected")
+        from .tally_writes import complete_run
+        complete_run(connection, run, result)
         return public_run(connection, run_for(connection, tenant["id"], run_id))
     if not original:
         raise ServiceError("invalid", "No supported proposal. Handle this bill in the original system.")
@@ -151,15 +168,14 @@ def decide(connection, tenant, user, run_id, file_id, action):
                 record["expected_excel"] = record["current_excel"]
             connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
         result = copy.deepcopy(run["result"])
-        result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != file_id]
-        for row in result["records"]:
-            row["decision"] = "approve" if row["source_file_id"] == file_id else "hold"
+        for position, row in enumerate(result["records"]):
+            row["decision"] = "approve" if position == index else "hold"
         return approve_run(connection, tenant, user, run_id, {"result": result, "acknowledge_findings": True})
     except (ValueError, KeyError, TypeError) as error:
         raise ServiceError("invalid", "No supported write. Use Do nothing.") from error
 
 
-def _retry_save(connection, tenant, user, run, record):
+def _retry_save(connection, tenant, user, run, index):
     """Re-send a held bill's supported proposal after the destination is fixed.
 
     This is a technical retry under the original authorization, not a new
@@ -168,20 +184,15 @@ def _retry_save(connection, tenant, user, run, record):
     offered as a correction rather than overwritten.
     """
     from .service import approve_run
-    # Scope to held saves only; another proposal from the same file keeps its own decision.
-    retried = {index for index, row in enumerate(run["result"]["records"])
-               if row["source_file_id"] == record["source_file_id"]
-               and row.get("status") == "held" and row.get("save_hold")}
-    if not retried:
+    row = None if index is None else run["result"]["records"][index]
+    if not row or row.get("status") != "held" or not row.get("save_hold"):
         raise ServiceError("invalid", "Only a held save can be retried.")
-    for index in retried:
-        row = run["result"]["records"][index]
-        reason = row.pop("save_hold")
-        row["findings"] = [finding for finding in row["findings"] if finding != reason]
+    reason = row.pop("save_hold")
+    row["findings"] = [finding for finding in row["findings"] if finding != reason]
     connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
     result = copy.deepcopy(run["result"])
-    for index, row in enumerate(result["records"]):
-        row["decision"] = "approve" if index in retried else "hold"
+    for position, other in enumerate(result["records"]):
+        other["decision"] = "approve" if position == index else "hold"
     return approve_run(connection, tenant, user, run["id"], {"result": result, "acknowledge_findings": True})
 
 
@@ -245,8 +256,16 @@ def excel_baseline(connection, run, record, content):
                                (Jsonb(observation["current"]), item["id"]))
 
 
-def written(connection, run, record):
-    """A verified save resolves the blocked-write event, never the review event."""
+def written(connection, run, record, result):
+    """A verified save resolves the blocked-write event, never the review event.
+
+    The event belongs to the input file, which can hold several bills; it stays
+    open while any other proposal from that file still awaits a decision.
+    """
+    from .tally_writes import SETTLED
+    if any(r["source_file_id"] == record["source_file_id"] and r.get("status") not in SETTLED
+           for r in result["records"]):
+        return
     item = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s AND status='pending' FOR UPDATE",
         (run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:bill")).fetchone()
     if item:
@@ -268,8 +287,11 @@ def supplier_created(connection, item, job, observation):
     from .client_context import select_target
     from .tally_writes import prepare, complete_run
     result = copy.deepcopy(run["result"])
-    record = next(r for r in result["records"] if r["source_file_id"] == target["file_id"])
-    if item["status"] == "done" or record.get("status") in ("saved", "duplicate", "rejected", "writing"):
+    from .tally_writes import SETTLED
+    # The supplier item belongs to the file; continue the undecided bill naming this supplier.
+    record = next((r for r in result["records"] if r["source_file_id"] == target["file_id"]
+                   and r["data"].get("vendor") == target["vendor"] and r.get("status") not in SETTLED), None)
+    if item["status"] == "done" or record is None:
         return
     selected = select_target(record, run["config"]["tally_target"])
     master = next(m for m in observation["masters"] if m.get("@_NAME", m.get("NAME")) == target["vendor"])
