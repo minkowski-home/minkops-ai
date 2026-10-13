@@ -253,6 +253,8 @@ def _reconcile(connection, parent):
             for record in proposal["records"]:
                 record["findings"] = list(dict.fromkeys([
                     *record["findings"], *proposal["findings"]]))
+                record["exception_codes"] = list(dict.fromkeys([
+                    *record.get("exception_codes", []), *proposal.get("exception_codes", [])]))
             result["records"].extend(previous or proposal["records"])
             if previous and file_id == parent["config"].get("retry_file_id"):
                 result["records"].extend(proposal["records"])
@@ -275,11 +277,9 @@ def _reconcile(connection, parent):
     # The parent review carries the same immutable client policy as its
     # independent children; aggregation cannot discard a review gate.
     result = enforce_policies(parent["config"], result)
-    from .attention import flag
+    from .attention import flag, issue_record
     for issue in result.get("unresolved", []):
-        record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
-                      {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
-        flag(connection, parent, record)
+        flag(connection, parent, issue_record(result, issue))
     connection.execute(
         "UPDATE account_runs SET result=%s,config=config-'aggregation_failures' WHERE id=%s",
         (Jsonb(result), parent["id"]),

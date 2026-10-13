@@ -43,11 +43,16 @@ def prepare_automatic(connection, run, result):
             or result.get("findings")
             or control_state(connection, run["tenant_id"], run["task_id"]) != "active"):
         return False
+    from .attention import flag
+
     unresolved = {issue["source_file_id"] for issue in result.get("unresolved", [])}
     for record in result["records"]:
         if record.get("findings") or record["source_file_id"] in unresolved:
             if record.get("status") not in ("saved", "duplicate", "writing", "rejected"):
                 record["decision"] = "hold"
+                # Under standing authorization the exceptions are the work; they
+                # belong in shared attention, not only in this run's review.
+                flag(connection, run, record)
     prepare(connection, run, result)
     complete_run(connection, run, result)
     return True

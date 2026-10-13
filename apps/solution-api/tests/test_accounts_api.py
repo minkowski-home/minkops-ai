@@ -162,7 +162,7 @@ class AccountsTests(unittest.TestCase):
         )
         data = {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24}
         result = {
-            "findings": [],
+            "exceptions": [],
             "records": [
                 {
                     "source_file_id": bill,
@@ -174,7 +174,7 @@ class AccountsTests(unittest.TestCase):
                         {"field": key, "page": 1, "quote": str(value)}
                         for key, value in data.items()
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
                 for file_id in [self.file_id, second_id]
             ],
@@ -365,10 +365,10 @@ class AccountsTests(unittest.TestCase):
                         {"field": k, "page": 1, "quote": str(v)}
                         for k, v in {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24}.items()
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
 
         def fake(*args, **kwargs):

@@ -108,11 +108,13 @@ def test_only_exceptions_queues_clean_siblings_but_preserves_review_gates():
               "findings": [], "unresolved": [{"source_file_id": "bad", "reason": "unclear"}]}
     with patch("minkops_platform.run_controls.control_state", return_value="active"), \
          patch("minkops_platform.accounts.tally_writes.prepare") as prepare, \
-         patch("minkops_platform.accounts.tally_writes.complete_run"):
+         patch("minkops_platform.accounts.tally_writes.complete_run"), \
+         patch("minkops_platform.accounts.attention.flag") as flag:
         assert prepare_automatic(None, run, result)
         assert result["records"][1]["decision"] == "hold"
         assert "decision" not in result["records"][0]
         prepare.assert_called_once()
+        assert [call.args[2]["source_file_id"] for call in flag.call_args_list] == ["bad"]
         for change in ({"requires_review": True}, {"findings": ["batch uncertainty"]}):
             assert not prepare_automatic(None, run, {**result, **change})
         run["config"]["review_mode"] = "all_outputs"

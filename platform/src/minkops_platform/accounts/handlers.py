@@ -353,7 +353,10 @@ class BillHandler(AccountsHandler):
         return files, context, {"refs": refs, "contents": contents}
 
     def validate(self, run, files, context, domain, result):
+        from .checks import adopt_exceptions
+
         contents = domain["contents"]
+        result = adopt_exceptions(result)
         if any(r.get("operation") != "append" for r in result.get("records", [])):
             raise ValueError(
                 "Agent proposals must append by default; edits require explicit review."
@@ -380,11 +383,9 @@ class BillHandler(AccountsHandler):
         from .service import prepare_writes
         from minkops_platform.run_controls import control_state
         if not run.get("parent_run_id"):
-            from .attention import flag
+            from .attention import flag, issue_record
             for issue in result.get("unresolved", []):
-                record = next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
-                              {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]]})
-                flag(connection, run, record)
+                flag(connection, run, issue_record(result, issue))
 
         store.observe(
             connection,

@@ -5,6 +5,41 @@ from minkops_connectors.excel import sheet_records
 from .catalog import validate_data
 from .repository import digest_bytes
 
+# Short attention labels for the agent's closed set of genuine blockers.
+EXCEPTION_LABELS = {
+    "source_unreadable": "Unreadable bill",
+    "not_a_bill": "Not a bill",
+    "multiple_bills_unclear": "Unclear bill count",
+    "required_value_missing": "Missing bill value",
+    "source_values_conflict": "Bill values conflict",
+    "company_unresolved": "Company unclear",
+    "supplier_unresolved": "Supplier unclear",
+    "supplier_missing": "Missing supplier",
+    "classification_uncertain": "Ledger unclear",
+    "unsupported_structure": "Manual entry needed",
+}
+
+
+def adopt_exceptions(result):
+    """Translate the typed agent contract into internal blocking findings.
+
+    Only coded exceptions block a bill; notes stay internal observations, so a
+    successful check or a possible duplicate can no longer hold a routine bill.
+    Results pinned to the older free-text contract pass through unchanged.
+    """
+    if "exceptions" not in result:
+        return result
+
+    def adopt(holder):
+        exceptions = holder.pop("exceptions", [])
+        holder["findings"] = [exception["detail"] for exception in exceptions]
+        holder["exception_codes"] = list(dict.fromkeys(e["code"] for e in exceptions))
+
+    for record in result["records"]:
+        adopt(record)
+    adopt(result)
+    return result
+
 
 def check_records(result, catalog, input_ids, contents, checks):
     """Validate destinations and report selected checks using confirmed concepts.

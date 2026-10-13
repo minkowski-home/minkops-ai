@@ -39,11 +39,25 @@ def target_for(connection, run, record):
             "baseline": record.get("current")}
 
 
+def exception_label(record):
+    """Coded exceptions name themselves; older free-text findings use the keyword fallback."""
+    from .checks import EXCEPTION_LABELS
+    codes = record.get("exception_codes") or []
+    return EXCEPTION_LABELS[codes[0]] if codes else attention.label(" ".join(record.get("findings", [])))
+
+
+def issue_record(result, issue):
+    """The proposal for an unresolved input, or a placeholder carrying its reason."""
+    return next((r for r in result["records"] if r["source_file_id"] == issue["source_file_id"]),
+                {"source_file_id": issue["source_file_id"], "data": {}, "findings": [issue["reason"]],
+                 "exception_codes": [issue["code"]] if issue.get("code") else []})
+
+
 def flag(connection, run, record, *, title=None, kind="bill", actor=None):
     file_id = record["source_file_id"]
     name = next((f["path"] for f in run["config"].get("file_provenance", []) if f["id"] == file_id), file_id)
     return attention.record(connection, run, f"bill:{run['id']}:{file_id}:{kind}", name,
-        title or attention.label(" ".join(record.get("findings", []))), kind=kind,
+        title or exception_label(record), kind=kind,
         target=target_for(connection, run, record), actor=actor)
 
 
@@ -52,8 +66,7 @@ def stopped(connection, run, actor):
     result = run.get("result") or {}
     records = {record["source_file_id"]: record for record in result.get("records", [])}
     for issue in result.get("unresolved", []):
-        records.setdefault(issue["source_file_id"], {"source_file_id": issue["source_file_id"],
-                                                   "findings": [issue["reason"]], "data": {}})
+        records.setdefault(issue["source_file_id"], issue_record({"records": []}, issue))
     for record in records.values():
         if record.get("status") not in ("saved", "duplicate", "rejected"):
             item = flag(connection, run, record, title="Run stopped", actor=actor)
@@ -73,7 +86,7 @@ def decide(connection, tenant, user, run_id, file_id, action):
     issue = next((i for i in run["result"].get("unresolved", []) if i["source_file_id"] == file_id), None)
     if not original and not issue:
         raise ServiceError("invalid", "Bill not awaiting a decision.")
-    record = original or {"source_file_id": file_id, "data": {}, "findings": [issue["reason"]]}
+    record = original or issue_record({"records": []}, issue)
     if record.get("status") in ("saved", "duplicate", "rejected", "writing"):
         raise ServiceError("conflict", "Bill already handled.")
     if action == "retry":

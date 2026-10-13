@@ -1,5 +1,29 @@
 # Decision Logs
 
+## Enforce what may block a bill in the model's output schema (13 October 2026)
+
+**Situation:** Under Only exceptions, any free-text finding held a bill. Local
+runs held routine bills for "arithmetic reconciles", "optional cost code absent"
+and speculative duplicate warnings that misquoted invoice references. Three
+releases of prompt wording reduced but could not eliminate this, because prose
+cannot enforce severity.
+
+**Task:** Make routine observations structurally unable to block a supported
+bill, without hiding genuine uncertainty or weakening deterministic checks.
+
+**Action:** Bill Entry 0.12.0 replaces findings with typed exceptions drawn from
+a closed list of ten genuine blockers, plus non-blocking notes. Possible
+duplicates have no code; native reconciliation decides them. One adapter maps
+exceptions to the existing internal blocking findings plus codes, so storage,
+review, batch aggregation and older pinned runs are unchanged. Attention labels
+now come from codes instead of keyword guesses. Bills held under exception-only
+authorization are flagged in shared Attention, which they previously were not.
+
+**Result:** Schema tests reject free-text findings and unlisted codes. A
+database regression shows a bill carrying the former noise saving automatically
+while its sibling's uncertain ledger holds with a "Ledger unclear" Attention
+item. A live run is still required to measure the model's adherence.
+
 ## Separate destination holds from interpretation holds (13 October 2026)
 
 **Situation:** When Tally refused a supported bill (for example its date

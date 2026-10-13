@@ -9,26 +9,29 @@ from minkops_api.main import app
 import test_bill_entry as fixtures
 
 URL = fixtures.URL
+UNCLEAR = [{"code": "source_unreadable", "detail": "Unclear handwriting"}]
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL required")
 class AttentionTests(unittest.TestCase):
     for _method in ("setUp", "launch", "upload_bill", "process", "tally_discovery", "tally_result", "approve", "tally_job", "current"):
         locals()[_method] = getattr(fixtures.BillEntryTests, _method)
 
-    def ready(self, findings=None):
+    def ready(self, exceptions=None):
+        """A processed single-bill run; returns the stored internal result shape."""
+        from minkops_platform.accounts.checks import adopt_exceptions
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("attention.pdf")
         run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
         result=self.tally_result(run,bill)
-        result["records"][0]["findings"]=findings or []
+        result["records"][0]["exceptions"]=exceptions or []
         self.process(run,result)
-        return run,bill,result
+        return run,bill,adopt_exceptions(copy.deepcopy(result))
 
     def decision(self,run,bill,action):
         return self.client.post(f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",headers=self.csrf,json={"action":action})
 
     def test_do_nothing_records_identifier_and_never_queues_save(self):
-        run,bill,_=self.ready(["Unclear handwriting"])
+        run,bill,_=self.ready(UNCLEAR)
         response=self.decision(run,bill,"nothing")
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(response.json()["tally_writes"],[])
@@ -42,7 +45,7 @@ class AttentionTests(unittest.TestCase):
             self.assertIsNotNone(event["actor_id"])
 
     def test_guess_writes_but_review_remains_until_external_edit(self):
-        run,bill,_=self.ready(["Unclear handwriting"])
+        run,bill,_=self.ready(UNCLEAR)
         with psycopg.connect(URL,row_factory=dict_row) as c:
             from minkops_platform.accounts.attention import flag
             saved_run=c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone()
@@ -76,8 +79,8 @@ class AttentionTests(unittest.TestCase):
         bill=self.upload_bill("attention.pdf")
         run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
         result=self.tally_result(run,bill)
-        result["records"][0]["findings"]=["Expense ledger is a best guess."]
-        result["unresolved"]=[{"source_file_id":bill,"reason":"Expense ledger is a best guess."}]
+        result["records"][0]["exceptions"]=[{"code":"classification_uncertain","detail":"Expense ledger is a best guess."}]
+        result["unresolved"]=[{"source_file_id":bill,"code":"classification_uncertain","reason":"Expense ledger is a best guess."}]
         self.process(run,result)
         response=self.decision(run,bill,"guess")
         self.assertEqual(response.status_code,200,response.text)

@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "required": [
     "records",
-    "findings"
+    "exceptions"
   ],
   "properties": {
     "records": {
@@ -18,7 +18,7 @@
           "operation",
           "data",
           "evidence",
-          "findings"
+          "exceptions"
         ],
         "properties": {
           "source_file_id": {
@@ -80,12 +80,8 @@
               }
             }
           },
-          "findings": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
+          "exceptions": {"$ref": "#/$defs/exceptions"},
+          "notes": {"$ref": "#/$defs/notes"},
           "company_guid": {
             "type": [
               "string",
@@ -118,12 +114,8 @@
         }
       }
     },
-    "findings": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
+    "exceptions": {"$ref": "#/$defs/exceptions"},
+    "notes": {"$ref": "#/$defs/notes"},
     "unresolved": {
       "type": "array",
       "items": {
@@ -131,12 +123,14 @@
         "additionalProperties": false,
         "required": [
           "source_file_id",
+          "code",
           "reason"
         ],
         "properties": {
           "source_file_id": {
             "type": "string"
           },
+          "code": {"$ref": "#/$defs/exception_code"},
           "reason": {
             "type": "string",
             "minLength": 1
@@ -146,6 +140,37 @@
     }
   },
   "$defs": {
+    "exception_code": {
+      "description": "Only genuine blockers. Successful checks, absent optional values and possible duplicates are notes; the application decides duplicates natively.",
+      "enum": [
+        "source_unreadable",
+        "not_a_bill",
+        "multiple_bills_unclear",
+        "required_value_missing",
+        "source_values_conflict",
+        "company_unresolved",
+        "supplier_unresolved",
+        "supplier_missing",
+        "classification_uncertain",
+        "unsupported_structure"
+      ]
+    },
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": {"$ref": "#/$defs/exception_code"},
+        "detail": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "exceptions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/exception"}},
+    "notes": {
+      "description": "Non-blocking internal observations.",
+      "type": "array",
+      "maxItems": 20,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+    },
     "master_selection": {
       "type": "object",
       "additionalProperties": false,

@@ -235,10 +235,10 @@ class WorkflowArchitectureTests(unittest.TestCase):
                             "Amount": 50001,
                         }.items()
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
         with psycopg.connect(URL, row_factory=dict_row) as connection:
             row = connection.execute(

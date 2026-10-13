@@ -39,6 +39,18 @@ an unresolved match is not a new supplier. Purchase classification excludes the
 current invoice's own voucher as supporting history. Similar references retain
 every token; similar dates or amounts alone do not establish duplicate identity.
 
+Workflow 0.12.0 replaces free-text findings with typed exceptions. The model can
+block a bill only with a code from a closed list of genuine blockers (unreadable
+source, not a bill, unclear bill count, missing value, conflicting values,
+unclear company or supplier, missing supplier, uncertain ledger, unsupported
+structure). Everything else is a non-blocking internal note: successful checks,
+absent optional values, and similarity to an existing voucher. Native
+reconciliation alone decides duplicates. Attention labels come from the code.
+Under Only exceptions, held bills are flagged in shared Attention. A file may
+contain one bill plus copies and companion documents (e-way bill, IRN
+acknowledgement, challan, PO); those corroborate a single record. Runs pinned to
+earlier versions keep their free-text contract.
+
 The grouped file selector supports individual/group/all selection and search.
 Selections persist in this browser by source ID and path, including an explicitly
 empty selection. Refresh preserves choices when snapshot IDs change, removes

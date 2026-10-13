@@ -166,8 +166,10 @@ class BillEntryTests(unittest.TestCase):
             c.execute("UPDATE account_runs SET state='failed',error='Unreadable' WHERE id=%s",
                       (children[failed]["id"],))
         proposal = self.numbered_result(root, guessed, "GUESS-1")
-        proposal["records"][0]["findings"] = ["Expense ledger is a best guess."]
-        proposal["unresolved"] = [{"source_file_id": guessed, "reason": "Expense ledger is a best guess."}]
+        proposal["records"][0]["exceptions"] = [
+            {"code": "classification_uncertain", "detail": "Expense ledger is a best guess."}]
+        proposal["unresolved"] = [{"source_file_id": guessed, "code": "classification_uncertain",
+                                   "reason": "Expense ledger is a best guess."}]
         self.process(children[guessed], proposal)
         reconcile_once(URL)
         self.save_receipt(self.decide(root, guessed, "guess"), "GUESS-1", save_error)
@@ -205,6 +207,33 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(len(loaded["tally_writes"]), 1)
         self.assertEqual(loaded["result"]["findings"], [])
         self.assertEqual(loaded["result"]["deferred"], [{"source_file_id": inputs[0]}])
+
+    def test_notes_never_hold_exception_only_bills_but_coded_exceptions_reach_attention(self):
+        from minkops_platform.accounts.batch import reconcile_once
+
+        root, inputs, children = self.exception_only_batch()
+        for child in children:
+            file_id = child["file_ids"][0]
+            proposal = self.numbered_result(root, file_id, f"NOTE-{file_id}")
+            if file_id == inputs[0]:
+                # Observations that previously became blocking findings.
+                proposal["records"][0]["notes"] = [
+                    "Subtotal plus tax reconciles.", "Optional cost code absent.",
+                    "Resembles DEMO26-C1-B1; the native duplicate check decides."]
+            else:
+                proposal["records"][0]["exceptions"] = [{
+                    "code": "classification_uncertain",
+                    "detail": "Office Maintenance and Site Services both fit this purchase."}]
+            self.process(child, proposal)
+        reconcile_once(URL)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        records = {r["source_file_id"]: r for r in loaded["result"]["records"]}
+        self.assertEqual((records[inputs[0]]["status"], records[inputs[0]]["findings"]), ("writing", []))
+        self.assertEqual(records[inputs[1]]["decision"], "hold")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            item = c.execute("SELECT label,status FROM attention_items WHERE event_key=%s",
+                             (f"bill:{root['id']}:{inputs[1]}:bill",)).fetchone()
+        self.assertEqual((item["label"], item["status"]), ("Ledger unclear", "pending"))
 
     def test_recheck_does_not_restore_an_issue_the_operator_already_decided(self):
         _, guessed, _, loaded = self.guess_then_recheck_sibling("Tally rejected the voucher date.")
@@ -267,7 +296,8 @@ class BillEntryTests(unittest.TestCase):
         for child in children:
             proposal = self.tally_result(root, child["file_ids"][0])
             if child["file_ids"][0] == inputs[1]:
-                proposal["findings"] = ["This input has contradictory source evidence."]
+                proposal["exceptions"] = [{"code": "source_values_conflict",
+                                           "detail": "This input has contradictory source evidence."}]
             self.process(child, proposal)
         reconcile_once(URL)
         loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
@@ -464,8 +494,8 @@ class BillEntryTests(unittest.TestCase):
             run,
             {
                 "records": [],
-                "findings": [],
-                "unresolved": [{"source_file_id": bill, "reason": "Supplier missing"}],
+                "exceptions": [],
+                "unresolved": [{"source_file_id": bill, "code": "supplier_missing", "reason": "Supplier missing"}],
             },
         )
         self.tally_discovery("replacement-company", reuse_device=True)
@@ -495,10 +525,10 @@ class BillEntryTests(unittest.TestCase):
                     "operation": operation,
                     "data": {"Invoice": invoice, "Vendor": "Acme", "Amount": amount},
                     "evidence": [],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
 
     def process(self, run, result):
@@ -690,10 +720,10 @@ class BillEntryTests(unittest.TestCase):
                         for k, v in data.items()
                         if v is not None
                     ],
-                    "findings": [],
+                    "exceptions": [],
                 }
             ],
-            "findings": [],
+            "exceptions": [],
         }
 
     def tally_job(self, run):
@@ -853,9 +883,9 @@ class BillEntryTests(unittest.TestCase):
             "operation": "append",
             "data": {"Invoice": "A-1", "Vendor": "Acme", "Amount": 12},
             "evidence": [],
-            "findings": [],
+            "exceptions": [],
         }
-        result = {"records": [record], "findings": []}
+        result = {"records": [record], "exceptions": []}
         self.process(run, result)
         done = self.approve(run, result)
         self.assertEqual(done["state"], "completed")
@@ -1108,8 +1138,8 @@ class BillEntryTests(unittest.TestCase):
                 if child["file_ids"] == [good]
                 else {
                     "records": [],
-                    "findings": [],
-                    "unresolved": [{"source_file_id": bad, "reason": "Unreadable invoice number"}],
+                    "exceptions": [],
+                    "unresolved": [{"source_file_id": bad, "code": "source_unreadable", "reason": "Unreadable invoice number"}],
                 }
             )
             self.process(child, proposal)

@@ -14,8 +14,8 @@ For purchase/tax classification, exclude vouchers for this current bill identity
 (same supplier, invoice reference and financial year). They are duplicate-check
 evidence, not independent proof that the current allocation is correct. Require
 the current purpose to agree with a confirmed mapping or comparable independent
-history; if competing expense ledgers remain equally plausible, retain a held
-best-guess candidate rather than claiming a routine confident match.
+history; if competing expense ledgers remain equally plausible, return the best
+candidate with a classification_uncertain exception rather than a routine match.
 Inspect all plausible purchase masters before selecting one. A similar-purpose
 voucher for a different supplier suggests a candidate; it does not resolve a
 competing account without independent company policy or classification evidence.
@@ -53,11 +53,11 @@ exception when the evidence identifies one master. Normalize names to retrieve
 candidates; never confuse similarity with proof, override conflicting identifiers,
 or choose a default merely because it is the only candidate retrieved. Inspect
 the relevant full master records and history before concluding a supplier is new.
-Do not produce findings for harmless formatting differences already resolved.
+A resolved formatting difference is at most a note, never an exception.
 For purchase/tax ledgers use relevant prior allocations and native definitions;
 the same supplier may use different expense accounts for different purchases.
-Keep genuinely conflicting or insufficient evidence unresolved with the candidates
-and source identifiers in internal evidence. No customer-specific names or spellings
+Raise supplier_unresolved or company_unresolved for genuinely conflicting or
+insufficient identity evidence, naming the candidates in the exception detail. No customer-specific names or spellings
 are built into this matching procedure.
 
 Extract invoice_number as the supplier's invoice reference,
@@ -111,29 +111,47 @@ multiple rows only where the confirmed sheet models line items. Leave entry_id
 null; the application generates business identity. Do not write workbooks.
 
 Distinguish invoice vs PO/GRN, issue vs delivery dates, gross vs discounted base,
-and current payable vs previous balances. Office copies and repeated totals are
-not extra bills. Never invent or silently substitute source values. Do not claim
+and current payable vs previous balances. One file often holds a bill with
+companion documents: original/duplicate/triplicate copies, e-way bills, e-invoice
+IRN acknowledgements, delivery challans, GRNs, POs, packing lists or payment
+receipts. Return one record per distinct tax invoice and use companion pages only
+as corroborating evidence; they are never extra bills. Separate invoices in one
+file (different supplier invoice references) each get their own record. If you
+cannot tell whether pages are separate invoices or copies of one, raise
+multiple_bills_unclear instead of guessing a record count. A file with no
+purchase bill (for example only an e-way bill, quotation or statement) is
+not_a_bill. Never invent or silently substitute source values. Do not claim
 PO/receipt reconciliation without actual records. Manual corrections belong in
-original systems, not an in-app value editor or correction prompt. Preserve the
-input identifier and uncertain field in internal findings; the product supplies
-concise one-click decisions and shared attention.
+original systems, not an in-app value editor or correction prompt. Name the input
+and uncertain field in the exception detail; the product supplies concise
+one-click decisions and shared attention.
 
-Write /workspace/outputs/result.json with records, findings and unresolved:
-Findings are blocking exceptions, not a log of successful checks. Keep both
-findings arrays empty for a routine supported bill. Put resolved master links,
-arithmetic checks and other successful observations in their evidence fields.
-Absent optional cost_code, a PO reference without PO records, and the native
-adapter's mandatory future duplicate check are not exceptions by themselves.
-An exact source-file copy or an evidenced existing voucher is not an uncertain
-bill: return its normal supported candidate with empty findings. The application
-will compare canonical identity and every amount, then verify the native duplicate
-without another import. Hold only conflicting duplicate values or ambiguous keys.
-Preserve every invoice-reference token when comparing identities; never remove
-prefixes or infer a matching reference from a similar amount, date or description.
-Quote the actual native reference before claiming an existing identity conflict.
-Use per-record findings for an uncertain bill; use root findings only for a
-problem affecting every input in this hosted run. Never let one bill's uncertainty
-block another. Unreadable or unsupported inputs belong in unresolved.
+Write /workspace/outputs/result.json with records, exceptions, notes and unresolved.
+Exceptions are the only blockers. Each has a code from this closed list and a
+short detail naming the field and its evidence:
+- source_unreadable: pages needed for a mandatory value cannot be read reliably.
+- not_a_bill: the input contains no supported purchase bill.
+- multiple_bills_unclear: it is unclear which pages form which bill.
+- required_value_missing: a mandatory value is absent or illegible on the bill.
+- source_values_conflict: the bill's own printed values contradict each other.
+- company_unresolved: the buyer company is ambiguous or contradicts a locked company.
+- supplier_unresolved: two or more existing suppliers remain plausible.
+- supplier_missing: you established the supplier has no discovered ledger.
+- classification_uncertain: competing purchase or tax ledgers remain equally plausible.
+- unsupported_structure: the bill needs inventory, cost, billwise or other
+  allocations outside the supported Purchase contract.
+Everything else is a note, never an exception: successful checks, resolved
+spelling differences, absent optional values such as cost_code, a PO reference
+without PO records, and any similarity to an existing voucher. Do not raise an
+exception for a possible duplicate. Return the normal supported candidate; the
+application compares canonical identity and every amount and verifies duplicates
+natively without importing again. Preserve every invoice-reference token and
+quote native references exactly when noting a similarity. Notes are short,
+internal and never block a bill. A routine supported bill has no exceptions.
+Put record exceptions on a complete candidate that still needs a decision; use
+root exceptions only for a problem affecting every input in this hosted run. Use
+unresolved, with a code, only when no complete candidate can be proposed. Never
+let one bill's uncertainty block another.
 source_file_id must be the selected input's ID from config.file_ids, joined to
 context.files by its path. Never substitute the invoice number, company GUID,
 master GUID, destination ID or an unselected file ID.
@@ -142,12 +160,13 @@ the application binds this result to its pinned run metadata.
 {"records":[{"source_file_id":"supplied input ID","destination_file_id":"catalog destination ID",
 "sheet":"confirmed sheet","table":null,"operation":"append","data":{"exact field":"value"},
 "evidence":[{"field":"exact field","page":1,"quote":"observed text"}],
-"findings":["uncertainty"],"company_guid":"Tally company GUID only",
+"exceptions":[{"code":"classification_uncertain","detail":"what is uncertain and why"}],
+"notes":["optional internal observation"],"company_guid":"Tally company GUID only",
 "company_evidence":"buyer/context basis for Tally only",
 "master_refs":{"vendor":{"ref":"selected company ledger_refs key","evidence":"observed identity match"},
 "purchase_ledger":{"ref":"selected company ledger_refs key","evidence":"bill purpose and native allocation basis"},
-"tax_ledger":null}}],"findings":[],
-"unresolved":[{"source_file_id":"ID","reason":"why this input needs clarification"}]}.
+"tax_ledger":null}}],"exceptions":[],
+"unresolved":[{"source_file_id":"ID","code":"source_unreadable","reason":"why no candidate is possible"}]}.
 Omit company fields, master_refs and tax_allocations for Excel. master_refs is mandatory on every
 version-1 Tally record, including held candidates. Every selected input must have records or an
 unresolved explanation, including extraction failures. Append by default; edits
@@ -165,11 +184,11 @@ For a new supplier with no discovered ledger, retain a complete candidate record
 when the bill supports every mandatory value and the other ledgers are known.
 Set master_refs.vendor to {"ref":null,"new_supplier":true,"evidence":"searched candidates and why none matches"}
 and data.vendor to the supplier's evidenced printed name; retain valid selections
-for the other master roles. Mark the missing ledger in findings
-and unresolved, and hold the record. This enables an explicit native Create this
-ledger decision; it never authorizes creating masters or saving a voucher here.
+for the other master roles. Raise supplier_missing on that record, which holds
+it. This enables an explicit native Create this ledger decision; it never
+authorizes creating masters or saving a voucher here.
 An unresolved or ambiguous supplier is not a new supplier. Never set
 new_supplier:true for an uncertain match or merely because exact spelling differs.
-Likewise retain a complete supported low-confidence interpretation with findings
-for the Best guess write decision. Never invent missing amounts, dates, company
+Likewise retain a complete supported low-confidence interpretation with its
+coded exception for the Best guess write decision. Never invent missing amounts, dates, company
 identity or unsupported accounting fields merely to make a candidate complete.
