@@ -33,6 +33,13 @@ offline and unsupported items remain available for manual Done.
 
 Decisions name one bill. A file holding several invoices gets a decision per
 bill, and its attention item closes only when every bill from it is settled.
+Each bill input has one item per run and kind. Finalizing or re-aggregating a
+run only restates its holds, so an operator's Done survives a sibling's recheck.
+A new hold event reopens a Done item with its current reason: a destination
+refusal (including a Retry save refused again), a correction, an interrupted
+save, a save-time validation failure or a rechecked input. Stopping a batch
+opens items under the batch run only, including bills its children had read
+before aggregation; bills that were never read open none.
 Do nothing never writes, retains a source identifier in attention and permits
 other bills to continue. It is final for that run: the input is recorded as
 deferred data, not a run-level finding, so exception-only saves of its siblings

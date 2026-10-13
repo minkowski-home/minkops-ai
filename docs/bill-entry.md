@@ -283,3 +283,24 @@ values, Tally writes/readback, schema discovery, extraction into exact complex
 Excel headers, a native workbook save and repeated receipts. A provider rate
 limit interrupted the blank-image turn; explicit retry isolated that image and
 retained three verified sibling saves.
+
+### Scoring and replaying labelled fixture packages
+
+A fixture package holds `bills/*.pdf` and `evidence/expected-bills.json` with
+the expected outcome of every input. Select only `bills/` as inputs.
+`scripts/bill_entry_fixtures.py` grades a finished run per input as correct,
+an unnecessary hold, a wrong reason, a wrong save or a missed exception. The
+last two are critical and make the command exit nonzero. Use `--rerun` when
+the inputs were already saved and every create should now be a duplicate, and
+`--dry` for an All outputs run graded before saving. Educational Tally accepts
+only voucher dates on the 1st, 2nd and 31st; a correct bill held solely for its
+date passes.
+
+`replay` processes a launched run with the answers a correct agent returns,
+so everything after extraction is exercised on real documents without paid
+sessions. Stop the normal worker first; replay claims only the named run.
+
+```sh
+uv run --all-packages python scripts/bill_entry_fixtures.py replay RUN_ID packages/<package>
+uv run --all-packages python scripts/bill_entry_fixtures.py score RUN_ID packages/<package> [--dry|--rerun]
+```
