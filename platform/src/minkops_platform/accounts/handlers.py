@@ -69,6 +69,10 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             if not discovery_id:
                 raise ServiceError("invalid", "Confirm Tally source discovery first.")
             target = tally_target(connection, tenant, user, discovery_id)
+            from minkops_platform import desktop
+
+            desktop.require_companion(
+                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]))
             from minkops_platform.discovery import workflow_context
 
             source_context = workflow_context(

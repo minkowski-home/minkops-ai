@@ -110,8 +110,15 @@ Device = Annotated[dict, Depends(worker_device)]
 
 
 @router.post("/api/desktop/worker/claim")
-def claim(device: Device, connection: Db):
-    return call(desktop.claim, connection, device)
+def claim(
+    device: Device,
+    connection: Db,
+    version: Annotated[str | None, Header(alias="X-Minkops-Companion-Version", max_length=20)] = None,
+    host: Annotated[str | None, Header(alias="X-Minkops-Host", max_length=200)] = None,
+    session: Annotated[str | None, Header(alias="X-Minkops-Session", max_length=20)] = None,
+):
+    # Every poll reports the PC's companion; older releases report nothing.
+    return call(desktop.claim, connection, device, desktop.companion_report(version, host, session))
 
 
 @router.post(

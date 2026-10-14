@@ -124,7 +124,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=old, json={}).status_code, 401
         )
-        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"]}
+        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.7.0"}
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()[
                 "id"
@@ -223,7 +223,7 @@ class DesktopTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         self.device = response.json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"]}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
         self.worker_base = "/api/desktop/worker"
         return self.device
 
@@ -385,6 +385,34 @@ class DesktopTests(unittest.TestCase):
             },
         )
         self.assertEqual(late.status_code, 409, late.text)
+
+    def claim_as(self, headers):
+        return self.client.post(self.worker_base + "/claim", headers={"Authorization": self.worker["Authorization"], **headers}, json={})
+
+    def test_each_poll_records_the_companion_version_pc_and_session(self):
+        self.pair()
+        self.claim_as({"X-Minkops-Companion-Version": "0.7.0", "X-Minkops-Host": "PRAHLAD-GADHWAL",
+                       "X-Minkops-Session": "remote"})
+        [device] = self.client.get(self.base + "/devices").json()
+        self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
+                         ("0.7.0", "PRAHLAD-GADHWAL", True))
+        self.claim_as({"X-Minkops-Companion-Version": "not a version", "X-Minkops-Host": "x" * 81})
+        [device] = self.client.get(self.base + "/devices").json()
+        self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
+                         (None, None, None), "unreadable reports are never stored as facts")
+
+    def test_tally_work_waits_for_a_current_companion(self):
+        self.pair()
+        self.launch()  # A PC that has not polled yet: work waits for it.
+        self.claim_as({})  # Releases before 0.7.0 poll without reporting a version.
+        body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
+        outdated = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
+        self.assertEqual(outdated.status_code, 409, outdated.text)
+        self.assertIn("Update Minkops on Office PC to 0.7.0 or later", outdated.json()["detail"])
+        self.claim_as({"X-Minkops-Companion-Version": "0.6.10"})
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
+        self.claim_as({"X-Minkops-Companion-Version": "0.10.0"})
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
 
     def bundle(self, **extra):
         return {

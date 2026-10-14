@@ -211,6 +211,8 @@ def launch(connection, tenant, user, body):
     if previous:
         return detail(connection, previous)
     device = desktop.owned_device(connection, tenant["id"], user["id"], body["device_id"])
+    if config["tally"]:
+        desktop.require_companion(device)
     workflow = connection.execute(
         "SELECT * FROM workflows WHERE tenant_id=%s AND key='source-discovery' AND status='active'",
         (tenant["id"],),

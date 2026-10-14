@@ -153,7 +153,12 @@ function startWorker() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
-        "X-Minkops-Plan-Version": "2",
+        // Plan 3: open-company discovery and pinned purchase voucher types.
+        "X-Minkops-Plan-Version": "3",
+        // Each poll tells the console which PC and companion run the work.
+        "X-Minkops-Companion-Version": app.getVersion(),
+        "X-Minkops-Host": pcName().replace(/[^\x20-\x7e]/g, "?"),
+        "X-Minkops-Session": remoteSession() ? "remote" : "console",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

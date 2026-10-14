@@ -4,15 +4,7 @@ import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { desktopBridge, type DesktopStatus } from "./bridge";
 import { LoadingIndicator, RetryMessage } from "../components/Feedback";
-
-interface Device {
-  id: string;
-  name: string;
-  owner_id: string;
-  last_seen_at: string | null;
-  revoked_at: string | null;
-  expires_at: string;
-}
+import { companionNotice, type DestinationDevice as Device } from "./destinationPCs";
 
 export function DevicesScreen({
   tenant,
@@ -144,6 +136,8 @@ export function DevicesScreen({
                     ? "Open the desktop app to reconnect this PC."
                     : "Open Minkops on this PC. Queued work starts when it reconnects."}
               </p>
+              {device.companion_version && <p className="quiet-state">Minkops {device.companion_version}{device.hostname && device.hostname !== device.name ? ` · ${device.hostname}` : ""}</p>}
+              {companionNotice(device) && <p role="status" className="form-message">{companionNotice(device)}</p>}
               <button className="button button-primary" disabled={busy || expired}
                 aria-expanded={checking === device.id} aria-controls={`connections-${device.id}`}
                 onClick={() => setChecking(current => current === device.id ? null : device.id)}>Check connections</button>

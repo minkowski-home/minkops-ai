@@ -10,6 +10,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import secrets
 from uuid import UUID, uuid4
 
@@ -27,7 +28,7 @@ def _hash(value):
 
 def public_device(row):
     return {
-        key: row[key]
+        key: row.get(key)
         for key in (
             "id",
             "name",
@@ -36,8 +37,39 @@ def public_device(row):
             "last_seen_at",
             "expires_at",
             "revoked_at",
+            "companion_version",
+            "hostname",
+            "remote_session",
         )
     }
+
+
+# Tally work needs the open-company session contract and pinned voucher types.
+MINIMUM_COMPANION = (0, 7, 0)
+
+
+def companion_report(version, host, session):
+    """Normalize what a polling companion reports; unreadable values become unknown."""
+    version = version if isinstance(version, str) and re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,4}", version) else None
+    host = host.strip() if isinstance(host, str) and 1 <= len(host.strip()) <= 80 and host.isprintable() else None
+    return {"companion_version": version, "hostname": host,
+            "remote_session": {"remote": True, "console": False}.get(session)}
+
+
+def require_companion(device):
+    """Refuse Tally work an outdated companion would mishandle.
+
+    A PC that has never polled is allowed: work waits until it connects, and it
+    reports its version then. One that polls without a version predates 0.7.0.
+    """
+    if device["last_seen_at"] is None:
+        return
+    version = device.get("companion_version")
+    if version is None or tuple(int(part) for part in version.split(".")) < MINIMUM_COMPANION:
+        raise ServiceError(
+            "conflict",
+            f"Update Minkops on {device['name']} to {'.'.join(map(str, MINIMUM_COMPANION))} or later, then try again.",
+        )
 
 
 def register(connection, tenant, user, name, installation_id):
@@ -374,6 +406,8 @@ def launch(connection, tenant, user, body):
     operation, payload = body["operation"], body["input"]
     _validate_input(operation, payload)
     device = owned_device(connection, tenant["id"], user["id"], body["device_id"])
+    if operation.startswith("tally."):
+        require_companion(device)
     fingerprint, previous = resolve_request(
         connection,
         tenant["id"],
@@ -479,8 +513,13 @@ def job_detail(connection, tenant, user, job_id):
     return public_job(row)
 
 
-def claim(connection, device):
-    connection.execute("UPDATE desktop_devices SET last_seen_at=now() WHERE id=%s", (device["id"],))
+def claim(connection, device, report=None):
+    report = report or companion_report(None, None, None)
+    connection.execute(
+        """UPDATE desktop_devices SET last_seen_at=now(),companion_version=%s,hostname=%s,remote_session=%s
+        WHERE id=%s""",
+        (report["companion_version"], report["hostname"], report["remote_session"], device["id"]),
+    )
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
            (state='executing' AND operation NOT IN ('accounts.save','tally.save','attention.supplier') AND lease_until<now()))
@@ -539,6 +578,9 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
         return context_plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "sources.discover":
         from . import discovery
+
+        if plan_version < 3 and discovery.get_run(connection, device["tenant_id"], job["input"]["discovery_run_id"])["config"]["tally"]:
+            raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then run discovery again.")
 
         return discovery.plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "tally.save":

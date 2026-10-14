@@ -139,7 +139,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(offline.status_code, 409, offline.text)
         self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
             "name": "Bill PC", "installation_id": self.device["installation_id"]}).json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"]}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
         retried = self.decide(run, bill, "retry_save")
         self.assertEqual(retried["state"], "writing")
         self.save_receipt(retried, "MOCK-1")
@@ -656,7 +656,7 @@ class BillEntryTests(unittest.TestCase):
                 headers=self.csrf,
                 json={"name": "Bill PC", "installation_id": str(uuid.uuid4())},
             ).json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"]}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
         discovery = "/api/tenants/mock-tenant/discovery"
         categories = ["company", "ledgers", "voucher_types"]
         period = {"from": "2026-10-01", "to": "2026-10-31"}
@@ -1094,6 +1094,25 @@ class BillEntryTests(unittest.TestCase):
         )
         repeated = next(r for r in done["result"]["records"] if r["status"] == "duplicate")
         self.assertEqual((repeated["findings"], repeated["notes"]), ([], ["Repeated bill in this batch was skipped."]))
+
+    def test_tally_discovery_plan_is_never_given_to_an_older_companion(self):
+        self.native = "/api/tenants/mock-tenant/desktop"
+        self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
+            "name": "Old PC", "installation_id": str(uuid.uuid4())}).json()
+        worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        launched = self.client.post("/api/tenants/mock-tenant/discovery/runs", headers=self.csrf, json={
+            "device_id": self.device["id"], "request_key": str(uuid.uuid4()),
+            "config": {"depth": "client_context", "excel_source_ids": [],
+                       "tally": {"port": 9000, "period": {"from": "2026-10-01", "to": "2026-10-31"}}}})
+        self.assertEqual(launched.status_code, 202, launched.text)
+        claim = self.client.post("/api/desktop/worker/claim", headers=worker, json={}).json()
+        route = f"/api/desktop/worker/jobs/{claim['id']}/plan?claim_token={claim['claim_token']}"
+        old = self.client.get(route, headers={**worker, "X-Minkops-Plan-Version": "2"})
+        self.assertEqual(old.status_code, 409, old.text)
+        self.assertIn("Update Minkops", old.json()["detail"])
+        current = self.client.get(route, headers={**worker, "X-Minkops-Plan-Version": "3"})
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json()["sources"][0]["label"], "Companies open in Tally")
 
     def test_purchase_voucher_type_comes_from_discovery_not_a_fixed_name(self):
         """A practice that books purchases only under its own type can enter bills."""
