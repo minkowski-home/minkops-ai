@@ -150,8 +150,19 @@ route, with smaller limits elsewhere. Services/native adapters enforce 100
 supported files, 5 MB per file, 30 MB per snapshot and folder containment.
 Production distribution needs the organization's Windows signing certificate;
 without one, builds are unsigned release candidates. The packaged profile uses
-`https://app.minkops.com`; release notes must disclose the unsigned status. No
-automatic updater is introduced.
+`https://app.minkops.com`; release notes must disclose the unsigned status.
+
+From 0.7.0, packaged companions update themselves from the generic feed at
+`https://minkops.com/downloads/` (electron-updater). `npm run package:win` writes
+`release/Minkops-Setup-<version>.exe`, its `.blockmap` and `latest.yml`. Update
+`apps/corporate-website/frontend/src/content/windows-release.json`, then run
+`infra/deploy_hosting.py corporate --installer release/Minkops-Setup-<version>.exe`;
+it refuses a feed whose version, file name or SHA-512 differs from the reviewed
+installer and publishes all three files together. Updates download in the
+background (blockmap differential downloads) and install on quit, or once the
+companion is idle: no claimed job, no unsent receipt and no focused window.
+Downloads are SHA-512 verified; until the installer is code-signed, first installs
+still show SmartScreen.
 
 Run `npm ci` in this app before building a release. Its `.npmrc` packages the two
 local modules rather than depending on Windows junction traversal, and this

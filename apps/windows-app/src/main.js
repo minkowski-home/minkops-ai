@@ -45,6 +45,8 @@ import {
 } from "@minkops/desktop-connectors";
 import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
+import electronUpdater from "electron-updater";
+import { startUpdates } from "./updater.js";
 import {
   trustedOrigin,
   validateSender,
@@ -72,6 +74,7 @@ let state = {
   pending: null,
 };
 const pendingGrants = new Map();
+let update = null;
 // Support evidence kept in memory: the latest diagnostic per running job and
 // a short history of outcomes for Send diagnostics. Never bill contents.
 const jobDiagnostics = new Map();
@@ -489,6 +492,7 @@ function setupBridge() {
   handle("desktop:status", async () => ({
     discovery_archive_error: state.discovery_archive_error ?? null,
     version: app.getVersion(),
+    update,
     name: hostname(),
     device: state.device
       ? {
@@ -790,6 +794,15 @@ else {
       );
       tray.on("double-click", openConsole);
       startWorker();
+      startUpdates({
+        updater: electronUpdater.autoUpdater,
+        isPackaged: app.isPackaged && !localDemo,
+        // Never restart over a claimed job, an unsent receipt or an active user.
+        isIdle: () => !worker?.busy && !state.pending && !window?.isFocused(),
+        onState: (value) => {
+          update = value;
+        },
+      });
       openConsole();
     })
     .catch(() => {

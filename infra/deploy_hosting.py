@@ -5,9 +5,11 @@ build directory is uploaded; symlinks and hidden files are rejected or excluded.
 """
 
 import argparse
+import base64
 import gzip
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -27,6 +29,22 @@ def serving_config(configuration):
     return {"headers": headers, "rewrites": rewrites}
 
 
+def verified_feed(installer, manifest):
+    """The companion's update feed (electron-builder latest.yml) must describe
+    exactly the reviewed installer: its version, file name and SHA-512."""
+    feed = installer.with_name("latest.yml")
+    blockmap = installer.with_name(installer.name + ".blockmap")
+    for path in (feed, blockmap):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"Missing update feed file {path.name} next to the installer")
+    fields = dict(re.findall(r"^(version|path|sha512):\s*'?([^'\n]+?)'?\s*$", feed.read_text(), re.MULTILINE))
+    with installer.open("rb") as stream:
+        sha512 = base64.b64encode(hashlib.file_digest(stream, "sha512").digest()).decode()
+    if fields != {"version": manifest["version"], "path": manifest["filename"], "sha512": sha512}:
+        raise RuntimeError("The update feed does not match the reviewed installer")
+    return feed, blockmap
+
+
 def deploy(target, installer=None):
     configuration_path = Path(__file__).with_name("firebase.json")
     configuration = next(item for item in json.loads(configuration_path.read_text())["hosting"] if item["target"] == target)
@@ -44,9 +62,14 @@ def deploy(target, installer=None):
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         if source.stat().st_size != manifest["bytes"] or digest != manifest["sha256"]:
             raise RuntimeError("Installer does not match the checked-in release manifest")
+        # Installed companions update from this feed, so it ships with every release.
+        feed, blockmap = verified_feed(source, manifest)
         destination.parent.mkdir(exist_ok=True)
         if source.resolve() != destination.resolve():
             shutil.copyfile(source, destination)
+        for path in (feed, blockmap):
+            if path.resolve() != (destination.parent / path.name).resolve():
+                shutil.copyfile(path, destination.parent / path.name)
         destination.with_suffix(".exe.sha256").write_text(f"{manifest['sha256']}  {manifest['filename']}\n")
     files, uploads = {}, {}
     for file in directory.rglob("*"):
