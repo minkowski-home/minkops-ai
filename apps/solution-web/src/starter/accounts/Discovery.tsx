@@ -9,7 +9,7 @@ import { CatalogReview } from "./CatalogReview";
 import { desktopBridge } from "../desktop/bridge";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { Spinner } from "../components/Feedback";
-import { canConfirm, discoveryProgress, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
+import { canConfirm, discoveryProgress, scopeChangeLines, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
 import { DiscoveryResults } from "./DiscoveryResults";
 
 import { DestinationPCPicker } from '../desktop/DestinationPC';
@@ -222,6 +222,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
             : pending ? run.catalog ? "Checking client context and workbook mappings before review." : "You can leave this page and return. Collection continues on your PC."
               : run.state === "failed" ? "Check source access on your PC, then run discovery again." : "Check the collected counts and mappings, then confirm."}</p></header>
       {run.catalog?.sources.map(source => source.snapshot?.scope_error && <p role="alert" className="form-message" key={source.key}>{source.snapshot.scope_error}</p>)}
+      {scopeChangeLines(run).map(line => <p role="status" className="quiet-state" key={line}>{line}</p>)}
       {run.catalog?.context_error && <p role="alert" className="form-message">{run.catalog.context_error}</p>}
       {run.analysis_failed && <p className="quiet-state">AI context analysis was unavailable. Confirm the collected Tally sources without context notes, or run discovery again.</p>}
       {run.catalog && run.config.ai_context === false && <p className="quiet-state">AI analysis is off. Review the collected sources{run.config.excel_source_ids.length ? "; Excel structure is saved without entry mappings" : ""}.</p>}

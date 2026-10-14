@@ -1114,6 +1114,19 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(current.status_code, 200, current.text)
         self.assertEqual(current.json()["sources"][0]["label"], "Companies open in Tally")
 
+    def test_discovery_review_names_companies_added_or_no_longer_open(self):
+        first = self.tally_discovery("alpha-guid")
+        detail = lambda run: self.client.get(f"/api/tenants/mock-tenant/discovery/runs/{run}").json()
+        self.assertIsNone(detail(first)["scope_changes"], "a first discovery has nothing to compare")
+        wider = self.tally_discovery("alpha-guid", multiple=True, reuse_device=True)
+        self.assertEqual(detail(wider)["scope_changes"], {
+            "added": [{"company": "Beta", "company_guid": "beta-guid"}], "removed": []})
+        narrower = self.tally_discovery("alpha-guid", reuse_device=True)
+        self.assertEqual(detail(narrower)["scope_changes"], {
+            "added": [], "removed": [{"company": "Beta", "company_guid": "beta-guid"}]})
+        self.assertEqual(detail(wider)["scope_changes"]["added"][0]["company"], "Beta",
+                         "each run compares with the confirmation before it")
+
     def test_purchase_voucher_type_comes_from_discovery_not_a_fixed_name(self):
         """A practice that books purchases only under its own type can enter bills."""
         did = self.tally_discovery(voucher_types=(

@@ -276,6 +276,7 @@ def test_master_index_locations_survive_file_chunk_boundaries():
 def test_detail_summary_does_not_change_stored_catalog(monkeypatch):
     from minkops_platform.discovery import detail
     monkeypatch.setattr("minkops_platform.discovery.control_state", lambda *args: "active")
+    monkeypatch.setattr("minkops_platform.discovery.scope_changes", lambda *args: None)
 
     value = snapshot()
     catalog = {"sources": [{"tool": "tally", "snapshot": value}], "partial": False}
@@ -285,6 +286,8 @@ def test_detail_summary_does_not_change_stored_catalog(monkeypatch):
     result = detail(None, row)
     assert catalog == original
     assert result["catalog"]["sources"][0]["snapshot"]["companies"][0]["master_summary"]["unique_count"] == 2
+    offered = result["catalog"]["sources"][0]["snapshot"]["companies"][0]["purchase_voucher_types"]
+    assert [c["name"] for c in offered["candidates"]] == ["Purchase"]
 
 
 def test_unknown_lookup_version_and_conflicting_write_references_are_rejected():

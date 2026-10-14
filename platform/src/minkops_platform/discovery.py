@@ -140,12 +140,43 @@ def detail(connection, row, *, include_records=True):
         "state": state,
         "control_state": control,
         "catalog": catalog,
+        "scope_changes": scope_changes(connection, row),
         "mapping_run": mapping,
         "analysis_failed": analysis_failed,
         "ready": state == "completed" and bool(row["confirmed_at"]) and not catalog["partial"]
         if catalog
         else False,
     }
+
+
+def _tally_companies(catalog):
+    return {c["company_guid"]: c["company"]
+            for source in (catalog or {}).get("sources", []) if source["tool"] == "tally"
+            for c in source.get("snapshot", {}).get("companies", []) if c.get("company_guid")}
+
+
+def scope_changes(connection, row):
+    """Companies added or no longer open since the confirmation before this run.
+
+    Discovery reads only the companies open in Tally, so a smaller scope is a
+    user's choice, shown at review rather than treated as missing evidence.
+    Bill Entry can then route only to companies in the confirmed scope.
+    """
+    current = _tally_companies(row["catalog"])
+    if not current:
+        return None
+    previous = connection.execute(
+        """SELECT catalog FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s
+        AND confirmed_at IS NOT NULL AND id<>%s AND created_at<%s ORDER BY created_at DESC LIMIT 1""",
+        (row["tenant_id"], row["actor_id"], row["device_id"], row["id"], row["created_at"]),
+    ).fetchone()
+    if not previous:
+        return None
+    before = _tally_companies(previous["catalog"])
+    listed = lambda guids, names: sorted(
+        ({"company": names[g], "company_guid": g} for g in guids), key=lambda c: c["company"])
+    return {"added": listed(current.keys() - before.keys(), current),
+            "removed": listed(before.keys() - current.keys(), before)}
 
 
 def _observe(connection, row, state, summary, progress):
