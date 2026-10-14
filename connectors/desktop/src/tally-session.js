@@ -7,6 +7,8 @@
  * bill saves can never disagree about the same session.
  */
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { boundedText } from "./index.js";
 
@@ -316,4 +318,26 @@ export async function tallyProcesses() {
 }
 export async function tallyCrashEvents() {
   return powershell(EVENTS).catch(() => []);
+}
+
+// Settings that explain connection and folder problems; nothing else leaves the PC.
+const INI_KEYS = ["Tally Gateway Server", "User TDL", "Default Companies", "Load", "Data",
+  "Client Server", "ServerPort", "Enable ODBC Server"];
+export function parseTallyIni(text) {
+  const settings = {};
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = line.match(/^\s*([^;=][^=]*?)\s*=\s*(.*?)\s*$/);
+    const key = match && INI_KEYS.find((k) => k.toLowerCase() === match[1].toLowerCase());
+    if (key) settings[key] = match[2].slice(0, 300);
+  }
+  return settings;
+}
+/** Read next to the running executable only; Minkops never searches for Tally. */
+export async function readTallyIni(exe, { read = readFile } = {}) {
+  if (typeof exe !== "string" || !exe) return null;
+  try {
+    return parseTallyIni(await read(join(dirname(exe), "tally.ini"), "utf8"));
+  } catch {
+    return null;
+  }
 }

@@ -278,3 +278,20 @@ test("a read that succeeds after a retry returns the response body", async () =>
   });
   assert.equal(await (await transport("http://127.0.0.1:9000", read)).text(), "<ENVELOPE/>");
 });
+
+test("only whitelisted tally.ini settings are read for diagnostics", async () => {
+  const { parseTallyIni, readTallyIni } = await import("../src/tally-session.js");
+  const ini = [
+    ";;TallyPrime workstation specific parameters file", "[TALLY]",
+    "Tally Gateway Server=PRAHLAD-GADHWAL:9999", "User TDL=Yes", "Default Companies=Yes", "Load=100000",
+    "Data=D:\\TALLY PRIME\\SACHIN INFRA ORIGINAL DATA", "Client Server=None", "ServerPort=9000",
+    "Enable ODBC Server=Yes", "LicTimeout=", "Tally Gold License Server=secret-host", "Export Path=F:\\PRAHLAD\\BLR",
+  ].join("\r\n");
+  assert.deepEqual(parseTallyIni(ini), {
+    "Tally Gateway Server": "PRAHLAD-GADHWAL:9999", "User TDL": "Yes", "Default Companies": "Yes", Load: "100000",
+    Data: "D:\\TALLY PRIME\\SACHIN INFRA ORIGINAL DATA", "Client Server": "None", ServerPort: "9000",
+    "Enable ODBC Server": "Yes",
+  });
+  assert.equal(await readTallyIni(null), null);
+  assert.equal(await readTallyIni("C:\\missing\\tally.exe", { read: async () => { throw new Error("ENOENT"); } }), null);
+});

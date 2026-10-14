@@ -13,6 +13,7 @@ import json
 import secrets
 from uuid import UUID, uuid4
 
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
 from .accounts import service as accounts
@@ -107,6 +108,36 @@ def revoke(connection, tenant, user, device_id):
             0,
         )
     return {"message": "PC disconnected."}
+
+
+# Crockford base32: references are read aloud, so no I, L, O or U.
+REFERENCE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+DIAGNOSTIC_SECTIONS = {"collected_at", "companion", "windows", "tally", "jobs", "records"}
+
+
+def _store_diagnostic(connection, device, payload, *, kind, job_id=None):
+    connection.execute("DELETE FROM desktop_diagnostics WHERE created_at < now() - interval '30 days'")
+    for _ in range(5):
+        reference = "D-" + "".join(secrets.choice(REFERENCE_ALPHABET) for _ in range(6))
+        try:
+            with connection.transaction():
+                connection.execute(
+                    """INSERT INTO desktop_diagnostics(tenant_id,device_id,job_id,kind,reference,payload)
+                    VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (device["tenant_id"], device["id"], job_id, kind, reference, Jsonb(payload)),
+                )
+            return reference
+        except UniqueViolation:
+            continue
+    raise ServiceError("conflict", "Could not store diagnostics. Try again.")
+
+
+def send_diagnostics(connection, device, payload):
+    """Store a support bundle the user chose to send; returns a reference to read out."""
+    if (not isinstance(payload, dict) or not payload or set(payload) - DIAGNOSTIC_SECTIONS
+            or len(json.dumps(payload).encode()) > 64_000):
+        raise ServiceError("invalid", "Diagnostics must be a bounded technical summary.")
+    return {"reference": _store_diagnostic(connection, device, payload, kind="requested")}
 
 
 def public_job(row):
@@ -571,6 +602,13 @@ def finish(connection, device, job_id, receipt):
         if job["receipt_hash"] != fingerprint:
             raise ServiceError("conflict", "This task already has a different result.")
         return public_job(job)
+    diagnostic = receipt.get("diagnostic")
+    if isinstance(diagnostic, dict) and diagnostic:
+        # Evidence must never cost the user their receipt: an oversized one is
+        # recorded as truncated rather than rejected.
+        if len(json.dumps(diagnostic).encode()) > 16_000:
+            diagnostic = {"truncated": True}
+        _store_diagnostic(connection, device, diagnostic, kind="job", job_id=job["id"])
     if job["state"] != "executing" and not (
         job["operation"] in ("accounts.save", "tally.save")
         and job["error"] == "Save interrupted; retry requested."

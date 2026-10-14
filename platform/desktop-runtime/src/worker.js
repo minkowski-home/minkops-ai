@@ -6,6 +6,7 @@ export class CompanionWorker {
     pending,
     savePending,
     acknowledge = async () => {},
+    diagnosticFor = () => null,
   }) {
     Object.assign(this, {
       request,
@@ -13,6 +14,7 @@ export class CompanionWorker {
       pending,
       savePending,
       acknowledge,
+      diagnosticFor,
     });
     this.busy = false;
   }
@@ -49,6 +51,12 @@ export class CompanionWorker {
                   : "The connected folder could not be read. Reconnect it and try again.",
           };
         }
+        // Evidence collected while the job ran (for example a classified Tally
+        // failure) is sent with the receipt so support never needs the PC.
+        const diagnostic = await Promise.resolve()
+          .then(() => this.diagnosticFor(job, receipt))
+          .catch(() => null);
+        if (diagnostic) receipt.diagnostic = diagnostic;
         pending = { id: job.id, receipt };
         await this.savePending(pending);
       }

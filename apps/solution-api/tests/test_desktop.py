@@ -386,6 +386,66 @@ class DesktopTests(unittest.TestCase):
         )
         self.assertEqual(late.status_code, 409, late.text)
 
+    def bundle(self, **extra):
+        return {
+            "collected_at": "2026-10-14T07:47:18.907Z",
+            "companion": {"version": "0.7.0"},
+            "windows": {"hostname": "PRAHLAD-GADHWAL", "remote_session": False},
+            "tally": {"session": {"state": "not_running"}, "processes": []},
+            **extra,
+        }
+
+    def stored_diagnostics(self):
+        with psycopg.connect(URL) as c:
+            return c.execute(
+                "SELECT reference,kind,job_id,payload FROM desktop_diagnostics WHERE device_id=%s ORDER BY created_at",
+                (self.device["id"],),
+            ).fetchall()
+
+    def test_send_diagnostics_stores_a_bounded_bundle_and_returns_a_reference(self):
+        self.pair()
+        route = self.worker_base + "/diagnostics"
+        sent = self.client.post(route, headers=self.worker, json=self.bundle())
+        self.assertEqual(sent.status_code, 201, sent.text)
+        self.assertRegex(sent.json()["reference"], r"^D-[0-9A-HJKMNP-TV-Z]{6}$")
+        [(reference, kind, job_id, payload)] = self.stored_diagnostics()
+        self.assertEqual((reference, kind, job_id), (sent.json()["reference"], "requested", None))
+        self.assertEqual(payload["windows"]["hostname"], "PRAHLAD-GADHWAL")
+        for invalid in (self.bundle(bills=["private"]), self.bundle(tally={"x": "y" * 70_000}), []):
+            self.assertEqual(self.client.post(route, headers=self.worker, json=invalid).status_code, 422)
+        self.assertEqual(self.client.post(route, json=self.bundle()).status_code, 401)
+
+    def test_diagnostics_older_than_thirty_days_are_removed(self):
+        self.pair()
+        route = self.worker_base + "/diagnostics"
+        self.client.post(route, headers=self.worker, json=self.bundle())
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE desktop_diagnostics SET created_at=now()-interval '31 days' WHERE device_id=%s",
+                      (self.device["id"],))
+        self.client.post(route, headers=self.worker, json=self.bundle())
+        self.assertEqual(len(self.stored_diagnostics()), 1)
+
+    def test_a_failed_job_keeps_its_diagnostic_without_blocking_the_receipt(self):
+        self.pair()
+        for diagnostic, expected in (
+            ({"state": "not_running", "cause": "ECONNREFUSED", "elapsed_ms": 4}, "not_running"),
+            ({"state": "busy", "error": "x" * 20_000}, None),
+        ):
+            job, _ = self.launch()
+            claim = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+            receipt = {"claim_token": claim["claim_token"], "error": "Tally isn't open on PC1.",
+                       "diagnostic": diagnostic}
+            route = self.worker_base + f"/jobs/{job['id']}/finish"
+            for _ in range(2):  # a replayed receipt stores nothing twice
+                self.assertEqual(self.client.post(route, headers=self.worker, json=receipt).status_code, 200)
+            stored = [row for row in self.stored_diagnostics() if str(row[2]) == job["id"]]
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0][1], "job")
+            if expected:
+                self.assertEqual(stored[0][3]["state"], expected)
+            else:
+                self.assertEqual(stored[0][3], {"truncated": True})
+
     def test_error_finishes_as_failure_without_fake_completion(self):
         self.pair()
         job, _ = self.launch()

@@ -28,6 +28,7 @@ export function DevicesScreen({
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [diagnostics, setDiagnostics] = useState("");
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
   const refresh = useCallback(async () => {
     const [loaded, status] = await Promise.all([
@@ -105,6 +106,14 @@ export function DevicesScreen({
           >
             {connected ? "Disconnect this PC" : "Connect this PC"}
           </button>
+          {desktopBridge()?.sendDiagnostics && <button className="button button-ghost" disabled={busy}
+            onClick={() => void action(async () => {
+              const sent = await desktopBridge()!.sendDiagnostics!();
+              setDiagnostics(sent.reference
+                ? `Diagnostics sent. Reference ${sent.reference}.`
+                : "Minkops could not be reached, so the diagnostics were copied. Paste them to your Minkops contact.");
+            })}>Send diagnostics</button>}
+          {diagnostics && <p role="status">{diagnostics}</p>}
         </article>
       ) : (
         <p className="quiet-state">

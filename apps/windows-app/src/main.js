@@ -10,8 +10,9 @@ import {
   net,
   dialog,
   shell,
+  clipboard,
 } from "electron";
-import { hostname } from "node:os";
+import { hostname, release } from "node:os";
 import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import {
@@ -21,6 +22,8 @@ import {
   realpath,
   unlink,
   mkdir,
+  readdir,
+  stat,
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -33,6 +36,8 @@ import {
   discoverClientContext,
   saveDiscoveryPackage,
   tallyTransport,
+  tallyProcesses,
+  readTallyIni,
   inspectTallyAttention,
   tallyCrashEvents,
   saveTallyBill,
@@ -67,6 +72,12 @@ let state = {
   pending: null,
 };
 const pendingGrants = new Map();
+// Support evidence kept in memory: the latest diagnostic per running job and
+// a short history of outcomes for Send diagnostics. Never bill contents.
+const jobDiagnostics = new Map();
+const recentJobs = [];
+const pcName = () => hostname().slice(0, 80);
+const remoteSession = () => /^RDP-/i.test(process.env.SESSIONNAME ?? "");
 let persistence = Promise.resolve();
 const uuid = (value) =>
   typeof value === "string" &&
@@ -160,7 +171,7 @@ function startWorker() {
       if (state.device !== identity) throw new Error("PC connection changed.");
       // Minkops never starts, closes or restarts Tally; failures become typed
       // states naming this PC, and each one leaves a local diagnostic record.
-      const pc = hostname().slice(0, 80);
+      const pc = pcName();
       const tallyRequest = tallyTransport({
         pc,
         diagnose: async (diagnostic) => {
@@ -177,6 +188,13 @@ function startWorker() {
             JSON.stringify(record, null, 2),
             { mode: 0o600 },
           );
+          jobDiagnostics.set(job.id, {
+            ...diagnostic,
+            windows_events: (record.windows_events ?? []).slice(0, 3).map((event) => ({
+              ...event,
+              Message: String(event.Message ?? "").slice(0, 500),
+            })),
+          });
         },
       });
       if (
@@ -284,6 +302,19 @@ function startWorker() {
       );
       return { content: saved.toString("base64") };
     },
+    diagnosticFor: (job, receipt) => {
+      recentJobs.unshift({
+        id: job.id,
+        operation: job.operation,
+        outcome: receipt.error ? "failed" : "completed",
+        ...(receipt.error ? { error: receipt.error } : {}),
+        at: new Date().toISOString(),
+      });
+      recentJobs.length = Math.min(recentJobs.length, 20);
+      const diagnostic = jobDiagnostics.get(job.id) ?? null;
+      jobDiagnostics.delete(job.id);
+      return diagnostic;
+    },
     pending: () => state.pending,
     savePending: async (pending) => {
       if (state.device === identity) {
@@ -342,6 +373,80 @@ function startWorker() {
   tick();
 }
 
+/** A technical summary for support: versions, this PC, the Tally session and
+ * recent outcomes. Never bill data, file contents, XML or credentials. */
+async function collectDiagnostics() {
+  const pc = pcName();
+  const processes = await tallyProcesses().catch(() => null);
+  let session;
+  try {
+    const ready = await checkTally({ pc, retries: 0 });
+    session = { state: "ready", companies: ready.companies, warnings: ready.warnings.map((w) => w.state) };
+  } catch (error) {
+    session = { state: error.tallyState ?? "error", message: String(error.message).slice(0, 300), cause: error.detail?.cause };
+  }
+  const folder = join(app.getPath("userData"), "tally-diagnostics");
+  const records = [];
+  try {
+    const files = await Promise.all(
+      (await readdir(folder)).filter((name) => name.endsWith(".json")).map(async (name) => ({
+        name, modified: (await stat(join(folder, name))).mtimeMs,
+      })),
+    );
+    for (const file of files.sort((a, b) => b.modified - a.modified).slice(0, 5))
+      records.push(JSON.parse((await readFile(join(folder, file.name), "utf8")).slice(0, 4000)));
+  } catch {
+    /* No local records yet, or one is unreadable; send the rest. */
+  }
+  return {
+    collected_at: new Date().toISOString(),
+    companion: { version: app.getVersion(), plan_version: 3, connected: Boolean(state.device) },
+    windows: { hostname: pc, release: release(), remote_session: remoteSession() },
+    tally: {
+      session,
+      processes: processes?.map(({ product, version, session: windowsSession }) => ({ product, version, session: windowsSession })) ?? null,
+      settings: await readTallyIni(processes?.[0]?.exe),
+    },
+    jobs: recentJobs,
+    records: records.filter(Boolean),
+  };
+}
+
+/** Send to Minkops when connected; otherwise copy, so the user can paste it. */
+async function sendDiagnostics() {
+  const bundle = await collectDiagnostics();
+  const identity = state.device;
+  if (identity) {
+    try {
+      const response = await fetch(origin + "/api/desktop/worker/diagnostics", {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(30000),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${identity.credential}` },
+        body: JSON.stringify(bundle),
+      });
+      if (response.ok) return { reference: (await response.json()).reference };
+    } catch {
+      /* Offline: fall back to the clipboard below. */
+    }
+  }
+  clipboard.writeText(JSON.stringify(bundle, null, 2));
+  return { copied: true };
+}
+
+async function sendDiagnosticsFromTray() {
+  const sent = await sendDiagnostics().catch(() => null);
+  await dialog.showMessageBox({
+    type: sent ? "info" : "warning",
+    title: "Minkops diagnostics",
+    message: sent?.reference
+      ? `Diagnostics sent. Reference: ${sent.reference}`
+      : sent?.copied
+        ? "Minkops could not be reached, so the diagnostics were copied. Paste them to your Minkops contact."
+        : "Diagnostics could not be collected. Restart Minkops and try again.",
+  });
+}
+
 function handle(channel, operation) {
   ipcMain.handle(channel, async (event, payload) => {
     validateSender(event, window, origin);
@@ -372,6 +477,7 @@ function setupBridge() {
     await saveCatalogSnapshot(selected.filePath, catalog);
     return true;
   });
+  handle("desktop:send-diagnostics", () => sendDiagnostics());
   handle("desktop:tally-diagnostics", async () => {
     await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
   });
@@ -665,6 +771,7 @@ else {
       tray.setContextMenu(
         Menu.buildFromTemplate([
           { label: "Open Minkops", click: openConsole },
+          { label: "Send diagnostics", click: () => void sendDiagnosticsFromTray() },
           {
             label: "Reconnect to Minkops",
             click: () => {

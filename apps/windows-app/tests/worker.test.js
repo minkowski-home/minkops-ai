@@ -328,3 +328,23 @@ test("a typed Tally failure names its action on the Tally source", async () => {
   assert.equal(result.sources[0].status, "unavailable");
   assert.equal(result.sources[0].error, typed.message);
 });
+
+test("a job's local diagnostic travels with its receipt, success or failure", async () => {
+  for (const execute of [async () => ({ available: true, companies: [] }), async () => { throw new Error("x"); }]) {
+    let pending;
+    const finished = [];
+    const worker = new CompanionWorker({
+      request: async (path, body) => {
+        if (path.endsWith("/claim")) return { id: "job-1", operation: "tally.probe", input: {}, claim_token: "claim" };
+        finished.push(body);
+        return {};
+      },
+      execute,
+      diagnosticFor: (job) => (job.id === "job-1" ? { state: "busy", cause: "TimeoutError" } : null),
+      pending: () => pending,
+      savePending: async (value) => { pending = value; },
+    });
+    await worker.tick();
+    assert.deepEqual(finished[0].diagnostic, { state: "busy", cause: "TimeoutError" });
+  }
+});
