@@ -42,3 +42,15 @@ def test_invalid_measurements_are_rejected_before_any_update(monkeypatch, measur
     with pytest.raises(ServiceError, match="progress"):
         discovery.progress(connection, {"tenant_id": "tenant"}, {"id": "job", "input": {"discovery_run_id": "run"}}, {"source_key": "tally", "status": "reading", "progress": measurement})
     assert not connection.calls
+
+
+def test_status_summaries_are_readable_text(monkeypatch):
+    """Progress summaries reach users verbatim; mis-encoded literals must not ship."""
+    row = {"id": "run", "observations": []}
+    observed = []
+    monkeypatch.setattr(discovery, "get_run", lambda *args: row)
+    monkeypatch.setattr(discovery, "plan", lambda *args: {"sources": [{"key": "tally"}]})
+    monkeypatch.setattr(discovery, "_observe", lambda connection, row, state, summary, progress: observed.append(summary))
+    discovery.progress(Connection(), {"tenant_id": "tenant"}, {"id": "job", "input": {"discovery_run_id": "run"}},
+                       {"source_key": "tally", "status": "reading"})
+    assert observed == ["Tally: Reading your selected source…"]

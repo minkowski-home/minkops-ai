@@ -361,7 +361,7 @@ def progress(connection, device, job, body):
             "executing",
             f"{label}: "
             + {
-                "reading": "Reading your selected sourceâ€¦",
+                "reading": "Reading your selected source…",
                 "ready": "Source collected.",
                 "unavailable": "Needs attention; continuing with other sources.",
             }[body["status"]],
