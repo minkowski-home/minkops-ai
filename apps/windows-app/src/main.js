@@ -210,8 +210,16 @@ function startWorker() {
         !Object.keys(job.input || {}).length
       ) {
         // Check connection uses the same read-only check as discovery and saves.
-        const ready = await checkTally({ pc });
-        return { available: true, companies: ready.companies.map((c) => c.company) };
+        try {
+          const ready = await checkTally({ pc });
+          return { available: true, companies: ready.companies.map((c) => c.company) };
+        } catch (error) {
+          jobDiagnostics.set(job.id, {
+            state: error.tallyState ?? "error", cause: error.detail?.cause,
+            running: error.detail?.running, error: String(error.message).slice(0, 300),
+          });
+          throw error;
+        }
       }
       const grantFor = (sourceId) =>
         binding(identity.tenant, sourceId, { id: identity.owner_id });
@@ -282,7 +290,11 @@ function startWorker() {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        return saveTallyBill(plan, { request: tallyRequest, pc });
+        return saveTallyBill(plan, {
+          request: tallyRequest,
+          pc,
+          diagnose: (record) => jobDiagnostics.set(job.id, record),
+        });
       }
       if (job.operation !== "accounts.save")
         throw new Error("Unsupported local operation.");

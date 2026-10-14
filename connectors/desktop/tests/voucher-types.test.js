@@ -173,8 +173,10 @@ function withOpen(io, companies) {
 
 test("a bill waits, unwritten, until its company is open in Tally", async () => {
   const io = tally({ types: [...PREDEFINED, type("Purchase GST")] });
-  const result = await saveTallyBill(plan(GST), session(withOpen(io, [["Other", "other-guid"]])));
+  const evidence = [];
+  const result = await saveTallyBill(plan(GST), { ...session(withOpen(io, [["Other", "other-guid"]])), diagnose: (d) => evidence.push(d) });
   assert.deepEqual(result, { outcome: "attention", hold: "company_not_open", message: "Open Test in Tally on PC1, then try again." });
+  assert.equal(evidence[0].state, "company_not_open");
   assert.equal(io.imports().length, 0);
 });
 

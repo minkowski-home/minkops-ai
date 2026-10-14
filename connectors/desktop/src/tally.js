@@ -433,8 +433,12 @@ export function classifyRejection(reason) {
  * (and be the discovered one), then commit; an unacknowledged write is
  * reconciled once and never resent. Session problems become holds that a
  * Retry save clears once Tally is ready. */
-export async function saveTallyBill(plan, { request = fetch, sessionRequest = fetch, processes, pc, wait } = {}) {
-  const hold = (error) => ({ outcome: "attention", hold: error.tallyState, message: error.message });
+export async function saveTallyBill(plan, { request = fetch, sessionRequest = fetch, processes, pc, wait, diagnose = () => {} } = {}) {
+  const hold = (error) => {
+    // Session checks bypass the transport, so record their evidence here.
+    diagnose({ state: error.tallyState, cause: error.detail?.cause, running: error.detail?.running, error: error.message });
+    return { outcome: "attention", hold: error.tallyState, message: error.message };
+  };
   try {
     await requireOpenCompany(
       { company: plan.company, company_guid: plan.references?.company_guid },
