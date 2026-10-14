@@ -21,6 +21,8 @@ const plan = {
   operation: "append",
   expected: null,
 };
+// The live voucher-type read that precedes every referenced write.
+const purchaseTypes = () => exportReply(['<VOUCHERTYPE NAME="Purchase" RESERVEDNAME="Purchase"><GUID>purchase-guid</GUID></VOUCHERTYPE>']);
 const exportReply = (vouchers = []) =>
   `<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${vouchers.join("")}</COLLECTION></DATA></BODY></ENVELOPE>`;
 const voucher = (amount = 118) =>
@@ -58,14 +60,14 @@ test("split tax rechecks each master, imports separate lines and verifies all am
   const names=['Supplier','Purchases','CGST','SGST'];
   const references={company_guid:'company-guid',ledgers:Object.fromEntries(names.map(name=>[name,{GUID:name+'-guid',PARENT:'Group',ALTERID:'12'}]))};
   const refs=[exportReply(['<COMPANY NAME="Test"><GUID>company-guid</GUID></COMPANY>']),exportReply(['<COMPANY NAME="Test"><GUID>company-guid</GUID></COMPANY>']),
-    exportReply(names.map(name=>`<LEDGER NAME="${name}"><GUID>${name}-guid</GUID><PARENT>Group</PARENT><ALTERID>12</ALTERID></LEDGER>`))];
+    exportReply(names.map(name=>`<LEDGER NAME="${name}"><GUID>${name}-guid</GUID><PARENT>Group</PARENT><ALTERID>12</ALTERID></LEDGER>`)),purchaseTypes()];
   const splitVoucher=voucher().replace('<LEDGERNAME>Tax</LEDGERNAME><AMOUNT>-18</AMOUNT>',
     '<LEDGERNAME>CGST</LEDGERNAME><AMOUNT>-9</AMOUNT></ALLLEDGERENTRIES.LIST><ALLLEDGERENTRIES.LIST><LEDGERNAME>SGST</LEDGERNAME><AMOUNT>-9</AMOUNT>');
   const approved={...plan,format_version:2,references,data:{...data,tax_ledger:null},tax_allocations:[{ledger:'CGST',amount:9},{ledger:'SGST',amount:9}]};
   const io=fake([...refs,exportReply(),'<RESPONSE><CREATED>1</CREATED><ERRORS>0</ERRORS></RESPONSE>',exportReply([splitVoucher])]);
   assert.equal((await commitTallyBill(approved,io)).outcome,'saved');
-  assert.ok(io.calls[4].includes('<LEDGERNAME>CGST</LEDGERNAME>'));
-  assert.ok(io.calls[4].includes('<LEDGERNAME>SGST</LEDGERNAME>'));
+  assert.ok(io.calls[5].includes('<LEDGERNAME>CGST</LEDGERNAME>'));
+  assert.ok(io.calls[5].includes('<LEDGERNAME>SGST</LEDGERNAME>'));
   const replay=fake([...refs,exportReply([splitVoucher])]);
   assert.equal((await commitTallyBill(approved,replay)).outcome,'duplicate');
   assert.ok(replay.calls.every(body=>!body.includes('Import Data')));
@@ -232,6 +234,7 @@ test("native numeric AlterID formatting is equivalent but actual master changes 
       exportReply(['<COMPANY NAME="Test"><GUID>company-guid</GUID></COMPANY>']),
       exportReply(["Supplier","Purchases","Tax"].map(name=>
         `<LEDGER NAME="${name}"><GUID>${name}-guid</GUID><PARENT>Group</PARENT><ALTERID TYPE="Number"> ${actualId}</ALTERID></LEDGER>`)),
+      purchaseTypes(),
       exportReply(),
       "<RESPONSE><CREATED>1</CREATED><ERRORS>0</ERRORS></RESPONSE>",
       exportReply([voucher()]),

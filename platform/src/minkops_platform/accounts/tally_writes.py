@@ -141,6 +141,11 @@ def prepare(connection, run, result, *, approved=False):
             }
             if record.get("tax_allocations") is not None:
                 plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
+            if target.get("voucher_type"):
+                # Format 3 pins the run's purchase voucher type; companions that
+                # predate it would write "Purchase", so they cannot receive it.
+                plan["references"] = {**plan["references"], "voucher_type": target["voucher_type"]}
+                plan["format_version"] = 3
             try:
                 with connection.transaction():
                     write = connection.execute(
@@ -289,7 +294,7 @@ def accept(connection, device, payload, receipt):
     outcome = receipt["outcome"]
     current = receipt.get("current")
     if outcome in ("saved", "duplicate", "correction"):
-        if not isinstance(current, dict) or set(current) != {
+        if not isinstance(current, dict) or set(current) - {"voucher_type"} != {
             "master_id",
             "guid",
             "date",
@@ -299,6 +304,11 @@ def accept(connection, device, payload, receipt):
             "fingerprint",
         }:
             raise ServiceError("invalid", "Tally receipt must contain an observed voucher.")
+        # Companions from 0.7.0 report the observed voucher type; older ones omit it.
+        if "voucher_type" in current and (
+            not isinstance(current["voucher_type"], str) or not 1 <= len(current["voucher_type"]) <= 200
+        ):
+            raise ServiceError("invalid", "Invalid observed voucher type.")
         if (
             any(
                 not isinstance(current[k], str) or not 1 <= len(current[k]) <= 200

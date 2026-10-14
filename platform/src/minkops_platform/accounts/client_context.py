@@ -250,12 +250,13 @@ def targets_from_snapshot(snapshot, device_id, discovery_id):
                 if category == "company"
                 else [r["data"] for r in masters if r["type"] == kind]
             )
-            # Write checks need stable scalar identity, while full definitions stay in evidence files.
+            # Write checks need stable scalar identity, while full definitions
+            # stay in evidence files. RESERVEDNAME and ISACTIVE classify voucher types.
             records = [
                 {
                     k: text(v)
                     for k, v in r.items()
-                    if k in ("@_NAME", "NAME", "GUID", "PARENT", "ALTERID")
+                    if k in ("@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE")
                 }
                 for r in records
             ]
@@ -270,6 +271,7 @@ def targets_from_snapshot(snapshot, device_id, discovery_id):
             },
             device_id,
             discovery_id,
+            vouchers=company["vouchers"]["records"],
         )
         books_from = books_beginning(company["identity"])
         if books_from:

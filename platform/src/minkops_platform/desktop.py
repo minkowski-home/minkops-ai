@@ -516,7 +516,7 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
 
         run, write = spec(connection, device, job["input"], underway=True)
         if write["plan"].get("format_version", 1) > plan_version:
-            raise ServiceError("conflict", "Update Minkops to version 0.6.9 or later to save separate tax allocations.")
+            raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then use Retry save.")
         recheck_target(
             connection,
             {"id": device["tenant_id"]},

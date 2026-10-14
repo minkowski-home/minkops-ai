@@ -198,7 +198,7 @@ def tally_target(connection, tenant, user, discovery_id):
     return target_from_references(source, row["device_id"], discovery_id)
 
 
-def target_from_references(source, device_id, discovery_id):
+def target_from_references(source, device_id, discovery_id, vouchers=()):
     required = {"company", "ledgers", "voucher_types"}
     collections = {c["category"]: c for c in source["collections"]}
     if any(k not in collections or collections[k]["status"] != "ready" for k in required):
@@ -221,11 +221,8 @@ def target_from_references(source, device_id, discovery_id):
         name(r): {k: r.get(k) for k in ("GUID", "PARENT", "ALTERID")}
         for r in collections["ledgers"]["records"]
     }
-    voucher_types = [name(r) for r in collections["voucher_types"]["records"]]
-    if "Purchase" not in voucher_types:
-        raise ServiceError(
-            "conflict", "A Purchase voucher type is required in the selected company."
-        )
+    from .voucher_types import candidates
+
     target = {
         "device_id": str(device_id),
         "company": source["company"],
@@ -236,6 +233,8 @@ def target_from_references(source, device_id, discovery_id):
         "ledgers": ledgers,
         "discovery_id": str(discovery_id),
         "references": {"company_guid": company_guid, "ledgers": ledger_versions},
+        # Chosen per run (voucher_types.apply_choices); never assumed to be "Purchase".
+        "purchase_voucher_types": candidates(collections["voucher_types"]["records"], vouchers),
     }
     from .master_selection import ledger_reference
 
@@ -306,6 +305,13 @@ def accept_context(connection, device, job, result):
             "conflict",
             "The Tally company identity changed. Start a new bill run after checking the company.",
         )
+    from .voucher_types import pin
+
+    try:
+        # This older single-company path has no launch choice: one type or a clear stop.
+        target["voucher_type"] = pin(target, target["purchase_voucher_types"], None)
+    except ValueError as error:
+        raise ServiceError("conflict", str(error)) from error
     run["config"]["tally_target"] = target
     connection.execute(
         "UPDATE workflow_runs SET config=%s WHERE id=%s", (Jsonb(run["config"]), run["id"])
@@ -358,7 +364,7 @@ def validate_references(snapshot, plan):
             or any(
                 not isinstance(r, dict)
                 or any(
-                    k not in {"@_NAME", "NAME", "GUID", "PARENT", "ALTERID"}
+                    k not in {"@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE"}
                     or not isinstance(v, str)
                     for k, v in r.items()
                 )
@@ -417,6 +423,10 @@ def allocation_entries(data, allocations=None):
 
 def validate_tally(data, target, allocations=None):
     from .catalog import validate_data
+
+    if target.get("voucher_type_error"):
+        # Only this company's bills wait; the run's other companies continue.
+        raise HoldReason("voucher_type_unresolved", target["voucher_type_error"])
 
     validate_data(tally_mapping(target["discovery_id"])["sheets"][0], data)
     identity = business_identity(data)
