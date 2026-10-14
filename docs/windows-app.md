@@ -5,8 +5,9 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.6.4 is the current release for version 2 discovery packages and shared Tally
-recovery. Core Tally discovery now uses HTTP/XML exports and needs no ODBC driver.
+Companion 0.7.0 is the current release: it works only with the companies open in
+the user's Tally, reports typed session states, sends diagnostics and updates
+itself. Core Tally discovery uses HTTP/XML exports and needs no ODBC driver.
 Installed-RC evidence below is historical. Current production, installed-upgrade
 and live Tally/Excel evidence is in [MIN-124 verification](verification-min-124.md).
 Windows 10 device testing was deferred by the owner; compatibility is retained.
@@ -66,38 +67,62 @@ server and needs no browser loopback exception, firewall port or router
 forwarding. Future mobile clients can use the same server-owned tasks and
 request bounded work on an authorized connected PC.
 
-## Tally diagnostics and crash recovery
+## Tally session, diagnostics and uncertain writes
 
-All companion Tally operations use the same bounded recovery transport. HTTP/XML
-failures are recorded in local `tally-diagnostics/<job-id>.json` with the protocol
-error and available recent Windows Application crash events. Review offers **Open
-Tally error details**. Raw request XML, credentials and documents are not logged
-to the server. Windows may not report the original crash cause; diagnostics are
-evidence, not a promise of a complete postmortem.
+Tally belongs to the user. The companion never starts, closes, restarts or locates
+Tally, never handles company passwords and never chooses data folders; it works
+with the companies the user opened, from any folder (`connectors/desktop/src/tally-session.js`).
+Check connection, the discovery preflight and the check before every bill save
+share one read-only classifier, so they cannot disagree. It reads the open
+`Company` collection and, on failure, the error cause plus a read-only process
+check, and returns one typed state whose message names the PC:
 
-Automatic recovery requires a previously observed, identifiable Tally executable
-and proof that no Tally instance remains. A live or uncertain instance is never
-replaced. Restart occurs at most once per native job. Only numeric `/LOAD` company
-arguments are replayed; no arbitrary startup scripts, TDL or remote executable
-paths are accepted from workflow inputs. Observed company numbers can supplement
-the original startup arguments. If unavailable, Tally's existing startup settings
-apply. Company GUID/master checks still guard every write. TallyPrime support,
-company-number export and authentication screens require live verification.
+| State | Meaning |
+| --- | --- |
+| `not_running` | No Tally process, or none reachable |
+| `port_closed` | Tally runs but refuses connections on the port (Help > Settings > Connectivity) |
+| `busy` | Timed out after two retries: a pending prompt or a very large report |
+| `no_company` / `duplicate_company` / `too_many` | Open-company scope is empty, ambiguous by name, or over 50 |
+| `company_not_open` | A save's company is not open, or a same-named copy is open instead |
+| `invalid_response` | Unparseable or failed reply |
 
-[Tally's ERP 9 reference](https://help.tallysolutions.com/article/DeveloperReference/tdlreference/release_1_5.htm/)
-documents `/LOAD:<Company Number>`; a GUID is not that number. TallyPrime also
-supports [startup company selection](https://help.tallysolutions.com/tally/set-up-company-tally/).
-This refactor uses a numeric argument only when observed locally, and never
-assumes arbitrary company GUIDs can be loaded through the command line.
+Typed messages pass through job receipts verbatim; untyped errors keep a generic
+fallback. Before each save the company must be open and match the discovered GUID;
+session problems and native rejections (classified as date, permission, voucher
+type, voucher number or ledger) become holds with a specific attention label that
+**Retry save** clears once Tally is ready.
 
-Recovery waits for read-only company availability. Reads may retry once after
-restart. Imports never retry automatically after a lost acknowledgement or
-failure response: fresh read-only reconciliation checks whether the exact approved
-bill exists. Matching data produces a duplicate receipt, a different version is
-held, and a missing bill requires review/Resume. Login/load failure also becomes
-a handoff. Consequential lease expiry and persisted receipt replay retain the
-existing safeguards. External writers can race read/import; Tally offers no
-transaction spanning those separate requests, so ambiguity remains a handoff.
+Reads that time out may repeat twice. Imports never repeat: after a lost
+acknowledgement or failure response, a fresh read-only reconciliation checks
+whether the exact approved bill exists. Matching data produces a duplicate receipt,
+a different version is held, and a missing bill requires review and Retry save.
+If Tally closed, the bill holds until it is open again. External writers can race
+read/import; Tally offers no transaction spanning those separate requests, so
+ambiguity remains a handoff.
+
+Bill saves use the run's pinned purchase voucher type, chosen from discovered types
+whose predefined base is Purchase (`RESERVEDNAME`, else the `PARENT` chain).
+Duplicate, correction and attention reads cover every purchase-based type,
+including inactive ones, and a matching Journal voucher holds instead of being
+repeated. Before writing, the live type must still exist with the same GUID, be
+purchase-based and active. Corrections keep the existing voucher's type.
+
+Each failed or retried Tally job attaches a bounded diagnostic (state, cause code,
+elapsed time, recent Windows crash events) to its receipt, and the local
+`tally-diagnostics/<job-id>.json` record remains. **Send diagnostics** (tray menu or
+the PCs screen) posts a summary of versions, PC name, Remote Desktop session, Tally
+processes, the session check, whitelisted `tally.ini` settings and recent job
+outcomes, and returns a reference such as `D-7K2Q4M`; offline, it copies the
+summary instead. The server keeps diagnostics for 30 days in `desktop_diagnostics`.
+Bill data, request XML, file contents and credentials never leave the PC.
+
+Every poll reports the companion version, hostname and whether the session is a
+Remote Desktop session. The console shows them, warns about Remote Desktop, and the
+server refuses Tally work for companions older than 0.7.0 with "Update Minkops on
+*PC*". A PC that has not polled yet may queue work.
+
+`node scripts/verify_tally_session_live.mjs [port] [company] [guid]` prints the
+typed state on a Windows PC without changing Tally, for rehearsals.
 
 Versioned discovery packages are saved locally as described in
 [source discovery](source-discovery.md), alongside the authoritative server copy.

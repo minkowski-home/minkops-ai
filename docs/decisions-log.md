@@ -1,5 +1,85 @@
 # Decision Logs
 
+## Work with the user's Tally session instead of controlling it (14 October 2026)
+
+**Situation:** The first client demo failed before any bill was read. Discovery
+required every company in the single data folder named by `tally.ini` to be open,
+so it asked Tally to quit and restart with all of them. The client's companies were
+password-protected, one needed migration, others lived in different folders, and
+Tally sat outside `Program Files`. The run looped through "close Tally", "not
+installed" and "scope could not be verified" (folder-local company numbers collided)
+while Check connection, which read only open companies, kept passing. This reversed
+the 11 October decision to load every company on disk.
+
+**Task:** Make discovery and saves work on any practice's setup without Minkops
+handling passwords, folders or the Tally process, while keeping the protection that
+decision was for: never silently lose a company.
+
+**Action:** Deleted all start, close, restart and install-lookup code. The scope is
+now the companies the user opened, from any folder, identified by GUID; duplicate
+names block because requests address companies by name. One read-only classifier,
+shared by Check connection, discovery and a pre-save check, turns failures into
+typed states (not running, port closed, busy, no company, duplicate, not open) that
+name the PC; the worker passes them through instead of guessing. Unacknowledged
+writes still reconcile and never replay. Lost companies became a review comparison
+with the previous confirmation rather than a reason to restart Tally.
+
+**Result:** Tests cover colliding folder numbers, duplicate and copied companies,
+closed and busy Tally, closure mid-collection and mid-write, and a same-named copy
+that must never be written to. The connector lost its process-control surface
+entirely (a test asserts no start/close/restart export exists). Live Windows
+verification on a client-like setup is still required before the next meeting.
+
+## Take purchase voucher types from discovery, never a fixed name (14 October 2026)
+
+**Situation:** Bill Entry required a voucher type named `Purchase`, looked for
+duplicates only among `Purchase` vouchers and always imported `VCHTYPE="Purchase"`.
+Practices that book purchases under their own types would have bills filed under
+the wrong type and, worse, duplicates missed.
+
+**Task:** Make the core workflow correct for any client's voucher types without a
+client-specific option, and keep duplicate protection complete.
+
+**Action:** Classify a type by its predefined base: `RESERVEDNAME`, else the base of
+its `PARENT`, followed by name with a cycle guard, implemented identically on the
+server (selection) and companion (live checks). Each run pins one active
+purchase-based type per company: automatic when unique, otherwise an explicit launch
+choice preselecting the most-used type, with no preselection on a tie. Write plans
+moved to format 3 so older companions cannot receive them. Before writing, the live
+type must keep its GUID, base and activation. Duplicate, correction and attention
+reads cover the whole family, including inactive types, and a matching Journal
+voucher holds instead of being repeated. Corrections keep the existing type.
+
+**Result:** Server and connector tests cover custom-only companies, several types,
+stale choices, deactivated, re-parented and recreated types, duplicates under
+inactive types, Journal conflicts and type-preserving corrections. No tenant option
+was added; the choice is a run selection like the company.
+
+## Make field failures diagnosable and fixable without a visit (14 October 2026)
+
+**Situation:** Diagnosing the failed demo took PowerShell sessions on the client's
+PC: the companion kept only `fetch failed` locally, the server could not tell which
+companion version a PC ran, and every fix required a manual reinstall. The first
+probe had also run on the user's Remote Desktop machine rather than the Tally PC.
+
+**Task:** Give support remote evidence and a delivery path for fixes, without
+collecting business data or interrupting financial saves.
+
+**Action:** Job receipts carry a bounded diagnostic (typed state, cause code,
+elapsed time, crash events); oversized evidence is stored as truncated rather than
+costing the receipt. A Send diagnostics action posts a whitelisted summary and
+returns a readable reference, copying it when offline. Every poll reports version,
+hostname and Remote Desktop session; the server refuses Tally work for companions
+older than 0.7.0 with an update prompt. Companion 0.7.0 adds electron-updater on a
+generic feed beside the public installer, installing only when no job is claimed,
+no receipt is pending and the window is not in use; the hosting deploy refuses a
+feed whose version, file name or SHA-512 differs from the reviewed installer.
+
+**Result:** Server tests cover retention, size bounds, tenant scoping, replayed
+receipts and version gating; companion tests cover idle-gated installation and
+receipt attachment. An isolated end-to-end HTTP smoke recorded the typed probe
+failure and the reported companion version. 0.7.0 is the last manual install.
+
 ## Measure the hold rate with a labelled holdout and a free replay (13 October 2026)
 
 **Situation:** The main complaint was too many held bills, and several releases
