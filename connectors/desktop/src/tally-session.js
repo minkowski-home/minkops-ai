@@ -32,8 +32,9 @@ const MESSAGES = {
     `Tally isn't reachable on ${pc}. Open Tally and your companies. If it is open, enable port ${port} in Help (F1) > Settings > Connectivity.`,
   port_closed: (pc, port) =>
     `Tally on ${pc} isn't accepting connections on port ${port}. ${settings} on port ${port}, then try again.`,
+  // A pending prompt and a very large report both time out; name both causes.
   busy: (pc) =>
-    `Tally on ${pc} is waiting on a screen. Finish any password prompt or open dialog in Tally, then try again.`,
+    `Tally on ${pc} is not responding. Finish any password prompt or open dialog in Tally, or wait for a large report to finish, then try again.`,
   no_company: (pc) => `Open at least one company in Tally on ${pc}, then try again.`,
   duplicate_company: (pc, name) =>
     `Two open companies are named ${name}. Close one in Tally on ${pc}, then try again.`,
