@@ -93,14 +93,14 @@ def test_an_update_feed_must_describe_exactly_the_released_installer(tmp_path, m
 def test_a_valid_feed_is_published_next_to_the_installer(tmp_path, monkeypatch):
     build, installer, feed = release_tree(tmp_path, monkeypatch)
 
-    class Stop(Exception):
+    class StopBeforeUploadError(Exception):
         pass
 
     def stop(*args):
-        raise Stop()
+        raise StopBeforeUploadError()
 
     monkeypatch.setattr(hosting, "GoogleApi", stop)
-    with pytest.raises(Stop):
+    with pytest.raises(StopBeforeUploadError):
         hosting.deploy("corporate", installer)
     downloads = build / "downloads"
     assert (downloads / "Minkops-Setup-0.7.0.exe").read_bytes() == installer.read_bytes()

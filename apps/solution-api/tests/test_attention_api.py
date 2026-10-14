@@ -352,7 +352,7 @@ class AttentionTests(unittest.TestCase):
             "claim_token": claim["claim_token"],
             "result": {"outcome": "attention", "message": message, "hold": "company_not_open"}})
         self.assertEqual(finished.status_code, 200, finished.text)
-        items = self.client.get(f"/api/tenants/mock-tenant/attention?status=pending").json()
+        items = self.client.get("/api/tenants/mock-tenant/attention?status=pending").json()
         self.assertIn("Open company in Tally", [item["label"] for item in items])
         record = self.client.get(self.base + f"/runs/{run['id']}").json()["result"]["records"][0]
         self.assertEqual((record["status"], record["save_hold"]), ("held", message))

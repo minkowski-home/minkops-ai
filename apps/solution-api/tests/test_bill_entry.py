@@ -1116,7 +1116,10 @@ class BillEntryTests(unittest.TestCase):
 
     def test_discovery_review_names_companies_added_or_no_longer_open(self):
         first = self.tally_discovery("alpha-guid")
-        detail = lambda run: self.client.get(f"/api/tenants/mock-tenant/discovery/runs/{run}").json()
+
+        def detail(run):
+            return self.client.get(f"/api/tenants/mock-tenant/discovery/runs/{run}").json()
+
         self.assertIsNone(detail(first)["scope_changes"], "a first discovery has nothing to compare")
         wider = self.tally_discovery("alpha-guid", multiple=True, reuse_device=True)
         self.assertEqual(detail(wider)["scope_changes"], {

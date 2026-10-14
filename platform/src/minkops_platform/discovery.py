@@ -173,8 +173,10 @@ def scope_changes(connection, row):
     if not previous:
         return None
     before = _tally_companies(previous["catalog"])
-    listed = lambda guids, names: sorted(
-        ({"company": names[g], "company_guid": g} for g in guids), key=lambda c: c["company"])
+
+    def listed(guids, names):
+        return sorted(({"company": names[g], "company_guid": g} for g in guids), key=lambda c: c["company"])
+
     return {"added": listed(current.keys() - before.keys(), current),
             "removed": listed(before.keys() - current.keys(), before)}
 
