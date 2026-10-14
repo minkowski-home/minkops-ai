@@ -184,6 +184,22 @@ export async function checkTally({
   }
 }
 
+/** The company a save targets must be open, and be the same company: a
+ * same-named copy from another folder is never written to. */
+export async function requireOpenCompany({ company, company_guid }, options = {}) {
+  const pc = options.pc ?? "this PC";
+  const { companies } = await checkTally(options);
+  const open = companies.find((c) => c.company.toLowerCase() === company.toLowerCase());
+  if (!open)
+    throw new TallyUnavailable("company_not_open", `Open ${company} in Tally on ${pc}, then try again.`);
+  if (company_guid && open.company_guid !== company_guid)
+    throw new TallyUnavailable(
+      "company_not_open",
+      `A different company named ${company} is open in Tally on ${pc}. Close it, open the company Minkops discovered, then try again.`,
+    );
+  return open;
+}
+
 /** Only known exports may repeat. New JSON/action contracts never become
  * replayable merely by omitting an Import tag. */
 const isWrite = (body) =>

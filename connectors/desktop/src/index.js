@@ -14,9 +14,9 @@ import { join, dirname, basename, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, excelSchemaBytes } from './discovery.js';
 export { readTallyReferences } from './tally-references.js';
-export { checkTally, readOpenCompanies, openCompanyScope, classifyTallyFailure, tallyTransport, TallyUnavailable, tallyCompanyNumber, tallyProcesses, tallyCrashEvents } from './tally-session.js';
+export { checkTally, requireOpenCompany, readOpenCompanies, openCompanyScope, classifyTallyFailure, tallyTransport, TallyUnavailable, tallyCompanyNumber, tallyProcesses, tallyCrashEvents } from './tally-session.js';
 export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
-export { commitTallyBill, readTallyBills } from './tally.js';
+export { commitTallyBill, readTallyBills, saveTallyBill, classifyRejection, purchaseVoucherTypes } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|pdf|png|jpe?g|webp)$/i;

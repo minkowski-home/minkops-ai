@@ -12,6 +12,19 @@ from .bills import add_note, allocation_entries, validate_tally
 from .repository import observe, run_for
 
 PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
+# Short labels for typed holds the companion reports before or instead of a
+# write (connectors/desktop/src/tally.js saveTallyBill). Unknown codes fall back.
+HOLD_TITLES = {
+    "company_not_open": "Open company in Tally",
+    "no_company": "Open company in Tally",
+    "duplicate_company": "Duplicate company open",
+    "not_running": "Tally unavailable",
+    "port_closed": "Tally unavailable",
+    "busy": "Tally unavailable",
+    "too_many": "Tally unavailable",
+    "invalid_response": "Tally unavailable",
+    "rejected": "Tally rejected bill",
+}
 
 
 def hold_save(connection, run, record, reason, *, title=None):
@@ -388,7 +401,7 @@ def accept(connection, device, payload, receipt):
         item = (flag(connection, run, record, title="Review in Tally", reopen=True) if outcome == "correction"
                 else hold_save(connection, run, record,
                                str(receipt.get("message", "Tally write needs attention."))[:300],
-                               title="Review in Tally"))
+                               title=HOLD_TITLES.get(receipt.get("hold"), "Review in Tally")))
         from ..attention import audit
         audit(connection,item,run['actor_id'],outcome,receipt.get('message','Existing voucher needs review.'))
     # Best-guess review starts after verified write, using exact native identity.

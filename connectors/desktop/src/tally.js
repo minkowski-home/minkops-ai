@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { boundedText } from "./index.js";
 import { readTallyReferences } from "./tally-references.js";
+import { requireOpenCompany, TallyUnavailable } from "./tally-session.js";
 
 const xml = (s) =>
   String(s).replace(
@@ -406,4 +407,52 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
       "Tally readback differs from the approved bill. Reconcile before retrying.",
     );
   return { outcome: "saved", current: saved[0] };
+}
+
+// Tally's native reasons stay in diagnostics; users get one short action.
+const REJECTIONS = [
+  ["date", /\bdate\b|financial year|books? beginning/i,
+    "Tally rejected the voucher date. Check the bill date against the company's financial year, then use Retry save."],
+  ["permission", /not (?:authori[sz]ed|allowed|permitted)|access denied|no (?:access|rights)|security/i,
+    "The Tally user who is logged in cannot create this voucher. Log in as a user allowed to enter purchases, then use Retry save."],
+  ["voucher_type", /voucher ?type/i,
+    "Tally rejected the purchase voucher type. Check it in Tally, refresh Source Discovery, then start a new run."],
+  ["voucher_number", /voucher (?:no\b|number)/i,
+    "Tally needs a voucher number for this voucher type. Check its numbering in Tally, then use Retry save."],
+  ["ledger", /ledger|does not exist|not found/i,
+    "Tally rejected a ledger on this bill. Check the ledgers in Tally, then use Retry save."],
+];
+export function classifyRejection(reason) {
+  const match = REJECTIONS.find(([, pattern]) => pattern.test(String(reason ?? "")));
+  return match
+    ? { code: match[0], message: match[2] }
+    : { code: "other", message: "Tally rejected this bill. Check its voucher settings in Tally, then use Retry save." };
+}
+
+/** One approved bill, as the companion saves it: the company must be open
+ * (and be the discovered one), then commit; an unacknowledged write is
+ * reconciled once and never resent. Session problems become holds that a
+ * Retry save clears once Tally is ready. */
+export async function saveTallyBill(plan, { request = fetch, sessionRequest = fetch, processes, pc, wait } = {}) {
+  const hold = (error) => ({ outcome: "attention", hold: error.tallyState, message: error.message });
+  try {
+    await requireOpenCompany(
+      { company: plan.company, company_guid: plan.references?.company_guid },
+      { port: plan.port ?? 9000, request: sessionRequest, processes, pc, wait },
+    );
+    return await commitTallyBill(plan, { request });
+  } catch (error) {
+    if (error instanceof TallyUnavailable) return hold(error);
+    if (!error.tallyAmbiguous) throw error;
+    let reconciled;
+    try {
+      reconciled = await commitTallyBill(plan, { request, reconciliationOnly: true });
+    } catch (second) {
+      if (second instanceof TallyUnavailable) return hold(second);
+      throw second;
+    }
+    if (reconciled.outcome === "attention" && error.tallyLineError)
+      return { ...reconciled, hold: "rejected", message: classifyRejection(error.tallyLineError).message };
+    return reconciled;
+  }
 }

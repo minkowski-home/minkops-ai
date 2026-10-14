@@ -35,7 +35,7 @@ import {
   tallyTransport,
   inspectTallyAttention,
   tallyCrashEvents,
-  commitTallyBill,
+  saveTallyBill,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
 import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
@@ -256,20 +256,7 @@ function startWorker() {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        try {
-          return await commitTallyBill(plan, { request: tallyRequest });
-        } catch (error) {
-          if (!error.tallyAmbiguous) throw error;
-          const reconciled = await commitTallyBill(plan, {
-            request: tallyRequest,
-            reconciliationOnly: true,
-          });
-          if (reconciled.outcome === "attention" && error.tallyLineError)
-            reconciled.message = /date/i.test(error.tallyLineError)
-              ? "Tally rejected the voucher date. Check the source bill and Tally date settings, then use Retry save."
-              : "Tally rejected this bill. Check its voucher settings in Tally, then use Retry save.";
-          return reconciled;
-        }
+        return saveTallyBill(plan, { request: tallyRequest, pc });
       }
       if (job.operation !== "accounts.save")
         throw new Error("Unsupported local operation.");

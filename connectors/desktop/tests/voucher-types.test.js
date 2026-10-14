@@ -154,3 +154,75 @@ test("attention checks see the bill under any purchase type", async () => {
     { company: "Test", company_guid: "company-guid", port: 9000, vendor: "Supplier", invoice_number: "INV-7" }, io);
   assert.equal(observed.current.voucher_type, "Purchase GST");
 });
+
+// One bill save as the companion runs it: session check, commit, reconcile.
+import { classifyRejection, saveTallyBill } from "../src/tally.js";
+
+const session = (io, processes = [{ pid: 1 }]) => ({
+  request: io.request, sessionRequest: io.request, processes: async () => processes, pc: "PC1", wait: async () => {},
+});
+function withOpen(io, companies) {
+  return {
+    ...io,
+    request: async (url, options) =>
+      options.body.includes("MinkopsOpenCompanies")
+        ? new Response(envelope(companies.map(([name, guid]) => `<COMPANY NAME="${name}"><GUID>${guid}</GUID></COMPANY>`).join("")))
+        : io.request(url, options),
+  };
+}
+
+test("a bill waits, unwritten, until its company is open in Tally", async () => {
+  const io = tally({ types: [...PREDEFINED, type("Purchase GST")] });
+  const result = await saveTallyBill(plan(GST), session(withOpen(io, [["Other", "other-guid"]])));
+  assert.deepEqual(result, { outcome: "attention", hold: "company_not_open", message: "Open Test in Tally on PC1, then try again." });
+  assert.equal(io.imports().length, 0);
+});
+
+test("a same-named copy of the company is never written to", async () => {
+  const io = tally({ types: [...PREDEFINED, type("Purchase GST")] });
+  const result = await saveTallyBill(plan(GST), session(withOpen(io, [["Test", "copy-guid"]])));
+  assert.equal(result.hold, "company_not_open");
+  assert.match(result.message, /A different company named Test is open/);
+  assert.equal(io.imports().length, 0);
+});
+
+test("a closed Tally holds the bill with its typed action", async () => {
+  const closed = async () => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+  };
+  const result = await saveTallyBill(plan(GST), { request: closed, sessionRequest: closed, processes: async () => [], pc: "PC1" });
+  assert.equal(result.hold, "not_running");
+  assert.match(result.message, /Tally isn't open on PC1/);
+});
+
+test("a rejected import is reconciled once and explained by its cause", async () => {
+  const io = tally({
+    types: [...PREDEFINED, type("Purchase GST")],
+    reply: "<RESPONSE><ERRORS>1</ERRORS><LINEERROR>Voucher date is out of the financial year</LINEERROR></RESPONSE>",
+  });
+  const transport = (await import("../src/tally-session.js")).tallyTransport({ request: io.request, processes: async () => [{ pid: 1 }] });
+  const result = await saveTallyBill(plan(GST), { ...session(io), request: transport });
+  assert.equal(result.outcome, "attention");
+  assert.equal(result.hold, "rejected");
+  assert.match(result.message, /voucher date/);
+  assert.equal(io.imports().length, 1, "the import is never resent");
+});
+
+test("Tally's rejection reasons map to one short action each", () => {
+  const cases = {
+    "Voucher date is out of the financial year": "date",
+    "Date is before Books beginning date": "date",
+    "You are not authorised to create Vouchers": "permission",
+    "Access denied for this user": "permission",
+    "Voucher Type 'Purchase GST' does not exist": "voucher_type",
+    "Voucher Number is required": "voucher_number",
+    "Ledger 'Supplier' does not exist!": "ledger",
+    "Something unusual": "other",
+  };
+  for (const [reason, code] of Object.entries(cases)) {
+    const rejection = classifyRejection(reason);
+    assert.equal(rejection.code, code, reason);
+    assert.ok(rejection.message.length <= 300);
+    assert.doesNotMatch(rejection.message, new RegExp(reason.slice(0, 12)), "native text stays in diagnostics");
+  }
+});
