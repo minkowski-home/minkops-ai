@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { CatalogReview } from "./CatalogReview";
+import { BillDetailsButton } from "./BillDetails";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
 import { billActions, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
@@ -193,6 +194,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
               >
                 View bill
               </a>
+              <BillDetailsButton record={r} config={run.config} name={name(r.source_file_id)} />
               {Boolean(r.tax_allocations?.length) && <p className="muted">Tax: {r.tax_allocations!.map(line =>
                 `${line.ledger ?? "Pending ledger"} · ${new Intl.NumberFormat("en-IN").format(line.amount)}`).join(" · ")}</p>}
               <span role="status">

@@ -18,6 +18,9 @@ test("a locked run asks only about its own company, preselecting the most used t
   assert.deepEqual(launch.choices, { a: "Purchase GST-guid" });
   assert.equal(launch.blocker, "");
   assert.deepEqual(voucherTypeLaunch(companies, "locked", "a", { a: "Purchase-guid" }).choices, { a: "Purchase-guid" });
+  const cleared = voucherTypeLaunch(companies, "locked", "a", { a: "" });
+  assert.deepEqual(cleared.choices, {});
+  assert.match(cleared.blocker, /Choose the purchase voucher type/);
 });
 
 test("a locked run cannot start without a type the server will accept", () => {
@@ -40,5 +43,5 @@ test("the locked company is never silently the first of several", () => {
   assert.equal(initialLockedCompany(companies, undefined), "");
   assert.equal(initialLockedCompany(companies.slice(0, 1), undefined), "a");
   assert.equal(initialLockedCompany(companies, "b"), "b");
-  assert.equal(initialLockedCompany(companies, "gone"), "");
+  assert.equal(initialLockedCompany(companies.slice(0, 1), "gone"), "gone", "a lost choice never falls back");
 });

@@ -22,8 +22,9 @@ export function voucherTypeLaunch(
   const choices: Record<string, string> = {};
   for (const company of questions) {
     const offered = company.purchase_voucher_types!.candidates.map((c) => c.guid);
-    const value = [chosen[company.company_guid], company.purchase_voucher_types!.default].find((v) => v && offered.includes(v));
-    if (value) choices[company.company_guid] = value;
+    // An explicit choice, including clearing it, wins over the preselection.
+    const value = company.company_guid in chosen ? chosen[company.company_guid] : company.purchase_voucher_types!.default;
+    if (value && offered.includes(value)) choices[company.company_guid] = value;
   }
   // Older catalogs carry no offer; the server then decides on its own.
   const missing = scope.filter((c) => c.purchase_voucher_types && !c.purchase_voucher_types.candidates.length);
@@ -40,8 +41,10 @@ export function voucherTypeLaunch(
   };
 }
 
-/** Never preselect one of several companies: the batch's company is the user's call. */
+/** Never preselect one of several companies: the batch's company is the user's
+ * call. A saved choice is kept even when it is no longer discovered, so the run
+ * waits for a new choice instead of silently switching companies. */
 export function initialLockedCompany(companies: DiscoveredCompany[], configured: unknown) {
-  if (typeof configured === "string" && companies.some((c) => c.company_guid === configured)) return configured;
+  if (typeof configured === "string" && configured) return configured;
   return companies.length === 1 ? companies[0].company_guid : "";
 }
