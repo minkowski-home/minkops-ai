@@ -127,7 +127,7 @@ export function discoverySources(run: DiscoveryRun): SourceSummary[] {
     const hasCompanyActivity = run.observations.some(o => o.key === source.key && o.category);
     const status = source.status === "waiting" ? run.state === "failed" ? "unavailable" : observed?.status ?? (hasCompanyActivity ? "reading" : "waiting") : source.status;
     return [{ key: source.key, tool: source.tool,
-      label: source.label ?? source.snapshot?.company ?? (source.tool === "tally" ? "All configured companies" : "Excel folder"),
+      label: source.label ?? source.snapshot?.company ?? (source.tool === "tally" ? "Companies open in Tally" : "Excel folder"),
       status: source.workbooks?.some(b => b.status !== "ready") ? "unavailable" : status,
       error: source.error, workbooks: source.workbooks ?? [],
       collections: (source.snapshot?.collections ?? []).map(collection => ({

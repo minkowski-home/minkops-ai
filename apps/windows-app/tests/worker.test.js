@@ -285,3 +285,46 @@ test("worker serializes overlapping ticks and records actionable failure", async
   assert.equal(claims, 1);
   assert.equal(pending, null);
 });
+
+async function failedReceipt(operation, error) {
+  let pending;
+  const finished = [];
+  const worker = new CompanionWorker({
+    request: async (path, body) => {
+      if (path.endsWith("/claim")) return { id: "job", operation, input: {}, claim_token: "claim" };
+      finished.push(body);
+      return {};
+    },
+    execute: async () => { throw error; },
+    pending: () => pending,
+    savePending: async (value) => { pending = value; },
+  });
+  await worker.tick();
+  return finished[0];
+}
+
+test("a typed Tally state reaches the user verbatim instead of a generic guess", async () => {
+  const typed = Object.assign(new Error("Tally isn't open on PRAHLAD-GADHWAL. Open it and your companies, then try again."), {
+    userSafe: true, tallyState: "not_running",
+  });
+  for (const operation of ["tally.probe", "tally.references", "tally.save", "sources.discover"])
+    assert.equal((await failedReceipt(operation, typed)).error, typed.message);
+  const long = Object.assign(new Error("x".repeat(400)), { userSafe: true });
+  assert.equal((await failedReceipt("tally.probe", long)).error.length, 300);
+});
+
+test("untyped failures keep their safe fallback and never leak internal details", async () => {
+  const receipt = await failedReceipt("tally.probe", new Error("ECONNRESET at C:\\Users\\private"));
+  assert.doesNotMatch(receipt.error, /private|ECONNRESET|not responding/);
+  assert.match(receipt.error, /Send diagnostics/);
+});
+
+test("a typed Tally failure names its action on the Tally source", async () => {
+  const typed = Object.assign(new Error("Two open companies are named Sachin Infra. Close one in Tally on PC1, then try again."), { userSafe: true });
+  const result = await collectSources(
+    { config: { tally: {} }, sources: [{ key: "tally", tool: "tally" }] },
+    { discoverClientContext: async () => { throw typed; }, onProgress: async () => {} },
+  );
+  assert.equal(result.sources[0].status, "unavailable");
+  assert.equal(result.sources[0].error, typed.message);
+});

@@ -35,9 +35,13 @@ export class CompanionWorker {
           receipt = {
             claim_token: job.claim_token,
             result: null,
+            // Connector errors flagged user-safe carry one specific action (for
+            // example "Tally isn't open on <PC>"); anything else stays generic.
             error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
-              ["tally.probe", "tally.references"].includes(job.operation)
-                ? "Tally is not responding. Open Tally, load your company, and try again."
+              error.userSafe && typeof error.message === "string" && error.message.trim()
+                ? error.message.slice(0, 300)
+              : ["tally.probe", "tally.references"].includes(job.operation)
+                ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
                 : job.operation === "tally.save"
                   ? "Tally could not confirm this bill. Check the company, then use Retry save; existing vouchers are reconciled before writing."
                   : job.operation === "accounts.save"

@@ -26,20 +26,14 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   inventory,
   replaceApproved,
-  tallyProbe,
+  checkTally,
   inspectExcel,
   excelSchemaBytes,
   readTallyReferences,
   discoverClientContext,
   saveDiscoveryPackage,
-  recoveringTallyRequest,
-  ensureTallyDiscovery,
+  tallyTransport,
   inspectTallyAttention,
-  tallyCompanyNumber,
-  captureTallyProcess,
-  tallyProcessRunning,
-  restartTallyProcess,
-  waitForTally,
   tallyCrashEvents,
   commitTallyBill,
   saveCatalogSnapshot,
@@ -164,32 +158,16 @@ function startWorker() {
     request,
     execute: async (job) => {
       if (state.device !== identity) throw new Error("PC connection changed.");
-      const tallyRequest = recoveringTallyRequest({
-        preserveCompanyScope: job.operation === "sources.discover",
-        capture: async () => {
-          const observed = await captureTallyProcess().catch(() => null);
-          if (observed) {
-            observed.loads = [
-              ...new Set([
-                ...observed.loads,
-                ...Object.values(state.tally_company_numbers ?? {}),
-              ]),
-            ];
-            state.tally_startup = observed;
-            await persist();
-          }
-          return observed ?? state.tally_startup ?? null;
-        },
-        isRunning: tallyProcessRunning,
-        restart: restartTallyProcess,
-        ready: waitForTally,
+      // Minkops never starts, closes or restarts Tally; failures become typed
+      // states naming this PC, and each one leaves a local diagnostic record.
+      const pc = hostname().slice(0, 80);
+      const tallyRequest = tallyTransport({
+        pc,
         diagnose: async (diagnostic) => {
           const root = join(app.getPath("userData"), "tally-diagnostics");
           await mkdir(root, { recursive: true });
           const record = {
             ...diagnostic,
-            observed: undefined,
-            company_scope: diagnostic.observed?.company_scope,
             job_id: job.id,
             collected_at: new Date().toISOString(),
             windows_events: await tallyCrashEvents(),
@@ -204,8 +182,11 @@ function startWorker() {
       if (
         job.operation === "tally.probe" &&
         !Object.keys(job.input || {}).length
-      )
-        return tallyProbe({ request: tallyRequest });
+      ) {
+        // Check connection uses the same read-only check as discovery and saves.
+        const ready = await checkTally({ pc });
+        return { available: true, companies: ready.companies.map((c) => c.company) };
+      }
       const grantFor = (sourceId) =>
         binding(identity.tenant, sourceId, { id: identity.owner_id });
       if (job.operation === "sources.discover") {
@@ -217,15 +198,8 @@ function startWorker() {
           inventory,
           inspectExcel,
           excelSchemaBytes,
-          discoverClientContext: async (config, options) => {
-            const startup = await ensureTallyDiscovery(config);
-            state.tally_startup = startup;
-            await persist();
-            return discoverClientContext(config, {
-              ...options,
-              request: tallyRequest,
-            });
-          },
+          discoverClientContext: (config, options) =>
+            discoverClientContext(config, { ...options, request: tallyRequest, pc }),
           onProgress: async (source_key, status, category = null, progress = null) => {
             try {
               await reportDiscoveryProgress(() => request(`/api/desktop/worker/jobs/${job.id}/progress`, {
@@ -240,15 +214,6 @@ function startWorker() {
             }
           },
         });
-        for (const source of result.sources)
-          for (const company of source.snapshot?.companies ?? []) {
-            const number = tallyCompanyNumber(company.identity?.COMPANYNUMBER);
-            if (number !== null) {
-              state.tally_company_numbers ??= {};
-              state.tally_company_numbers[company.company_guid] = number;
-            }
-          }
-        await persist();
         await saveDiscoveryPackage(
           join(
             app.getPath("userData"),
@@ -692,6 +657,10 @@ else {
           // Credentials and grants belong to one server. Changing deployments
           // requires explicit pairing; never send a prior server's token away.
           if (restored.server_origin === origin) state = restored;
+          // Releases before 0.7.0 remembered how to restart Tally. Minkops no
+          // longer controls Tally, so that local state is discarded.
+          delete state.tally_startup;
+          delete state.tally_company_numbers;
         } catch {
           /* Damaged local credentials require explicit reconnection. */
         }

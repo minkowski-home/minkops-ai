@@ -175,7 +175,7 @@ def launch(connection, tenant, user, body):
         if set(tally) != {"port", "period"}:
             raise ServiceError(
                 "invalid",
-                "Complete discovery reads all configured companies; specify only port and voucher period.",
+                "Discovery reads the companies open in Tally; specify only port and voucher period.",
             )
         start, end = map(date.fromisoformat, (tally["period"]["from"], tally["period"]["to"]))
         if start > end or (end - start).days > 3660:
@@ -286,7 +286,7 @@ def plan(connection, device, job):
             {
                 "key": "tally",
                 "tool": "tally",
-                "label": "All configured companies",
+                "label": "Companies open in Tally",
             }
         )
     return {"config": row["config"], "sources": sources}
@@ -397,7 +397,8 @@ def _tally_authority(source):
     snapshot = source.get("snapshot") or {}
     if "company_scope" not in snapshot:
         return source  # Older single-company snapshots keep their full fingerprint.
-    scope = sorted(snapshot["company_scope"], key=lambda c: (c["company"], c["company_number"]))
+    # Names are unique in a scope; open scopes may omit folder-local numbers.
+    scope = sorted(snapshot["company_scope"], key=lambda c: c["company"])
     return {"key": source["key"], "company_scope": scope}
 
 

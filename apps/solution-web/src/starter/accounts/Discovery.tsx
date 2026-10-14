@@ -124,7 +124,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow, onConfigChange, s
     {!devices.length && <p className="quiet-state">Connect this workspace in the Windows app to get started. <Link to={`/${routeSlug}/connections`}>Connected PCs</Link></p>}
     <div className={`discovery-setup-sources${tally && excel ? " has-both" : ""}`}>
       {tally && <section className="discovery-config-source" aria-label="Tally options">
-        <h4>Tally</h4><p>All configured companies and full masters.</p>
+        <h4>Tally</h4><p>The companies open in Tally, with full masters. Open every company you need, from any folder, before you start.</p>
         <div className="discovery-date-range">
           <label className="config-field">Vouchers from<input type="date" required value={periodFrom} disabled={Boolean(busy)} onChange={event => setPeriodFrom(event.target.value)} /></label>
           <label className="config-field">Through<input type="date" required min={periodFrom} value={periodTo} disabled={Boolean(busy)} onChange={event => setPeriodTo(event.target.value)} /></label>
