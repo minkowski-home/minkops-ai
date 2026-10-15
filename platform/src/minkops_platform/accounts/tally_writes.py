@@ -12,6 +12,19 @@ from .bills import add_note, allocation_entries, validate_tally
 from .repository import observe, run_for
 
 PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
+# Short labels for typed holds the companion reports before or instead of a
+# write (connectors/desktop/src/tally.js saveTallyBill). Unknown codes fall back.
+HOLD_TITLES = {
+    "company_not_open": "Open company in Tally",
+    "no_company": "Open company in Tally",
+    "duplicate_company": "Duplicate company open",
+    "not_running": "Tally unavailable",
+    "port_closed": "Tally unavailable",
+    "busy": "Tally unavailable",
+    "too_many": "Tally unavailable",
+    "invalid_response": "Tally unavailable",
+    "rejected": "Tally rejected bill",
+}
 
 
 def hold_save(connection, run, record, reason, *, title=None):
@@ -141,6 +154,11 @@ def prepare(connection, run, result, *, approved=False):
             }
             if record.get("tax_allocations") is not None:
                 plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
+            if target.get("voucher_type"):
+                # Format 3 pins the run's purchase voucher type; companions that
+                # predate it would write "Purchase", so they cannot receive it.
+                plan["references"] = {**plan["references"], "voucher_type": target["voucher_type"]}
+                plan["format_version"] = 3
             try:
                 with connection.transaction():
                     write = connection.execute(
@@ -289,7 +307,7 @@ def accept(connection, device, payload, receipt):
     outcome = receipt["outcome"]
     current = receipt.get("current")
     if outcome in ("saved", "duplicate", "correction"):
-        if not isinstance(current, dict) or set(current) != {
+        if not isinstance(current, dict) or set(current) - {"voucher_type"} != {
             "master_id",
             "guid",
             "date",
@@ -299,6 +317,11 @@ def accept(connection, device, payload, receipt):
             "fingerprint",
         }:
             raise ServiceError("invalid", "Tally receipt must contain an observed voucher.")
+        # Companions from 0.7.0 report the observed voucher type; older ones omit it.
+        if "voucher_type" in current and (
+            not isinstance(current["voucher_type"], str) or not 1 <= len(current["voucher_type"]) <= 200
+        ):
+            raise ServiceError("invalid", "Invalid observed voucher type.")
         if (
             any(
                 not isinstance(current[k], str) or not 1 <= len(current[k]) <= 200
@@ -378,7 +401,7 @@ def accept(connection, device, payload, receipt):
         item = (flag(connection, run, record, title="Review in Tally", reopen=True) if outcome == "correction"
                 else hold_save(connection, run, record,
                                str(receipt.get("message", "Tally write needs attention."))[:300],
-                               title="Review in Tally"))
+                               title=HOLD_TITLES.get(receipt.get("hold"), "Review in Tally")))
         from ..attention import audit
         audit(connection,item,run['actor_id'],outcome,receipt.get('message','Existing voucher needs review.'))
     # Best-guess review starts after verified write, using exact native identity.

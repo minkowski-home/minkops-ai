@@ -4,7 +4,8 @@
       "target": "corporate",
       "public": "../apps/corporate-website/frontend/dist",
       "ignore": ["**/.*", "**/node_modules/**"],
-      "headers": [{"source": "/api/**", "headers": [{"key": "Cache-Control", "value": "private, no-store"}]}],
+      "headers": [{"source": "/api/**", "headers": [{"key": "Cache-Control", "value": "private, no-store"}]},
+                  {"source": "/downloads/latest.yml", "headers": [{"key": "Cache-Control", "value": "no-cache"}]}],
       "rewrites": [
         {"source": "/api/interest", "run": {"serviceId": "minkops-interest-api", "region": "us-central1"}},
         {"source": "**", "destination": "/index.html"}

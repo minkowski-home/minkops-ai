@@ -4,15 +4,7 @@ import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { desktopBridge, type DesktopStatus } from "./bridge";
 import { LoadingIndicator, RetryMessage } from "../components/Feedback";
-
-interface Device {
-  id: string;
-  name: string;
-  owner_id: string;
-  last_seen_at: string | null;
-  revoked_at: string | null;
-  expires_at: string;
-}
+import { companionNotice, type DestinationDevice as Device } from "./destinationPCs";
 
 export function DevicesScreen({
   tenant,
@@ -28,6 +20,7 @@ export function DevicesScreen({
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [diagnostics, setDiagnostics] = useState("");
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
   const refresh = useCallback(async () => {
     const [loaded, status] = await Promise.all([
@@ -105,6 +98,14 @@ export function DevicesScreen({
           >
             {connected ? "Disconnect this PC" : "Connect this PC"}
           </button>
+          {desktopBridge()?.sendDiagnostics && <button className="button button-ghost" disabled={busy}
+            onClick={() => void action(async () => {
+              const sent = await desktopBridge()!.sendDiagnostics!();
+              setDiagnostics(sent.reference
+                ? `Diagnostics sent. Reference ${sent.reference}.`
+                : "Minkops could not be reached, so the diagnostics were copied. Paste them to your Minkops contact.");
+            })}>Send diagnostics</button>}
+          {diagnostics && <p role="status">{diagnostics}</p>}
         </article>
       ) : (
         <p className="quiet-state">
@@ -135,6 +136,8 @@ export function DevicesScreen({
                     ? "Open the desktop app to reconnect this PC."
                     : "Open Minkops on this PC. Queued work starts when it reconnects."}
               </p>
+              {device.companion_version && <p className="quiet-state">Minkops {device.companion_version}{device.hostname && device.hostname !== device.name ? ` · ${device.hostname}` : ""}</p>}
+              {companionNotice(device) && <p role="status" className="form-message">{companionNotice(device)}</p>}
               <button className="button button-primary" disabled={busy || expired}
                 aria-expanded={checking === device.id} aria-controls={`connections-${device.id}`}
                 onClick={() => setChecking(current => current === device.id ? null : device.id)}>Check connections</button>

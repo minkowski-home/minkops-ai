@@ -18,6 +18,8 @@ export interface DesktopBridge {
   schemaOnlyFolders?: boolean;
   discoveryPackages?: boolean;
   openTallyDiagnostics?(): Promise<void>;
+  /** Companion 0.7.0+: sends a technical summary, or copies it when offline. */
+  sendDiagnostics?(): Promise<{ reference?: string; copied?: boolean }>;
   status(): Promise<DesktopStatus>;
   connect(tenant: string): Promise<{ id: string }>;
   disconnect(): Promise<void>;

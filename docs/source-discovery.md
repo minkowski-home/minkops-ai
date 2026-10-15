@@ -45,18 +45,26 @@ Source Discovery always uses `client_context`; depth and category selectors are
 removed. The upgrade migration removes retired depth settings from installed
 workflows while preserving immutable historical run catalogs.
 
-Tally discovery uses the native **Company on Disk** collection to include every
-company in Tally's configured data directory, together with any already loaded
-companies. The companion locates the locally installed TallyPrime and starts it
-with all numbered company directories when stopped. To load unopened companies
-in a running instance it requests a graceful close and restarts with the complete
-scope. It never force-closes Tally; unsaved work, company login, unavailable data
-paths and uncertain process identity require attention.
+Tally discovery reads **the companies the user has open in Tally**, from any data
+folder. Minkops never starts, closes, restarts or locates Tally, never handles
+company passwords and never chooses data folders: the user opens the companies
+(entering passwords in Tally) before discovery. `Company on Disk` is not read; it
+covers only the single folder named by `tally.ini` and misleads in practices that
+keep companies in several folders.
 
-Company names, GUIDs and company numbers fence crash recovery and collection.
-The catalog retains the initial scope, records unavailable companies explicitly,
-and becomes partial if companies disappear, appear or change identity during
-collection. A partial package cannot be confirmed or reused as complete context.
+The GUID identifies a company. Company numbers are folder-local (every folder
+numbers from 100000) and are display data only. Two open companies with the same
+name block discovery with one action, because every native request selects its
+company by name. Snapshots use format 3 for this open scope; format 2 catalogs
+remain valid. The package becomes partial if companies are opened, closed or
+replaced during collection, and a Tally that closes mid-run ends the run with its
+typed action instead of failing each remaining company. A partial package cannot
+be confirmed or reused as complete context.
+
+Review compares the run with the previous confirmation on the same PC and names
+companies **No longer included** and **Newly included**. A smaller scope is the
+user's choice: confirming accepts it, and bills for a removed company wait until
+it is opened and discovered again.
 The fixed connector accepts a loopback port and inclusive voucher period, never
 caller XML, TDL, scripts, hostnames or SQL. ODBC metadata discovery is removed.
 
@@ -143,7 +151,7 @@ current company and master identities immediately before import.
 
 ## Bounds and failure behavior
 
-Native Tally collection supports 1–50 loaded companies, a period up to 3,660 days,
+Native Tally collection supports 1–50 open companies, a period up to 3,660 days,
 32 MB per HTTP response and 64 MB overall collection/validated snapshot. Excel
 retains 5 MB/workbook, 100 sheets, 10,000 rows, 500 columns, 250,000 cells/sheet
 and 50 MB expanded ZIP bounds. These are parser limits, not permission to upload
@@ -161,8 +169,8 @@ preparation path where applicable. New runs use version 2. Retry may adopt a
 newer confirmed package on the same PC only if the discovered company GUID set
 is unchanged. Completed sibling entries retain their receipts and plans.
 
-Tally error diagnosis, bounded restart and uncertain-import reconciliation are
-shared native capabilities; see [Windows recovery](windows-app.md).
+Typed Tally session states, diagnostics and uncertain-import reconciliation are
+shared native capabilities; see [the Windows companion](windows-app.md).
 
 ## Pause, resume and stop
 

@@ -47,6 +47,8 @@ class Receipt(BaseModel):
     claim_token: UUID
     result: dict | None = None
     error: str | None = Field(default=None, min_length=1, max_length=300)
+    # Bounded technical evidence for support; excluded from the receipt identity.
+    diagnostic: dict | None = None
 
 
 @router.get("/api/tenants/{slug}/desktop/devices")
@@ -108,8 +110,15 @@ Device = Annotated[dict, Depends(worker_device)]
 
 
 @router.post("/api/desktop/worker/claim")
-def claim(device: Device, connection: Db):
-    return call(desktop.claim, connection, device)
+def claim(
+    device: Device,
+    connection: Db,
+    version: Annotated[str | None, Header(alias="X-Minkops-Companion-Version", max_length=20)] = None,
+    host: Annotated[str | None, Header(alias="X-Minkops-Host", max_length=200)] = None,
+    session: Annotated[str | None, Header(alias="X-Minkops-Session", max_length=20)] = None,
+):
+    # Every poll reports the PC's companion; older releases report nothing.
+    return call(desktop.claim, connection, device, desktop.companion_report(version, host, session))
 
 
 @router.post(
@@ -136,6 +145,18 @@ async def finish(job_id: UUID, request: Request, device: Device, connection: Db)
     except (ValueError, TypeError, UnicodeDecodeError) as error:
         raise HTTPException(422, "Invalid local task receipt.") from error
     return call(desktop.finish, connection, device, job_id, body.model_dump(mode="json"))
+
+
+@router.post("/api/desktop/worker/diagnostics", status_code=201)
+async def diagnostics(request: Request, device: Device, connection: Db):
+    body = await request.body()
+    if len(body) > 80_000:
+        raise HTTPException(413, "Diagnostics are too large.")
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise HTTPException(422, "Invalid diagnostics.") from error
+    return call(desktop.send_diagnostics, connection, device, payload)
 
 
 @router.get("/api/desktop/worker/jobs/{job_id}/plan")

@@ -1,0 +1,31 @@
+Minkops 0.7.0 — Windows release candidate
+15 October 2026
+
+Minkops uses the companies you have opened in Tally, including companies from
+different data folders. It no longer starts, closes or restarts Tally. Connection,
+discovery and pre-save checks identify the PC and explain the action required.
+Open the required companies and enable Tally's HTTP server on port 9000.
+
+Source Discovery identifies companies by GUID and shows changes in company scope
+before confirmation. Bill Entry uses the purchase voucher types collected from
+Tally. Choose the destination company at launch; when it has several purchase
+types, choose the type for the run. Show details previews the proposed entry.
+
+Send diagnostics is available in the tray and Connected PCs. It returns a support
+reference when connected and copies a technical summary when offline. Connected
+PCs report their app version, hostname and Remote Desktop session status.
+
+Install 0.7.0 manually over an earlier version before using the updated Tally
+workflows. Older companions are asked to update. From 0.7.0, updates download in
+the background and install when idle or quitting; pending work defers idle
+installation. Release publication checks the installer and update-feed hashes.
+
+Windows 10/11 x64. Windows 11 installation, upgrade, diagnostics, live Tally
+discovery and update download/install were verified. Windows 10 device testing
+and a physical Remote Desktop session remain untested. Automatic relaunch after
+an update was suppressed in the isolated rehearsal; manual relaunch passed.
+This release candidate is unsigned; Windows may display a publisher warning.
+It opens https://app.minkops.com using your existing profile.
+
+SHA-256:
+911df81674a07766675d6b671d31e93647c3622b4d53e809c36c9196a766621b

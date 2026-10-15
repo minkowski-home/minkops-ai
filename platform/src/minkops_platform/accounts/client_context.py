@@ -20,10 +20,13 @@ def validate_snapshot(snapshot, config):
         not isinstance(snapshot, dict)
         or set(snapshot) - {"scope_error"}
         != {"format_version", "period", "companies", "company_scope", "partial"}
-        or snapshot["format_version"] != "2"
+        or snapshot["format_version"] not in ("2", "3")
         or snapshot["period"] != config["period"]
     ):
         raise ValueError("Discovery returned a different period or format.")
+    # Format 3 scopes the companies open in Tally, from any data folder: the
+    # GUID identifies a company and its folder-local number may repeat.
+    open_scope = snapshot["format_version"] == "3"
     period = snapshot["period"]
     start, end = date.fromisoformat(period["from"]), date.fromisoformat(period["to"])
     if start > end:
@@ -41,7 +44,23 @@ def validate_snapshot(snapshot, config):
         or type(snapshot["partial"]) is not bool
     ):
         raise ValueError("Invalid company scope.")
-    if (
+    if open_scope:
+        if (
+            not isinstance(scope, list)
+            or len(scope) != len(companies)
+            or any(
+                not isinstance(c, dict)
+                or set(c) != {"company", "company_guid", "company_number"}
+                or any(not isinstance(c[k], str) or not c[k].strip() for k in ("company", "company_guid"))
+                or (c["company_number"] is not None
+                    and not (isinstance(c["company_number"], str) and re.fullmatch(r"[0-9]{1,10}", c["company_number"])))
+                for c in scope
+            )
+            or len({c["company"].casefold() for c in scope}) != len(scope)
+            or len({c["company_guid"] for c in scope}) != len(scope)
+        ):
+            raise ValueError("Invalid company scope evidence.")
+    elif (
         not isinstance(scope, list)
         or len(scope) != len(companies)
         or any(
@@ -103,8 +122,8 @@ def validate_snapshot(snapshot, config):
             or guid in guids
             or text(identity.get("GUID")) != guid
             or guid != expected[name]["company_guid"]
-            or str(text(identity.get("COMPANYNUMBER")) or "").strip()
-            != expected[name]["company_number"]
+            or (not open_scope and str(text(identity.get("COMPANYNUMBER")) or "").strip()
+                != expected[name]["company_number"])
         ):
             raise ValueError("Company identity mismatch.")
         guids.add(guid)
@@ -231,12 +250,13 @@ def targets_from_snapshot(snapshot, device_id, discovery_id):
                 if category == "company"
                 else [r["data"] for r in masters if r["type"] == kind]
             )
-            # Write checks need stable scalar identity, while full definitions stay in evidence files.
+            # Write checks need stable scalar identity, while full definitions
+            # stay in evidence files. RESERVEDNAME and ISACTIVE classify voucher types.
             records = [
                 {
                     k: text(v)
                     for k, v in r.items()
-                    if k in ("@_NAME", "NAME", "GUID", "PARENT", "ALTERID")
+                    if k in ("@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE")
                 }
                 for r in records
             ]
@@ -251,6 +271,7 @@ def targets_from_snapshot(snapshot, device_id, discovery_id):
             },
             device_id,
             discovery_id,
+            vouchers=company["vouchers"]["records"],
         )
         books_from = books_beginning(company["identity"])
         if books_from:

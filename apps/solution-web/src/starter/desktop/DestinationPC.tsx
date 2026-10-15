@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../contexts/AuthContext';
-import { destinationAvailable, destinationDevices, destinationPreference, initialDestination, type DestinationDevice } from './destinationPCs';
+import { companionNotice, destinationAvailable, destinationDevices, destinationPreference, initialDestination, type DestinationDevice } from './destinationPCs';
 
 export interface DestinationPCState {
   deviceId: string; available: boolean; loading: boolean; error: string; name: string;
@@ -65,5 +65,6 @@ export function DestinationPCPicker({ devices, value, onChange, busy = false, re
     {!loading && !devices.length && required && <p role="status">Connect a PC in the Windows app to use a local destination.</p>}
     {value && !destinationAvailable(selected) && <p role="status">The selected PC is unavailable. Reconnect it or explicitly choose another PC.</p>}
     {selected && destinationAvailable(selected) && (!selected.last_seen_at || Date.now() - Date.parse(selected.last_seen_at) >= 30000) && <p className="quiet-state">This PC is offline. Local work waits for it to reconnect.</p>}
+    {selected && companionNotice(selected) && <p role="status">{companionNotice(selected)}</p>}
   </div>;
 }

@@ -17,16 +17,7 @@ const company = (name) =>
 function transport(sent, fail = false) {
   return async (_url, { body }) => {
     sent.push(body);
-    if (body.includes("<ID>MinkopsAvailableCompanies</ID>"))
-      return new Response(
-        `<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${company("A")}${company("B")}</COLLECTION></DATA></BODY></ENVELOPE>`
-          .replaceAll("<COMPANY ", "<COMPANYONDISK ")
-          .replaceAll("</COMPANY>", "</COMPANYONDISK>"),
-      );
-    if (
-      body.includes("<ID>MinkopsCompanies</ID>") ||
-      body.includes("<ID>MinkopsCompanyScope</ID>")
-    )
+    if (body.includes("<ID>MinkopsOpenCompanies</ID>"))
       return new Response(
         `<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${company("A")}${company("B")}</COLLECTION></DATA></BODY></ENVELOPE>`,
       );
@@ -96,7 +87,7 @@ test("a lost, added or replaced company during collection makes the package part
       { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
       {
         request: (url, options) =>
-          options.body.includes("<ID>MinkopsCompanyScope</ID>") && ++probes > 1
+          options.body.includes("<ID>MinkopsOpenCompanies</ID>") && ++probes > 1
             ? Promise.resolve(
                 new Response(
                   `<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${finalScope}</COLLECTION></DATA></BODY></ENVELOPE>`,
@@ -106,7 +97,7 @@ test("a lost, added or replaced company during collection makes the package part
       },
     );
     assert.equal(result.partial, true);
-    assert.match(result.scope_error, /company scope/i);
+    assert.match(result.scope_error, /opened or closed in Tally during discovery/);
     assert.equal(result.companies.length, 2, "successful evidence is retained");
   }
 });
@@ -143,27 +134,51 @@ test("collection progress measures verified native reads and replaces the curren
   assert.ok(failed.at(-1)[2].completed < failed.at(-1)[2].total, "failed exports are never credited as complete");
 });
 
-test("an unopened on-disk company remains an identified unavailable company, never omitted", async () => {
-  const base = transport([]);
+test("discovery covers only open companies, from any folder, keyed by GUID", async () => {
+  const sent = [];
+  const base = transport(sent);
+  // Both companies come from different data folders, so each is number 100000.
+  const open = company("A") + company("B").replace("100001", "100000");
   const result = await discoverClientContext(
     { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
     {
       request: (url, options) =>
-        options.body.includes("<ID>MinkopsCompanyScope</ID>")
-          ? Promise.resolve(
-              new Response(
-                `<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${company("A")}</COLLECTION></DATA></BODY></ENVELOPE>`,
-              ),
-            )
+        options.body.includes("<ID>MinkopsOpenCompanies</ID>")
+          ? Promise.resolve(new Response(`<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${open}</COLLECTION></DATA></BODY></ENVELOPE>`))
           : base(url, options),
     },
   );
-  assert.equal(result.partial, true);
-  assert.equal(result.companies.length, 2);
-  assert.equal(result.companies[1].company, "B");
-  assert.equal(result.companies[1].status, "unavailable");
-  assert.equal(result.company_scope[1].company_guid, null);
+  assert.equal(result.format_version, "3");
+  assert.equal(result.partial, false);
+  assert.deepEqual(result.company_scope, [
+    { company: "A", company_guid: "A-guid", company_number: "100000" },
+    { company: "B", company_guid: "B-guid", company_number: "100000" },
+  ]);
+  assert.ok(sent.every((body) => !/Company on Disk/i.test(body)));
 });
+
+test("a Tally closed during collection ends discovery with its typed action", async () => {
+  const base = transport([]);
+  let exports = 0;
+  await assert.rejects(
+    discoverClientContext(
+      { port: 9000, period: { from: "2026-10-01", to: "2026-10-02" } },
+      {
+        request: (url, options) => {
+          if (options.body.includes("List of Accounts") && ++exports === 1)
+            throw Object.assign(new Error("Tally isn't open on PC1. Open it and your companies, then try again."), {
+              userSafe: true,
+              tallyState: "not_running",
+            });
+          return base(url, options);
+        },
+      },
+    ),
+    { tallyState: "not_running" },
+  );
+  assert.equal(exports, 1, "no further company is attempted against a closed Tally");
+});
+
 test("period discovery requests a complete date-filtered native voucher collection", async () => {
   const base = transport([]);
   const requests = [];

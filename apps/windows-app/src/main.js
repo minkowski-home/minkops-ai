@@ -10,8 +10,9 @@ import {
   net,
   dialog,
   shell,
+  clipboard,
 } from "electron";
-import { hostname } from "node:os";
+import { hostname, release } from "node:os";
 import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import {
@@ -21,31 +22,31 @@ import {
   realpath,
   unlink,
   mkdir,
+  readdir,
+  stat,
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import {
   inventory,
   replaceApproved,
-  tallyProbe,
+  checkTally,
   inspectExcel,
   excelSchemaBytes,
   readTallyReferences,
   discoverClientContext,
   saveDiscoveryPackage,
-  recoveringTallyRequest,
-  ensureTallyDiscovery,
+  tallyTransport,
+  tallyProcesses,
+  readTallyIni,
   inspectTallyAttention,
-  tallyCompanyNumber,
-  captureTallyProcess,
-  tallyProcessRunning,
-  restartTallyProcess,
-  waitForTally,
   tallyCrashEvents,
-  commitTallyBill,
+  saveTallyBill,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
 import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
+import electronUpdater from "electron-updater";
+import { startUpdates } from "./updater.js";
 import {
   trustedOrigin,
   validateSender,
@@ -73,6 +74,13 @@ let state = {
   pending: null,
 };
 const pendingGrants = new Map();
+let update = null;
+// Support evidence kept in memory: the latest diagnostic per running job and
+// a short history of outcomes for Send diagnostics. Never bill contents.
+const jobDiagnostics = new Map();
+const recentJobs = [];
+const pcName = () => hostname().slice(0, 80);
+const remoteSession = () => /^RDP-/i.test(process.env.SESSIONNAME ?? "");
 let persistence = Promise.resolve();
 const uuid = (value) =>
   typeof value === "string" &&
@@ -148,7 +156,12 @@ function startWorker() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
-        "X-Minkops-Plan-Version": "2",
+        // Plan 3: open-company discovery and pinned purchase voucher types.
+        "X-Minkops-Plan-Version": "3",
+        // Each poll tells the console which PC and companion run the work.
+        "X-Minkops-Companion-Version": app.getVersion(),
+        "X-Minkops-Host": pcName().replace(/[^\x20-\x7e]/g, "?"),
+        "X-Minkops-Session": remoteSession() ? "remote" : "console",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -164,32 +177,16 @@ function startWorker() {
     request,
     execute: async (job) => {
       if (state.device !== identity) throw new Error("PC connection changed.");
-      const tallyRequest = recoveringTallyRequest({
-        preserveCompanyScope: job.operation === "sources.discover",
-        capture: async () => {
-          const observed = await captureTallyProcess().catch(() => null);
-          if (observed) {
-            observed.loads = [
-              ...new Set([
-                ...observed.loads,
-                ...Object.values(state.tally_company_numbers ?? {}),
-              ]),
-            ];
-            state.tally_startup = observed;
-            await persist();
-          }
-          return observed ?? state.tally_startup ?? null;
-        },
-        isRunning: tallyProcessRunning,
-        restart: restartTallyProcess,
-        ready: waitForTally,
+      // Minkops never starts, closes or restarts Tally; failures become typed
+      // states naming this PC, and each one leaves a local diagnostic record.
+      const pc = pcName();
+      const tallyRequest = tallyTransport({
+        pc,
         diagnose: async (diagnostic) => {
           const root = join(app.getPath("userData"), "tally-diagnostics");
           await mkdir(root, { recursive: true });
           const record = {
             ...diagnostic,
-            observed: undefined,
-            company_scope: diagnostic.observed?.company_scope,
             job_id: job.id,
             collected_at: new Date().toISOString(),
             windows_events: await tallyCrashEvents(),
@@ -199,13 +196,31 @@ function startWorker() {
             JSON.stringify(record, null, 2),
             { mode: 0o600 },
           );
+          jobDiagnostics.set(job.id, {
+            ...diagnostic,
+            windows_events: (record.windows_events ?? []).slice(0, 3).map((event) => ({
+              ...event,
+              Message: String(event.Message ?? "").slice(0, 500),
+            })),
+          });
         },
       });
       if (
         job.operation === "tally.probe" &&
         !Object.keys(job.input || {}).length
-      )
-        return tallyProbe({ request: tallyRequest });
+      ) {
+        // Check connection uses the same read-only check as discovery and saves.
+        try {
+          const ready = await checkTally({ pc });
+          return { available: true, companies: ready.companies.map((c) => c.company) };
+        } catch (error) {
+          jobDiagnostics.set(job.id, {
+            state: error.tallyState ?? "error", cause: error.detail?.cause,
+            running: error.detail?.running, error: String(error.message).slice(0, 300),
+          });
+          throw error;
+        }
+      }
       const grantFor = (sourceId) =>
         binding(identity.tenant, sourceId, { id: identity.owner_id });
       if (job.operation === "sources.discover") {
@@ -217,15 +232,8 @@ function startWorker() {
           inventory,
           inspectExcel,
           excelSchemaBytes,
-          discoverClientContext: async (config, options) => {
-            const startup = await ensureTallyDiscovery(config);
-            state.tally_startup = startup;
-            await persist();
-            return discoverClientContext(config, {
-              ...options,
-              request: tallyRequest,
-            });
-          },
+          discoverClientContext: (config, options) =>
+            discoverClientContext(config, { ...options, request: tallyRequest, pc }),
           onProgress: async (source_key, status, category = null, progress = null) => {
             try {
               await reportDiscoveryProgress(() => request(`/api/desktop/worker/jobs/${job.id}/progress`, {
@@ -240,15 +248,6 @@ function startWorker() {
             }
           },
         });
-        for (const source of result.sources)
-          for (const company of source.snapshot?.companies ?? []) {
-            const number = tallyCompanyNumber(company.identity?.COMPANYNUMBER);
-            if (number !== null) {
-              state.tally_company_numbers ??= {};
-              state.tally_company_numbers[company.company_guid] = number;
-            }
-          }
-        await persist();
         await saveDiscoveryPackage(
           join(
             app.getPath("userData"),
@@ -291,20 +290,11 @@ function startWorker() {
         const plan = await request(
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
-        try {
-          return await commitTallyBill(plan, { request: tallyRequest });
-        } catch (error) {
-          if (!error.tallyAmbiguous) throw error;
-          const reconciled = await commitTallyBill(plan, {
-            request: tallyRequest,
-            reconciliationOnly: true,
-          });
-          if (reconciled.outcome === "attention" && error.tallyLineError)
-            reconciled.message = /date/i.test(error.tallyLineError)
-              ? "Tally rejected the voucher date. Check the source bill and Tally date settings, then use Retry save."
-              : "Tally rejected this bill. Check its voucher settings in Tally, then use Retry save.";
-          return reconciled;
-        }
+        return saveTallyBill(plan, {
+          request: tallyRequest,
+          pc,
+          diagnose: (record) => jobDiagnostics.set(job.id, record),
+        });
       }
       if (job.operation !== "accounts.save")
         throw new Error("Unsupported local operation.");
@@ -331,6 +321,19 @@ function startWorker() {
         },
       );
       return { content: saved.toString("base64") };
+    },
+    diagnosticFor: (job, receipt) => {
+      recentJobs.unshift({
+        id: job.id,
+        operation: job.operation,
+        outcome: receipt.error ? "failed" : "completed",
+        ...(receipt.error ? { error: receipt.error } : {}),
+        at: new Date().toISOString(),
+      });
+      recentJobs.length = Math.min(recentJobs.length, 20);
+      const diagnostic = jobDiagnostics.get(job.id) ?? null;
+      jobDiagnostics.delete(job.id);
+      return diagnostic;
     },
     pending: () => state.pending,
     savePending: async (pending) => {
@@ -390,6 +393,80 @@ function startWorker() {
   tick();
 }
 
+/** A technical summary for support: versions, this PC, the Tally session and
+ * recent outcomes. Never bill data, file contents, XML or credentials. */
+async function collectDiagnostics() {
+  const pc = pcName();
+  const processes = await tallyProcesses().catch(() => null);
+  let session;
+  try {
+    const ready = await checkTally({ pc, retries: 0 });
+    session = { state: "ready", companies: ready.companies, warnings: ready.warnings.map((w) => w.state) };
+  } catch (error) {
+    session = { state: error.tallyState ?? "error", message: String(error.message).slice(0, 300), cause: error.detail?.cause };
+  }
+  const folder = join(app.getPath("userData"), "tally-diagnostics");
+  const records = [];
+  try {
+    const files = await Promise.all(
+      (await readdir(folder)).filter((name) => name.endsWith(".json")).map(async (name) => ({
+        name, modified: (await stat(join(folder, name))).mtimeMs,
+      })),
+    );
+    for (const file of files.sort((a, b) => b.modified - a.modified).slice(0, 5))
+      records.push(JSON.parse((await readFile(join(folder, file.name), "utf8")).slice(0, 4000)));
+  } catch {
+    /* No local records yet, or one is unreadable; send the rest. */
+  }
+  return {
+    collected_at: new Date().toISOString(),
+    companion: { version: app.getVersion(), plan_version: 3, connected: Boolean(state.device) },
+    windows: { hostname: pc, release: release(), remote_session: remoteSession() },
+    tally: {
+      session,
+      processes: processes?.map(({ product, version, session: windowsSession }) => ({ product, version, session: windowsSession })) ?? null,
+      settings: await readTallyIni(processes?.[0]?.exe),
+    },
+    jobs: recentJobs,
+    records: records.filter(Boolean),
+  };
+}
+
+/** Send to Minkops when connected; otherwise copy, so the user can paste it. */
+async function sendDiagnostics() {
+  const bundle = await collectDiagnostics();
+  const identity = state.device;
+  if (identity) {
+    try {
+      const response = await fetch(origin + "/api/desktop/worker/diagnostics", {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(30000),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${identity.credential}` },
+        body: JSON.stringify(bundle),
+      });
+      if (response.ok) return { reference: (await response.json()).reference };
+    } catch {
+      /* Offline: fall back to the clipboard below. */
+    }
+  }
+  clipboard.writeText(JSON.stringify(bundle, null, 2));
+  return { copied: true };
+}
+
+async function sendDiagnosticsFromTray() {
+  const sent = await sendDiagnostics().catch(() => null);
+  await dialog.showMessageBox({
+    type: sent ? "info" : "warning",
+    title: "Minkops diagnostics",
+    message: sent?.reference
+      ? `Diagnostics sent. Reference: ${sent.reference}`
+      : sent?.copied
+        ? "Minkops could not be reached, so the diagnostics were copied. Paste them to your Minkops contact."
+        : "Diagnostics could not be collected. Restart Minkops and try again.",
+  });
+}
+
 function handle(channel, operation) {
   ipcMain.handle(channel, async (event, payload) => {
     validateSender(event, window, origin);
@@ -420,12 +497,14 @@ function setupBridge() {
     await saveCatalogSnapshot(selected.filePath, catalog);
     return true;
   });
+  handle("desktop:send-diagnostics", () => sendDiagnostics());
   handle("desktop:tally-diagnostics", async () => {
     await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
   });
   handle("desktop:status", async () => ({
     discovery_archive_error: state.discovery_archive_error ?? null,
     version: app.getVersion(),
+    update,
     name: hostname(),
     device: state.device
       ? {
@@ -692,6 +771,10 @@ else {
           // Credentials and grants belong to one server. Changing deployments
           // requires explicit pairing; never send a prior server's token away.
           if (restored.server_origin === origin) state = restored;
+          // Releases before 0.7.0 remembered how to restart Tally. Minkops no
+          // longer controls Tally, so that local state is discarded.
+          delete state.tally_startup;
+          delete state.tally_company_numbers;
         } catch {
           /* Damaged local credentials require explicit reconnection. */
         }
@@ -709,6 +792,7 @@ else {
       tray.setContextMenu(
         Menu.buildFromTemplate([
           { label: "Open Minkops", click: openConsole },
+          { label: "Send diagnostics", click: () => void sendDiagnosticsFromTray() },
           {
             label: "Reconnect to Minkops",
             click: () => {
@@ -722,6 +806,15 @@ else {
       );
       tray.on("double-click", openConsole);
       startWorker();
+      startUpdates({
+        updater: electronUpdater.autoUpdater,
+        isPackaged: app.isPackaged && !localDemo,
+        // Never restart over a claimed job, an unsent receipt or an active user.
+        isIdle: () => !worker?.busy && !state.pending && !window?.isFocused(),
+        onState: (value) => {
+          update = value;
+        },
+      });
       openConsole();
     })
     .catch(() => {

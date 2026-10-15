@@ -14,9 +14,9 @@ import { join, dirname, basename, sep, extname } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, excelSchemaBytes } from './discovery.js';
 export { readTallyReferences } from './tally-references.js';
-export { recoveringTallyRequest, ensureTallyDiscovery, tallyCompanyNumber, captureTallyProcess, tallyProcessRunning, restartTallyProcess, waitForTally, tallyCrashEvents } from './tally-recovery.js';
+export { checkTally, requireOpenCompany, readOpenCompanies, openCompanyScope, classifyTallyFailure, tallyTransport, TallyUnavailable, tallyCompanyNumber, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
 export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
-export { commitTallyBill, readTallyBills } from './tally.js';
+export { commitTallyBill, readTallyBills, saveTallyBill, classifyRejection, purchaseVoucherTypes } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|pdf|png|jpe?g|webp)$/i;
@@ -90,66 +90,6 @@ export async function boundedText(response, limit = 1_000_000) {
   } finally {
     await reader.cancel().catch(() => {});
   }
-}
-
-/** A read-only company export, never a caller-supplied XML request or hostname. */
-export async function tallyProbe({ port = 9000, request = fetch } = {}) {
-  if (!Number.isInteger(port) || port < 1 || port > 65535)
-    throw new Error("Invalid Tally port.");
-  const body =
-    '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsCompanies</ID></HEADER><BODY><DESC><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsCompanies"><TYPE>Company</TYPE><FETCH>Name</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>';
-  const response = await request(`http://127.0.0.1:${port}`, {
-    method: "POST",
-    body,
-    headers: { "Content-Type": "text/xml; charset=utf-8" },
-    redirect: "error",
-    signal: AbortSignal.timeout(8000),
-  });
-  const text = await boundedText(response);
-  if (/<!DOCTYPE|<!ENTITY/i.test(text) || XMLValidator.validate(text) !== true)
-    throw new Error("Tally returned an invalid response.");
-  const parsed = new XMLParser({
-    ignoreAttributes: false,
-    parseTagValue: false,
-    trimValues: true,
-  }).parse(text);
-  const envelope = parsed.ENVELOPE;
-  if (
-    !envelope ||
-    String(envelope.HEADER?.STATUS) !== "1" ||
-    /<LINEERROR\b/i.test(text)
-  )
-    throw new Error("Tally could not list the open companies.");
-  const nodes = envelope.BODY?.DATA?.COLLECTION?.COMPANY;
-  const list = nodes ? (Array.isArray(nodes) ? nodes : [nodes]) : [];
-  const companies = list.map((company) => {
-    // With attributes enabled, <NAME TYPE="String"> is an object containing
-    // #text. Accept scalar text or this typed-text shape, never object coercion.
-    const node = company.NAME;
-    let name;
-    if (typeof node === "string") name = node;
-    else if (node !== undefined) {
-      if (
-        !node ||
-        Array.isArray(node) ||
-        typeof node !== "object" ||
-        Object.keys(node).some(
-          (key) => key !== "#text" && !key.startsWith("@_"),
-        ) ||
-        (node["#text"] !== undefined && typeof node["#text"] !== "string")
-      ) {
-        throw new Error("Tally returned an invalid company name.");
-      }
-      name = node["#text"];
-    }
-    name = name || company["@_NAME"];
-    if (typeof name !== "string" || !name.trim())
-      throw new Error("Tally returned an invalid company name.");
-    return name.trim();
-  });
-  if (companies.length > 100 || companies.some((c) => c.length > 200))
-    throw new Error("Tally returned an invalid company list.");
-  return { available: true, companies };
 }
 
 function relativeParts(path) {

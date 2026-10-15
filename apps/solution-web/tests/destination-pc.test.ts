@@ -17,3 +17,12 @@ test('multiple PCs require a choice; saved unavailable choices never switch sile
   assert.equal(initialDestination([pc],'{}',now),'a');
   assert.equal(initialDestination([{...pc,expires_at:'2025-01-01'}],null,now),'');
 });
+import { companionNotice } from '../src/starter/desktop/destinationPCs.ts';
+test('a PC is asked to update only when it reports an older or no version', () => {
+  assert.equal(companionNotice({...pc}), '', 'never polled: work waits for it');
+  assert.match(companionNotice({...pc,last_seen_at:'2026-10-12'}), /Update Minkops on PC A to 0.7.0/);
+  assert.match(companionNotice({...pc,last_seen_at:'2026-10-12',companion_version:'0.6.10'}), /Update Minkops/);
+  assert.equal(companionNotice({...pc,last_seen_at:'2026-10-12',companion_version:'0.10.0'}), '');
+  assert.match(companionNotice({...pc,last_seen_at:'2026-10-12',companion_version:'0.7.0',remote_session:true}),
+    /Remote Desktop session/);
+});

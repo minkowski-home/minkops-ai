@@ -95,6 +95,16 @@
         "null"
       ],
       "minLength": 1
+    },
+    "purchase_voucher_types": {
+      "type": "object",
+      "title": "Purchase voucher type per company",
+      "maxProperties": 50,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
     }
   },
   "required": [

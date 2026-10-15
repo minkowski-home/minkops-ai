@@ -173,8 +173,8 @@ supported for legacy runs. Workflow 0.11.1 also supports one to eight separately
 evidenced tax allocations, including CGST and SGST, through company-scoped native
 master references. The server derives canonical names, checks each positive amount
 and the exact tax sum, and rejects mixed scalar/split mappings and repeated ledgers.
-Split plans require companion 0.6.9 and native plan protocol 2; older companions
-receive an update instruction before accessing such a plan. Every selected master
+New plans use native plan protocol 3 (pinned purchase voucher type, companion
+0.7.0); older companions receive an update instruction before accessing such a plan. Every selected master
 is rechecked, and every saved allocation must match readback independently. Equal
 gross totals cannot conceal a collapsed or changed tax split. This accounting
 voucher contract does not assert statutory filing readiness.
@@ -217,16 +217,22 @@ evidence below predates this refactor. Repeat live acceptance and deployment und
 [MIN-124](https://linear.app/minkops/issue/MIN-124). No scheduling or new accounting
 layer is introduced. The existing native Purchase contract remains bounded.
 
-Tally HTTP/XML errors produce local diagnostics with available Windows crash events.
-If a known Tally process disappears, the companion may restart it once using its
-observed executable and safe numeric `/LOAD` arguments, then wait for companies.
-Reads may repeat once; an uncertain import is never automatically resent. Read-only
-reconciliation distinguishes an already-applied bill, a conflicting version and
-an absent bill requiring review/Resume. If restart, login or readback cannot be
-established, the run remains unresolved. See [Windows recovery](windows-app.md).
-An XML rejection from a still-running Tally process does not imply a restart.
-Rejected dates receive a concise date-settings handoff; uncertain writes retain
-read-only reconciliation and never automatically repeat an import.
+Bill saves run against the user's open Tally session; Minkops never starts or
+restarts Tally. Before each save the run's company must be open and match the
+discovered GUID; otherwise the bill holds ("Open company in Tally") and Retry save
+continues once it is open. Reads may repeat after a timeout; an uncertain import is
+never automatically resent. Read-only reconciliation distinguishes an
+already-applied bill, a conflicting version and an absent bill requiring review and
+Retry save. Native rejections are classified (date, permission, voucher type,
+voucher number, ledger) into short labels; Tally's own text stays in diagnostics.
+See [the Windows companion](windows-app.md).
+
+Each run writes with a purchase voucher type pinned per company from discovered
+masters (automatic when only one is active, otherwise chosen at launch), and checks
+duplicates across every purchase-based type, including inactive ones; a matching
+Journal voucher holds. Choosing "Use one company for this run" suits practices that
+keep one Tally company per financial year. **Show details** on each proposal lists
+the company, voucher type, date, ledgers and amounts it will enter.
 
 The following generator and live scripts describe the earlier development proof.
 Do not run them against this preserved Test Company: their fixed fixture IDs

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   inventory,
-  tallyProbe,
+  checkTally,
 } from "../../../connectors/desktop/src/index.js";
 import { CompanionWorker } from "../../../platform/desktop-runtime/src/worker.js";
 
@@ -32,7 +32,7 @@ async function api(
     headers: {
       ...(form ? {} : { "Content-Type": "application/json" }),
       ...(credential
-        ? { Authorization: `Bearer ${credential}` }
+        ? { Authorization: `Bearer ${credential}`, 'X-Minkops-Plan-Version': '3', 'X-Minkops-Companion-Version': '0.7.0' }
         : { Cookie: cookie, "x-csrf-token": csrf }),
     },
     body: body === undefined ? undefined : form ? body : JSON.stringify(body),
@@ -140,7 +140,8 @@ try {
   });
   const worker = new CompanionWorker({
     ...options,
-    execute: () => tallyProbe(),
+    // The same read-only check the companion runs for Check connection.
+    execute: async () => ({ available: true, companies: (await checkTally()).companies.map((c) => c.company) }),
   });
   await worker.tick();
   const tally = await api(base + `/desktop/jobs/${probe.id}`);

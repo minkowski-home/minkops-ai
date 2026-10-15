@@ -336,3 +336,23 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual(updated["state"],"writing")
         _,_,plan=self.tally_job(updated)
         self.assertEqual(plan["data"]["vendor"],"New supplier")
+
+
+    def test_company_not_open_hold_is_labelled_and_retryable(self):
+        """A companion's typed hold names its action in shared attention."""
+        did = self.tally_discovery()
+        bill = self.upload_bill()
+        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+        self.process(run, self.tally_result(run, bill))
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        claim, route, _ = self.tally_job(loaded)
+        message = "Open Test in Tally on PC1, then try again."
+        finished = self.client.post(route + "/finish", headers=self.worker, json={
+            "claim_token": claim["claim_token"],
+            "result": {"outcome": "attention", "message": message, "hold": "company_not_open"}})
+        self.assertEqual(finished.status_code, 200, finished.text)
+        items = self.client.get("/api/tenants/mock-tenant/attention?status=pending").json()
+        self.assertIn("Open company in Tally", [item["label"] for item in items])
+        record = self.client.get(self.base + f"/runs/{run['id']}").json()["result"]["records"][0]
+        self.assertEqual((record["status"], record["save_hold"]), ("held", message))

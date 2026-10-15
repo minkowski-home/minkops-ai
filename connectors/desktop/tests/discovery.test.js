@@ -100,7 +100,7 @@ test("Tally workflow references scope company, exclude unrelated values, and iso
         sent.push({ url, body: options.body });
         if (options.body.includes("<TYPE>Company</TYPE>"))
           return new Response(
-            '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Test &amp; Co"/></COLLECTION></DATA></BODY></ENVELOPE>',
+            '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Test &amp; Co"><GUID>co-guid</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>',
           );
         if (options.body.includes("<TYPE>StockItem</TYPE>"))
           throw new Error("offline");
@@ -147,7 +147,7 @@ test("Tally discovery refuses unopened companies and never falls back to the act
         request: async () => {
           calls++;
           return new Response(
-            '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Other"/></COLLECTION></DATA></BODY></ENVELOPE>',
+            '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Other"><GUID>other-guid</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>',
           );
         },
       },

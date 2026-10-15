@@ -20,6 +20,7 @@ EXCEPTION_LABELS = {
     "unsupported_structure": "Manual entry needed",
     "date_before_books": "Before books begin",
     "destination_changed": "Tally changed",
+    "voucher_type_unresolved": "Voucher type needed",
 }
 
 

@@ -6,6 +6,7 @@ export class CompanionWorker {
     pending,
     savePending,
     acknowledge = async () => {},
+    diagnosticFor = () => null,
   }) {
     Object.assign(this, {
       request,
@@ -13,6 +14,7 @@ export class CompanionWorker {
       pending,
       savePending,
       acknowledge,
+      diagnosticFor,
     });
     this.busy = false;
   }
@@ -35,9 +37,13 @@ export class CompanionWorker {
           receipt = {
             claim_token: job.claim_token,
             result: null,
+            // Connector errors flagged user-safe carry one specific action (for
+            // example "Tally isn't open on <PC>"); anything else stays generic.
             error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
-              ["tally.probe", "tally.references"].includes(job.operation)
-                ? "Tally is not responding. Open Tally, load your company, and try again."
+              error.userSafe && typeof error.message === "string" && error.message.trim()
+                ? error.message.slice(0, 300)
+              : ["tally.probe", "tally.references"].includes(job.operation)
+                ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
                 : job.operation === "tally.save"
                   ? "Tally could not confirm this bill. Check the company, then use Retry save; existing vouchers are reconciled before writing."
                   : job.operation === "accounts.save"
@@ -45,6 +51,12 @@ export class CompanionWorker {
                   : "The connected folder could not be read. Reconnect it and try again.",
           };
         }
+        // Evidence collected while the job ran (for example a classified Tally
+        // failure) is sent with the receipt so support never needs the PC.
+        const diagnostic = await Promise.resolve()
+          .then(() => this.diagnosticFor(job, receipt))
+          .catch(() => null);
+        if (diagnostic) receipt.diagnostic = diagnostic;
         pending = { id: job.id, receipt };
         await this.savePending(pending);
       }

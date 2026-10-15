@@ -23,7 +23,7 @@ async function api(path, body, credential, expected = 200) {
     headers: {
       "Content-Type": "application/json",
       ...(credential
-        ? { Authorization: `Bearer ${credential}` }
+        ? { Authorization: `Bearer ${credential}`, 'X-Minkops-Plan-Version': '3', 'X-Minkops-Companion-Version': '0.7.0' }
         : { Cookie: cookie, "x-csrf-token": csrf }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),

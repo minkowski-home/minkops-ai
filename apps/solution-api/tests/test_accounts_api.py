@@ -408,7 +408,7 @@ class AccountsTests(unittest.TestCase):
                 headers=self.csrf,
                 json={"name": "Accounts PC", "installation_id": str(uuid.uuid4())},
             ).json()
-            worker_headers = {"Authorization": "Bearer " + device["credential"]}
+            worker_headers = {"Authorization": "Bearer " + device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
             bound = self.client.post(
                 native_base + f"/devices/{device['id']}/sources/{self.source['id']}",
                 headers=self.csrf,
