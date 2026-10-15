@@ -1655,3 +1655,21 @@ and bill reasoning still contribute to elapsed time.
 **Action:** Consolidated editable defaults into a shared run-options component, kept schema-declared defaults separate from resource selections, isolated workflow administration, and made previous-run reuse explicit. Save outcomes take precedence over findings, with attention linked separately. Added regression coverage for default persistence boundaries, failed saves, role restrictions, resource routing and responsive layouts.
 
 **Result:** Run options have one visible home; saving defaults never changes availability or an executing run. Discovery identifies run-only options explicitly. Verification and attention remain separate, and displayed wall time derives from recorded timestamps rather than estimates.
+
+### 2026-10-15 — Validate the update artifact the client actually downloads
+
+**Situation:** Windows release rehearsal found that Hosting verified the legacy
+top-level update-feed path/hash while electron-updater preferred `files[]`.
+A mismatched file entry could therefore pass deployment and break automatic updates.
+
+**Task:** Keep installer publication atomic with the reviewed artifact contract.
+
+**Action:** Parse the complete YAML feed, reject duplicate keys and malformed
+documents, and validate both legacy metadata and the single file's URL, SHA-512
+and byte length before filesystem publication or any cloud operation.
+
+**Result:** Six negative cases failed before the fix; all eight regression cases
+now reject invalid feeds before publication. A real Windows updater downloaded
+the reviewed 0.7.0 installer, verified its hash, deferred while busy, and dispatched
+the silent installer; installed-app checks passed afterwards. The installer remains
+unsigned, and automatic relaunch was suppressed in the isolated update rehearsal.

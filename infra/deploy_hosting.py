@@ -9,16 +9,27 @@ import base64
 import gzip
 import hashlib
 import json
-import re
 import shutil
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
+import yaml
+
 from google_api import GoogleApi
 
 SITES = {"corporate": "minkops-ai-prod", "console": "minkops-ai-console"}
 BASE = "https://firebasehosting.googleapis.com/v1beta1"
+
+
+class FeedLoader(yaml.SafeLoader):
+    """Match the updater's rejection of ambiguous duplicate YAML keys."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        if len(keys) != len(set(keys)):
+            raise yaml.YAMLError("Duplicate update feed key")
+        return super().construct_mapping(node, deep=deep)
 
 
 def serving_config(configuration):
@@ -37,10 +48,19 @@ def verified_feed(installer, manifest):
     for path in (feed, blockmap):
         if path.is_symlink() or not path.is_file():
             raise RuntimeError(f"Missing update feed file {path.name} next to the installer")
-    fields = dict(re.findall(r"^(version|path|sha512):\s*'?([^'\n]+?)'?\s*$", feed.read_text(), re.MULTILINE))
+    try:
+        fields = yaml.load(feed.read_text(), Loader=FeedLoader)
+    except (yaml.YAMLError, TypeError, UnicodeError) as error:
+        raise RuntimeError("Invalid update feed") from error
     with installer.open("rb") as stream:
         sha512 = base64.b64encode(hashlib.file_digest(stream, "sha512").digest()).decode()
-    if fields != {"version": manifest["version"], "path": manifest["filename"], "sha512": sha512}:
+    expected = {"version": manifest["version"], "path": manifest["filename"], "sha512": sha512}
+    # electron-updater prefers files[] over the legacy top-level path/hash.
+    # Validate both representations before any files or cloud state are changed.
+    files = [{"url": manifest["filename"], "sha512": sha512, "size": installer.stat().st_size}]
+    if (not isinstance(fields, dict)
+            or any(fields.get(key) != value for key, value in expected.items())
+            or fields.get("files") != files):
         raise RuntimeError("The update feed does not match the reviewed installer")
     return feed, blockmap
 

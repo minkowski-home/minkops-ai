@@ -106,3 +106,24 @@ def test_a_valid_feed_is_published_next_to_the_installer(tmp_path, monkeypatch):
     assert (downloads / "Minkops-Setup-0.7.0.exe").read_bytes() == installer.read_bytes()
     assert (downloads / "latest.yml").read_text() == feed.read_text()
     assert (downloads / "Minkops-Setup-0.7.0.exe.blockmap").read_bytes() == b"blockmap"
+
+
+@pytest.mark.parametrize("problem", ["url", "digest", "size", "empty", "malformed", "duplicate", "duplicate_same", "scalar"])
+def test_updater_file_entries_are_checked_before_any_publication(tmp_path, monkeypatch, problem):
+    build, installer, feed = release_tree(tmp_path, monkeypatch)
+    text = feed.read_text()
+    changed = {
+        "url": text.replace("  - url: Minkops", "  - url: Other"),
+        "digest": text.replace("    sha512: ", "    sha512: AAAA"),
+        "size": text.replace(f"    size: {installer.stat().st_size}", "    size: 1"),
+        "empty": text[:text.index("files:")] + "files: []\n" + text[text.index("\npath:"):],
+        "malformed": text + "invalid: [\n",
+        "duplicate": text + "files: []\n",
+        "duplicate_same": text + "version: 0.7.0\n",
+        "scalar": "not a feed\n",
+    }[problem]
+    feed.write_text(changed)
+    monkeypatch.setattr(hosting, "GoogleApi", lambda *args: pytest.fail("Invalid file entries reached publication"))
+    with pytest.raises(RuntimeError, match="update feed"):
+        hosting.deploy("corporate", installer)
+    assert not (build / "downloads").exists()
