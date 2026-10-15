@@ -92,6 +92,7 @@ def detail(connection, row, *, include_records=True):
     # Display a derived summary without rewriting the immutable native catalog.
     if catalog:
         from .accounts.client_context import master_lookup
+        from .accounts.voucher_types import summary as voucher_summary
 
         for source in catalog.get("sources", []):
             if source["tool"] != "tally":
@@ -100,7 +101,13 @@ def detail(connection, row, *, include_records=True):
                 if company.get("masters", {}).get("status") != "ready":
                     continue
                 try:
-                    company["master_summary"] = master_lookup(company)["summary"]
+                    lookup = master_lookup(company)
+                    company["master_summary"] = lookup["summary"]
+                    # Bill Entry offers these per company; records stay server-side.
+                    company["purchase_voucher_types"] = voucher_summary(
+                        [r["data"] for r in lookup["records"] if r["type"] == "VOUCHERTYPE"],
+                        company.get("vouchers", {}).get("records", []),
+                    )
                 except ValueError as error:
                     company["master_lookup_error"] = str(error)
                     catalog["partial"] = True
@@ -133,12 +140,45 @@ def detail(connection, row, *, include_records=True):
         "state": state,
         "control_state": control,
         "catalog": catalog,
+        "scope_changes": scope_changes(connection, row),
         "mapping_run": mapping,
         "analysis_failed": analysis_failed,
         "ready": state == "completed" and bool(row["confirmed_at"]) and not catalog["partial"]
         if catalog
         else False,
     }
+
+
+def _tally_companies(catalog):
+    return {c["company_guid"]: c["company"]
+            for source in (catalog or {}).get("sources", []) if source["tool"] == "tally"
+            for c in source.get("snapshot", {}).get("companies", []) if c.get("company_guid")}
+
+
+def scope_changes(connection, row):
+    """Companies added or no longer open since the confirmation before this run.
+
+    Discovery reads only the companies open in Tally, so a smaller scope is a
+    user's choice, shown at review rather than treated as missing evidence.
+    Bill Entry can then route only to companies in the confirmed scope.
+    """
+    current = _tally_companies(row["catalog"])
+    if not current:
+        return None
+    previous = connection.execute(
+        """SELECT catalog FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s
+        AND confirmed_at IS NOT NULL AND id<>%s AND created_at<%s ORDER BY created_at DESC LIMIT 1""",
+        (row["tenant_id"], row["actor_id"], row["device_id"], row["id"], row["created_at"]),
+    ).fetchone()
+    if not previous:
+        return None
+    before = _tally_companies(previous["catalog"])
+
+    def listed(guids, names):
+        return sorted(({"company": names[g], "company_guid": g} for g in guids), key=lambda c: c["company"])
+
+    return {"added": listed(current.keys() - before.keys(), current),
+            "removed": listed(before.keys() - current.keys(), before)}
 
 
 def _observe(connection, row, state, summary, progress):
@@ -175,7 +215,7 @@ def launch(connection, tenant, user, body):
         if set(tally) != {"port", "period"}:
             raise ServiceError(
                 "invalid",
-                "Complete discovery reads all configured companies; specify only port and voucher period.",
+                "Discovery reads the companies open in Tally; specify only port and voucher period.",
             )
         start, end = map(date.fromisoformat, (tally["period"]["from"], tally["period"]["to"]))
         if start > end or (end - start).days > 3660:
@@ -204,6 +244,8 @@ def launch(connection, tenant, user, body):
     if previous:
         return detail(connection, previous)
     device = desktop.owned_device(connection, tenant["id"], user["id"], body["device_id"])
+    if config["tally"]:
+        desktop.require_companion(device)
     workflow = connection.execute(
         "SELECT * FROM workflows WHERE tenant_id=%s AND key='source-discovery' AND status='active'",
         (tenant["id"],),
@@ -286,7 +328,7 @@ def plan(connection, device, job):
             {
                 "key": "tally",
                 "tool": "tally",
-                "label": "All configured companies",
+                "label": "Companies open in Tally",
             }
         )
     return {"config": row["config"], "sources": sources}
@@ -361,7 +403,7 @@ def progress(connection, device, job, body):
             "executing",
             f"{label}: "
             + {
-                "reading": "Reading your selected sourceâ€¦",
+                "reading": "Reading your selected source…",
                 "ready": "Source collected.",
                 "unavailable": "Needs attention; continuing with other sources.",
             }[body["status"]],
@@ -397,7 +439,8 @@ def _tally_authority(source):
     snapshot = source.get("snapshot") or {}
     if "company_scope" not in snapshot:
         return source  # Older single-company snapshots keep their full fingerprint.
-    scope = sorted(snapshot["company_scope"], key=lambda c: (c["company"], c["company_number"]))
+    # Names are unique in a scope; open scopes may omit folder-local numbers.
+    scope = sorted(snapshot["company_scope"], key=lambda c: c["company"])
     return {"key": source["key"], "company_scope": scope}
 
 

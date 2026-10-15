@@ -14,12 +14,7 @@ import {
 import { join } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { boundedText } from "./index.js";
-import {
-  readTallyCompanyScope,
-  readTallyAvailableCompanies,
-  sameCompanyScope,
-  tallyCompanyNumber,
-} from "./tally-recovery.js";
+import { openCompanyScope, readOpenCompanies } from "./tally-session.js";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const escape = (s) =>
   s.replace(
@@ -51,7 +46,7 @@ function date(value) {
 }
 export async function discoverClientContext(
   config,
-  { request = fetch, onProgress = async () => {} } = {},
+  { request = fetch, onProgress = async () => {}, pc = "this PC" } = {},
 ) {
   if (
     !config ||
@@ -67,50 +62,14 @@ export async function discoverClientContext(
     to = date(config.period.to);
   if (from > to || (to - from) / 86400000 > 3660)
     throw new Error("Invalid period.");
-  async function companyScope() {
-    const available = await readTallyAvailableCompanies({
-      port: config.port,
-      request,
-    });
-    const loaded = await readTallyCompanyScope({ port: config.port, request });
-    const scope = available.map((c) => ({
-      ...c,
-      company_guid:
-        loaded.find(
-          (l) =>
-            l.company === c.company && l.company_number === c.company_number,
-        )?.company_guid ?? null,
-    }));
-    // Preserve companies opened from another configured location as well.
-    for (const company of loaded) {
-      if (
-        scope.some(
-          (c) =>
-            c.company_number === company.company_number &&
-            c.company !== company.company,
-        ) ||
-        scope.some(
-          (c) =>
-            c.company === company.company &&
-            c.company_number !== company.company_number,
-        )
-      )
-        throw Object.assign(
-          new Error(
-            "Tally company scope has conflicting identities. Check company data paths and retry discovery.",
-          ),
-          { tallyScope: true },
-        );
-      if (!scope.some((c) => c.company_number === company.company_number))
-        scope.push(company);
-    }
-    if (scope.length > 50)
-      throw Object.assign(
-        new Error("Tally company scope exceeds 50 companies."),
-        { tallyScope: true },
-      );
-    return scope.sort((a, b) => a.company.localeCompare(b.company));
-  }
+  // The scope is exactly the companies the user opened in Tally, from any
+  // folder. Unopened companies are the user's choice, not missing evidence.
+  const companyScope = async () =>
+    openCompanyScope(await readOpenCompanies({ port: config.port, request, pc }), { pc })
+      .map(({ company, company_guid, company_number }) => ({ company, company_guid, company_number }));
+  const sameScope = (expected, actual) =>
+    JSON.stringify(expected.map((c) => [c.company, c.company_guid])) ===
+    JSON.stringify(actual.map((c) => [c.company, c.company_guid]));
   const scope = await companyScope();
   const companies = [];
   // Count verified native reads, not individual records in a bulk export.
@@ -226,15 +185,9 @@ export async function discoverClientContext(
     const item = { company, port: config.port, status: "ready" };
     try {
       await report(company, "reading", "Checking company");
-      if (!expected.company_guid)
-        throw new Error("Company is not loaded or requires login.");
       item.identity = await exportData(company, "MinkopsIdentity", null, true);
       item.company_guid = scalar(item.identity?.GUID);
-      if (
-        item.company_guid !== expected.company_guid ||
-        tallyCompanyNumber(item.identity?.COMPANYNUMBER) !==
-          expected.company_number
-      )
+      if (item.company_guid !== expected.company_guid)
         throw new Error("Company identity changed during discovery.");
       completed++;
       await report(company, "reading", "Reading masters");
@@ -284,7 +237,9 @@ export async function discoverClientContext(
         records: vouchers,
       };
     } catch (error) {
-      if (error.code === "TASK_STOPPED") throw error;
+      // A closed or busy Tally ends the whole collection with its own action;
+      // continuing would only repeat the failure for every remaining company.
+      if (error.code === "TASK_STOPPED" || error.userSafe) throw error;
       item.status = "unavailable";
       item.error =
         "Could not collect complete company data. Check access, detailed export support and collection size, then refresh.";
@@ -295,16 +250,16 @@ export async function discoverClientContext(
   let scopeError;
   await report(null, "reading", "Checking company scope");
   try {
-    const current = await companyScope();
-    if (!sameCompanyScope(scope, current)) throw new Error("changed");
+    if (!sameScope(scope, await companyScope())) throw new Error("changed");
     completed++;
-  } catch {
+  } catch (error) {
+    if (error.code === "TASK_STOPPED") throw error;
     scopeError =
-      "Tally company scope changed or could not be verified. Load all original companies and refresh discovery.";
+      "Companies were opened or closed in Tally during discovery. Keep the same companies open and run discovery again.";
   }
   await report(null, scopeError || companies.some(c => c.status !== "ready") ? "unavailable" : "ready", scopeError ? "Company scope needs attention" : "Company scope checked");
   return {
-    format_version: "2",
+    format_version: "3",
     period: config.period,
     companies,
     company_scope: scope,

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { readTallyReferences, discoverClientContext, ensureTallyDiscovery, inspectExcel, inventory, excelSchemaBytes, tallyProbe, commitTallyBill, readTallyBills } from '../../../connectors/desktop/src/index.js';
+import { readTallyReferences, discoverClientContext, inspectExcel, inventory, excelSchemaBytes, readOpenCompanies, commitTallyBill, readTallyBills } from '../../../connectors/desktop/src/index.js';
 import { collectSources } from '../../../platform/desktop-runtime/src/discovery.js';
 import { CompanionWorker } from '../../../platform/desktop-runtime/src/worker.js';
 
@@ -22,7 +22,7 @@ let cookie = '', csrf = '', pending = null, executedJob = null, lastReceipt = nu
 async function api(path, body, { method = body === undefined ? 'GET' : 'POST', worker = false } = {}) {
   const response = await fetch(origin + path, {
     method, redirect: 'error', signal: AbortSignal.timeout(65000),
-    headers: { 'Content-Type': 'application/json', ...(worker ? { Authorization: `Bearer ${device.credential}` } : { Cookie: cookie, 'x-csrf-token': csrf }) },
+    headers: { 'Content-Type': 'application/json', ...(worker ? { Authorization: `Bearer ${device.credential}`, 'X-Minkops-Plan-Version': '3', 'X-Minkops-Companion-Version': '0.7.0' } : { Cookie: cookie, 'x-csrf-token': csrf }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
@@ -37,7 +37,7 @@ await api('/api/auth/login', credentials);
 const user = await api('/api/auth/me');
 csrf = user.csrf_token;
 assert.ok(user.memberships.some(m => m.slug === 'mock-tenant' && m.role === 'admin'));
-assert.ok((await tallyProbe()).companies.includes(company), 'Explicit test company must be open');
+assert.ok((await readOpenCompanies()).some(c => c.company === company), 'Explicit test company must be open');
 const base = '/api/tenants/mock-tenant';
 const device = phase === 'discovery'
   ? await api(base + '/desktop/devices', { name: 'Production release verification PC', installation_id: randomUUID() })
@@ -100,7 +100,7 @@ const worker = new CompanionWorker({
       return result;
     }
     return collectSources(plan, { inventory, inspectExcel, excelSchemaBytes,
-      discoverClientContext: async config => { await ensureTallyDiscovery(config); return discoverClientContext(config); },
+      discoverClientContext: config => discoverClientContext(config),
       folderFor: () => { throw new Error('This schema check grants no folders'); },
       onProgress: (source_key,status,category=null) => api(`/api/desktop/worker/jobs/${job.id}/progress`, { claim_token: job.claim_token, source_key,status,category }, { worker: true }),
     });

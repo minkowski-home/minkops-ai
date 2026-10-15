@@ -61,6 +61,7 @@ export interface CollectionProgress {
   activity: string;
   item?: string;
 }
+interface ScopeCompany { company: string; company_guid: string }
 export interface DiscoveryRun {
   id: string;
   task_id: string;
@@ -72,6 +73,8 @@ export interface DiscoveryRun {
   mapping_run: Run | null;
   /** Optional AI context analysis failed for a Tally-only collection. */
   analysis_failed?: boolean;
+  /** Companies added or no longer open since the previous confirmation. */
+  scope_changes?: { added: ScopeCompany[]; removed: ScopeCompany[] } | null;
   catalog: {
     context_error?: string;
     context_notes?: { company_guid: string; observation: string; certainty: string; evidence_ids: string[] }[];
@@ -80,6 +83,17 @@ export interface DiscoveryRun {
     review: { status: string; reused_from: string | null };
     excel_mappings: Catalog | null;
   } | null;
+}
+/** Discovery reads only the companies open in Tally; a change is the user's choice. */
+export function scopeChangeLines(run: DiscoveryRun) {
+  const names = (list: ScopeCompany[]) => list.map((c) => c.company).join(", ");
+  const changes = run.scope_changes;
+  if (!changes) return [];
+  return [
+    ...(changes.removed.length ? [`No longer included: ${names(changes.removed)}.` + (run.ready ? ""
+      : " Confirming accepts this; bills for these companies wait until you open them in Tally and run discovery again.")] : []),
+    ...(changes.added.length ? [`Newly included: ${names(changes.added)}.`] : []),
+  ];
 }
 export const masterLabels: Record<string, string> = {
   LEDGER: "Ledgers", GROUP: "Groups", VOUCHERTYPE: "Voucher types",
@@ -127,7 +141,7 @@ export function discoverySources(run: DiscoveryRun): SourceSummary[] {
     const hasCompanyActivity = run.observations.some(o => o.key === source.key && o.category);
     const status = source.status === "waiting" ? run.state === "failed" ? "unavailable" : observed?.status ?? (hasCompanyActivity ? "reading" : "waiting") : source.status;
     return [{ key: source.key, tool: source.tool,
-      label: source.label ?? source.snapshot?.company ?? (source.tool === "tally" ? "All configured companies" : "Excel folder"),
+      label: source.label ?? source.snapshot?.company ?? (source.tool === "tally" ? "Companies open in Tally" : "Excel folder"),
       status: source.workbooks?.some(b => b.status !== "ready") ? "unavailable" : status,
       error: source.error, workbooks: source.workbooks ?? [],
       collections: (source.snapshot?.collections ?? []).map(collection => ({

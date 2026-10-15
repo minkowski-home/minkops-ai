@@ -10,9 +10,11 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import secrets
 from uuid import UUID, uuid4
 
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
 from .accounts import service as accounts
@@ -26,7 +28,7 @@ def _hash(value):
 
 def public_device(row):
     return {
-        key: row[key]
+        key: row.get(key)
         for key in (
             "id",
             "name",
@@ -35,8 +37,39 @@ def public_device(row):
             "last_seen_at",
             "expires_at",
             "revoked_at",
+            "companion_version",
+            "hostname",
+            "remote_session",
         )
     }
+
+
+# Tally work needs the open-company session contract and pinned voucher types.
+MINIMUM_COMPANION = (0, 7, 0)
+
+
+def companion_report(version, host, session):
+    """Normalize what a polling companion reports; unreadable values become unknown."""
+    version = version if isinstance(version, str) and re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,4}", version) else None
+    host = host.strip() if isinstance(host, str) and 1 <= len(host.strip()) <= 80 and host.isprintable() else None
+    return {"companion_version": version, "hostname": host,
+            "remote_session": {"remote": True, "console": False}.get(session)}
+
+
+def require_companion(device):
+    """Refuse Tally work an outdated companion would mishandle.
+
+    A PC that has never polled is allowed: work waits until it connects, and it
+    reports its version then. One that polls without a version predates 0.7.0.
+    """
+    if device["last_seen_at"] is None:
+        return
+    version = device.get("companion_version")
+    if version is None or tuple(int(part) for part in version.split(".")) < MINIMUM_COMPANION:
+        raise ServiceError(
+            "conflict",
+            f"Update Minkops on {device['name']} to {'.'.join(map(str, MINIMUM_COMPANION))} or later, then try again.",
+        )
 
 
 def register(connection, tenant, user, name, installation_id):
@@ -107,6 +140,36 @@ def revoke(connection, tenant, user, device_id):
             0,
         )
     return {"message": "PC disconnected."}
+
+
+# Crockford base32: references are read aloud, so no I, L, O or U.
+REFERENCE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+DIAGNOSTIC_SECTIONS = {"collected_at", "companion", "windows", "tally", "jobs", "records"}
+
+
+def _store_diagnostic(connection, device, payload, *, kind, job_id=None):
+    connection.execute("DELETE FROM desktop_diagnostics WHERE created_at < now() - interval '30 days'")
+    for _ in range(5):
+        reference = "D-" + "".join(secrets.choice(REFERENCE_ALPHABET) for _ in range(6))
+        try:
+            with connection.transaction():
+                connection.execute(
+                    """INSERT INTO desktop_diagnostics(tenant_id,device_id,job_id,kind,reference,payload)
+                    VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (device["tenant_id"], device["id"], job_id, kind, reference, Jsonb(payload)),
+                )
+            return reference
+        except UniqueViolation:
+            continue
+    raise ServiceError("conflict", "Could not store diagnostics. Try again.")
+
+
+def send_diagnostics(connection, device, payload):
+    """Store a support bundle the user chose to send; returns a reference to read out."""
+    if (not isinstance(payload, dict) or not payload or set(payload) - DIAGNOSTIC_SECTIONS
+            or len(json.dumps(payload).encode()) > 64_000):
+        raise ServiceError("invalid", "Diagnostics must be a bounded technical summary.")
+    return {"reference": _store_diagnostic(connection, device, payload, kind="requested")}
 
 
 def public_job(row):
@@ -343,6 +406,8 @@ def launch(connection, tenant, user, body):
     operation, payload = body["operation"], body["input"]
     _validate_input(operation, payload)
     device = owned_device(connection, tenant["id"], user["id"], body["device_id"])
+    if operation.startswith("tally."):
+        require_companion(device)
     fingerprint, previous = resolve_request(
         connection,
         tenant["id"],
@@ -448,8 +513,13 @@ def job_detail(connection, tenant, user, job_id):
     return public_job(row)
 
 
-def claim(connection, device):
-    connection.execute("UPDATE desktop_devices SET last_seen_at=now() WHERE id=%s", (device["id"],))
+def claim(connection, device, report=None):
+    report = report or companion_report(None, None, None)
+    connection.execute(
+        """UPDATE desktop_devices SET last_seen_at=now(),companion_version=%s,hostname=%s,remote_session=%s
+        WHERE id=%s""",
+        (report["companion_version"], report["hostname"], report["remote_session"], device["id"]),
+    )
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
            (state='executing' AND operation NOT IN ('accounts.save','tally.save','attention.supplier') AND lease_until<now()))
@@ -509,6 +579,9 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
     if job["state"] == "executing" and job["operation"] == "sources.discover":
         from . import discovery
 
+        if plan_version < 3 and discovery.get_run(connection, device["tenant_id"], job["input"]["discovery_run_id"])["config"]["tally"]:
+            raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then run discovery again.")
+
         return discovery.plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "tally.save":
         from .accounts.bills import recheck_target
@@ -516,7 +589,7 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
 
         run, write = spec(connection, device, job["input"], underway=True)
         if write["plan"].get("format_version", 1) > plan_version:
-            raise ServiceError("conflict", "Update Minkops to version 0.6.9 or later to save separate tax allocations.")
+            raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then use Retry save.")
         recheck_target(
             connection,
             {"id": device["tenant_id"]},
@@ -571,6 +644,13 @@ def finish(connection, device, job_id, receipt):
         if job["receipt_hash"] != fingerprint:
             raise ServiceError("conflict", "This task already has a different result.")
         return public_job(job)
+    diagnostic = receipt.get("diagnostic")
+    if isinstance(diagnostic, dict) and diagnostic:
+        # Evidence must never cost the user their receipt: an oversized one is
+        # recorded as truncated rather than rejected.
+        if len(json.dumps(diagnostic).encode()) > 16_000:
+            diagnostic = {"truncated": True}
+        _store_diagnostic(connection, device, diagnostic, kind="job", job_id=job["id"])
     if job["state"] != "executing" and not (
         job["operation"] in ("accounts.save", "tally.save")
         and job["error"] == "Save interrupted; retry requested."

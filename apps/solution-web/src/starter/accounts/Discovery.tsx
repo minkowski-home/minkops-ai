@@ -9,7 +9,7 @@ import { CatalogReview } from "./CatalogReview";
 import { desktopBridge } from "../desktop/bridge";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { Spinner } from "../components/Feedback";
-import { canConfirm, discoveryProgress, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
+import { canConfirm, discoveryProgress, scopeChangeLines, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
 import { DiscoveryResults } from "./DiscoveryResults";
 
 import { DestinationPCPicker } from '../desktop/DestinationPC';
@@ -124,7 +124,7 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow, onConfigChange, s
     {!devices.length && <p className="quiet-state">Connect this workspace in the Windows app to get started. <Link to={`/${routeSlug}/connections`}>Connected PCs</Link></p>}
     <div className={`discovery-setup-sources${tally && excel ? " has-both" : ""}`}>
       {tally && <section className="discovery-config-source" aria-label="Tally options">
-        <h4>Tally</h4><p>All configured companies and full masters.</p>
+        <h4>Tally</h4><p>The companies open in Tally, with full masters. Open every company you need, from any folder, before you start.</p>
         <div className="discovery-date-range">
           <label className="config-field">Vouchers from<input type="date" required value={periodFrom} disabled={Boolean(busy)} onChange={event => setPeriodFrom(event.target.value)} /></label>
           <label className="config-field">Through<input type="date" required min={periodFrom} value={periodTo} disabled={Boolean(busy)} onChange={event => setPeriodTo(event.target.value)} /></label>
@@ -222,6 +222,7 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
             : pending ? run.catalog ? "Checking client context and workbook mappings before review." : "You can leave this page and return. Collection continues on your PC."
               : run.state === "failed" ? "Check source access on your PC, then run discovery again." : "Check the collected counts and mappings, then confirm."}</p></header>
       {run.catalog?.sources.map(source => source.snapshot?.scope_error && <p role="alert" className="form-message" key={source.key}>{source.snapshot.scope_error}</p>)}
+      {scopeChangeLines(run).map(line => <p role="status" className="quiet-state" key={line}>{line}</p>)}
       {run.catalog?.context_error && <p role="alert" className="form-message">{run.catalog.context_error}</p>}
       {run.analysis_failed && <p className="quiet-state">AI context analysis was unavailable. Confirm the collected Tally sources without context notes, or run discovery again.</p>}
       {run.catalog && run.config.ai_context === false && <p className="quiet-state">AI analysis is off. Review the collected sources{run.config.excel_source_ids.length ? "; Excel structure is saved without entry mappings" : ""}.</p>}

@@ -101,3 +101,15 @@ test("a failed optional analysis still lets complete Tally sources be confirmed"
   assert.equal(canConfirm(run({ state: "review", catalog: { ...catalog, partial: true }, analysis_failed: true }), false), false);
   assert.equal(canConfirm(run({ state: "review", catalog }), false), true);
 });
+
+import { scopeChangeLines } from "../src/starter/accounts/discoveryView.ts";
+test("review names companies no longer open and newly included, in plain words", () => {
+  const company = (name: string) => ({ company: name, company_guid: `${name}-guid` });
+  assert.deepEqual(scopeChangeLines(run()), []);
+  assert.deepEqual(scopeChangeLines(run({ scope_changes: { added: [], removed: [] } })), []);
+  assert.deepEqual(scopeChangeLines(run({ scope_changes: { added: [company("Sachin Infra (2026-27)")], removed: [company("Sachin Infra (2024-25)"), company("Sachin Infra (2025-26)")] } })), [
+    "No longer included: Sachin Infra (2024-25), Sachin Infra (2025-26). Confirming accepts this; bills for these companies wait until you open them in Tally and run discovery again.",
+    "Newly included: Sachin Infra (2026-27).",
+  ]);
+  assert.match(scopeChangeLines(run({ ready: true, scope_changes: { added: [], removed: [company("A")] } }))[0], /^No longer included: A\.$/);
+});

@@ -88,13 +88,56 @@ def test_full_nested_records_preserved_and_undated_masters():
         lambda s: s.update(scope_error="Company scope changed."),
     ],
 )
-def test_invalid_snapshot_rejected(mutation):
-    value = snapshot()
+@pytest.mark.parametrize("factory", [lambda: snapshot(), lambda: open_snapshot()])
+def test_invalid_snapshot_rejected(mutation, factory):
+    value = factory()
     mutation(value)
     with pytest.raises(ValueError):
         validate_snapshot(
             value, {"port": 9000, "period": {"from": "2026-10-01", "to": "2026-10-02"}}
         )
+
+
+def open_snapshot():
+    """Format 3: the scope is the companies open in Tally, identified by GUID."""
+    value = snapshot()
+    value["format_version"] = "3"
+    # Each data folder numbers its companies from 100000, so numbers repeat.
+    for company in value["companies"]:
+        company["identity"]["COMPANYNUMBER"] = " 100000"
+    for entry in value["company_scope"]:
+        entry["company_number"] = "100000"
+    return value
+
+
+def test_open_scope_allows_folder_local_numbers_to_repeat_or_be_absent():
+    value = open_snapshot()
+    validate_snapshot(value, {"port": 9000, "period": value["period"]})
+    value["company_scope"][0]["company_number"] = None
+    del value["companies"][0]["identity"]["COMPANYNUMBER"]
+    validate_snapshot(value, {"port": 9000, "period": value["period"]})
+
+
+def rename(value, index, name):
+    value["company_scope"][index]["company"] = name
+    value["companies"][index]["company"] = name
+    value["companies"][index]["identity"]["@_NAME"] = name
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda s: rename(s, 1, "a"),  # Tally names are case-insensitive
+        lambda s: s["company_scope"][0].update(company_guid=None),
+        lambda s: s["company_scope"][0].update(company_number="10000x"),
+        lambda s: s["company_scope"][0].update(extra="field"),
+    ],
+)
+def test_open_scope_requires_unique_names_and_guids(mutation):
+    value = open_snapshot()
+    mutation(value)
+    with pytest.raises(ValueError):
+        validate_snapshot(value, {"port": 9000, "period": value["period"]})
 
 
 def test_scope_failure_is_partial_even_when_every_export_succeeded():
@@ -233,6 +276,7 @@ def test_master_index_locations_survive_file_chunk_boundaries():
 def test_detail_summary_does_not_change_stored_catalog(monkeypatch):
     from minkops_platform.discovery import detail
     monkeypatch.setattr("minkops_platform.discovery.control_state", lambda *args: "active")
+    monkeypatch.setattr("minkops_platform.discovery.scope_changes", lambda *args: None)
 
     value = snapshot()
     catalog = {"sources": [{"tool": "tally", "snapshot": value}], "partial": False}
@@ -242,6 +286,8 @@ def test_detail_summary_does_not_change_stored_catalog(monkeypatch):
     result = detail(None, row)
     assert catalog == original
     assert result["catalog"]["sources"][0]["snapshot"]["companies"][0]["master_summary"]["unique_count"] == 2
+    offered = result["catalog"]["sources"][0]["snapshot"]["companies"][0]["purchase_voucher_types"]
+    assert [c["name"] for c in offered["candidates"]] == ["Purchase"]
 
 
 def test_unknown_lookup_version_and_conflicting_write_references_are_rejected():

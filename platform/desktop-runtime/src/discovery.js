@@ -112,7 +112,7 @@ export async function collectSources(
         tool: source.tool,
         status: "unavailable",
         error:
-          error.tallyScope ? error.message : source.tool === "tally"
+          error.userSafe ? error.message : source.tool === "tally"
             ? "Tally service or company access could not be verified. Check Tally on this PC and retry discovery."
             : "Folder is unavailable. Reconnect the original folder on this PC and refresh.",
       });

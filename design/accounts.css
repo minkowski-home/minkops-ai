@@ -162,3 +162,13 @@
 .workflow-destination select { width: 100%; }
 .workflow-destination .config-field { max-width: 360px; }
 .discovery-setup-controls > .workflow-destination { width: 320px; max-width: 100%; }
+
+/* Bill details: a small floating card listing what a proposal enters in Tally. */
+.bill-details { width: min(440px, calc(100vw - 32px)); padding: 20px 24px; border: var(--rule-default); border-radius: var(--radius-4); background: var(--surface-raised); color: var(--text-primary); box-shadow: var(--shadow-overlay); }
+.bill-details::backdrop { background: rgba(23, 23, 27, 0.32); }
+.bill-details header { margin-bottom: 12px; }
+.bill-details h4 { margin: 0 0 4px; }
+.bill-details dl { display: grid; margin: 0 0 16px; }
+.bill-details dl div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: var(--rule); }
+.bill-details dt { color: var(--text-secondary); font: var(--type-body-sm); overflow-wrap: anywhere; }
+.bill-details dd { margin: 0; font: var(--type-body-sm); font-weight: 600; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }

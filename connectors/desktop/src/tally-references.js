@@ -1,6 +1,7 @@
 /** Fixed, bounded identity reads for destination verification and legacy pinned writes. */
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { tallyProbe, boundedText } from "./index.js";
+import { boundedText } from "./index.js";
+import { readOpenCompanies, TallyUnavailable } from "./tally-session.js";
 
 export const TALLY_COLLECTIONS = Object.freeze({
   company: ["Company", "COMPANY"],
@@ -60,17 +61,18 @@ export async function readTallyReferences(
     new Set(categories).size !== categories.length
   )
     throw new Error("Invalid Tally discovery configuration.");
-  const probe = await tallyProbe({ port, request });
-  if (!probe.companies.includes(company))
-    throw new Error(
-      "The selected company is not open in Tally. Open it and refresh discovery.",
+  const open = await readOpenCompanies({ port, request });
+  if (!open.some((c) => c.company === company))
+    throw new TallyUnavailable(
+      "company_not_open",
+      `${company} is not open in Tally. Open it in Tally, then try again.`,
     );
   const collections = [];
   for (const category of categories) {
     await onProgress(category, "reading");
     const [type, tag] = TALLY_COLLECTIONS[category];
     try {
-      const xml = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsDiscovery</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsDiscovery" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>Name,GUID,Parent,AlterID</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+      const xml = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsDiscovery</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsDiscovery" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>Name,GUID,Parent,AlterID${category === "voucher_types" ? ",IsActive" : ""}</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
       const response = await request(`http://127.0.0.1:${port}`, {
         method: "POST",
         body: xml,
@@ -106,7 +108,8 @@ export async function readTallyReferences(
         Object.fromEntries(
           Object.entries(r)
             .filter(([key]) =>
-              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID"].includes(key),
+              // RESERVEDNAME and ISACTIVE classify voucher types (see tally.js).
+              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE"].includes(key),
             )
             .map(([key, value]) => [key, tallyReferenceScalar(value)]),
         ),

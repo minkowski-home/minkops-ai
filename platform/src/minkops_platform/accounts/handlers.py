@@ -69,6 +69,10 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             if not discovery_id:
                 raise ServiceError("invalid", "Confirm Tally source discovery first.")
             target = tally_target(connection, tenant, user, discovery_id)
+            from minkops_platform import desktop
+
+            desktop.require_companion(
+                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]))
             from minkops_platform.discovery import workflow_context
 
             source_context = workflow_context(
@@ -96,6 +100,12 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                     raise ServiceError("invalid", str(error)) from error
             elif target["locked_company_guid"] is not None:
                 raise ServiceError("invalid", "Automatic company selection cannot lock a company.")
+            from .voucher_types import apply_choices
+
+            try:
+                apply_choices(target, selections.get("purchase_voucher_types") or {})
+            except ValueError as error:
+                raise ServiceError("invalid", str(error)) from error
             references = []
             selections.update(
                 {

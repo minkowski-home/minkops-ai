@@ -12,9 +12,10 @@ import { api, type Workflow } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { chooseFolder, refreshFolder, supportsLocalFolder } from './localFiles';
 import type { Run, Source, SavedCatalog } from './types';
+import { initialLockedCompany, voucherTypeLaunch, type DiscoveredCompany } from './voucherTypes';
 
-interface NativeCatalog { id:string; ready:boolean; device_id:string; config:{tally:{company?:string}|null};catalog?:{excel_catalog_id?:string;format_version?:string;sources:{tool:string;snapshot?:{companies?:{company:string;company_guid:string}[]}}[]} }
-const discoveredCompanies = (catalog:NativeCatalog|null) => catalog?.catalog?.sources.flatMap(s=>s.tool==='tally' ? s.snapshot?.companies ?? [] : []) ?? [];
+interface NativeCatalog { id:string; ready:boolean; device_id:string; config:{tally:{company?:string}|null};catalog?:{excel_catalog_id?:string;format_version?:string;sources:{tool:string;snapshot?:{companies?:DiscoveredCompany[]}}[]} }
+const discoveredCompanies = (catalog:NativeCatalog|null): DiscoveredCompany[] => catalog?.catalog?.sources.flatMap(s=>s.tool==='tally' ? s.snapshot?.companies ?? [] : []) ?? [];
 
 function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destination, settings }: RunSettingsProps & { routeSlug: string; destination?: DestinationPCState }) {
   const { user } = useAuth(); const navigate = useNavigate();
@@ -30,7 +31,10 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
   const nativeCatalog = loadedNativeCatalog?.device_id === destination?.deviceId ? loadedNativeCatalog : null;
   const destinationCatalogs = catalogs.filter(catalog => catalog.id === nativeCatalog?.catalog?.excel_catalog_id);
   const destinationCatalogId = destinationCatalogs.some(catalog => catalog.id === catalogId) ? catalogId : destinationCatalogs[0]?.id ?? '';
-  const lockedCompanyGuid = String(workflow.config_values.locked_company_guid ?? discoveredCompanies(nativeCatalog)[0]?.company_guid ?? '');
+  const companies = discoveredCompanies(nativeCatalog);
+  const lockedCompanyGuid = initialLockedCompany(companies, workflow.config_values.locked_company_guid);
+  const [voucherChoices, setVoucherChoices] = useState<Record<string, string>>({});
+  const voucherTypes = voucherTypeLaunch(companies, companyMode, lockedCompanyGuid, voucherChoices);
   const [nativeError, setNativeError] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const inputFormat = String(workflow.config_values.input_format ?? 'mixed');
@@ -100,7 +104,7 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
       const run = await api<Run>(base + '/runs', { method: 'POST', body: JSON.stringify({
         key: workflow.key, request_key: crypto.randomUUID(), file_ids: selected, destination_device_id: destination?.deviceId,
         catalog_id: outputMode==='tally_in_place' ? null : destinationCatalogId,
-        config: { ...workflow.config_values, input_format: inputFormat, review_mode: reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id,company_mode:companyMode,locked_company_guid:companyMode==='locked'?lockedCompanyGuid:null}:{}) },
+        config: { ...workflow.config_values, input_format: inputFormat, review_mode: reviewMode, output_mode: outputMode, checks, ...(outputMode==='tally_in_place'?{discovery_id:nativeCatalog?.id,company_mode:companyMode,locked_company_guid:companyMode==='locked'?lockedCompanyGuid:null,purchase_voucher_types:voucherTypes.choices}:{}) },
       }) }, user.csrf_token);
       navigate(`/${routeSlug}/tasks/${run.task_id}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not start workflow.'); }
@@ -114,18 +118,30 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
       onConnect={() => user && void action(() => chooseFolder(tenant,user.csrf_token))}
       onRefresh={source => user && void action(() => refreshFolder(tenant,source,user.csrf_token))}
       onReconnect={source => user && void action(() => chooseFolder(tenant,user.csrf_token,source))} />
+    {outputMode==='tally_in_place'&&<div className="accounts-field-grid" aria-label="Tally destination">
+      <p role="status">{nativeCatalog?.ready&&companies.length?`${companies.length} discovered compan${companies.length===1?'y':'ies'} available`:`Run and confirm complete Tally Source Discovery on ${destination?.name || 'the selected PC'} first.`}</p>
+      <label>Company selection<select aria-label="Company selection" value={companyMode} onChange={e=>onConfigChange?.({...workflow.config_values,company_mode:e.target.value})}><option value="infer">Infer from each bill · any discovered company</option><option value="locked">Use one company for this run</option></select></label>
+      {companyMode==='locked'&&<label>Company for all bills<select aria-label="Company for all bills" value={lockedCompanyGuid} onChange={e=>onConfigChange?.({...workflow.config_values,locked_company_guid:e.target.value})}><option value="">Choose a company</option>{companies.map(c=><option key={c.company_guid} value={c.company_guid}>{c.company}</option>)}</select></label>}
+      {voucherTypes.questions.map(company=><label key={company.company_guid}>Purchase voucher type{companyMode==='locked'?'':` · ${company.company}`}
+        <select aria-label={`Purchase voucher type for ${company.company}`} value={voucherTypes.choices[company.company_guid] ?? ''} onChange={e=>setVoucherChoices(current=>({...current,[company.company_guid]:e.target.value}))}>
+          <option value="">Choose a voucher type</option>
+          {company.purchase_voucher_types!.candidates.map(type=><option key={type.guid} value={type.guid}>{type.name}{type.used?` · used ${type.used} time${type.used===1?'':'s'}`:''}</option>)}
+        </select></label>)}
+      {companyMode==='locked'&&<p className="quiet-state">{lockedCompanyGuid?'Keep this company open in Tally while bills are saved.':'Choose the company these bills belong to.'}</p>}
+      {voucherTypes.notice&&<p className="quiet-state">{voucherTypes.notice}</p>}
+    </div>}
     <details className="accounts-config"><summary>Destination and checks</summary><div className="accounts-field-grid">
-        {outputMode==='tally_in_place'?<p role="status">{nativeCatalog?.ready&&discoveredCompanies(nativeCatalog).length?`${discoveredCompanies(nativeCatalog).length} discovered companies available`:`Run and confirm complete Tally Source Discovery on ${destination?.name || 'the selected PC'} first.`}</p>:
-        <label>Confirmed sources<select aria-label="Confirmed sources" value={destinationCatalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{destinationCatalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} · {c.catalog.sheets.length} sheets</option>)}</select></label>}
-        {outputMode==='tally_in_place'&&<><label>Company selection<select aria-label="Company selection" value={companyMode} onChange={e=>onConfigChange?.({...workflow.config_values,company_mode:e.target.value})}><option value="infer">Infer from each bill · any discovered company</option><option value="locked">Use one company for this run</option></select></label>{companyMode==='locked'&&<label>Company for all bills<select aria-label="Company for all bills" value={lockedCompanyGuid} onChange={e=>onConfigChange?.({...workflow.config_values,locked_company_guid:e.target.value})}><option value="">Choose a company</option>{discoveredCompanies(nativeCatalog).map(c=><option key={c.company_guid} value={c.company_guid}>{c.company}</option>)}</select></label>}</>}
+        {outputMode!=='tally_in_place'&&<label>Confirmed sources<select aria-label="Confirmed sources" value={destinationCatalogId} onChange={(e) => setCatalogId(e.target.value)}><option value="">Run source discovery first</option>{destinationCatalogs.map((c) => <option key={c.id} value={c.id}>{new Date(c.confirmed_at).toLocaleString()} · {c.catalog.sheets.length} sheets</option>)}</select></label>}
+        {outputMode==='tally_in_place'&&<p className="quiet-state">Tally checks are built in: duplicates across every purchase voucher type, exact ledgers and amounts, and readback after each save.</p>}
         {outputMode!=='tally_in_place'&&<fieldset><legend>Reference checks</legend>{['vendor_match','duplicate','totals','cost_codes'].map((check) => <label key={check}><input type="checkbox" checked={checks.includes(check)} onChange={(e) => setChecks((old) => e.target.checked ? [...old,check] : old.filter((v) => v !== check))} />{check.replaceAll('_',' ')}</label>)}</fieldset>}
     </div></details>
     <RunSettings tenant={tenant} workflow={workflow} onConfigChange={onConfigChange} settings={settings} exclude={["company_mode", "locked_company_guid"]} busy={busy} />
     {!selected.length && <p className="quiet-state">Select at least one bill to run.</p>}
     {workflow.status !== "active" && <p className="quiet-state">This workflow is unavailable for new runs.</p>}
+    {outputMode==='tally_in_place' && voucherTypes.blocker && <p role="status" className="form-message">{voucherTypes.blocker}</p>}
     {nativeError && <p role="alert" className="form-message">{nativeError}</p>}
     {error && <p role="alert" className="form-message">{error}</p>}
-    <button className="button button-primary" disabled={!loaded || !destination?.available || busy || workflow.status !== 'active' || !selected.length || (outputMode==='tally_in_place'? !nativeCatalog?.ready||!discoveredCompanies(nativeCatalog).length||(companyMode==='locked'&&!discoveredCompanies(nativeCatalog).some(company=>company.company_guid===lockedCompanyGuid)) : !destinationCatalogId || !nativeCatalog?.ready)} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
+    <button className="button button-primary" disabled={!loaded || !destination?.available || busy || workflow.status !== 'active' || !selected.length || (outputMode==='tally_in_place'? !nativeCatalog?.ready||!companies.length||(companyMode==='locked'&&!companies.some(company=>company.company_guid===lockedCompanyGuid))||Boolean(voucherTypes.blocker) : !destinationCatalogId || !nativeCatalog?.ready)} onClick={() => void launch()}>{busy && <Spinner />}{busy ? 'Working…' : `Run ${workflow.name.toLowerCase()}`}</button>
     <span className="quiet-state"> {selected.length} files selected</span>
   </section>;
 }

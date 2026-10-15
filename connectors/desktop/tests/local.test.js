@@ -3,25 +3,22 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inventory, replaceApproved, tallyProbe } from "../src/index.js";
+import { inventory, replaceApproved, readOpenCompanies } from "../src/index.js";
 import { createHash } from "node:crypto";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-test("Tally probe sends only a fixed company export and parses names", async () => {
+test("open-company read sends only a fixed company export and parses names", async () => {
   let sent;
-  const result = await tallyProbe({
+  const result = await readOpenCompanies({
     request: async (url, options) => {
       sent = { url, ...options };
       return new Response(
-        '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Minkops Test"><NAME>Minkops Test</NAME></COMPANY><COMPANY NAME="Second &amp; Co"><NAME>Second &amp; Co</NAME></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>',
+        '<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Minkops Test"><NAME>Minkops Test</NAME><GUID>g1</GUID></COMPANY><COMPANY NAME="Second &amp; Co"><NAME>Second &amp; Co</NAME><GUID>g2</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>',
       );
     },
   });
-  assert.deepEqual(result, {
-    available: true,
-    companies: ["Minkops Test", "Second & Co"],
-  });
+  assert.deepEqual(result.map((c) => c.company), ["Minkops Test", "Second & Co"]);
   assert.equal(sent.url, "http://127.0.0.1:9000");
   assert.equal(sent.redirect, "error");
   assert.match(sent.body, /<TALLYREQUEST>Export<\/TALLYREQUEST>/);
@@ -36,39 +33,36 @@ test("Tally rejects errors, malformed XML, entity definitions and large response
     "x".repeat(1_000_001),
   ]) {
     await assert.rejects(
-      tallyProbe({ request: async () => new Response(text) }),
+      readOpenCompanies({ request: async () => new Response(text) }),
     );
   }
 });
 
 test("Tally typed company names retain text and never become object strings", async () => {
-  const result = await tallyProbe({
+  const result = await readOpenCompanies({
     request: async () =>
       new Response(
         "<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>" +
-          '<COMPANY NAME="Minkops Test" RESERVEDNAME=""><NAME TYPE="String">Minkops Test</NAME></COMPANY>' +
-          '<COMPANY NAME="Attribute &amp; Co"/>' +
+          '<COMPANY NAME="Minkops Test" RESERVEDNAME=""><NAME TYPE="String">Minkops Test</NAME><GUID TYPE="String">g1</GUID></COMPANY>' +
+          '<COMPANY NAME="Attribute &amp; Co"><GUID>g2</GUID></COMPANY>' +
           "</COLLECTION></DATA></BODY></ENVELOPE>",
       ),
   });
-  assert.deepEqual(result, {
-    available: true,
-    companies: ["Minkops Test", "Attribute & Co"],
-  });
+  assert.deepEqual(result.map((c) => c.company), ["Minkops Test", "Attribute & Co"]);
   await assert.rejects(
-    tallyProbe({
+    readOpenCompanies({
       request: async () =>
         new Response(
-          "<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY><NAME><UNEXPECTED>nested</UNEXPECTED></NAME></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>",
+          "<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY><NAME><UNEXPECTED>nested</UNEXPECTED></NAME><GUID>g</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>",
         ),
     }),
-    /company name/i,
+    { tallyState: "invalid_response" },
   );
 });
 
 test("Tally rejects configurable remote addresses and invalid ports", async () => {
   for (const port of [0, -1, "9000", 65536])
-    await assert.rejects(tallyProbe({ port }));
+    await assert.rejects(readOpenCompanies({ port }));
 });
 
 test("native folder inventory skips hidden files and refuses symlink escape", async (t) => {

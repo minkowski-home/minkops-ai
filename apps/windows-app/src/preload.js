@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld(
     schemaOnlyFolders: true,
     discoveryPackages: true,
     openTallyDiagnostics: () => ipcRenderer.invoke("desktop:tally-diagnostics"),
+    sendDiagnostics: () => ipcRenderer.invoke("desktop:send-diagnostics"),
     status: () => ipcRenderer.invoke("desktop:status"),
     connect: (tenant) => ipcRenderer.invoke("desktop:connect", tenant),
     disconnect: () => ipcRenderer.invoke("desktop:disconnect"),

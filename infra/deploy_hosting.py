@@ -5,6 +5,7 @@ build directory is uploaded; symlinks and hidden files are rejected or excluded.
 """
 
 import argparse
+import base64
 import gzip
 import hashlib
 import json
@@ -13,10 +14,22 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
+import yaml
+
 from google_api import GoogleApi
 
 SITES = {"corporate": "minkops-ai-prod", "console": "minkops-ai-console"}
 BASE = "https://firebasehosting.googleapis.com/v1beta1"
+
+
+class FeedLoader(yaml.SafeLoader):
+    """Match the updater's rejection of ambiguous duplicate YAML keys."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        if len(keys) != len(set(keys)):
+            raise yaml.YAMLError("Duplicate update feed key")
+        return super().construct_mapping(node, deep=deep)
 
 
 def serving_config(configuration):
@@ -25,6 +38,31 @@ def serving_config(configuration):
     rewrites = [{"glob": rule["source"], **({"run": rule["run"]} if "run" in rule else {"path": rule["destination"]})}
                 for rule in configuration.get("rewrites", [])]
     return {"headers": headers, "rewrites": rewrites}
+
+
+def verified_feed(installer, manifest):
+    """The companion's update feed (electron-builder latest.yml) must describe
+    exactly the reviewed installer: its version, file name and SHA-512."""
+    feed = installer.with_name("latest.yml")
+    blockmap = installer.with_name(installer.name + ".blockmap")
+    for path in (feed, blockmap):
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"Missing update feed file {path.name} next to the installer")
+    try:
+        fields = yaml.load(feed.read_text(), Loader=FeedLoader)
+    except (yaml.YAMLError, TypeError, UnicodeError) as error:
+        raise RuntimeError("Invalid update feed") from error
+    with installer.open("rb") as stream:
+        sha512 = base64.b64encode(hashlib.file_digest(stream, "sha512").digest()).decode()
+    expected = {"version": manifest["version"], "path": manifest["filename"], "sha512": sha512}
+    # electron-updater prefers files[] over the legacy top-level path/hash.
+    # Validate both representations before any files or cloud state are changed.
+    files = [{"url": manifest["filename"], "sha512": sha512, "size": installer.stat().st_size}]
+    if (not isinstance(fields, dict)
+            or any(fields.get(key) != value for key, value in expected.items())
+            or fields.get("files") != files):
+        raise RuntimeError("The update feed does not match the reviewed installer")
+    return feed, blockmap
 
 
 def deploy(target, installer=None):
@@ -44,9 +82,14 @@ def deploy(target, installer=None):
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         if source.stat().st_size != manifest["bytes"] or digest != manifest["sha256"]:
             raise RuntimeError("Installer does not match the checked-in release manifest")
+        # Installed companions update from this feed, so it ships with every release.
+        feed, blockmap = verified_feed(source, manifest)
         destination.parent.mkdir(exist_ok=True)
         if source.resolve() != destination.resolve():
             shutil.copyfile(source, destination)
+        for path in (feed, blockmap):
+            if path.resolve() != (destination.parent / path.name).resolve():
+                shutil.copyfile(path, destination.parent / path.name)
         destination.with_suffix(".exe.sha256").write_text(f"{manifest['sha256']}  {manifest['filename']}\n")
     files, uploads = {}, {}
     for file in directory.rglob("*"):

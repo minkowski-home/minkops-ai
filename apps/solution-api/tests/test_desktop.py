@@ -124,7 +124,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=old, json={}).status_code, 401
         )
-        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"]}
+        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.7.0"}
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()[
                 "id"
@@ -223,7 +223,7 @@ class DesktopTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         self.device = response.json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"]}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
         self.worker_base = "/api/desktop/worker"
         return self.device
 
@@ -385,6 +385,94 @@ class DesktopTests(unittest.TestCase):
             },
         )
         self.assertEqual(late.status_code, 409, late.text)
+
+    def claim_as(self, headers):
+        return self.client.post(self.worker_base + "/claim", headers={"Authorization": self.worker["Authorization"], **headers}, json={})
+
+    def test_each_poll_records_the_companion_version_pc_and_session(self):
+        self.pair()
+        self.claim_as({"X-Minkops-Companion-Version": "0.7.0", "X-Minkops-Host": "PRAHLAD-GADHWAL",
+                       "X-Minkops-Session": "remote"})
+        [device] = self.client.get(self.base + "/devices").json()
+        self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
+                         ("0.7.0", "PRAHLAD-GADHWAL", True))
+        self.claim_as({"X-Minkops-Companion-Version": "not a version", "X-Minkops-Host": "x" * 81})
+        [device] = self.client.get(self.base + "/devices").json()
+        self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
+                         (None, None, None), "unreadable reports are never stored as facts")
+
+    def test_tally_work_waits_for_a_current_companion(self):
+        self.pair()
+        self.launch()  # A PC that has not polled yet: work waits for it.
+        self.claim_as({})  # Releases before 0.7.0 poll without reporting a version.
+        body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
+        outdated = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
+        self.assertEqual(outdated.status_code, 409, outdated.text)
+        self.assertIn("Update Minkops on Office PC to 0.7.0 or later", outdated.json()["detail"])
+        self.claim_as({"X-Minkops-Companion-Version": "0.6.10"})
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
+        self.claim_as({"X-Minkops-Companion-Version": "0.10.0"})
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
+
+    def bundle(self, **extra):
+        return {
+            "collected_at": "2026-10-14T07:47:18.907Z",
+            "companion": {"version": "0.7.0"},
+            "windows": {"hostname": "PRAHLAD-GADHWAL", "remote_session": False},
+            "tally": {"session": {"state": "not_running"}, "processes": []},
+            **extra,
+        }
+
+    def stored_diagnostics(self):
+        with psycopg.connect(URL) as c:
+            return c.execute(
+                "SELECT reference,kind,job_id,payload FROM desktop_diagnostics WHERE device_id=%s ORDER BY created_at",
+                (self.device["id"],),
+            ).fetchall()
+
+    def test_send_diagnostics_stores_a_bounded_bundle_and_returns_a_reference(self):
+        self.pair()
+        route = self.worker_base + "/diagnostics"
+        sent = self.client.post(route, headers=self.worker, json=self.bundle())
+        self.assertEqual(sent.status_code, 201, sent.text)
+        self.assertRegex(sent.json()["reference"], r"^D-[0-9A-HJKMNP-TV-Z]{6}$")
+        [(reference, kind, job_id, payload)] = self.stored_diagnostics()
+        self.assertEqual((reference, kind, job_id), (sent.json()["reference"], "requested", None))
+        self.assertEqual(payload["windows"]["hostname"], "PRAHLAD-GADHWAL")
+        for invalid in (self.bundle(bills=["private"]), self.bundle(tally={"x": "y" * 70_000}), []):
+            self.assertEqual(self.client.post(route, headers=self.worker, json=invalid).status_code, 422)
+        self.assertEqual(self.client.post(route, json=self.bundle()).status_code, 401)
+
+    def test_diagnostics_older_than_thirty_days_are_removed(self):
+        self.pair()
+        route = self.worker_base + "/diagnostics"
+        self.client.post(route, headers=self.worker, json=self.bundle())
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE desktop_diagnostics SET created_at=now()-interval '31 days' WHERE device_id=%s",
+                      (self.device["id"],))
+        self.client.post(route, headers=self.worker, json=self.bundle())
+        self.assertEqual(len(self.stored_diagnostics()), 1)
+
+    def test_a_failed_job_keeps_its_diagnostic_without_blocking_the_receipt(self):
+        self.pair()
+        for diagnostic, expected in (
+            ({"state": "not_running", "cause": "ECONNREFUSED", "elapsed_ms": 4}, "not_running"),
+            ({"state": "busy", "error": "x" * 20_000}, None),
+        ):
+            job, _ = self.launch()
+            claim = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+            receipt = {"claim_token": claim["claim_token"], "error": "Tally isn't open on PC1.",
+                       "diagnostic": diagnostic}
+            route = self.worker_base + f"/jobs/{job['id']}/finish"
+            for _ in range(2):  # a replayed receipt stores nothing twice
+                self.assertEqual(self.client.post(route, headers=self.worker, json=receipt).status_code, 200)
+            stored = [row for row in self.stored_diagnostics() if str(row[2]) == job["id"]]
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0][1], "job")
+            if expected:
+                self.assertEqual(stored[0][3]["state"], expected)
+            else:
+                self.assertEqual(stored[0][3], {"truncated": True})
 
     def test_error_finishes_as_failure_without_fake_completion(self):
         self.pair()
