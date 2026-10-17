@@ -1,5 +1,34 @@
 # Decision Logs
 
+## Plan the warehouse around the OLTP's real semantics (17 October 2026)
+
+**Situation:** Minkops needed a warehouse a month before its first real users.
+An audit of the OLTP schema for extraction found file bytes stored in `bytea`
+columns, runs without a creation time, and `updated_at` maintained by hand in
+about 21 places while also serving as worker lease, queue position and refresh
+cursor. The first attempt to record these findings as comments inside
+`0001_baseline.sql` would have changed its checksum and stopped `migrate.py` on
+every existing database, production included.
+
+**Task:** Design a warehouse that is cheap now (pre-launch budget), portable to
+production tools later, safe for a multi-tenant customer analytics product, and
+fix the source schema where analytics exposed real defects.
+
+**Action:** Chose a local PostgreSQL warehouse loaded through `postgres_fdw` in
+one transaction (one consistent OLTP snapshot) and transformed with dbt, with
+BigQuery, Datastream CDC and self-hosted Airflow deferred to explicit gates
+instead of adopted early. Made a column-level extraction manifest the deny-by-default
+contract for what leaves the OLTP. Chose "build pooled, serve bridged" tenancy:
+the pooled OLTP means raw data arrives pooled regardless of hosting, so tenant
+isolation is served through per-tenant view schemas rather than N copies of
+every model. Sequenced the `updated_at` trigger after separating lease, queue
+and refresh timestamps, so the fix cannot change worker behaviour. Findings
+moved into new-migration plan items rather than edits to applied migrations.
+
+**Result:** [docs/warehouse-plan.md](warehouse-plan.md) defines phases, gates,
+risks and an inventory of every OLTP table. No code yet; the plan's CI design
+makes a migration that breaks analytics fail on its own pull request.
+
 ## Work with the user's Tally session instead of controlling it (14 October 2026)
 
 **Situation:** The first client demo failed before any bill was read. Discovery

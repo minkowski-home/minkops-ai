@@ -103,7 +103,8 @@ that a consequential write is correct.
   approvals, outcomes, and audit records as implementations are added.
 - `connectors/` — integrations Minkops must implement or mediate itself.
 - `infra/` — local OLTP Compose and hosted runtime guidance.
-- `warehouse/` — reserved for a separately designed warehouse; currently empty.
+- `warehouse/` — analytics warehouse (local PostgreSQL first); see the
+  [warehouse plan](docs/warehouse-plan.md). Not yet implemented.
 - `packages/`, `db/`, `design/`, and `docs/` — shared contracts and assets,
   versioned OLTP migrations, design sources, and engineering guidance.
 
