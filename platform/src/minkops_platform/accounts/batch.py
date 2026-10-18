@@ -34,6 +34,7 @@ def create_child(connection, run, file_id):
     config = copy.deepcopy(run["config"])
     config.pop("batch", None)
     config.pop("retry_file_id", None)
+    config.pop("retry_file_ids", None)
     config.pop("tally_context_job_id", None)
     # Provider receipts belong to a particular run, including retry children.
     for field in ("hosted_workspace", "hosted_session_closed", "cleanup_attempt_at", "cleanup_attempt_count"):
@@ -145,7 +146,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             queue_tally_context(connection, child)
             run["config"]["tally_target"] = original_target
         connection.execute(
-            "UPDATE account_runs SET config=config || jsonb_build_object('batch',true,'retry_file_id',%s::text) WHERE id=%s",
+            "UPDATE account_runs SET config=(config-'retry_file_ids') || jsonb_build_object('batch',true,'retry_file_id',%s::text) WHERE id=%s",
             (file_id, run_id),
         )
         observe(
@@ -156,6 +157,24 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             30,
         )
     return public_run(connection, run_for(connection, tenant["id"], run_id))
+
+
+def recheck_many(connection, tenant, user, run, file_ids):
+    """Refresh discovery once, then enqueue independent children atomically."""
+    from .bills import queue_tally_context
+    resolve_bill(connection, tenant, user, run["id"], file_ids[0], "", False)
+    template = connection.execute("""SELECT config FROM account_runs WHERE tenant_id=%s
+        AND parent_run_id=%s AND file_ids @> %s AND NOT coalesce((config->>'superseded')::boolean,false)
+        ORDER BY updated_at DESC LIMIT 1""", (tenant["id"], run["id"], Jsonb([file_ids[0]]))).fetchone()
+    parent = {**run, "config": template["config"]}
+    for file_id in file_ids[1:]:
+        connection.execute("UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
+            (tenant["id"], run["id"], Jsonb([file_id])))
+        child = create_child(connection, parent, file_id)
+        if child["config"].get("tally_target", {}).get("schema_only"):
+            queue_tally_context(connection, child)
+    connection.execute("UPDATE account_runs SET config=config || %s WHERE tenant_id=%s AND id=%s",
+        (Jsonb({"retry_file_ids": file_ids}), tenant["id"], run["id"]))
 
 
 def reconcile_once(url):
@@ -236,7 +255,7 @@ def _reconcile(connection, parent):
             ]
         # The first aggregation adopts each child's outcome. Afterwards the parent
         # also holds operator decisions, so only the rechecked input is re-read.
-        fresh = not prior or file_id == parent["config"].get("retry_file_id")
+        fresh = not prior or file_id in {parent["config"].get("retry_file_id"), *parent["config"].get("retry_file_ids", [])}
         carried = [i for i in prior.get("unresolved", []) if i["source_file_id"] == file_id]
         if child["state"] == "failed":
             result["records"].extend(previous)
@@ -281,7 +300,7 @@ def _reconcile(connection, parent):
     for issue in result.get("unresolved", []):
         # Re-aggregation restates carried issues; only a recheck is a new event.
         flag(connection, parent, issue_record(result, issue),
-             reopen=issue["source_file_id"] == parent["config"].get("retry_file_id"))
+             reopen=issue["source_file_id"] in {parent["config"].get("retry_file_id"), *parent["config"].get("retry_file_ids", [])})
     connection.execute(
         "UPDATE account_runs SET result=%s,config=config-'aggregation_failures' WHERE id=%s",
         (Jsonb(result), parent["id"]),

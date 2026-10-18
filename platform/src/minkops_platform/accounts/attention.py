@@ -303,40 +303,77 @@ def supplier_created(connection, item, job, observation):
     target = item["target"]
     run = run_for(connection, item["tenant_id"], target["run_id"], True)
     from minkops_platform.run_controls import control_state
-    if control_state(connection, item["tenant_id"], run["task_id"]) != "active":
+    intent = control_state(connection, item["tenant_id"], run["task_id"])
+    if intent != "active":
+        if intent == "paused":
+            # A write already underway may finish while paused. Preserve its
+            # verified callback, but defer the newly authorized bill dispatch.
+            masters = [m for m in observation["masters"] if m.get("@_NAME", m.get("NAME")) == target["vendor"]]
+            connection.execute("UPDATE attention_items SET target=target || %s WHERE tenant_id=%s AND id=%s",
+                (Jsonb({"supplier_continuation": {"valid": True, "masters": masters}}), item["tenant_id"], item["id"]))
         return
-    if run["state"] != "review":
+    if run["state"] not in ("review", "writing"):
         return
     from .client_context import select_target
     from .tally_writes import prepare, complete_run
     result = copy.deepcopy(run["result"])
     from .tally_writes import SETTLED
-    # The supplier item belongs to the file; continue the undecided bill naming this supplier.
-    record = next((r for r in result["records"] if r["source_file_id"] == target["file_id"]
-                   and r["data"].get("vendor") == target["vendor"] and r.get("status") not in SETTLED), None)
-    if item["status"] == "done" or record is None:
+    from .bulk_decisions import proposal_identity
+    consent = target.get("authorized_proposals")
+    eligible = []
+    for index, record in enumerate(result["records"]):
+        if record.get("status") in SETTLED:
+            continue
+        authorized = (any(c["record_index"] == index and c["source_file_id"] == record["source_file_id"]
+                          and c["identity"] == proposal_identity(record) for c in consent) if consent else
+                      record["source_file_id"] == target["file_id"] and record["data"].get("vendor") == target["vendor"])
+        if authorized:
+            selected = select_target(record, run["config"]["tally_target"])
+            if selected["references"]["company_guid"] != target["company_guid"]:
+                continue
+            eligible.append(record)
+            if not consent:
+                break
+    if (item["status"] == "done" and not target.get("supplier_continuation")) or not eligible:
         return
-    selected = select_target(record, run["config"]["tally_target"])
     master = next(m for m in observation["masters"] if m.get("@_NAME", m.get("NAME")) == target["vendor"])
     if master.get("PARENT") != "Sundry Creditors" or not master.get("GUID"):
         raise ServiceError("invalid", "Supplier definition needs review.")
-    selected["ledgers"] = list(dict.fromkeys([*selected["ledgers"], target["vendor"]]))
-    selected["references"]["ledgers"][target["vendor"]] = {k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}
-    if run["config"]["tally_target"].get("master_selection_version") == 1:
-        from .master_selection import ledger_reference
-
-        identity = selected["references"]["ledgers"][target["vendor"]]
-        ref = ledger_reference(selected, target["vendor"], identity)
-        selected["ledger_refs"][ref] = {"name": target["vendor"], "identity": identity}
-        record["master_refs"]["vendor"] = {"ref": ref, "evidence": "Explicit supplier creation verified by native readback."}
-    record["decision"] = "approve"
-    result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != target["file_id"]]
+    for record in eligible:
+        selected = select_target(record, run["config"]["tally_target"])
+        selected["ledgers"] = list(dict.fromkeys([*selected["ledgers"], target["vendor"]]))
+        selected["references"]["ledgers"][target["vendor"]] = {k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}
+        record["data"]["vendor"] = target["vendor"]
+        if run["config"]["tally_target"].get("master_selection_version") == 1:
+            from .master_selection import ledger_reference
+            identity = selected["references"]["ledgers"][target["vendor"]]
+            ref = ledger_reference(selected, target["vendor"], identity)
+            selected["ledger_refs"][ref] = {"name": target["vendor"], "identity": identity}
+            record["master_refs"]["vendor"] = {"ref": ref, "evidence": "Explicit supplier creation verified by native readback."}
+        record["decision"] = "approve"
+        sibling = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s FOR UPDATE",
+            (run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:supplier")).fetchone()
+        if sibling and sibling["id"] != item["id"]:
+            connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s", (job["actor_id"], sibling["id"]))
+            attention.audit(connection, sibling, job["actor_id"], "continued", "Authorized supplier verified; bill save queued.")
     for row in result["records"]:
-        if row is not record and row.get("status") not in ("saved", "duplicate", "writing", "rejected"):
+        if not any(row is authorized for authorized in eligible) and row.get("status") not in ("saved", "duplicate", "writing", "rejected"):
             row["decision"] = "hold"
     connection.execute("UPDATE account_runs SET config=%s WHERE id=%s", (Jsonb(run["config"]), run["id"]))
     # The native-created master is scoped to this continuation. Other runs keep
     # their confirmed snapshots and must refresh discovery to see the new master.
     prepare(connection, run, result, approved=True)
     complete_run(connection, run, result)
+    connection.execute("UPDATE attention_items SET target=target-'supplier_continuation' WHERE tenant_id=%s AND id=%s",
+        (item["tenant_id"], item["id"]))
     attention.audit(connection, item, job["actor_id"], "continued", "Supplier verified. Bill save queued.")
+
+
+def resume_suppliers(connection, run, user):
+    # A live callback locks item -> run. Skip an item already held by that
+    # callback: after Resume commits it sees active intent and continues itself.
+    items = connection.execute("""SELECT * FROM attention_items WHERE tenant_id=%s AND task_id=%s
+        AND target->>'run_id'=%s AND target ? 'supplier_continuation' FOR UPDATE SKIP LOCKED""",
+        (run["tenant_id"], run["task_id"], str(run["id"]))).fetchall()
+    for item in items:
+        supplier_created(connection, item, {"actor_id": user["id"]}, item["target"]["supplier_continuation"])

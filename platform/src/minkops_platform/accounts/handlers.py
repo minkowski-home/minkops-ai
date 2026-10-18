@@ -320,6 +320,10 @@ class DiscoveryHandler(AccountsHandler):
 
 
 class BillHandler(AccountsHandler):
+    def on_resume(self, connection, run, user):
+        from .attention import resume_suppliers
+        resume_suppliers(connection, run, user)
+
     def public_fields(self, connection, run):
         from .bill_review import attention_items, review
         from .bill_decisions import public_result
