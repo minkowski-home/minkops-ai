@@ -1,5 +1,28 @@
 # Decision Logs
 
+## Fence bulk consent to a verified cohort (18 October 2026)
+
+**Situation:** Repeating a single-bill decision N times fails once the first
+approval changes a run to writing. Supplier callbacks could also arrive during
+another save and return without ever continuing their authorized bills.
+
+**Task:** Make one-click batch decisions efficient without widening consent,
+crossing company boundaries, losing actor evidence or duplicating native writes.
+
+**Action:** Derived subjects from company identity and typed supplier/hold data,
+excluding ambiguous masters and best guesses. Added a server preview token over
+the cohort and revision, then one locked transaction for per-member structured
+audit and one approval/job. Native supplier readback continues only proposals
+whose immutable identity matches the stored consent, including while unrelated
+writes are active. Rechecks share one refreshed context and retain independent
+durable child execution. Existing records, summaries and checksums are preserved
+by an additive audit-detail migration.
+
+**Result:** PostgreSQL regressions exercise three matching bills, an untouched
+different supplier, stale previews, replay, one approval, one supplier import
+intent and three continuations, plus a single discovery refresh for recheck.
+The browser verifies the subject/count confirmation and exact token submission.
+
 ## Project bill exceptions without changing Attention identity (18 October 2026)
 
 **Situation:** A PDF can contain several independent bills, while durable

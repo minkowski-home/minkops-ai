@@ -63,9 +63,13 @@ def public_result(run):
     result = copy.deepcopy(run.get("result"))
     if not isinstance(result, dict):
         return result
-    for record in result.get("records", []):
+    from .bulk_decisions import options
+    bulk = options(run)
+    for index, record in enumerate(result.get("records", [])):
         if isinstance(record, dict) and record.get("source_file_id"):
             record["allowed_actions"] = allowed_actions(run, record)
+            record["bulk_actions"] = bulk.get((index, record["source_file_id"]), {})
     for issue in result.get("unresolved", []):
         issue["allowed_actions"] = allowed_actions(run, issue)
+        issue["bulk_actions"] = bulk.get((None, issue["source_file_id"]), {})
     return result

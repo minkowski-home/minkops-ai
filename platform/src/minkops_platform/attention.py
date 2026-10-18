@@ -40,10 +40,11 @@ def resolved(item, observation):
     )
 
 
-def audit(connection, item, actor, action, summary):
+def audit(connection, item, actor, action, summary, *, detail=None):
     connection.execute(
-        "INSERT INTO attention_events(tenant_id,item_id,actor_id,action,summary) VALUES (%s,%s,%s,%s,%s)",
-        (item["tenant_id"], item["id"], actor, action, str(summary).replace("\n", " ")[:300]),
+        """INSERT INTO attention_events(tenant_id,item_id,actor_id,action,summary,detail)
+        VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+        (item["tenant_id"], item["id"], actor, action, str(summary).replace("\n", " ")[:300], Jsonb(detail or {})),
     )
 
 

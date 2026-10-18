@@ -30,6 +30,10 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const bulkDialog = useRef<HTMLDialogElement>(null);
+  const [bulk, setBulk] = useState<{fileId: string; proposal: number | null; action: BillAction;
+    count: number; description: string; preview_token: string} | null>(null);
+  useEffect(() => { if (bulk) bulkDialog.current?.showModal(); }, [bulk]);
   const applying = useRef(false),
     attempted = useRef("");
   const base = `/api/tenants/${tenant}/accounts`;
@@ -128,6 +132,28 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       setBusy(false);
     }
   }
+  async function previewBulk(fileId: string, proposal: number | null, action: BillAction) {
+    if (!user || !run || busy || controlState !== "active" || loadError) return;
+    setBusy(true); setError("");
+    try {
+      const preview = await api<{count: number; description: string; preview_token: string}>(
+        `/api/tenants/${tenant}/attention/bills/${run.id}/${fileId}/bulk-preview`,
+        {method: "POST", body: JSON.stringify({action, proposal})}, user.csrf_token);
+      setBulk({...preview, fileId, proposal, action});
+    } catch (error) { setError(error instanceof Error ? error.message : "Could not preview similar bills."); }
+    finally { setBusy(false); }
+  }
+  function decisionButtons(fileId: string, proposal: number | null, actions: BillAction[], counts: Partial<Record<BillAction, number>>, attention = true) {
+    return <div className="accounts-toolbar">{actions.map(action => <div key={action} className="accounts-toolbar">
+      <button className="button button-ghost" disabled={busy || controlState !== "active" || Boolean(loadError)}
+        onClick={() => void act(`/api/tenants/${tenant}/attention/bills/${run?.id}/${fileId}`, {action, proposal})}>
+        {action === "guess" && !attention ? "Write bill" : ACTION_LABELS[action]}</button>
+      {action !== "guess" && (counts[action] ?? 0) > 1 && <button className="button button-ghost"
+        disabled={busy || controlState !== "active" || Boolean(loadError)}
+        onClick={() => void previewBulk(fileId, proposal, action)}>
+        Apply {ACTION_LABELS[action]} to all {counts[action]} similar</button>}
+    </div>)}</div>;
+  }
   if (!run) return loadError ? <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>
     : loaded ? null : <LoadingIndicator>Loading workflow results…</LoadingIndicator>;
   const discovery = run.workflow_key === "source-discovery";
@@ -197,11 +223,6 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
           const pending = isPending(r);
           const attention = needsAttention(r, result);
           const supplierMissing = missingSupplier(r);
-          // A file can hold several bills; each decision names its own proposal.
-          const decide = (action: string) =>
-            act(`/api/tenants/${tenant}/attention/bills/${run.id}/${r.source_file_id}`, {
-              action, proposal: index
-            });
           return (
             <article className="accounts-bill" key={`${r.source_file_id}:${index}`}>
               <h4>{name(r.source_file_id)}</h4>
@@ -226,18 +247,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
               </span>
               <p>{reason(r.source_file_id, index)}</p>
               {pending && run.state === "review" && ownsRun && (
-                <div className="accounts-toolbar">
-                  {billActions(r).map((action) => (
-                    <button
-                      key={action}
-                      className="button button-ghost"
-                      disabled={busy || controlState !== "active" || Boolean(loadError)}
-                      onClick={() => void decide(action)}
-                    >
-                      {action === "guess" && !attention ? "Write bill" : ACTION_LABELS[action]}
-                    </button>
-                  ))}
-                </div>
+                decisionButtons(r.source_file_id, index, billActions(r), r.bulk_actions ?? {}, attention)
               )}
             </article>
           );
@@ -248,30 +258,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
             <h4>{name(i.source_file_id)}</h4>
             <p>Needs attention</p>
             <p>{reason(i.source_file_id)}</p>
-            <button
-              className="button button-ghost"
-              disabled={busy || !ownsRun || controlState !== "active" || Boolean(loadError)}
-              onClick={() =>
-                void act(
-                  `/api/tenants/${tenant}/attention/bills/${run.id}/${i.source_file_id}`,
-                  { action: "nothing" }
-                )
-              }
-            >
-              Do nothing
-            </button>
-            <button
-              className="button button-ghost"
-              disabled={busy || !ownsRun || controlState !== "active" || Boolean(loadError)}
-              onClick={() =>
-                void act(
-                  `/api/tenants/${tenant}/attention/bills/${run.id}/${i.source_file_id}`,
-                  { action: "retry" }
-                )
-              }
-            >
-              Recheck bill
-            </button>
+            {ownsRun && run.state === "review" && decisionButtons(i.source_file_id, null, i.allowed_actions ?? [], i.bulk_actions ?? {})}
           </article>
         ))}
       {!discovery &&
@@ -328,6 +315,22 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       )}
       {run.state === "completed" && <p role="status">Finished</p>}
       {error && <p role="alert">{error}</p>}
+      <dialog ref={bulkDialog} className="bill-details" aria-label="Confirm similar bill decisions"
+        onClose={() => setBulk(null)}>
+        {bulk && <>
+          <h4>{ACTION_LABELS[bulk.action]} · {bulk.count} similar bills</h4>
+          <p>{bulk.description}</p>
+          <p>This decision applies to all {bulk.count} matching open bills in this run.</p>
+          {bulk.action === "supplier" && <p>Creates one supplier ledger and saves the authorized bills after native verification.</p>}
+          <div className="accounts-toolbar">
+            <button className="button button-primary" disabled={busy || controlState !== "active" || Boolean(loadError)}
+              onClick={() => void act(`/api/tenants/${tenant}/attention/bills/${run.id}/${bulk.fileId}/bulk`, {
+                action: bulk.action, proposal: bulk.proposal, preview_token: bulk.preview_token,
+              }).then(() => bulkDialog.current?.close())}>Confirm for {bulk.count} bills</button>
+            <button className="button button-ghost" disabled={busy} onClick={() => bulkDialog.current?.close()}>Cancel</button>
+          </div>
+        </>}
+      </dialog>
     </section>
   );
 }
