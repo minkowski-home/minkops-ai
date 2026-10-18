@@ -90,6 +90,9 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             target["company_mode"] = selections.get("company_mode", "infer")
             target["master_selection_version"] = 1
             target["tax_allocation_version"] = 1
+            if tuple(map(int, definition.metadata["version"].split("."))) >= (0, 13, 0):
+                desktop.require_companion(desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 8, 0))
+                target["supplier_creation_version"] = 1
             target["locked_company_guid"] = selections.get("locked_company_guid")
             if target["company_mode"] == "locked":
                 from .client_context import select_target

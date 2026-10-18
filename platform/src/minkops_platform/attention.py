@@ -148,10 +148,12 @@ def refresh(connection, tenant_id, user, item_id=None):
     return {"queued": sum(enqueue(connection, item, user) for item in rows)}
 
 
-def plan(connection, device, job):
+def plan(connection, device, job, *, plan_version=1):
     item = get(connection, device["tenant_id"], job["input"]["item_id"])
     if str(item["target"].get("device_id")) != str(device["id"]) or item["status"] != "pending":
         raise ServiceError("conflict", "Attention item no longer pending on this PC.")
+    if item["target"].get("gst_supplier") and plan_version < 4:
+        raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later before creating or verifying this GST supplier.")
     return item["target"]
 
 

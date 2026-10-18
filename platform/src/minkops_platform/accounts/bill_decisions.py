@@ -32,10 +32,12 @@ def supported_write(run, record, *, supplier=False):
         if supplier:
             vendor = candidate["data"]["vendor"]
             refs = candidate.get("master_refs")
-            if (vendor in selected["ledgers"] or candidate["data"].get("tax") != 0
+            if (vendor in selected["ledgers"]
                     or (refs is not None and refs.get("vendor", {}).get("new_supplier") is not True)
                     or not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in candidate.get("evidence", []))):
                 return False
+            from .supplier_gst import creation_plan
+            creation_plan(run, candidate, selected)
             selected = {**selected, "ledgers": [*selected["ledgers"], vendor]}
         validate_tally(candidate["data"], selected, candidate.get("tax_allocations"))
         return True

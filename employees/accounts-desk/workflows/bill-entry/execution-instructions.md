@@ -207,6 +207,20 @@ it. This enables an explicit native Create this ledger decision; it never
 authorizes creating masters or saving a voucher here.
 An unresolved or ambiguous supplier is not a new supplier. Never set
 new_supplier:true for an uncertain match or merely because exact spelling differs.
+
+For Tally, also extract nullable record.supplier_details when the supplier's
+GSTIN, registration type, state/code, place of supply, address and PIN are
+supported by the bill. Keep them outside data and its column-evidence array.
+Use the supplier's details, never the buyer's GSTIN or shipping address. Include
+literal page/quote evidence for gstin, registration_type, state,
+place_of_supply and address. A tax invoice with GST charged supports Regular;
+Composition requires its own printed evidence and cannot charge GST. If required
+details are missing or uncertain, use null rather than inventing them. Re-read
+a GSTIN that fails its base-36 check character. Search the full company's
+discovered GST registrations before declaring a supplier new: another spelling
+with the same valid GSTIN may be the existing ledger, and several matching
+ledgers are an ambiguity. The application alone decides whether an explicit
+GST-aware creation is supported and verifies every field natively.
 Likewise retain a complete supported low-confidence interpretation with its
 coded exception for the Best guess write decision. Never invent missing amounts, dates, company
 identity or unsupported accounting fields merely to make a candidate complete.

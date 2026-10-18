@@ -531,6 +531,7 @@ def refreshed_tally_target(connection, tenant, user, current):
             "locked_company_guid": current["locked_company_guid"],
             **({"master_selection_version": 1} if current.get("master_selection_version") == 1 else {}),
             **({"tax_allocation_version": 1} if current.get("tax_allocation_version") == 1 else {}),
+            **({"supplier_creation_version": 1} if current.get("supplier_creation_version") == 1 else {}),
         }
     latest = connection.execute(
         """SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
