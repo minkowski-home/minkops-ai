@@ -37,6 +37,8 @@ def hold_save(connection, run, record, reason, *, title=None):
 
     record["status"] = "held"
     record["save_hold"] = reason
+    from .bill_review import TITLE_CODES
+    record["save_hold_code"] = TITLE_CODES.get(title, "save_held")
     record["findings"] = list(dict.fromkeys([*record["findings"], reason]))
     return flag(connection, run, record, title=title, reopen=True)
 
@@ -230,7 +232,8 @@ def defer_input(result, file_id):
     """
     deferred = result.setdefault("deferred", [])
     if not any(item["source_file_id"] == file_id for item in deferred):
-        deferred.append({"source_file_id": file_id})
+        issue = next((i for i in result.get("unresolved", []) if i["source_file_id"] == file_id), {})
+        deferred.append({"source_file_id": file_id, **{k: issue[k] for k in ("code", "reason") if k in issue}})
     result["unresolved"] = [i for i in result.get("unresolved", []) if i["source_file_id"] != file_id]
     return result
 

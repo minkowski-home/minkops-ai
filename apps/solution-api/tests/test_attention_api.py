@@ -13,6 +13,44 @@ UNCLEAR = [{"code": "source_unreadable", "detail": "Unclear handwriting"}]
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL required")
 class AttentionTests(unittest.TestCase):
+    def test_exception_csv_is_authorized_stable_and_uses_durable_multi_bill_outcomes(self):
+        import codecs
+        import csv
+        import io
+        run, bill, _ = self.ready(UNCLEAR)
+        route = self.base + f"/runs/{run['id']}/unsaved-bills.csv"
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            stored = c.execute("SELECT result FROM account_runs WHERE id=%s", (run["id"],)).fetchone()["result"]
+            held = copy.deepcopy(stored["records"][0])
+            held["data"].update(invoice_number="=DANGEROUS()", vendor="@supplier", subtotal=-100, tax=-18, total=-118)
+            held.update(status="held", save_hold="Internal diagnostic")
+            saved = copy.deepcopy(held); saved.update(status="saved")
+            duplicate = copy.deepcopy(held); duplicate.update(status="duplicate")
+            stored["records"] = [saved, held, duplicate]
+            from psycopg.types.json import Jsonb
+            c.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(stored), run["id"]))
+        response = self.client.get(route)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.content.startswith(codecs.BOM_UTF8))
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertIn("attachment;", response.headers["content-disposition"])
+        rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["Invoice number"], rows[0]["Total"], rows[0]["Status"]), ("'=DANGEROUS()", "-118", "Save held"))
+        self.assertTrue(rows[0]["Reason"])
+        public = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual((public["review"]["saved"], public["review"]["duplicates"]), (1, 1))
+        self.assertEqual(rows[0]["Reason"], public["review"]["rows"][0]["reason"])
+        self.assertTrue(all(item["reason"] for item in self.client.get("/api/tenants/mock-tenant/attention").json()))
+        self.assertEqual(self.client.get(route.replace("mock-tenant", "pr-infra")).status_code, 404)
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='writing' WHERE id=%s", (run["id"],))
+        self.assertEqual(self.client.get(route).status_code, 409)
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='review' WHERE id=%s", (run["id"],))
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get(route).status_code, 401)
+
     for _method in ("setUp", "launch", "upload_bill", "process", "tally_discovery", "tally_result", "approve", "tally_job", "current"):
         locals()[_method] = getattr(fixtures.BillEntryTests, _method)
 
@@ -153,7 +191,7 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual(self.decision(root,quote,"nothing").status_code,200)
         approved=self.decision(root,bill,"guess")
         self.assertEqual(approved.status_code,200,approved.text)
-        self.assertEqual(approved.json()["result"]["deferred"],[{"source_file_id":quote}])
+        self.assertEqual(approved.json()["result"]["deferred"],[{"source_file_id":quote,"code":"not_a_bill","reason":"Quotation, not a bill."}])
         claim,route,plan=self.tally_job(approved.json())
         self.client.post(route+"/finish",headers=self.worker,
                          json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(plan)}})

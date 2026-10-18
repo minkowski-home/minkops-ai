@@ -57,9 +57,11 @@ def flag(connection, run, record, *, title=None, kind="bill", actor=None, reopen
     """Attention for one input file; `reopen` only for a new hold event (see attention.record)."""
     file_id = record["source_file_id"]
     name = next((f["path"] for f in run["config"].get("file_provenance", []) if f["id"] == file_id), file_id)
+    from .bill_review import reason_sentence
+    target = {**target_for(connection, run, record), "reason": reason_sentence(record, title=title)}
     return attention.record(connection, run, f"bill:{run['id']}:{file_id}:{kind}", name,
         title or exception_label(record), kind=kind,
-        target=target_for(connection, run, record), actor=actor, reopen=reopen)
+        target=target, actor=actor, reopen=reopen)
 
 
 def stopped(connection, run, actor):

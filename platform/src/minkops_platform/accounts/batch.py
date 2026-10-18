@@ -241,7 +241,7 @@ def _reconcile(connection, parent):
         if child["state"] == "failed":
             result["records"].extend(previous)
             result["unresolved"].extend(
-                [{"source_file_id": file_id, "reason": child["error"] or "Extraction needs attention."}]
+                [{"source_file_id": file_id, "code": "extraction_failed", "reason": child["error"] or "Extraction needs attention."}]
                 if fresh
                 else carried
             )

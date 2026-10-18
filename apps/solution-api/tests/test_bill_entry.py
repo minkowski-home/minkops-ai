@@ -247,7 +247,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(loaded["state"], "writing", loaded["result"])
         self.assertEqual(len(loaded["tally_writes"]), 1)
         self.assertEqual(loaded["result"]["findings"], [])
-        self.assertEqual(loaded["result"]["deferred"], [{"source_file_id": inputs[0]}])
+        self.assertEqual(loaded["result"]["deferred"], [{"source_file_id": inputs[0], "code": "extraction_failed", "reason": "Unreadable"}])
 
     def test_notes_never_hold_exception_only_bills_but_coded_exceptions_reach_attention(self):
         from minkops_platform.accounts.batch import reconcile_once

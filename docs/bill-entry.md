@@ -89,6 +89,29 @@ with `MINKOPS_UI_ARTIFACTS`. Unit tests remain `npm test`.
 
 ## Workflow
 
+### Exception review and export
+
+Review lists only bills that Minkops has not successfully saved. Saved bills and
+verified duplicates appear in a collapsed count ("saved · already in Tally").
+Each remaining proposal or unresolved input has a plain-language sentence from
+its typed exception or native save outcome, never from model findings. Do nothing
+preserves that reason in durable deferred state and shared Attention.
+
+**Export CSV** downloads the same server-owned projection in web and Windows.
+It is available once results are combined and the run is in review, completed,
+failed or stopped; processing and active saves disable it with an explanation.
+`GET /api/tenants/{slug}/accounts/runs/{id}/unsaved-bills.csv` uses the run's
+tenant authorization and private/no-store response headers. The UTF-8 BOM makes
+Excel detect the encoding, and text cells are escaped against spreadsheet
+formulas without changing negative numeric amounts.
+
+The sheet contains source file, invoice, supplier, date, subtotal, total tax,
+individual tax allocations, gross total, company, status, reason and Attention ID.
+Statuses are **Needs attention**, **Save held**, and **Not written (Do nothing)**.
+Saved and duplicate bills are excluded. Multi-bill PDFs have one row per bill;
+inputs with no proposal have one file row. The open file-level bill Attention ID
+is preferred, then the supplier ID; several bills may share that ID.
+
 1. Connect the Windows PC and grant the destination folder. Run Source discovery
    and confirm Excel header mappings, then explicitly refresh the real workbook
    before using it as a destination. For Tally, confirm the selected company's

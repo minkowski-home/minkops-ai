@@ -1,5 +1,26 @@
 # Decision Logs
 
+## Project bill exceptions without changing Attention identity (18 October 2026)
+
+**Situation:** A PDF can contain several independent bills, while durable
+Attention items belong to a file and kind. An exception export needed bill-level
+accuracy without disturbing existing Done, reopen or verified-close behavior.
+
+**Task:** Give accountants one trustworthy list of bills Minkops did not enter,
+with consistent explanations across web, Windows and downloadable sheets.
+
+**Action:** Added a shared server projection over durable run outcomes. It emits
+one row per unsaved proposal and a file row only when no proposal exists,
+prefers the existing open bill/supplier item, and derives reasons from typed
+codes. Deferred inputs retain their reason; extraction failures gain a code.
+Exports require stable aggregate state, tenant authorization, a UTF-8 BOM and
+text-only formula escaping, preserving legitimate negative numeric amounts.
+
+**Result:** Regression tests cover mixed and multi-bill runs, active-save refusal,
+preserved deferrals, native hold labels, authentication, tenant isolation and
+spreadsheet escaping. Existing Attention identity and resolution semantics remain
+in place; live release verification is recorded separately when completed.
+
 ## Plan the warehouse around the OLTP's real semantics (17 October 2026)
 
 **Situation:** Minkops needed a warehouse a month before its first real users.
