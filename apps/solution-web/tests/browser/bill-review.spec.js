@@ -5,7 +5,7 @@ test('mixed runs show exceptions, saved counts, reasons and an authenticated CSV
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  let state = 'review';
+  let state = 'review'; const applied = [];
   const record = (status, invoice) => ({ source_file_id: 'multi', status, operation: 'append', data: { invoice_number: invoice, total: 118 }, findings: [], evidence: [] });
   const rows = [
     { source_file_id: 'multi', source_file: 'multi.pdf', record_index: 2, status: 'Save held', reason: 'Tally rejected this bill and its destination settings need attention.' },
@@ -21,10 +21,12 @@ test('mixed runs show exceptions, saved counts, reasons and an authenticated CSV
     else if (path.endsWith('/accounts/tasks/task/run')) body = {
       id: 'run', actor_id: 'user', task_id: 'task', workflow_key: 'bill-entry', state,
       config: { file_provenance: [{ id: 'multi', path: 'multi.pdf' }, { id: 'blank', path: 'blank.pdf' }] },
-      result: { records: [record('saved', 'SAVED-1'), record('duplicate', 'EXISTING-1'), { ...record('held', 'HELD-1'), save_hold: 'diagnostic', allowed_actions: ['retry_save', 'nothing'] }],
+      result: { records: [record('saved', 'SAVED-1'), record('duplicate', 'EXISTING-1'), { ...record('held', 'HELD-1'), save_hold: 'diagnostic', allowed_actions: ['retry_save', 'nothing'], bulk_actions: {retry_save: 3} }],
         findings: [], deferred: [{ source_file_id: 'blank' }] }, writes: [], tally_writes: [],
       review: { saved: 1, duplicates: 1, rows, export_unavailable: state === 'writing' ? 'Export is ready after destination saves have finished.' : null },
     };
+    else if (path.endsWith('/bulk-preview')) body = {count: 3, description: 'Test Company · Open company in Tally', preview_token: 'a'.repeat(64)};
+    else if (path.endsWith('/bulk')) { applied.push(route.request().postDataJSON()); body = {id: 'run', actor_id: 'user', task_id: 'task', workflow_key: 'bill-entry', state: 'writing', config: {}, result: {records: [], findings: []}, writes: []}; }
     else if (path.endsWith('/unsaved-bills.csv')) {
       await route.fulfill({ body: '\ufeffSource file,Invoice number\r\nmulti.pdf,HELD-1\r\n', contentType: 'text/csv; charset=utf-8', headers: { 'Content-Disposition': 'attachment; filename="unsaved-bills-run.csv"' } });
       return;
@@ -47,6 +49,12 @@ test('mixed runs show exceptions, saved counts, reasons and an authenticated CSV
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('bill-review-mobile.png') });
+  await page.getByRole('button', {name: 'Apply Retry save to all 3 similar'}).click();
+  const consent = page.getByRole('dialog', {name: 'Confirm similar bill decisions'});
+  await expect(consent.getByText('Test Company · Open company in Tally')).toBeVisible();
+  await expect(consent.getByText('This decision applies to all 3 matching open bills in this run.')).toBeVisible();
+  await consent.getByRole('button', {name: 'Confirm for 3 bills'}).click();
+  expect(applied).toEqual([{action: 'retry_save', proposal: 2, preview_token: 'a'.repeat(64)}]);
   state = 'writing'; await page.reload();
   await expect(page.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
   await expect(page.getByText('Export is ready after destination saves have finished.')).toBeVisible();

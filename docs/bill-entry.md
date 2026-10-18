@@ -133,6 +133,29 @@ Unknown future codes offer only Do nothing/Recheck until a handler is explicitly
 supported. The UI consumes server-derived actions and never infers eligibility
 from free-text findings. Mark Done and Refresh remain shared Attention actions.
 
+**Apply to all similar** is offered for Create this ledger, Retry save, Do
+nothing and Recheck only when the server can identify a shared subject. New
+suppliers group by company GUID, normalized printed name and GSTIN. Native save
+holds group by company and typed hold reason; books-date and voucher-type holds
+also have company-scoped subjects. Ambiguous suppliers/ledger pairs and Best
+guess write have no bulk action in v1.
+
+A fresh server preview shows the subject and count before confirmation. The
+apply request is fenced to that cohort and revision: changed bills require a
+new preview. All member audits and state changes commit together. One bulk save
+uses one approval; one supplier group creates one native job, then continues
+every still-matching, explicitly authorized proposal after readback. Other
+pending writes do not strand a verified supplier continuation. Recheck refreshes
+discovery once and creates independent bounded child sessions. Repeated requests
+return the existing result without queuing another write or duplicating audit.
+
+`attention_events.detail` stores a versioned decision record: company, code,
+structured subject, action, actor, source/trigger item, proposal, count, stable
+decision tuple and snapshot token. MIN-132 can reuse this record for client
+memory; this release does not remember or automatically reuse choices.
+
+### Exception sheet contents
+
 Review lists only bills that Minkops has not successfully saved. Saved bills and
 verified duplicates appear in a collapsed count ("saved · already in Tally").
 Each remaining proposal or unresolved input has a plain-language sentence from
