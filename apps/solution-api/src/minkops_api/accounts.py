@@ -137,6 +137,21 @@ def run_detail(slug: str, run_id: UUID, user: User, connection: Db):
     return public_run(connection, _call(repository.run_for, connection, tenant["id"], run_id))
 
 
+@router.get("/runs/{run_id}/unsaved-bills.csv")
+def unsaved_bills(slug: str, run_id: UUID, user: User, connection: Db):
+    from minkops_platform.accounts.bill_review import attention_items, export_csv
+
+    tenant, _ = tenant_access(slug, user, connection)
+    run = _call(repository.run_for, connection, tenant["id"], run_id)
+    if run["workflow_key"] != "bill-entry":
+        raise HTTPException(404, "Bill run not found.")
+    content = _call(export_csv, run, attention_items(connection, run))
+    return Response(content, media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="unsaved-bills-{run_id}.csv"',
+        "Cache-Control": "private, no-store",
+    })
+
+
 @router.get("/tasks/{task_id}/run")
 def task_run(slug: str, task_id: UUID, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)

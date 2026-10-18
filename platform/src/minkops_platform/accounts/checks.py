@@ -21,6 +21,7 @@ EXCEPTION_LABELS = {
     "date_before_books": "Before books begin",
     "destination_changed": "Tally changed",
     "voucher_type_unresolved": "Voucher type needed",
+    "extraction_failed": "Recheck bill",
 }
 
 
