@@ -23,7 +23,9 @@ function BillEntryLaunch({ tenant, routeSlug, workflow, onConfigChange, destinat
   const [catalogs, setCatalogs] = useState<SavedCatalog[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [catalogId, setCatalogId] = useState('');
-  const outputMode = String(workflow.config_values.output_mode ?? 'excel_in_place');
+  // The v1 product surface is Tally-only; pinned legacy Excel runs keep their
+  // existing review/recovery path and the core adapter remains available.
+  const outputMode: string = 'tally_in_place';
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const loaded = loadState === 'ready';
   const [loadedNativeCatalog,setNativeCatalog] = useState<NativeCatalog|null>(null);
@@ -169,7 +171,7 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
       try { selectedPC = JSON.parse(localStorage.getItem(destinationPreference(tenant, user.id, workflow.key)) ?? 'null'); }
       catch { /* Unknown preferences require an explicit destination choice. */ }
       if (!target.device_id || selectedPC !== target.device_id) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
-      if (target.output_mode !== workflow.config_values.output_mode) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
+      if (target.output_mode !== 'tally_in_place') { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
       const tally=target.output_mode==='tally_in_place';
       let selections: string[] = [];
       try {

@@ -322,7 +322,9 @@ class DiscoveryHandler(AccountsHandler):
 class BillHandler(AccountsHandler):
     def public_fields(self, connection, run):
         from .bill_review import attention_items, review
-        return {**super().public_fields(connection, run), "review": review(run, attention_items(connection, run))}
+        from .bill_decisions import public_result
+        return {**super().public_fields(connection, run), "review": review(run, attention_items(connection, run)),
+                "result": public_result(run)}
 
     def launched(self, connection, run):
         if run["config"].get("tally_target", {}).get("schema_only"):

@@ -91,6 +91,48 @@ with `MINKOPS_UI_ARTIFACTS`. Unit tests remain `npm test`.
 
 ### Exception review and export
 
+### v1 settings and handler policy
+
+New UI launches are Tally-only. Read bills groups the input format, Tally
+destination groups discovery/company/voucher-type choices, and Review and save
+groups review mode. Exact ledger/amount validation, duplicates and native
+readback are mandatory. Excel/Both/draft and Excel-only checks are hidden in
+v1; pinned legacy runs retain their adapters and recovery contracts.
+
+The server owns the following maximum handler matrix. It further removes write
+actions when mandatory values, company/master identity, source evidence or
+supplier-creation prerequisites fail. Recheck appears only for an unresolved
+input; saved/rejected/writing bills and runs outside review offer no decisions.
+Best guess retains its separate human-review Attention after native save.
+
+| Typed code | Maximum handlers |
+| --- | --- |
+| `source_unreadable` | Best guess write, Do nothing, Recheck |
+| `classification_uncertain` | Best guess write, Do nothing, Recheck |
+| `manual_review` | Best guess write, Do nothing, Recheck |
+| `supplier_missing` | Create this ledger, Do nothing, Recheck |
+| `not_a_bill` | Do nothing, Recheck |
+| `multiple_bills_unclear` | Do nothing, Recheck |
+| `required_value_missing` | Do nothing, Recheck |
+| `source_values_conflict` | Do nothing, Recheck |
+| `company_unresolved` | Do nothing, Recheck |
+| `supplier_unresolved` | Do nothing, Recheck |
+| `unsupported_structure` | Do nothing, Recheck |
+| `date_before_books` | Do nothing, Recheck |
+| `destination_changed` | Do nothing, Recheck |
+| `voucher_type_unresolved` | Do nothing, Recheck |
+| `extraction_failed` | Do nothing, Recheck |
+| `run_stopped` | Do nothing, Recheck (only after an active review) |
+| `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
+| `company_not_open`, `no_company`, `duplicate_company` | Retry save, Do nothing |
+| `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response` | Retry save, Do nothing |
+| `rejected`, `save_hold`, `save_held` | Retry save, Do nothing |
+| `save_waiting`, `save_interrupted`, `pc_unavailable` | Retry save, Do nothing |
+
+Unknown future codes offer only Do nothing/Recheck until a handler is explicitly
+supported. The UI consumes server-derived actions and never infers eligibility
+from free-text findings. Mark Done and Refresh remain shared Attention actions.
+
 Review lists only bills that Minkops has not successfully saved. Saved bills and
 verified duplicates appear in a collapsed count ("saved · already in Tally").
 Each remaining proposal or unresolved input has a plain-language sentence from

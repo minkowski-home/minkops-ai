@@ -227,7 +227,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
               <p>{reason(r.source_file_id, index)}</p>
               {pending && run.state === "review" && ownsRun && (
                 <div className="accounts-toolbar">
-                  {billActions(r, result).map((action) => (
+                  {billActions(r).map((action) => (
                     <button
                       key={action}
                       className="button button-ghost"
