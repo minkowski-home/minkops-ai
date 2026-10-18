@@ -21,6 +21,7 @@ export interface SettingSpec {
   description?: string;
   enum?: (string | number)[];
   "x-enabled-options"?: (string | number)[];
+  "x-step"?: string;
 }
 
 export interface ConfigSchema {

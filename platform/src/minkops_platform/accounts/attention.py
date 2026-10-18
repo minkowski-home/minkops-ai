@@ -129,6 +129,9 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     record = original or issue_record({"records": []}, issue)
     if record.get("status") in ("saved", "duplicate", "rejected", "writing"):
         raise ServiceError("conflict", "Bill already handled.")
+    from .bill_decisions import allowed_actions
+    if action not in allowed_actions(run, record):
+        raise ServiceError("invalid", "This decision is unavailable for this bill. Use an offered action or handle it in the original system.")
     if action == "retry":
         return resolve_bill(connection, tenant, user, run_id, file_id, "", False)
     if action == "retry_save":

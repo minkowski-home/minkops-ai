@@ -8,7 +8,8 @@
         "all_outputs",
         "only_exceptions"
       ],
-      "title": "Default review mode"
+      "title": "Default review mode",
+      "x-step": "Review and save"
     },
     "output_mode": {
       "type": "string",
@@ -42,7 +43,8 @@
         "image",
         "mixed"
       ],
-      "title": "Bill inputs"
+      "title": "Bill inputs",
+      "x-step": "Read bills"
     },
     "company_mode": {
       "type": "string",
