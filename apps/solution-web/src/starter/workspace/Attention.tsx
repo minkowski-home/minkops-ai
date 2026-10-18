@@ -9,6 +9,7 @@ interface Item {
   task_id: string;
   identifier: string;
   label: string;
+  reason: string;
   status: string;
   workflow: string;
   employee: string;
@@ -145,6 +146,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
               <article className="accounts-bill" key={i.id}>
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
+                <p>{i.reason || "This item needs attention in the original system."}</p>
                 {i.status === "pending" ? (
                   <div className="accounts-toolbar">
                     <button
