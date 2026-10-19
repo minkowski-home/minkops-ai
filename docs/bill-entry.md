@@ -123,6 +123,7 @@ Best guess retains its separate human-review Attention after native save.
 | `voucher_type_unresolved` | Do nothing, Recheck |
 | `identity_rule_unknown` | Do nothing, Recheck |
 | `date_outside_company_period` | Do nothing, Recheck |
+| `posting_profile_miss` | Best guess write, Do nothing, Recheck |
 | `extraction_failed` | Do nothing, Recheck |
 | `run_stopped` | Do nothing, Recheck (only after an active review) |
 | `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
@@ -287,6 +288,22 @@ application only binds and proves it:
   document;
 - inventory, bill-wise allocations and foreign currency are connector limitations
   the AI reports as `unsupported_structure`, naming the structure.
+
+**Posting patterns.** Each company's way of recording supplier documents is
+derived once (the `posting_profile` stage reads that company's discovery only)
+and stored as a versioned client profile. Code proves every identity it names;
+a member confirms it once from the Attention card "Confirm posting pattern"
+(**Confirm** / **Do nothing**), and the company's bills wait until then. Bills are
+then checked against it: its voucher type per document kind, supplier party
+groups, round-off ledger and cap, TDS ledgers with their section and rate
+(deducted on the expense value), and where supplier document numbers are
+recorded for duplicate checks. A bill that does not fit holds as
+`posting_profile_miss`; three misses retire the pattern. A year-split sibling
+inherits a confirmed pattern when every identity re-binds by exact name and
+parent group, and newer discovery keeps a pattern while its identities and
+groups still hold, so routine master edits never ask again. Concurrent runs
+share one derivation; a failed derivation releases the company so its bills
+hold and the next run derives again.
 
 Approved bills are stored as native v5 plans (Windows companion 0.9.0+, see
 [Windows app](windows-app.md#companion-090-contracts)) and reviewed through a

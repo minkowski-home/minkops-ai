@@ -11,6 +11,35 @@ from psycopg.rows import dict_row
 URL = accounts_tests.URL
 
 
+def confirm_patterns(discovery_id):
+    """Seed each company's confirmed posting pattern from its own discovered masters."""
+    from psycopg.types.json import Jsonb
+    from minkops_platform.accounts.posting_profiles import validate
+    from minkops_platform.accounts.vouchers import Masters
+
+    with psycopg.connect(URL, row_factory=dict_row) as c:
+        row = c.execute("SELECT tenant_id,catalog FROM discovery_runs WHERE id=%s", (discovery_id,)).fetchone()
+        for company in row["catalog"]["sources"][0]["snapshot"]["companies"]:
+            masters = Masters(company)
+            types = [g for (kind, g), found in masters.by_key.items() if kind == "VOUCHERTYPE"
+                     and masters.family(found[0]) == "purchase" and masters.scalar(found[0], "ISACTIVE").casefold() != "no"]
+            if not types:
+                continue
+            payload = validate({"company_guid": company["company_guid"],
+                                "families": {"invoice": {"family": "purchase", "voucher_type_guid": types[0]}, "credit_note": None},
+                                "invoice_number": {"fields": ["REFERENCE"]}, "round_off": None, "tds": None,
+                                "party_groups": ["Sundry Creditors"], "practice": [], "summary": ["Fixture pattern"]},
+                               masters, company["company_guid"])
+            # Each fixture discovery replaces any pattern an earlier test confirmed.
+            c.execute("""UPDATE client_profiles SET status='superseded' WHERE tenant_id=%s AND kind='posting_profile'
+                AND scope_key=%s AND status IN ('deriving','proposed','active')""", (row["tenant_id"], company["company_guid"]))
+            c.execute("""INSERT INTO client_profiles(tenant_id,kind,scope_key,version,status,payload,provenance)
+                SELECT %s,'posting_profile',%s,coalesce(max(version),0)+1,'active',%s,%s FROM client_profiles
+                WHERE tenant_id=%s AND kind='posting_profile' AND scope_key=%s""",
+                      (row["tenant_id"], company["company_guid"], Jsonb(payload), Jsonb({"discovery_id": str(discovery_id)}),
+                       row["tenant_id"], company["company_guid"]))
+
+
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class BillEntryTests(unittest.TestCase):
     setUp = accounts_tests.AccountsTests.setUp
@@ -678,6 +707,7 @@ class BillEntryTests(unittest.TestCase):
         native_ids=True,
         siblings=False,
         voucher_padding=0,
+        confirmed_patterns=True,
     ):
         """`native_ids` gives masters the GUID/PARENT/ALTERID a live export carries.
 
@@ -817,12 +847,19 @@ class BillEntryTests(unittest.TestCase):
             discovery + f"/runs/{launched.json()['id']}/confirm", headers=self.csrf, json={}
         )
         self.assertEqual(r.status_code, 200, r.text)
+        if confirmed_patterns:
+            confirm_patterns(launched.json()["id"])
         return launched.json()["id"]
 
     def tally_result(self, run, bill, total=118):
         """A bill-entry 0.14 voucher proposal: purchase line plus 18% IGST."""
         company = run["config"]["tally_target"].get("companies", [{}])[0]
         guid = company.get("references", {}).get("company_guid")
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            pattern = c.execute("""SELECT payload FROM client_profiles WHERE kind='posting_profile' AND scope_key=%s
+                AND status='active' ORDER BY version DESC LIMIT 1""", (guid,)).fetchone()
+        voucher_type = (pattern["payload"]["families"]["invoice"]["voucher_type_guid"] if pattern
+                        else (company.get("voucher_type") or {}).get("GUID") or "Purchase-guid")
         return {
             "records": [
                 {
@@ -834,7 +871,7 @@ class BillEntryTests(unittest.TestCase):
                                  "supplier_name": "Supplier", "supplier_gstin": None, "origin": "domestic"},
                     "voucher": {
                         "family": "purchase",
-                        "voucher_type_guid": (company.get("voucher_type") or {}).get("GUID") or "Purchase-guid",
+                        "voucher_type_guid": voucher_type,
                         "party": {"ledger_guid": "Supplier-guid", "new_supplier": False,
                                   "evidence": "Bill identifiers and discovered native definition match."},
                         "lines": [
@@ -1278,7 +1315,7 @@ class BillEntryTests(unittest.TestCase):
         saved = self.client.get(self.base + f"/runs/{run['id']}").json()["result"]["records"][0]
         self.assertEqual((saved["status"], saved["current"]["voucher_type"]), ("saved", "Purchase GST"))
 
-    def test_several_purchase_types_need_an_explicit_choice_that_is_pinned(self):
+    def test_several_purchase_types_follow_the_confirmed_pattern_without_a_launch_choice(self):
         did = self.tally_discovery(
             "alpha-guid",
             voucher_types=({"NAME": "Purchase", "GUID": "vt-p"},
@@ -1290,34 +1327,25 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(offered, {"default": "vt-gst", "candidates": [
             {"name": "Purchase", "guid": "vt-p", "used": 1}, {"name": "Purchase GST", "guid": "vt-gst", "used": 2}]})
         bill = self.upload_bill()
-        config = {"output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions",
-                  "company_mode": "locked", "locked_company_guid": "alpha-guid"}
-        body = {"key": "bill-entry", "request_key": str(uuid.uuid4()), "file_ids": [bill], "catalog_id": None}
-        missing = self.client.post(self.base + "/runs", headers=self.csrf, json={**body, "config": config})
-        self.assertEqual(missing.status_code, 422, missing.text)
-        self.assertIn("Choose the purchase voucher type for Test", missing.json()["detail"])
-        stale = self.client.post(self.base + "/runs", headers=self.csrf, json={
-            **body, "request_key": str(uuid.uuid4()),
-            "config": {**config, "purchase_voucher_types": {"alpha-guid": "vt-unknown"}}})
-        self.assertEqual(stale.status_code, 422, stale.text)
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
-            **config, "purchase_voucher_types": {"alpha-guid": "vt-p"}})
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions",
+            "company_mode": "locked", "locked_company_guid": "alpha-guid"})
         self.process(run, self.tally_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         self.assertEqual(loaded["state"], "writing", loaded["result"])
         _, _, plan = self.tally_job(loaded)
-        self.assertEqual(plan["voucher_type"]["GUID"], "vt-p")
+        self.assertEqual(plan["voucher_type"]["GUID"], "vt-p")  # The fixture's confirmed pattern.
 
-    def test_a_company_without_an_active_purchase_type_cannot_start_a_locked_run(self):
-        did = self.tally_discovery("alpha-guid", voucher_types=(
+    def test_a_company_without_an_active_purchase_type_waits_for_a_pattern(self):
+        did = self.tally_discovery("inactive-guid", voucher_types=(
             {"NAME": "Purchase", "GUID": "vt-p", "ISACTIVE": "No"},))
         bill = self.upload_bill()
-        response = self.client.post(self.base + "/runs", headers=self.csrf, json={
-            "key": "bill-entry", "request_key": str(uuid.uuid4()), "file_ids": [bill], "catalog_id": None,
-            "config": {"output_mode": "tally_in_place", "discovery_id": did,
-                       "company_mode": "locked", "locked_company_guid": "alpha-guid"}})
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("no active purchase voucher type", response.json()["detail"])
+        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
+            "output_mode": "tally_in_place", "discovery_id": did,
+            "company_mode": "locked", "locked_company_guid": "inactive-guid"})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            config = c.execute("SELECT config FROM account_runs WHERE id=%s", (run["id"],)).fetchone()["config"]
+        self.assertIn("awaits", config, "No pattern can name an inactive type; nothing posts until one is confirmed.")
 
     def test_locked_company_conflict_cannot_be_approved_into_a_write(self):
         did = self.tally_discovery("alpha-guid", multiple=True)

@@ -30,7 +30,7 @@ class StageTest(unittest.TestCase):
     def test_bill_entry_pins_its_triage_stage_inside_the_same_bundle(self):
         definition = load_definition(REPOSITORY_ROOT / "employees/accounts-desk/workflows/bill-entry")
         snapshot = definition.execution_snapshot
-        self.assertEqual(set(stages(snapshot)), {"triage"})
+        self.assertEqual(set(stages(snapshot)), {"triage", "posting_profile"})
         self.assertIn("stages/triage.md", snapshot["files"])
         self.assertEqual(stage_schema(snapshot, "triage")["required"], ["bills"])
         broken = {**snapshot, "files": {k: v for k, v in snapshot["files"].items() if k != "stages/triage.md"}}

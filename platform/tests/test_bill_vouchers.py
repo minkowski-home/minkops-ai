@@ -204,3 +204,81 @@ class ResolvedBillTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def pattern(**changes):
+    """A confirmed posting pattern for the fixture company."""
+    from minkops_platform.accounts.posting_profiles import validate
+    from minkops_platform.accounts.vouchers import Masters
+
+    payload = {"company_guid": "company",
+               "families": {"invoice": {"family": "purchase", "voucher_type_guid": "vt-purchase-gst"},
+                            "credit_note": {"family": "debit_note", "voucher_type_guid": "vt-debit-note"}},
+               "invoice_number": {"fields": ["REFERENCE", "NARRATION"]},
+               "round_off": {"ledger_guid": guid("Round Off"), "max_cents": 50},
+               "tds": {"deducted_at": "booking", "ledgers": [{"ledger_guid": guid("TDS Payable 194C"), "section": "194C", "rate": 1}]},
+               "party_groups": ["Sundry Creditors"], "practice": [], "summary": ["Purchases: Purchase GST"], **changes}
+    return validate(payload, Masters(company()), "company")
+
+
+def with_pattern(payload):
+    settings = config()
+    settings["posting_profiles"] = {"company": {"id": "p", "version": 1, **payload}}
+    return settings
+
+
+class PostingPatternTest(unittest.TestCase):
+    def test_a_confirmed_pattern_allows_its_tds_and_sets_the_supplier_line(self):
+        record = proposal()
+        record["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 55.00))
+        bill = vouchers.check(record, with_pattern(pattern()))
+        self.assertEqual(bill.lines[0], {"ledger": "Acme Cement", "side": "credit", "amount_cents": 630000, "allocation": None})
+        self.assertEqual(bill.native_plan("12345678-1234-5234-8234-123456789abc", "append", None)["duplicate"]["number_fields"],
+                         ["REFERENCE", "NARRATION"])
+        wrong_rate = proposal()
+        wrong_rate["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 110.00))
+        with self.assertRaises(HoldReason):
+            vouchers.check(wrong_rate, with_pattern(pattern()))
+
+    def test_bills_outside_the_pattern_are_misses_not_silent_posts(self):
+        journal = proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal"})
+        rounded = proposal(**{"document.total": 6355.40})
+        rounded["voucher"]["lines"].append(line("round_off", "Freight Inward", "debit", 0.40))
+        rounded["voucher"]["lines"][6]["ledger_guid"] = guid("Purchase 5%")  # keep ledgers distinct
+        too_big = proposal(**{"document.total": 6355.80})
+        too_big["voucher"]["lines"].append(line("round_off", "Round Off", "debit", 0.80))
+        for record, code in ((journal, "posting_profile_miss"), (too_big, "source_values_conflict")):
+            with self.subTest(code=code), self.assertRaises(HoldReason) as held:
+                vouchers.check(record, with_pattern(pattern()))
+            self.assertEqual(held.exception.code, code)
+        with self.assertRaises(HoldReason):
+            vouchers.check(rounded, with_pattern(pattern()))
+        outsider = with_pattern(pattern(party_groups=["Duties & Taxes"]))
+        with self.assertRaises(HoldReason) as held:
+            vouchers.check(proposal(), outsider)
+        self.assertEqual(held.exception.code, "posting_profile_miss")
+
+    def test_patterns_name_only_discovered_identities_and_survive_master_edits(self):
+        from minkops_platform.accounts.posting_profiles import carry_forward, holds, validate
+        from minkops_platform.accounts.vouchers import Masters
+
+        for bad in ({"round_off": {"ledger_guid": "nowhere", "max_cents": 50}},
+                    {"families": {"invoice": {"family": "purchase", "voucher_type_guid": "vt-journal"}, "credit_note": None}},
+                    {"party_groups": ["Imaginary Group"]}, {"invoice_number": {"fields": []}}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                pattern(**bad)
+        edited = company()
+        for record in edited["masters"]["records"]:
+            record["data"]["ALTERID"] = "99"
+        self.assertTrue(holds(pattern(), Masters(edited)))
+        regrouped = company()
+        next(r for r in regrouped["masters"]["records"] if r["data"].get("NAME") == "Round Off")["data"]["PARENT"] = "Direct Expenses"
+        self.assertFalse(holds(pattern(), Masters(regrouped)))
+        sibling = company("Test (2027-28)", "next")
+        carried = carry_forward(pattern(), Masters(sibling), "next")
+        self.assertEqual(carried["round_off"]["ledger_guid"], "next-" + guid("Round Off"))
+        self.assertEqual(carried["families"]["invoice"]["voucher_type_guid"], "vt-purchase-gst")
+        missing = company("Test (2027-28)", "next")
+        missing["masters"]["records"] = [r for r in missing["masters"]["records"] if r["data"].get("NAME") != "Round Off"]
+        self.assertIsNone(carry_forward(pattern(), Masters(missing), "next"))
+        self.assertTrue(validate(carried, Masters(sibling), "next"))
