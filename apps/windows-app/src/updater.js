@@ -8,23 +8,30 @@
 const CHECK_EVERY = 6 * 3600 * 1000;
 const IDLE_EVERY = 60_000;
 
-export function startUpdates({ updater, isPackaged, isIdle, onState = () => {}, timers = globalThis }) {
-  if (!isPackaged) return { stop() {} };
+export function startUpdates({ updater, isPackaged, isIdle, canRestart = isIdle, onState = () => {}, timers = globalThis }) {
+  if (!isPackaged) return { stop() {}, check: async () => {}, requestInstall: () => false };
   updater.logger = null; // Never write update URLs or paths to the console.
   updater.autoDownload = true;
   // Quitting already ends any job, and pending receipts are persisted.
   updater.autoInstallOnAppQuit = true;
   let ready = false;
+  let requested = false;
+  let version;
+  updater.on("update-available", (info) => {
+    version = info?.version;
+    onState({ state: "downloading", version });
+  });
   updater.on("update-downloaded", (info) => {
     ready = true;
-    onState({ state: "ready", version: info?.version });
+    version = info?.version;
+    onState({ state: "ready", version });
   });
   updater.on("error", () => onState({ state: "error" }));
   const check = () => updater.checkForUpdates().catch(() => onState({ state: "error" }));
   check();
   const checker = timers.setInterval(check, CHECK_EVERY);
   const installer = timers.setInterval(() => {
-    if (!ready || !isIdle()) return;
+    if (!ready || !(requested ? canRestart() : isIdle())) return;
     stop();
     updater.quitAndInstall(true, true);
   }, IDLE_EVERY);
@@ -32,5 +39,10 @@ export function startUpdates({ updater, isPackaged, isIdle, onState = () => {}, 
     timers.clearInterval(checker);
     timers.clearInterval(installer);
   }
-  return { stop };
+  return { stop, check, requestInstall() {
+    if (!ready) return false;
+    requested = true;
+    onState({ state: "waiting", version });
+    return true;
+  } };
 }

@@ -27,3 +27,13 @@ body {
 .statement-mapping select { min-width: 0; width: 100%; }
 .statement-summary table { width: 100%; border-collapse: collapse; }
 .statement-summary th, .statement-summary td { padding: 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.update-notices { min-width: 0; }
+.update-notices:empty { display: none; }
+.update-notice {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  margin-bottom: 16px; padding: 14px 16px; border: 1px solid var(--rule-default);
+  background: var(--surface-inset); color: var(--text-primary);
+  font: var(--type-body-sm); overflow-wrap: anywhere;
+}
+.update-notice > span { flex: 1 1 260px; min-width: 0; }
+.update-notice .button { white-space: normal; max-width: 100%; }

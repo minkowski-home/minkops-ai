@@ -10,6 +10,7 @@ export interface NativeFolder {
 export interface DesktopStatus {
   discovery_archive_error?: string | null;
   version: string;
+  update?: { state: 'downloading' | 'ready' | 'waiting' | 'error'; version?: string } | null;
   name: string;
   device: { id: string; tenant: string; owner_id: string } | null;
 }
@@ -21,6 +22,8 @@ export interface DesktopBridge {
   /** Companion 0.7.0+: sends a technical summary, or copies it when offline. */
   sendDiagnostics?(): Promise<{ reference?: string; copied?: boolean }>;
   status(): Promise<DesktopStatus>;
+  checkUpdates?(): Promise<void>;
+  restartForUpdate?(): Promise<boolean>;
   connect(tenant: string): Promise<{ id: string }>;
   disconnect(): Promise<void>;
   saveCatalog?(tenant: string, discoveryId: string): Promise<boolean>;
