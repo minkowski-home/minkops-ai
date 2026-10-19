@@ -33,6 +33,12 @@ def database():
     if not url:
         raise HTTPException(503, "Database is not configured.")
     with psycopg.connect(url, row_factory=dict_row) as connection:
+        # Commit the deadline fence before request work: an unauthorized or
+        # failed request cannot roll it back. Reuse this request's connection.
+        from minkops_platform.run_limits import expire
+        connection.execute("SET LOCAL lock_timeout='1s'")
+        expire(connection)
+        connection.commit()
         yield connection
 
 

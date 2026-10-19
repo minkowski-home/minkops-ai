@@ -5,6 +5,10 @@ owns authorized inputs, durable runs, human review, independent checks, and
 verified writes. Start with an existing handler and tools; introduce custom
 Python only for a demonstrated gap or a guarantee the application must enforce.
 
+Use the shared task/run and desktop-job contracts for execution and controls.
+They provide the configurable active-processing budget for existing and future
+workflows; see [run limits and updates](run-limits-and-updates.md).
+
 ## Repository contracts
 
 ```text

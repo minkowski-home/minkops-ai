@@ -77,6 +77,7 @@ let state = {
 };
 const pendingGrants = new Map();
 let update = null;
+let updates = null;
 // Support evidence kept in memory: the latest diagnostic per running job and
 // a short history of outcomes for Send diagnostics. Never bill contents.
 const jobDiagnostics = new Map();
@@ -516,6 +517,8 @@ function setupBridge() {
     return true;
   });
   handle("desktop:send-diagnostics", () => sendDiagnostics());
+  handle("desktop:check-updates", () => updates?.check());
+  handle("desktop:install-update", () => updates?.requestInstall() ?? false);
   handle("desktop:tally-diagnostics", async () => {
     await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
   });
@@ -824,11 +827,12 @@ else {
       );
       tray.on("double-click", openConsole);
       startWorker();
-      startUpdates({
+      updates = startUpdates({
         updater: electronUpdater.autoUpdater,
         isPackaged: app.isPackaged && !localDemo,
         // Never restart over a claimed job, an unsent receipt or an active user.
         isIdle: () => !worker?.busy && !state.pending && !window?.isFocused(),
+        canRestart: () => !worker?.busy && !state.pending,
         onState: (value) => {
           update = value;
         },

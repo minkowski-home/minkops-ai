@@ -24,8 +24,10 @@ def main(image, interest_image):
         f"--service-account=minkops-worker@{PROJECT}.iam.gserviceaccount.com",
         f"--set-cloudsql-instances={INSTANCE}", "--command=python",
         "--args=-m,minkops_api.accounts_worker,--drain,--lanes,1", "--tasks=1", "--parallelism=1",
-        "--max-retries=0", "--task-timeout=1800s", f"--set-secrets={database}",
-        f"--set-env-vars=AUTH_DEV_MODE=0,WORKER_JOB_RESOURCE={JOB}")
+        # Leave time for the shared 45-minute budget to stop and reconcile
+        # before the infrastructure's hard wall-time cutoff.
+        "--max-retries=0", "--task-timeout=3600s", f"--set-secrets={database}",
+        f"--set-env-vars=AUTH_DEV_MODE=0,MINKOPS_RUN_TIMEOUT_MINUTES=45,WORKER_JOB_RESOURCE={JOB}")
     for account in ("api", "worker", "ops"):
         run("run", "jobs", "add-iam-policy-binding", "minkops-worker", f"--project={PROJECT}",
             f"--region={REGION}", f"--member=serviceAccount:minkops-{account}@{PROJECT}.iam.gserviceaccount.com",
@@ -41,7 +43,7 @@ def main(image, interest_image):
         # requests leave headroom in this 512 MiB pilot instead of risking OOMs.
         "--concurrency=2", "--timeout=60s", "--no-cpu-boost", "--no-invoker-iam-check",
         f"--set-secrets={database},{smtp}",
-        f"--set-env-vars=AUTH_DEV_MODE=0,COOKIE_SECURE=1,PUBLIC_APP_URL=https://app.minkops.com,SMTP_FROM=info@minkops.com,SMTP_EHLO_HOST=minkops.com,SMTP_STARTTLS=1,WORKER_JOB_RESOURCE={JOB}")
+        f"--set-env-vars=AUTH_DEV_MODE=0,COOKIE_SECURE=1,MINKOPS_RUN_TIMEOUT_MINUTES=45,PUBLIC_APP_URL=https://app.minkops.com,SMTP_FROM=info@minkops.com,SMTP_EHLO_HOST=minkops.com,SMTP_STARTTLS=1,WORKER_JOB_RESOURCE={JOB}")
     run("run", "deploy", "minkops-interest-api", *common, f"--image={interest_image}",
         f"--service-account=minkops-interest@{PROJECT}.iam.gserviceaccount.com",
         "--min=0", "--max=1", "--max-instances=1", "--concurrency=8", "--timeout=30s",

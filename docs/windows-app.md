@@ -5,7 +5,7 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.8.0 is the current release: it works only with the companies open in
+Companion 0.8.1 is the current release: it works only with the companies open in
 the user's Tally, reports typed session states, sends diagnostics and updates
 itself. Core Tally discovery uses HTTP/XML exports and needs no ODBC driver.
 Installed-RC evidence below is historical. Current production, installed-upgrade
@@ -186,6 +186,9 @@ it refuses a feed whose version, file name or SHA-512 differs from the reviewed
 installer and publishes all three files together. Updates download in the
 background (blockmap differential downloads) and install on quit, or once the
 companion is idle: no claimed job, no unsent receipt and no focused window.
+From 0.8.1 the console also shows update status and **Restart when safe**, which
+waits for local work and receipts even while the window is focused. Frontend
+releases have a separate explicit refresh banner. See [run limits and updates](run-limits-and-updates.md).
 Downloads are SHA-512 verified; until the installer is code-signed, first installs
 still show SmartScreen.
 
@@ -252,4 +255,4 @@ been verified by this local sweep.
 
 ### Companion 0.8.0 contracts
 
-Plan protocol 4 adds deterministic Statement Entry Payment/Receipt saves and verified GST supplier creation. Bill Entry 0.13 requires 0.8.0 for new GST-capable runs; older pinned bills retain their contracts. Statement intents are encrypted and fsynced under the app profile before import, and an uncertain import cannot be resent automatically. Statement rows never enter the hosted model path. See [Statement Entry](statement-entry.md) for routing, balances, preview and recovery. The distributed Windows x64 installer remains an unsigned release candidate; existing unsigned-release disclosure applies.
+Plan protocol 4 adds verified Statement Entry Payment/Receipt saves and GST supplier creation. Bill Entry 0.13 requires 0.8.0 or newer for new GST-capable runs; older pinned bills retain their contracts. Statement intents are encrypted and fsynced under the app profile before import, and an uncertain import cannot be resent automatically. Statement classification now uses the hosted skill with confirmed discovery and optional client branch mapping; native authorization and readback remain independent. See [Statement Entry](statement-entry.md) for routing, balances, preview and recovery. The distributed Windows x64 installer remains an unsigned release candidate; existing unsigned-release disclosure applies.

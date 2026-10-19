@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld(
     openTallyDiagnostics: () => ipcRenderer.invoke("desktop:tally-diagnostics"),
     sendDiagnostics: () => ipcRenderer.invoke("desktop:send-diagnostics"),
     status: () => ipcRenderer.invoke("desktop:status"),
+    checkUpdates: () => ipcRenderer.invoke("desktop:check-updates"),
+    restartForUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     connect: (tenant) => ipcRenderer.invoke("desktop:connect", tenant),
     disconnect: () => ipcRenderer.invoke("desktop:disconnect"),
     saveCatalog: (tenant, discoveryId) => ipcRenderer.invoke("desktop:save-catalog", {tenant, discoveryId}),
