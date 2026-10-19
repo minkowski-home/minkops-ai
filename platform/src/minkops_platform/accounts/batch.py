@@ -21,17 +21,27 @@ log = logging.getLogger(__name__)
 AGGREGATION_ATTEMPTS = 3
 
 
-def create_children(connection, run):
+def create_children(connection, run, file_ids=None):
+    """Fan out per bill, or first route bills to companies when many are open."""
+    from .company_scope import needs_triage, triage_chunks
+    from .repository import files_for
+
     connection.execute(
         "UPDATE account_runs SET config=config || '{\"batch\":true}'::jsonb WHERE id=%s",
         (run["id"],),
     )
-    for file_id in run["file_ids"]:
+    file_ids = file_ids or run["file_ids"]
+    if needs_triage(run["config"]):
+        for chunk in triage_chunks(files_for(connection, run["tenant_id"], file_ids)):
+            create_child(connection, run, chunk[0], file_ids=chunk, stage="triage")
+        return
+    for file_id in file_ids:
         create_child(connection, run, file_id)
 
 
-def create_child(connection, run, file_id):
-    config = copy.deepcopy(run["config"])
+def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=None):
+    """One hosted child: a posting session for one bill, or a triage stage over several."""
+    config = copy.deepcopy(config or run["config"])
     config.pop("batch", None)
     config.pop("retry_file_id", None)
     config.pop("retry_file_ids", None)
@@ -39,8 +49,20 @@ def create_child(connection, run, file_id):
     # Provider receipts belong to a particular run, including retry children.
     for field in ("hosted_workspace", "hosted_session_closed", "cleanup_attempt_at", "cleanup_attempt_count", "timeout_cancel_pending"):
         config.pop(field, None)
-    config["file_ids"] = [file_id]
+    config.pop("stage", None)
+    config.pop("expanded", None)
+    file_ids = file_ids or [file_id]
+    config["file_ids"] = file_ids
     config["review_mode"] = "all_outputs"
+    if stage:
+        from minkops_platform.runtime.bundles import stage_schema
+
+        config["stage"] = stage
+        config["agent_output_schema"] = stage_schema(config["execution_snapshot"], stage)
+    else:
+        config["agent_output_schema"] = run["config"].get("agent_output_schema")
+        if config.get("company_scope") and config.get("source_catalog_snapshot"):
+            _bind_scoped_assets(connection, run, config, file_ids)
     child = connection.execute(
         """INSERT INTO account_runs
             (tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,request_hash,config,file_ids,catalog_id,parent_run_id)
@@ -54,12 +76,24 @@ def create_child(connection, run, file_id):
             uuid4(),
             run["request_hash"],
             Jsonb(config),
-            Jsonb([file_id]),
+            Jsonb(file_ids),
             run["catalog_id"],
             run["id"],
         ),
     ).fetchone()
     return child
+
+
+def _bind_scoped_assets(connection, run, config, file_ids):
+    """Authorize exactly the company slice this posting session will receive."""
+    from .company_scope import assets_for
+    from .repository import files_for
+
+    bills = files_for(connection, run["tenant_id"], file_ids)
+    assets, _ = assets_for(config, sum(len(f["content"]) for f in bills))
+    config["authorized_bindings"] = [
+        b for b in config["authorized_bindings"] if not b["resource_id"].startswith("discovery-")
+    ] + [{"capability": "files.snapshot", "resource_id": a["id"], "sha256": a["sha256"]} for a in assets]
 
 
 def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
@@ -103,8 +137,19 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
         )
-        child = create_child(connection, run, file_id)
-        if "companies" in child["config"].get("tally_target", {}):
+        from .company_scope import needs_triage
+        if needs_triage(run["config"]):
+            # Route the recheck against the refreshed discovery it was asked for.
+            from ..discovery import workflow_context
+            run["config"]["source_catalog_snapshot"] = workflow_context(
+                connection, tenant["id"], run["config"]["tally_target"]["discovery_id"], ["tally"])
+            from .company_scope import annotate
+            annotate(run["config"]["tally_target"], run["config"]["source_catalog_snapshot"])
+            create_children(connection, run, [file_id])
+            child = None
+        else:
+            child = create_child(connection, run, file_id)
+        if child and "companies" in child["config"].get("tally_target", {}) and not child["config"].get("company_scope"):
             from ..discovery import workflow_context
             from .client_context import context_assets
 
@@ -127,7 +172,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
                 "UPDATE account_runs SET config=%s WHERE id=%s",
                 (Jsonb(child["config"]), child["id"]),
             )
-        if child["config"].get("tally_target", {}).get("schema_only"):
+        if child and child["config"].get("tally_target", {}).get("schema_only"):
             from .bills import queue_tally_context
             from ..discovery import workflow_context
 
@@ -170,6 +215,10 @@ def recheck_many(connection, tenant, user, run, file_ids):
     for file_id in file_ids[1:]:
         connection.execute("UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run["id"], Jsonb([file_id])))
+        from .company_scope import needs_triage
+        if needs_triage(parent["config"]):
+            create_children(connection, parent, [file_id])
+            continue
         child = create_child(connection, parent, file_id)
         if child["config"].get("tally_target", {}).get("schema_only"):
             queue_tally_context(connection, child)
@@ -219,10 +268,24 @@ def _aggregation_failed(connection, parent, error):
 
 
 def _reconcile(connection, parent):
+    from .company_scope import expand
+
+    stages = connection.execute(
+        """SELECT id,file_ids,state,result,error,config FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s
+        AND config->>'stage'='triage' AND NOT coalesce((config->>'superseded')::boolean,false)
+        AND NOT coalesce((config->>'expanded')::boolean,false)""",
+        (parent["tenant_id"], parent["id"]),
+    ).fetchall()
+    for triage in stages:
+        if triage["state"] in ("review", "failed"):
+            expand(connection, parent, triage)
+    if any(t["state"] not in ("review", "failed") for t in stages):
+        observe(connection, parent, "executing", "Routing bills to their companies.", 15)
+        return
     children = connection.execute(
         # Aggregation consumes outcomes, never the repeated multi-megabyte
         # execution catalogs pinned independently to every bill child.
-        "SELECT id,file_ids,state,result,error FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0",
+        "SELECT id,file_ids,state,result,error FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) AND config->>'stage' IS NULL ORDER BY file_ids->>0",
         (parent["tenant_id"], parent["id"]),
     ).fetchall()
     done = [c for c in children if c["state"] in ("review", "failed")]

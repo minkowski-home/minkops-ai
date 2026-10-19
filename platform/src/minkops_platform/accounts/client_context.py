@@ -331,10 +331,38 @@ def compact_record(value):
     return value
 
 
-def context_assets(catalog):
+def _vouchers_within(company, records, budget, supplier_gstins):
+    """A bounded, explainable voucher selection; returns (records, earliest date or None)."""
+    sizes = [len(json.dumps(compact_record(r), sort_keys=True, ensure_ascii=False).encode()) for r in records]
+    if sum(sizes) <= budget:
+        return records, None
+    from .supplier_gst import native_values
+
+    fields = {"GSTIN", "PARTYGSTIN", "LEDGSTIN"}
+    parties = {text(m["data"].get("@_NAME")) or text(m["data"].get("NAME"))
+               for m in company.get("masters", {}).get("records", [])
+               if m["type"] == "LEDGER" and set(supplier_gstins) & native_values(m["data"], fields)}
+    def priority(i):
+        data = records[i].get("data", {})
+        return (text(data.get("PARTYLEDGERNAME")) not in parties, -int(text(data.get("DATE")) or 0))
+    chosen, used = [], 0
+    for i in sorted(range(len(records)), key=priority):
+        if used + sizes[i] > budget:
+            continue
+        chosen.append(i)
+        used += sizes[i]
+    kept = [records[i] for i in sorted(chosen)]
+    dates = sorted(text(r.get("data", {}).get("DATE")) or "" for r in kept)
+    return kept, (dates[0] if dates else "none")
+
+
+def context_assets(catalog, *, companies=None, voucher_budget=None, supplier_gstins=()):
     """Full records live in lookup files; the manifest is small enough to read first.
 
-    Split at record boundaries for hosted file limits. Never discard records.
+    Split at record boundaries for hosted file limits. Never discard masters.
+    `companies` limits delivery to the routed company. When its vouchers exceed
+    `voucher_budget` bytes, the supplier's own vouchers (exact GSTIN on its
+    ledger) come first, then the newest; the manifest records the cut.
     File IDs and bytes derive only from the immutable server-owned catalog, so
     only catalogs stamped with the compact format change delivered bytes.
     """
@@ -378,6 +406,8 @@ def context_assets(catalog):
         if source["tool"] != "tally" or "companies" not in source.get("snapshot", {}):
             continue
         for index, company in enumerate(source["snapshot"]["companies"]):
+            if companies is not None and company.get("company_guid") not in companies:
+                continue
             manifest["companies"].append(
                 {
                     "company": company["company"],
@@ -392,6 +422,10 @@ def context_assets(catalog):
             for kind in ("masters", "vouchers"):
                 chunk, size, number = [], 2, 0
                 records = lookup["records"] if kind == "masters" and lookup else company.get(kind, {}).get("records", [])
+                if kind == "vouchers" and voucher_budget is not None:
+                    records, cut = _vouchers_within(company, records, voucher_budget, supplier_gstins)
+                    if cut:
+                        manifest["companies"][-1]["vouchers_from"] = cut
 
                 def flush():
                     label = "masters-lookup-v1" if kind == "masters" and lookup else kind

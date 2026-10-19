@@ -26,6 +26,7 @@ REASONS = {
     "unsupported_structure": "This bill requires accounting entries outside the supported save format.",
     "date_before_books": "The bill date is before the company's books beginning date.",
     "identity_rule_unknown": "A foreign supplier's invoice numbering cannot be checked for duplicates; enter it in Tally.",
+    "date_outside_company_period": "The bill date is outside the routed company's year and no single sibling company covers it.",
     "destination_changed": "The Tally destination changed after Source Discovery.",
     "voucher_type_unresolved": "A supported voucher type must be selected for this company.",
     "company_not_open": "The destination company must be open in Tally before this bill can be saved.",

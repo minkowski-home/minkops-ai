@@ -218,6 +218,24 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         ] = source_context
         from .client_context import context_assets
 
+        target = snapshots.get("tally_target") or {}
+        if is_bill and target.get("voucher_proposal_version") == 1:
+            # Sessions receive one routed company's evidence, never every company's.
+            from .company_scope import annotate, assets_for, fixed_scope
+
+            annotate(target, source_context)
+            probe = {"tally_target": target, "source_catalog_snapshot": source_context}
+            scope = fixed_scope(probe)
+            largest = max(len(f["content"]) for f in files[:len(ids)])
+            try:
+                for company in scope or [c["references"]["company_guid"] for c in target["companies"]]:
+                    assets, _ = assets_for({**probe, "company_scope": [company]}, largest)
+            except ValueError as error:
+                raise ServiceError("invalid", f"{error} Reduce the discovery scope or hand off.") from error
+            if scope:
+                snapshots["company_scope"] = scope
+                files += assets
+            return LaunchInputs(files, ids, catalog_id, config, snapshots)
         assets, _ = context_assets(source_context)
         files += assets
         sessions = [[f, *reference_files, *assets] for f in files[:len(ids)]] if is_bill else [files]
@@ -344,7 +362,9 @@ class BillHandler(AccountsHandler):
 
             queue_tally_context(connection, run)
             return
-        if len(run["file_ids"]) > 1:
+        from .company_scope import needs_triage
+
+        if len(run["file_ids"]) > 1 or needs_triage(run["config"]):
             from .batch import create_children
 
             create_children(connection, run)
@@ -361,10 +381,22 @@ class BillHandler(AccountsHandler):
                 )
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
+        if run["config"].get("stage") == "triage":
+            from .company_scope import directory
+
+            # Routing reads the bills against a compact directory, not full discovery.
+            context["config"] = {k: v for k, v in run["config"].items()
+                                 if k not in ("source_catalog_snapshot", "tally_target", "agent_output_schema")}
+            context["company_directory"] = directory(run["config"]["source_catalog_snapshot"])
+            context["files"] = [{"id": str(f["id"]), "path": f["path"]} for f in files]
+            return files, context, {}
         if run["config"].get("source_catalog_snapshot"):
             from .client_context import context_assets
+            from .company_scope import assets_for
 
-            assets, manifest = context_assets(run["config"]["source_catalog_snapshot"])
+            assets, manifest = (assets_for(run["config"], sum(len(f["content"]) for f in files))
+                                if run["config"].get("company_scope")
+                                else context_assets(run["config"]["source_catalog_snapshot"]))
             files += assets
             context["source_catalog"] = manifest
             context["config"] = {
@@ -383,6 +415,13 @@ class BillHandler(AccountsHandler):
     def validate(self, run, files, context, domain, result):
         from .checks import adopt_exceptions
 
+        if run["config"].get("stage") == "triage":
+            known = {c["references"]["company_guid"] for c in run["config"]["tally_target"]["companies"]}
+            routed = [b["source_file_id"] for b in result["bills"]]
+            if sorted(routed) != sorted(run["file_ids"]) or any(
+                    b["company_guid"] not in known and b["company_guid"] is not None for b in result["bills"]):
+                raise ValueError("Routing must name each selected bill once and only discovered companies.")
+            return result
         contents = domain["contents"]
         result = adopt_exceptions(result)
         if any(r.get("operation") != "append" for r in result.get("records", [])):
@@ -418,6 +457,9 @@ class BillHandler(AccountsHandler):
     def finish(self, connection, store, run, context, domain, result):
         from .service import prepare_writes
         from minkops_platform.run_controls import control_state
+        if run["config"].get("stage") == "triage":
+            store.observe(connection, run, "review", "Bills routed to their companies.", 70)
+            return
         if not run.get("parent_run_id"):
             from .attention import flag, issue_record
             for issue in result.get("unresolved", []):

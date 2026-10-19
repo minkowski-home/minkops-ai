@@ -20,6 +20,7 @@ EXCEPTION_LABELS = {
     "unsupported_structure": "Manual entry needed",
     "date_before_books": "Before books begin",
     "identity_rule_unknown": "Foreign supplier",
+    "date_outside_company_period": "Outside company year",
     "destination_changed": "Tally changed",
     "voucher_type_unresolved": "Voucher type needed",
     "extraction_failed": "Recheck bill",

@@ -478,6 +478,9 @@ def check(record, config, *, assume_new_supplier=False):
         raise _hold("date_before_books", f"Bill date {document['date']} is before {target['company']}'s books begin on "
                                          f"{books_from}; Tally cannot record it without a change to the company's books.")
 
+    if target.get("period_to") and document["date"] > target["period_to"]:
+        raise _hold("date_outside_company_period", f"Bill date {document['date']} is after {target['company']}'s books period "
+                                                   f"ends on {target['period_to']}; it belongs to the next year's company.")
     family = voucher["family"]
     voucher_type = masters.one("VOUCHERTYPE", voucher.get("voucher_type_guid"), "classification_uncertain",
                                "Select one discovered voucher type of the routed company.")
