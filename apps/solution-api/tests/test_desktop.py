@@ -98,6 +98,22 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(len([c for c in claims if c]), 1)
         self.assertEqual(next(c for c in claims if c)["id"], job["id"])
 
+    def test_revocation_waits_for_authorized_device_work(self):
+        from psycopg.rows import dict_row
+        from minkops_platform import desktop
+        self.pair()
+        with psycopg.connect(URL, row_factory=dict_row) as writer:
+            tenant_id = writer.execute('SELECT id FROM tenants WHERE slug=%s', (self.slug,)).fetchone()['id']
+            device = desktop.owned_device(writer, tenant_id, self.device['owner_id'], self.device['id'])
+            with psycopg.connect(URL, row_factory=dict_row) as revoker:
+                revoker.execute("SET LOCAL lock_timeout = '250ms'")
+                with self.assertRaises(psycopg.errors.LockNotAvailable):
+                    desktop.revoke(revoker, {'id':device['tenant_id']}, {'id':device['owner_id']}, device['id'])
+                revoker.rollback()
+        response = self.client.delete(self.base + f"/devices/{self.device['id']}", headers=self.csrf)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.post('/api/desktop/worker/claim', headers=self.worker, json={}).status_code, 401)
+
     def test_receipt_transport_rejects_malformed_and_oversized_json(self):
         self.pair()
         job, _ = self.launch()
