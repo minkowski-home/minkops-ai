@@ -69,7 +69,7 @@ and shared services. See [workflow authoring and installation](docs/workflow-aut
 for the CLI, Python extension points, and current integration boundaries.
 Skill-generated workbook editing is a later evaluated pilot. New execution
 methods are separate work. See
-[the architecture and evaluation guide](docs/workflow-refactor.md).
+[workflow testing and verification](docs/workflow-authoring.md#testing-a-new-definition).
 
 Accounts Source Discovery now collects reusable full Tally masters, period-scoped
 vouchers and reviewed client notes, with Excel confined to headers and formula

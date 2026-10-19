@@ -60,8 +60,8 @@ tables; repeated migration passed. Runtime credentials cannot perform DDL.
   runtime guarantees; 0.6.4 supersedes those candidates.
 
 Regression tests were observed failing before the respective native fixes and
-passing afterwards. Major recovery and packaging decisions are recorded in
-[the decisions log](decisions-log.md).
+passing afterwards. Current recovery and packaging contracts are documented in
+[the Windows app guide](windows-app.md).
 
 ## Native discovery and recovery
 

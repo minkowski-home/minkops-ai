@@ -7,7 +7,7 @@ const SETTLED = ["saved", "duplicate", "rejected", "writing"];
 
 export const isPending = (record: BillRecord) => !SETTLED.includes(record.status ?? "");
 
-export const isUnresolved = (record: BillRecord, result: BillResult | null) =>
+const isUnresolved = (record: BillRecord, result: BillResult | null) =>
   Boolean(result?.unresolved?.some((i) => i.source_file_id === record.source_file_id));
 
 export const needsAttention = (record: BillRecord, result: BillResult | null) =>

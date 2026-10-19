@@ -24,7 +24,7 @@ employees/<employee>/
     agent-output.schema.json       # optional separate proposal contract
     scripts/                      # explicitly bundled helpers, if needed
 solutions/<client>/
-  solution.ts                     # existing console branding/composition
+  solution.ts                     # console identity and optional tenant-slug mapping
   installation.json
   employees/<employee>/binding.json
 ```
@@ -36,8 +36,8 @@ An employee is a product grouping, not another agent execution loop.
 `workflow.json` declares the owner, version, skill/schema paths, tenant/run
 defaults, and hosted execution settings. Three additional fields select reuse:
 
-- `handler`: `skill.proposal`, `accounts.discovery`, or `accounts.bill`.
-- `presentation`: `proposal`, `accounts-discovery`, or `accounts-bill`.
+- `handler`: `skill.proposal`, `accounts.discovery`, `accounts.bill`, or `accounts.statement`.
+- `presentation`: `proposal`, `accounts-discovery`, `accounts-bill`, or `accounts-statement`.
 - `capabilities`: required authorized capabilities; currently `files.snapshot`.
 
 Workflow identity and handler identity are separate. Several definitions can
@@ -238,14 +238,29 @@ compatible. `accounts_worker` is the existing bootstrap command over the shared
 dispatcher. Historical runs without handler bindings use the narrowly bounded
 legacy Accounts mapping; legacy unpinned queued runs still require relaunch.
 
-Apply every pending migration through `0012_schema_discovery` before
-starting this revision. See [branch convergence](branch-convergence.md). Stop
-workers while changing application revisions, preserve session/write records,
+Apply every pending migration with `db/migrate.py` before starting a new
+revision. See [database upgrades](../db/README.md) and
+[branch convergence](branch-convergence.md). Stop workers while changing
+application revisions, preserve session/write records,
 and reconcile outstanding writes. An application rollback can use the retained
 Accounts view, but never run an older Accounts-only worker against new non-Accounts
 definitions. Do not drop/reverse the migration to recover an application revision.
 
 ## Testing a new definition
+
+Tenant defaults are stored in `workflows.config_values` and validated against
+`tenant-config.schema.json`. `resolve_run_config` merges workflow run defaults,
+tenant defaults, then per-run selections; it validates the run schema and
+caller-supplied resource scope. Configuration versions track tenant-schema
+changes, independently of workflow definition versions.
+
+The final-report `output.schema.json` and optional agent proposal schema have
+separate roles. Accounts validates proposals against the pinned agent schema
+and its business checks; see [run contracts](accounts-desk.md#run-contracts-and-recovery).
+The final-report `validate_output` helper checks the envelope and record data
+against a trusted confirmed schema, including pinned catalog/schema versions
+and rejection of external schema references. Structural validation does not
+prove arithmetic, evidence, approval or a successful destination write.
 
 Write expected outcomes outside skill bundles, then test registration, launch,
 schema/business checks, review, and recovery. Test cross-tenant resources,
@@ -254,15 +269,18 @@ architecture tests create renamed/default definitions in temporary directories
 and remove them; no test employee/workflow remains in the product.
 
 ```sh
-uv run --all-packages python -m unittest discover -s platform/tests -v
-uv run --all-packages python -m unittest discover -s apps/solution-api/tests -v
+TEST_DATABASE_URL=postgresql:///postgres AUTH_DEV_MODE=1 uv run --all-packages pytest platform/tests apps/solution-api/tests connectors/tests db/tests -q
+npm --prefix apps/solution-web test
+npm --prefix apps/solution-web run build
+npm --prefix apps/solution-web run lint
+npm --prefix apps/windows-app test
+npm --prefix apps/windows-app run build
 ```
 
-Set `TEST_DATABASE_URL` to an isolated migrated, demo-seeded database. These
-tests mutate fixtures. The native and web test/build commands remain documented
-in their existing guides. New business-system MCP bindings, scheduling, admin
-workflow creation UI, and customer-machine Python execution are separate work.
-
-Database-backed pytest runs now create and clean up their own database; see
-[isolated integration tests](../db/README.md#isolated-integration-tests). The
-supplied PostgreSQL role needs database-creation permission.
+Set `TEST_DATABASE_URL` to a PostgreSQL server role with database-creation
+permission. Pytest creates, migrates, seeds and cleans up a disposable database;
+see [isolated integration tests](../db/README.md#isolated-integration-tests).
+Verify ambiguous routing, duplicates, explicit corrections, workbook preservation,
+interrupted receipts, tenant isolation and recovery without repeating paid
+execution. New business-system MCP bindings, scheduling, admin workflow creation
+UI, and customer-machine Python execution are separate work.

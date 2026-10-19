@@ -32,62 +32,6 @@
   color: var(--text-secondary);
 }
 
-/* ---- Orchestration: flows -------------------------------------- */
-
-.mk-flows {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-top: var(--rule);
-}
-
-.mk-flow {
-  display: grid;
-  gap: var(--sp-7);
-  padding: var(--sp-10) 0;
-  border-bottom: var(--rule);
-}
-
-.mk-flow__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--sp-6);
-}
-
-.mk-flow__number {
-  font: var(--fw-medium) var(--fs-sm) / 1.6 var(--font-mono);
-  color: var(--brand-rust);
-}
-
-.mk-flow__text {
-  display: grid;
-  flex: 1 1 360px;
-  gap: var(--sp-3);
-  max-width: var(--measure);
-}
-
-.mk-flow__title {
-  font: var(--fw-medium) var(--fs-xl) / var(--lh-snug) var(--font-display);
-  letter-spacing: var(--ls-display);
-}
-
-.mk-flow__story {
-  color: var(--text-secondary);
-}
-
-.mk-flow__status {
-  margin-left: auto;
-}
-
-.mk-flow__diagram {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
 /* ---- About ----------------------------------------------------- */
 
 .mk-facts {
@@ -459,24 +403,6 @@
 
   .mk-post-card {
     padding: var(--sp-8) var(--sp-6);
-  }
-
-  .mk-flow__status {
-    margin-left: 0;
-  }
-
-  .mk-flow__diagram {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .mk-flow__diagram .mk-flow-arrow {
-    padding: var(--sp-2) 0;
-  }
-
-  .mk-flow__diagram .mk-flow-arrow__line {
-    transform: rotate(90deg);
-    width: 32px;
   }
 
   .mk-legal__clause {
