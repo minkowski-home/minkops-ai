@@ -7,7 +7,8 @@
  * Inventory, bill-wise and multi-centre allocations are outside this contract:
  * the server holds them as named connector limitations before a plan exists. */
 import {createHash} from 'node:crypto';
-import {classifyRejection, tallyExchange} from './tally.js';
+import {XMLParser, XMLValidator} from 'fast-xml-parser';
+import {boundedText} from './index.js';
 import {readTallyReferences} from './tally-references.js';
 import {requireOpenCompany, TallyUnavailable} from './tally-session.js';
 
@@ -41,6 +42,61 @@ const nativeCents = v => {
   return Math.round(n);
 };
 const populated = v => typeof v === 'object' && v !== null ? Object.values(v).some(populated) : v != null && String(v).trim() !== '';
+
+/** One bounded XML exchange with the local Tally HTTP server. */
+export async function tallyExchange(company, port, body, request) {
+  if (
+    typeof company !== "string" ||
+    !company.trim() ||
+    company.length > 200 ||
+    /[\x00-\x1f]/.test(company) ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  )
+    throw new Error("Invalid Tally target.");
+  const response = await request(`http://127.0.0.1:${port}`, {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "text/xml; charset=utf-8" },
+    redirect: "error",
+    signal: AbortSignal.timeout(20000),
+  });
+  const source = await boundedText(response, 5_000_000);
+  // Tally emits XML 1.0-invalid control-character references in some system
+  // fields. Never silently normalize them in a financial write response.
+  if (
+    /<!DOCTYPE|<!ENTITY|<LINEERROR\b/i.test(source) ||
+    XMLValidator.validate(source) !== true
+  )
+    throw new Error("Tally returned an invalid financial response.");
+  return new XMLParser({
+    ignoreAttributes: false,
+    parseTagValue: false,
+    parseAttributeValue: false,
+    trimValues: true,
+  }).parse(source);
+}
+
+// Tally's native reasons stay in diagnostics; users get one short action.
+const REJECTIONS = [
+  ["date", /\bdate\b|financial year|books? beginning/i,
+    "Tally rejected the voucher date. Check the bill date against the company's financial year, then use Retry save."],
+  ["permission", /not (?:authori[sz]ed|allowed|permitted)|access denied|no (?:access|rights)|security/i,
+    "The Tally user who is logged in cannot create this voucher. Log in as a user allowed to enter purchases, then use Retry save."],
+  ["voucher_type", /voucher ?type/i,
+    "Tally rejected the purchase voucher type. Check it in Tally, refresh Source Discovery, then start a new run."],
+  ["voucher_number", /voucher (?:no\b|number)/i,
+    "Tally needs a voucher number for this voucher type. Check its numbering in Tally, then use Retry save."],
+  ["ledger", /ledger|does not exist|not found/i,
+    "Tally rejected a ledger on this bill. Check the ledgers in Tally, then use Retry save."],
+];
+export function classifyRejection(reason) {
+  const match = REJECTIONS.find(([, pattern]) => pattern.test(String(reason ?? "")));
+  return match
+    ? { code: match[0], message: match[2] }
+    : { code: "other", message: "Tally rejected this bill. Check its voucher settings in Tally, then use Retry save." };
+}
 
 /** Classify voucher types by predefined base: RESERVEDNAME for a predefined
  * type, otherwise the base of its PARENT chain. Inactive types stay classified:
@@ -200,9 +256,17 @@ function containsToken(haystack, needle) {
   return false;
 }
 const FIELD_VALUE = {REFERENCE: v => v.reference, VOUCHERNUMBER: v => v.number};
-function sameDocument(voucher, duplicate) {
+/** Party plus document number in the client's configured number fields. */
+export function documentMatches(voucher, duplicate) {
   return norm(voucher.party_ledger) === norm(duplicate.party_ledger) && duplicate.number_fields.some(field =>
     field === 'NARRATION' ? containsToken(voucher.narration, duplicate.number) : norm(FIELD_VALUE[field](voucher)) === norm(duplicate.number));
+}
+
+/** The observed voucher as receipts and attention observations report it. */
+export function observedVoucher(v, family) {
+  return {guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family,
+    reference: v.reference, number: v.number, party_ledger: v.party_ledger, tag: v.tag,
+    lines: v.entries, allocations: v.allocations, fingerprint: v.fingerprint};
 }
 
 const hold = (code, message) => ({outcome: 'attention', hold: code, ...(message ? {message} : {})});
@@ -212,7 +276,7 @@ const attention = message => ({outcome: 'attention', message});
 function decide(plan, before, live, receipt) {
   const duplicate = plan.duplicate, familyOf = v => live.types.family.get(v.voucher_type.toLowerCase()) ?? null;
   if (duplicate.strategy === 'document') {
-    const found = before.filter(v => duplicate.families.includes(familyOf(v)) && sameDocument(v, duplicate));
+    const found = before.filter(v => duplicate.families.includes(familyOf(v)) && documentMatches(v, duplicate));
     const other = found.find(v => familyOf(v) !== plan.family);
     if (other) return {result: attention(`Tally already records this document as a ${other.voucher_type.slice(0, 80)} voucher. Review it in Tally; Minkops will not add another.`)};
     if (found.length > 1) return {result: attention('Multiple vouchers share this document identity. Review Tally before retrying.')};
@@ -277,10 +341,7 @@ export async function saveVoucher(plan, {
     const live = await recheck(plan, {request, readReferences});
     if (!live) return hold('destination_changed', 'A ledger, voucher type or cost allocation changed in Tally since discovery. Refresh Source Discovery before saving.');
     const familyOf = v => live.types.family.get(v.voucher_type.toLowerCase()) ?? null;
-    const receipt = (outcome, v) => ({outcome, company_guid: plan.company_guid, current: {
-      guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family: familyOf(v),
-      reference: v.reference, number: v.number, party_ledger: v.party_ledger, tag: v.tag,
-      lines: v.entries, allocations: v.allocations, fingerprint: v.fingerprint}});
+    const receipt = (outcome, v) => ({outcome, company_guid: plan.company_guid, current: observedVoucher(v, familyOf(v))});
     const decision = decide(plan, await window(), live, receipt);
     if (decision.result) return decision.result;
     const current = decision.current;
@@ -298,7 +359,7 @@ export async function saveVoucher(plan, {
       uncertain = error; // Reconcile below with reads only; never resend.
     }
     const identifies = plan.duplicate.strategy === 'document'
-      ? v => familyOf(v) === plan.family && sameDocument(v, plan.duplicate)
+      ? v => familyOf(v) === plan.family && documentMatches(v, plan.duplicate)
       : v => v.tag === plan.remote_id;
     const saved = (await window()).filter(identifies);
     // Tally may assign its own GUID on creation; the observed identity is authoritative.
