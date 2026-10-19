@@ -1,13 +1,12 @@
 # PR Infra
 
-This is the PR Infra client composition boundary. Its `solution.ts` currently
-declares identity and connector intent for the shared console. It does not
-implement a supplier-bill workflow or grant an agent access to WhatsApp or
-Excel.
+This is the PR Infra client composition boundary. `solution.ts` declares its
+shared-console identity; `installation.json` selects Accounts desk, whose
+binding enables Source discovery and Statement entry. `workflow-policy.json`
+selects the allowed business tools.
 
-When an employee and workflow are agreed, add their shared definition under
-`employees/<employee-id>/workflows/<workflow-id>/`. Put PR Infra's enabled
-workflow references, purchase-register mapping, supplier rules, approval
-policy, and any customer instructions under `employees/<employee-id>/` here.
-Keep shared workflow definitions, runtime services, and external-system clients
-outside this solution directory.
+Resource grants, discovered bank destinations and Other-side ledger settings
+must be configured through the application. Repository bindings do not grant
+file or Tally access. Put client instructions and policy under
+`employees/<employee-id>/` here; keep canonical workflow definitions, runtime
+services and external-system adapters in their shared layers.

@@ -14,10 +14,6 @@ def one(values, message):
     return values[0]
 
 
-def named(records, kind, value):
-    return [r['data'] for r in records if r['type']==kind and normalized(name(r['data']))==normalized(value)]
-
-
 def destination_choices(company):
     """Small launch metadata; never send full native masters to the renderer."""
     records=master_lookup(company)['records']

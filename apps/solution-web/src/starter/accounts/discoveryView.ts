@@ -95,7 +95,7 @@ export function scopeChangeLines(run: DiscoveryRun) {
     ...(changes.added.length ? [`Newly included: ${names(changes.added)}.`] : []),
   ];
 }
-export const masterLabels: Record<string, string> = {
+const masterLabels: Record<string, string> = {
   LEDGER: "Ledgers", GROUP: "Groups", VOUCHERTYPE: "Voucher types",
   STOCKITEM: "Stock items", STOCKGROUP: "Stock groups", STOCKCATEGORY: "Stock categories",
   UNIT: "Units", GODOWN: "Godowns", CURRENCY: "Currencies", COSTCATEGORY: "Cost categories",

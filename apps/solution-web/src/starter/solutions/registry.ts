@@ -6,8 +6,6 @@ const modules = import.meta.glob<{ solution: SolutionManifest }>(
 );
 const solutions = Object.values(modules).map((module) => module.solution);
 
-export const DEFAULT_SOLUTION_ID = "pr-infra";
-
 export function getSolution(id: string): SolutionManifest | undefined {
   return solutions.find((solution) => solution.id === id);
 }
