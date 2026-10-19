@@ -11,6 +11,7 @@ import {restoreSelection,selectionKeys} from './fileSelection';
 
 type Company = {company:string;company_guid:string;statement_options:{banks:{name:string;guid:string}[];voucher_types:{name:string;guid:string;base:string}[]}};
 interface Discovery {id:string;device_id:string;ready:boolean;catalog?:{sources:{tool:string;snapshot?:{companies?:Company[]}}[]}}
+const STATEMENT_FILES=/\.(csv|xlsx)$/i;
 const money=(cents:number)=>new Intl.NumberFormat('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}).format(cents/100);
 const preference=(tenant:string,user:string)=>`${tenant}:${user}:statement-entry:setup:v1`;
 interface SavedSetup {deviceId:string;files:string[];banks:Record<string,string>;types:Record<string,Record<string,string>>}
@@ -25,9 +26,9 @@ export async function quickStatementRun(tenant:string,workflow:RunSettingsProps[
   const base=`/api/tenants/${tenant}/accounts`;
   const [sources,discovery]=await Promise.all([api<Source[]>(base+'/sources'),api<Discovery|null>(`/api/tenants/${tenant}/discovery/latest?device_id=${encodeURIComponent(deviceId)}`)]);
   if(!discovery?.ready)return null;
-  const selected=restoreSelection(sources,JSON.stringify(saved.files));
+  const selected=restoreSelection(sources,JSON.stringify(saved.files),STATEMENT_FILES);
   const refreshed=await Promise.all(sources.filter(s=>s.files.some(f=>selected.includes(f.id))).map(s=>s.writable?refreshFolder(tenant,s,user.csrf_token):Promise.resolve(s)));
-  const ids=restoreSelection(refreshed,JSON.stringify(saved.files));if(!ids.length)return null;
+  const ids=restoreSelection(refreshed,JSON.stringify(saved.files),STATEMENT_FILES);if(!ids.length)return null;
   return api<Run>(base+'/runs',{method:'POST',body:JSON.stringify({key:workflow.key,request_key:crypto.randomUUID(),file_ids:ids,destination_device_id:deviceId,
     config:{...workflow.config_values,discovery_id:discovery.id,bank_ledgers:saved.banks,voucher_types:saved.types}})},user.csrf_token);
 }
@@ -44,7 +45,7 @@ export function StatementLaunch(props:RunSettingsProps & {routeSlug:string;desti
     let active=true; setDiscovery(null);
     void Promise.all([api<Source[]>(base+'/sources'),destination?.deviceId?api<Discovery|null>(`/api/tenants/${tenant}/discovery/latest?device_id=${encodeURIComponent(destination.deviceId)}`):Promise.resolve(null)])
       .then(([files,found])=>{if(active){setSources(files);setDiscovery(found);const saved=userId?savedSetup(tenant,userId):null;
-        if(saved&&saved.deviceId===destination?.deviceId){setSelected(restoreSelection(files,JSON.stringify(saved.files)));setBanks(saved.banks);setTypes(saved.types);}}})
+        if(saved&&saved.deviceId===destination?.deviceId){setSelected(restoreSelection(files,JSON.stringify(saved.files),STATEMENT_FILES));setBanks(saved.banks);setTypes(saved.types);}}})
       .catch((e:Error)=>{if(active)setError(e.message);});
     return()=>{active=false;};
   },[base,tenant,destination?.deviceId,userId]);
@@ -60,7 +61,7 @@ export function StatementLaunch(props:RunSettingsProps & {routeSlug:string;desti
       const config={...workflow.config_values,discovery_id:discovery.id,bank_ledgers:banks,voucher_types:types};
       const run=await api<Run>(base+'/runs',{method:'POST',body:JSON.stringify({key:workflow.key,request_key:crypto.randomUUID(),
         file_ids:selected,destination_device_id:destination?.deviceId,config})},user.csrf_token);
-      try {localStorage.setItem(preference(tenant,user.id),JSON.stringify({deviceId:destination?.deviceId,files:selectionKeys(sources,selected),banks,types}));} catch {/* Preferences do not affect authorization. */}
+      try {localStorage.setItem(preference(tenant,user.id),JSON.stringify({deviceId:destination?.deviceId,files:selectionKeys(sources,selected,STATEMENT_FILES),banks,types}));} catch {/* Preferences do not affect authorization. */}
       navigate(`/${props.routeSlug}/tasks/${run.task_id}`);
     }catch(e){setError(e instanceof Error?e.message:'Could not start statement entry.');}finally{setBusy(false);}
   }
