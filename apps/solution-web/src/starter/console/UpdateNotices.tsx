@@ -3,7 +3,7 @@ import { desktopBridge, type DesktopStatus } from '../desktop/bridge';
 
 /** Both checks are read-only. Never reload a session or interrupt a local save. */
 export function UpdateNotices() {
-  const [webUpdate, setWebUpdate] = useState(false);
+  const [webUpdate, setWebUpdate] = useState<string | null>(null);
   const [native, setNative] = useState<DesktopStatus['update']>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -15,7 +15,7 @@ export function UpdateNotices() {
           if (!response.ok) return;
           const version: unknown = await response.json();
           if (active && version && typeof version === 'object' && 'id' in version &&
-              typeof version.id === 'string' && version.id && version.id !== __MINKOPS_BUILD_ID__) setWebUpdate(true);
+              typeof version.id === 'string' && version.id && version.id !== __MINKOPS_BUILD_ID__) setWebUpdate(version.id);
         }),
         desktopBridge()?.status().then(status => { if (active) setNative(status.update); }),
       ]);
@@ -39,7 +39,13 @@ export function UpdateNotices() {
   return <div className="update-notices">
     {webUpdate && <div className="update-notice" role="status">
       <span>A newer version of Minkops is available. Refresh when you are ready; running workflows keep their progress.</span>
-      <button className="button button-ghost" onClick={() => window.location.reload()}>Refresh for latest version</button>
+      <button className="button button-ghost" onClick={() => {
+        // Electron may reuse fresh cached navigation HTML on a normal reload.
+        // One public cache key per build preserves the route and forces a fetch.
+        const target = new URL(window.location.href);
+        target.searchParams.set('_minkops_build', webUpdate);
+        window.location.replace(target.href);
+      }}>Refresh for latest version</button>
     </div>}
     {native && <div className="update-notice" role="status">
       <span>{native.state === 'downloading' ? `Downloading Minkops ${native.version ?? 'update'}… You can keep working.`
