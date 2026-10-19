@@ -256,3 +256,29 @@ been verified by this local sweep.
 ### Companion 0.8.0 contracts
 
 Plan protocol 4 adds verified Statement Entry Payment/Receipt saves and GST supplier creation. Bill Entry 0.13 requires 0.8.0 or newer for new GST-capable runs; older pinned bills retain their contracts. Statement intents are encrypted and fsynced under the app profile before import, and an uncertain import cannot be resent automatically. Statement classification now uses the hosted skill with confirmed discovery and optional client branch mapping; native authorization and readback remain independent. See [Statement Entry](statement-entry.md) for routing, balances, preview and recovery. The distributed Windows x64 installer remains an unsigned release candidate; existing unsigned-release disclosure applies.
+
+### Companion 0.9.0 contracts
+
+Plan protocol 5 adds one native writer for every accounting voucher family:
+Purchase, Journal, Debit Note, Payment, Receipt and Contra
+(`connectors/desktop/src/voucher.js`). A v5 plan states a header and 2–40
+balanced ledger lines, each with at most one cost centre/category allocation.
+The companion rechecks the pinned company, ledgers (GUID, parent, AlterID),
+voucher type (GUID, active, family) and allocation masters, then reads only the
+plan's date window before deciding:
+
+- `document` plans (bills) match party plus document number in the client's
+  number fields (Reference, voucher number, or a whole token in narration);
+  another family recording the same document needs attention.
+- `tag` plans (statements) treat any other voucher on the same day with the
+  same bank line as possibly existing, unless the server proved it a distinct
+  sibling transaction.
+- `counterpart` plans (a Contra's lone leg) are covered by one Minkops transfer
+  already holding both lines; an untagged one holds.
+
+A `strict` fence writes the encrypted intent (same `statement-manifests`
+directory as protocol 4, so upgraded plans keep their fence) before importing;
+`retry_after_read` lets a later explicit Retry save import only after a fresh
+read. Within one attempt an import is never repeated, and only an exact readback
+of every line, allocation, date and voucher type is accepted. Older plan formats
+keep their existing writers until the server emits v5 plans (MIN-145).
