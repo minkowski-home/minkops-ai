@@ -160,3 +160,17 @@ class StatementTests(unittest.TestCase):
         self.assertEqual(loaded['state'],'stopped')
         self.assertTrue(all(r['code']=='run_stopped' for r in loaded['result']['records']))
 
+    def test_stop_during_raw_agent_result_persistence_does_not_require_native_row_state(self):
+        run=self.ready()
+        # The shared lifecycle persists provider JSON before validating it. Stop
+        # may arrive in that interval; raw choices do not have native statuses.
+        raw={'records':[{'source_file_id':run['file_ids'][0],'sheet':'','row':3}]}
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='executing',result=%s WHERE id=%s",(Jsonb(raw),run['id']))
+        response=self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",headers=self.csrf,json={'action':'stop'})
+        self.assertEqual(response.status_code,200,response.text)
+        loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual(loaded['state'],'stopped')
+        self.assertEqual(loaded['result']['records'][0]['code'],'run_stopped')
+        self.assertFalse(loaded['tally_writes'])
+

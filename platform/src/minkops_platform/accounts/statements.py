@@ -214,9 +214,14 @@ class StatementHandler(AccountsHandler):
     def on_resume(self, connection, run, user): dispatch_next(connection,run)
 
     def on_stop(self, connection, run, user):
-        result=copy.deepcopy(run.get('result') or {'records':[]})
+        raw=run.get('result')
+        rows=raw.get('records',[]) if isinstance(raw,dict) else []
+        # Provider output is durably saved before schema/business validation.
+        # Stop must also work in that interval, with no native row state yet.
+        result={'records':[copy.deepcopy(r) for r in rows if isinstance(r,dict) and r.get('source_file_id') in run['file_ids']]
+            if isinstance(rows,list) else [],'findings':[]}
         for row in result['records']:
-            if row['status'] not in ('saved','duplicate','rejected'):
+            if row.get('status') not in ('saved','duplicate','rejected'):
                 row.update(status='held',code='run_stopped',reason='The run was stopped before this row was saved. Verify any underway operation in Tally.')
         connection.execute('UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s',(Jsonb(result),run['tenant_id'],run['id']))
         sync_attention(connection,run,result)
