@@ -2,6 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { progressView } from "../src/starter/workspace/progress.ts";
 
+test("automatic stops show the recorded active-time limit and retained-progress explanation", () => {
+  const summary = "Stopped after 45 minutes of active processing. Progress and completed saves are retained; an underway save may still finish.";
+  const task = {status: "stopped", progress: 40, events: [
+    {event_type: "executing"}, {event_type: "control.stop", summary}
+  ]};
+  for (const mode of ["bill-entry", "source-discovery", "proposal", "tally.probe"] as const) {
+    const view = progressView(task, mode);
+    assert.equal(view.activity, summary);
+    assert.equal(view.running, false);
+    assert.equal(view.finished, false);
+  }
+});
+
 test("paused and stopped tasks retain their last stage without spinning or completing", () => {
   for (const status of ["paused", "stopped"]) {
     const view = progressView({status, progress: 85, events: [{event_type: "writing"}, {event_type: `control.${status === "paused" ? "pause" : "stop"}`}]});
