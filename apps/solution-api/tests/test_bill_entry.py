@@ -139,7 +139,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(offline.status_code, 409, offline.text)
         self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
             "name": "Bill PC", "installation_id": self.device["installation_id"]}).json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.8.0"}
         retried = self.decide(run, bill, "retry_save")
         self.assertEqual(retried["state"], "writing")
         self.save_receipt(retried, "MOCK-1")
@@ -656,7 +656,7 @@ class BillEntryTests(unittest.TestCase):
                 headers=self.csrf,
                 json={"name": "Bill PC", "installation_id": str(uuid.uuid4())},
             ).json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.8.0"}
         discovery = "/api/tenants/mock-tenant/discovery"
         categories = ["company", "ledgers", "voucher_types"]
         period = {"from": "2026-10-01", "to": "2026-10-31"}
@@ -1099,7 +1099,7 @@ class BillEntryTests(unittest.TestCase):
         self.native = "/api/tenants/mock-tenant/desktop"
         self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
             "name": "Old PC", "installation_id": str(uuid.uuid4())}).json()
-        worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.8.0"}
         launched = self.client.post("/api/tenants/mock-tenant/discovery/runs", headers=self.csrf, json={
             "device_id": self.device["id"], "request_key": str(uuid.uuid4()),
             "config": {"depth": "client_context", "excel_source_ids": [],

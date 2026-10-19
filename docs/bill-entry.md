@@ -415,3 +415,7 @@ sessions. Stop the normal worker first; replay claims only the named run.
 uv run --all-packages python scripts/bill_entry_fixtures.py replay RUN_ID packages/<package>
 uv run --all-packages python scripts/bill_entry_fixtures.py score RUN_ID packages/<package> [--dry|--rerun]
 ```
+
+### GST supplier creation (0.13 / Windows 0.8)
+
+Create this ledger requires printed GSTIN, registration type, state, place of supply, address and PIN with literal page evidence, deterministic checksum/state validation, and a compatible registered supplier template in the same confirmed company. Existing GSTIN aliases, missing evidence and cross-state creation require manual handling in v1. Older pinned runs retain their prior behavior. The native callback must verify every approved statutory and mailing field before a bill is queued; an import acknowledgement alone is insufficient.

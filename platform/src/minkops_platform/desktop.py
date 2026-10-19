@@ -56,7 +56,7 @@ def companion_report(version, host, session):
             "remote_session": {"remote": True, "console": False}.get(session)}
 
 
-def require_companion(device):
+def require_companion(device, *, minimum=MINIMUM_COMPANION):
     """Refuse Tally work an outdated companion would mishandle.
 
     A PC that has never polled is allowed: work waits until it connects, and it
@@ -65,10 +65,10 @@ def require_companion(device):
     if device["last_seen_at"] is None:
         return
     version = device.get("companion_version")
-    if version is None or tuple(int(part) for part in version.split(".")) < MINIMUM_COMPANION:
+    if version is None or tuple(int(part) for part in version.split(".")) < minimum:
         raise ServiceError(
             "conflict",
-            f"Update Minkops on {device['name']} to {'.'.join(map(str, MINIMUM_COMPANION))} or later, then try again.",
+            f"Update Minkops on {device['name']} to {'.'.join(map(str, minimum))} or later, then try again.",
         )
 
 
@@ -571,7 +571,7 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
         raise ServiceError("conflict", "This task was stopped before the operation began.")
     if job["state"] == "executing" and job["operation"].startswith("attention."):
         from .attention import plan as attention_plan
-        return attention_plan(connection, device, job)
+        return attention_plan(connection, device, job, plan_version=plan_version)
     if job["state"] == "executing" and job["operation"] == "tally.references":
         from .accounts.bills import context_plan
 

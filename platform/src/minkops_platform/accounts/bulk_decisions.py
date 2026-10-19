@@ -159,6 +159,10 @@ def apply(connection, tenant, user, run_id, file_id, action, proposal, preview_t
         consent = [{"record_index": i, "source_file_id": r["source_file_id"], "identity": proposal_identity(r)} for i, r in cohort]
         connection.execute("UPDATE attention_items SET target=target || %s WHERE tenant_id=%s AND id=%s",
             (Jsonb({"authorized_proposals": consent}), tenant["id"], trigger_item["id"]))
+        # One new registration must be effective for the earliest authorized bill.
+        connection.execute("""UPDATE attention_items SET target=jsonb_set(target,
+            '{gst_supplier,applicable_from}',%s) WHERE tenant_id=%s AND id=%s AND target ? 'gst_supplier'""",
+            (Jsonb(min(r["data"]["date"] for _, r in cohort)), tenant["id"], trigger_item["id"]))
     elif action == "retry":
         from .batch import recheck_many
         recheck_many(connection, tenant, user, run, list(dict.fromkeys(r["source_file_id"] for _, r in cohort)))

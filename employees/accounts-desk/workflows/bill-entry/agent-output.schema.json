@@ -101,6 +101,7 @@
                 "amount":{"type":"number","exclusiveMinimum":0},
                 "evidence":{"type":"string","minLength":1,"maxLength":2000}}}
           },
+          "supplier_details": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/supplier_details"}]},
           "master_refs": {
             "type": "object",
             "additionalProperties": false,
@@ -140,6 +141,24 @@
     }
   },
   "$defs": {
+    "supplier_details": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gstin", "registration_type", "state_code", "state", "place_of_supply", "address", "pincode", "evidence"],
+      "properties": {
+        "gstin": {"type": "string", "minLength": 15, "maxLength": 15},
+        "registration_type": {"enum": ["Regular", "Composition"]},
+        "state_code": {"type": "string", "pattern": "^[0-9]{2}$"},
+        "state": {"type": "string", "minLength": 1, "maxLength": 100},
+        "place_of_supply": {"type": "string", "minLength": 1, "maxLength": 100},
+        "address": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 250}},
+        "pincode": {"type": "string", "pattern": "^[1-9][0-9]{5}$"},
+        "evidence": {"type": "array", "minItems": 5, "maxItems": 12, "items": {
+          "type": "object", "additionalProperties": false, "required": ["field", "page", "quote"],
+          "properties": {"field": {"enum": ["gstin", "registration_type", "state", "place_of_supply", "address"]},
+            "page": {"type": "integer", "minimum": 1}, "quote": {"type": "string", "minLength": 1, "maxLength": 2000}}
+        }}
+      }
+    },
     "exception_code": {
       "description": "Only genuine blockers. Successful checks, absent optional values and possible duplicates are notes; the application decides duplicates natively.",
       "enum": [

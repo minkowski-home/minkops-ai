@@ -1746,3 +1746,13 @@ now reject invalid feeds before publication. A real Windows updater downloaded
 the reviewed 0.7.0 installer, verified its hash, deferred while busy, and dispatched
 the silent installer; installed-app checks passed afterwards. The installer remains
 unsigned, and automatic relaunch was suppressed in the isolated update rehearsal.
+
+### Verified GST supplier creation and company-scoped native reads (MIN-126)
+
+**Situation:** Missing suppliers with GST could not safely use the existing basic ledger action. Live testing also showed Tally object exports returning a same-named ledger from another open company despite the requested company variable.
+
+**Task:** Create only sufficiently evidenced permanent supplier masters, preserving statutory fields and destination identity before continuing authorized bills.
+
+**Action:** Pinned a new capability to Bill Entry 0.13 and companion 0.8/protocol 4. Validate GSTIN/PAN/check character, state, registration, place of supply, address, PIN and literal source evidence. Require a GST-registered template from the same discovered company. Construct only supported registration/mailing fields, never copy balances or bank details, and reject existing GSTIN aliases. Native reads use a fixed company-scoped collection filtered by the expected ledger GUID; independently verify all approved fields after import. Cross-state creation stays held in v1. Bulk consent covers named proposal identities with the earliest authorized effective date.
+
+**Result:** Deterministic and PostgreSQL integration tests cover capability gating, template/evidence validation and callback continuation. Live Tally created synthetic `MIN126 Verified GST Supplier 20261018` only in Test Company, GUID ending `0000010a`; full native GST/address/PIN readback passed. The company-scope regression rejects foreign ledger GUIDs before import.

@@ -167,14 +167,19 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
                                 allow_split=scope.get("tax_allocation_version") == 1)
                 if record["master_refs"]["vendor"].get("new_supplier") is not True:
                     raise ValueError("Supplier match must be resolved before master creation.")
-            if not selected or record["data"].get("tax") != 0 or record["data"].get("vendor") in selected["ledgers"]:
-                raise ValueError("Supplier creation needs a supported non-tax bill and a new supplier.")
+            if not selected or record["data"].get("vendor") in selected["ledgers"]:
+                raise ValueError("Supplier creation needs a supported bill and a positively new supplier.")
+            from .supplier_gst import creation_plan
+            gst_supplier = creation_plan(run, record, selected)
             vendor = record["data"]["vendor"]
             if not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in record["evidence"]):
                 raise ValueError("Supplier name needs bill evidence.")
             prospective = {**selected, "ledgers": [*selected["ledgers"], vendor]}
-            validate_tally(record["data"], prospective)
+            validate_tally(record["data"], prospective, record.get("tax_allocations"))
             item = flag(connection, run, record, title="Missing supplier", kind="supplier", actor=user["id"])
+            if gst_supplier:
+                connection.execute("UPDATE attention_items SET target=target || %s WHERE tenant_id=%s AND id=%s RETURNING *",
+                    (Jsonb({"gst_supplier": gst_supplier}), tenant["id"], item["id"]))
             attention.enqueue(connection, item, user, "attention.supplier")
             return public_run(connection, run)
         if action != "guess":
@@ -265,7 +270,18 @@ def check_observation(item, observation):
     if not isinstance(masters, list) or any(not isinstance(m, dict) for m in masters):
         raise ServiceError("invalid", "Invalid native masters.")
     names = [m.get("@_NAME", m.get("NAME")) for m in masters]
-    return {"valid": valid if item["kind"] != "supplier" else target["vendor"] in names,
+    supplier_valid = target.get("vendor") in names
+    if item["kind"] == "supplier" and target.get("gst_supplier"):
+        from .supplier_gst import verified_supplier, scalar
+        supplier = observation.get("supplier")
+        reference = next((m for m in masters if m.get("@_NAME", m.get("NAME")) == target["vendor"]), None)
+        supplier_valid = (supplier_valid and verified_supplier(supplier, target["gst_supplier"])
+            and scalar(supplier.get("@_NAME") or supplier.get("NAME")) == target["vendor"]
+            and all(scalar(supplier.get(key)) == scalar(reference.get(key)) for key in ("GUID", "ALTERID")))
+        if supplier_valid:
+            supplier = {**supplier, **{key: scalar(supplier.get(key)) for key in ("GUID", "PARENT", "ALTERID")}}
+            masters = [supplier if m is reference else m for m in masters]
+    return {"valid": valid if item["kind"] != "supplier" else supplier_valid,
             "ledgers": names, "masters": masters, "current": current}
 
 

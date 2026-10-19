@@ -156,8 +156,8 @@ function startWorker() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
-        // Plan 3: open-company discovery and pinned purchase voucher types.
-        "X-Minkops-Plan-Version": "3",
+        // Plan 4 additionally verifies GST supplier details and bank vouchers.
+        "X-Minkops-Plan-Version": "4",
         // Each poll tells the console which PC and companion run the work.
         "X-Minkops-Companion-Version": app.getVersion(),
         "X-Minkops-Host": pcName().replace(/[^\x20-\x7e]/g, "?"),
@@ -420,7 +420,7 @@ async function collectDiagnostics() {
   }
   return {
     collected_at: new Date().toISOString(),
-    companion: { version: app.getVersion(), plan_version: 3, connected: Boolean(state.device) },
+    companion: { version: app.getVersion(), plan_version: 4, connected: Boolean(state.device) },
     windows: { hostname: pc, release: release(), remote_session: remoteSession() },
     tally: {
       session,
