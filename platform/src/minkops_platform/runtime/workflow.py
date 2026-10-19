@@ -1,6 +1,6 @@
 """Definition-driven hosted execution; no employee-specific dispatch or tool loop."""
 
-from .bundles import validate_snapshot
+from .bundles import stages, validate_snapshot
 from .openai_hosted import execute as hosted_execute
 
 
@@ -13,13 +13,16 @@ def execute(key, files, context, on_event, *, client=None, session_id=None, turn
     if version is not None and version != snapshot["definition_version"]:
         raise ValueError("Execution bundle does not match the run's definition version.")
     execution = snapshot["execution"]
+    # A stage keeps the skill and bundle; only its execution instructions differ.
+    stage = context["config"].get("stage")
+    instructions = stages(snapshot)[stage]["instructions"] if stage else execution["instructions"]
     return hosted_execute(
         key,
         files,
         context,
         on_event,
         instructions=snapshot["files"]["SKILL.md"],
-        execution_instructions=snapshot["files"][execution["instructions"]],
+        execution_instructions=snapshot["files"][instructions],
         model=execution["model"],
         packages=execution["python_packages"],
         skill_files=snapshot["files"],

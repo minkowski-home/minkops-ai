@@ -37,6 +37,9 @@ RESERVED = {
     "hosted_workspace",
     "hosted_session_closed",
     "timeout_cancel_pending",
+    "stage",
+    "company_scope",
+    "triage",
 }
 
 

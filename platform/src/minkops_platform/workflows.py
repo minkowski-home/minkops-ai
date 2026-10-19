@@ -49,6 +49,17 @@ DESCRIPTOR_SCHEMA = {
         "tenant_defaults": {"type": "object"},
         "run_defaults": {"type": "object"},
         "agent_output_schema": {"type": "string", "minLength": 1},
+        # Named steps of one workflow: other instructions and output schema, same pinned bundle.
+        "stages": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "required": ["instructions", "agent_output_schema"],
+                "additionalProperties": False,
+                "properties": {"instructions": {"type": "string", "minLength": 1},
+                               "agent_output_schema": {"type": "string", "minLength": 1}},
+            },
+        },
         "execution": EXECUTION_SCHEMA,
         "handler": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*$"},
         "presentation": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
