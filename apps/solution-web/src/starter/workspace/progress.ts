@@ -1,4 +1,4 @@
-type Observation = { status: string; progress: number; summary?: string; events: { event_type: string }[] };
+type Observation = { status: string; progress: number; summary?: string; events: { event_type: string; summary?: string }[] };
 
 export type ProgressState = "upcoming" | "done" | "active" | "waiting" | "attention" | "failed";
 export interface TaskProgressView {
@@ -92,12 +92,13 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
                     ? "Saving and checking"
                     : "Working on your files"));
   const controlled = ["paused", "stopped"].includes(task.status);
+  const stopSummary = task.events.filter(e => e.event_type === "control.stop").at(-1)?.summary;
   const waiting = current === 0 || event === "local_waiting";
   const needsInput = task.status === "attention" || event === "local_failed";
   const running = !finished && !controlled && task.status !== "failed" && !needsInput;
   const states: ProgressState[] = stages.map((_, index) => index < current || finished ? "done" : index > current ? "upcoming"
     : task.status === "failed" || task.status === "stopped" ? "failed" : controlled || waiting ? "waiting" : needsInput ? "attention" : "active");
   return { stages, current, finished, states, running, label: controlled ? task.status === "paused" ? "Paused" : "Stopped" : label,
-    activity: controlled ? task.status === "paused" ? "Resume to continue. An operation already underway may finish." : "Remaining work stopped. Completed saves remain." : task.summary,
+    activity: controlled ? task.status === "paused" ? "Resume to continue. An operation already underway may finish." : stopSummary || "Remaining work stopped. Completed saves remain." : task.summary,
     percent: finished ? 100 : null, meterLabel: finished ? "Workflow complete" : controlled ? "Run paused or stopped" : label };
 }
