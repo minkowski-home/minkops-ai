@@ -212,6 +212,8 @@ def enqueue_approved(connection, run, device_id, operation, write_id):
 
 
 def _observe(connection, job, state, summary, progress):
+    if job["operation"] == "tally.statement":
+        return  # The statement manifest/receipt owns its lifecycle and progress.
     if job["operation"].startswith("attention."):
         return  # Attention events have their own durable lifecycle and audit.
     if job["operation"] == "tally.references":
@@ -392,6 +394,7 @@ def _validate_input(operation, payload):
         "files.refresh": {"source_id"},
         "accounts.save": {"run_id", "write_id"},
         "tally.save": {"run_id", "write_id"},
+        "tally.statement": {"run_id", "write_id"},
     }
     if operation not in keys or set(payload) != keys[operation]:
         raise ServiceError("invalid", "This local operation is not supported.")
@@ -422,10 +425,12 @@ def launch(connection, tenant, user, body):
         _bound_source(connection, device, payload["source_id"])
     elif operation == "accounts.save":
         run, _ = _save_spec(connection, device, payload)
-    elif operation == "tally.save":
+    elif operation in ("tally.save", "tally.statement"):
         from .accounts.tally_writes import spec
 
         run, _ = spec(connection, device, payload)
+        if (run['workflow_key'] == 'statement-entry') != (operation == 'tally.statement'):
+            raise ServiceError('invalid', 'This native operation does not match the approved workflow contract.')
     if operation != "tally.probe":
         existing = connection.execute(
             """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation=%s AND input=%s
@@ -434,7 +439,7 @@ def launch(connection, tenant, user, body):
         ).fetchone()
         if existing:
             if (
-                operation not in ("accounts.save", "tally.save")
+                operation not in ("accounts.save", "tally.save", "tally.statement")
                 or existing["state"] == "queued"
                 or existing["lease_until"] > connection.execute("SELECT now() AS t").fetchone()["t"]
             ):
@@ -522,7 +527,7 @@ def claim(connection, device, report=None):
     )
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('accounts.save','tally.save','attention.supplier') AND lease_until<now()))
+           (state='executing' AND operation NOT IN ('accounts.save','tally.save','tally.statement','attention.supplier') AND lease_until<now()))
            AND (operation='attention.refresh' OR EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id AND t.control_state='active'))
            ORDER BY CASE WHEN operation='tally.save' THEN
              (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
@@ -572,6 +577,12 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
     if job["state"] == "executing" and job["operation"].startswith("attention."):
         from .attention import plan as attention_plan
         return attention_plan(connection, device, job, plan_version=plan_version)
+    if job["state"] == "executing" and job["operation"] == "tally.statement":
+        from .accounts.tally_writes import spec
+        run, write = spec(connection, device, job["input"], underway=True)
+        if run["workflow_key"] != "statement-entry" or plan_version < 4:
+            raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later for statement saves.")
+        return write["plan"]
     if job["state"] == "executing" and job["operation"] == "tally.references":
         from .accounts.bills import context_plan
 
@@ -652,7 +663,7 @@ def finish(connection, device, job_id, receipt):
             diagnostic = {"truncated": True}
         _store_diagnostic(connection, device, diagnostic, kind="job", job_id=job["id"])
     if job["state"] != "executing" and not (
-        job["operation"] in ("accounts.save", "tally.save")
+        job["operation"] in ("accounts.save", "tally.save", "tally.statement")
         and job["error"] == "Save interrupted; retry requested."
     ):
         raise ServiceError("conflict", "This local task is no longer running.")
@@ -707,6 +718,10 @@ def finish(connection, device, job_id, receipt):
         )
         result = {"verified": True, "run_state": verified["state"]}
         summary = "Workbook saved and checked."
+    elif job["operation"] == "tally.statement":
+        from .accounts.statements import accept
+        result = accept(connection, device, job["input"], result if result is not None else {"outcome": "attention"})
+        summary = "Statement voucher verified." if result["verified"] else "Statement row needs attention."
     elif job["operation"] == "tally.save":
         from .accounts.tally_writes import accept
 
@@ -748,6 +763,10 @@ def finish(connection, device, job_id, receipt):
            updated_at=now() WHERE id=%s RETURNING *""",
         (state, Jsonb(result), error, fingerprint, job_id),
     ).fetchone()
+    if job["operation"] == "tally.statement":
+        from .accounts.statements import dispatch_next
+        from .accounts.repository import run_for
+        dispatch_next(connection, run_for(connection, device["tenant_id"], job["input"]["run_id"]))
     summary = (
         error
         or summary

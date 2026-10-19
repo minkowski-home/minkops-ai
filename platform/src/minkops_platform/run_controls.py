@@ -80,6 +80,11 @@ def task_control(connection, tenant_id, user, task_id, action):
                                                     or (not binding and run.get("workflow_key") == "bill-entry")):
                 from .accounts.attention import stopped
                 stopped(connection, run, user["id"])
+            if run.get('parent_run_id') is None and binding.get('handler'):
+                from .runtime.application import get_handler
+                on_stop = getattr(get_handler(binding['handler']), 'on_stop', None)
+                if on_stop:
+                    on_stop(connection, run, user)
     task = connection.execute("UPDATE tasks SET control_state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s RETURNING *",
                               (target, tenant_id, task_id)).fetchone()
     if action == "resume":

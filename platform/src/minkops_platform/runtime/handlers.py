@@ -1,6 +1,7 @@
 """Explicit application capabilities; no dynamic imports from tenant input."""
 
 from minkops_platform.accounts.handlers import BillHandler, DiscoveryHandler
+from minkops_platform.accounts.statements import StatementHandler
 
 from .proposal import ProposalHandler
 
@@ -9,5 +10,6 @@ from .proposal import ProposalHandler
 HANDLERS = {
     "accounts.discovery": DiscoveryHandler(),
     "accounts.bill": BillHandler(),
+    "accounts.statement": StatementHandler(),
     "skill.proposal": ProposalHandler(),
 }

@@ -1,0 +1,11 @@
+{
+  "type":"object", "additionalProperties":false,
+  "required":["review_mode","other_side_ledger","counter_mode","date_format","opening_balance"],
+  "properties":{
+    "review_mode":{"type":"string","enum":["all_outputs","only_exceptions"],"title":"Review before saving","x-step":"Review and save"},
+    "other_side_ledger":{"type":"string","maxLength":200,"title":"Other-side ledger","description":"A discovered ledger used for company and cost-centre branches.","x-step":"Destination"},
+    "counter_mode":{"type":"string","enum":["single"],"title":"Other-side ledger strategy","x-step":"Destination"},
+    "date_format":{"type":"string","enum":["dmy","mdy","iso"],"title":"Text date order","description":"DMY means day/month/year; ISO dates and native Excel dates are always recognized.","x-step":"Read statement"},
+    "opening_balance":{"type":"string","maxLength":30,"title":"Opening balance (optional)","description":"Use when the file has no opening balance row. Missing or unverified balances hold affected rows.","x-step":"Read statement"}
+  }
+}
