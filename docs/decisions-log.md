@@ -1779,3 +1779,12 @@ Native-only discovery acceptance found a second boundary error: full collection 
 **Action:** Project only child outcome fields during aggregation. A PostgreSQL regression installs a JSON decoder that rejects execution contexts, proving aggregation never loads them. Expose a validated lane count through the existing bootstrap and retain four as the library default; the 512 MiB deployment selects one lane. Keep provider-session recovery and native write fences unchanged.
 
 **Result:** The context-boundary regression reproduced the defect before the fix. Bootstrap tests verify both bounded and persistent workers receive the configured lane count. Production recovery and final acceptance results are recorded in the release verification document.
+### Compatible device locks across native approval and polling
+
+**Situation:** Final live statement replay hit a PostgreSQL deadlock before any native write was dispatched. The worker held its workflow row while inserting an approved intent; a companion poll held an exclusive device lock while updating that same workflow. The intent's device foreign-key check completed the cycle.
+
+**Task:** Preserve device revocation and token-rotation guarantees while allowing durable approvals to coexist with authenticated polling.
+
+**Action:** Use a non-key update lock for authenticated polls and a key-share lock for read-only ownership checks. Revocation explicitly retains the exclusive device lock, and unique-token rotation remains exclusive. This removes the unnecessary device dependency without weakening approval, native readback or credential checks. A real PostgreSQL regression holds a poll transaction open while approving and enqueuing a statement; a second regression proves revocation still waits for authorized work and rejects the credential after completion.
+
+**Result:** The approval regression reproduced the production foreign-key lock timeout before the change. Both regressions and the existing device/statement suites pass. Final live recovery evidence is retained in the release verification document.

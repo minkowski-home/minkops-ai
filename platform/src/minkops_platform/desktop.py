@@ -85,13 +85,15 @@ def register(connection, tenant, user, name, installation_id):
 
 
 def authenticate(connection, credential):
+    # Serialize credential checks and polls without blocking approved intents'
+    # foreign-key checks. Revocation and token rotation retain exclusive locks.
     row = connection.execute(
         """SELECT d.*, t.slug, u.is_platform_admin FROM desktop_devices d
            JOIN tenants t ON t.id=d.tenant_id JOIN users u ON u.id=d.owner_id
            WHERE d.token_hash=%s AND d.revoked_at IS NULL AND d.expires_at>now()
            AND u.email_verified_at IS NOT NULL AND (u.is_platform_admin OR EXISTS
              (SELECT 1 FROM memberships m WHERE m.tenant_id=d.tenant_id AND m.user_id=d.owner_id))
-           FOR UPDATE OF d""",
+           FOR NO KEY UPDATE OF d""",
         (_hash(credential),),
     ).fetchone()
     if not row:
@@ -108,9 +110,13 @@ def devices(connection, tenant):
     ]
 
 
-def owned_device(connection, tenant_id, user_id, device_id, *, active=True):
+def owned_device(connection, tenant_id, user_id, device_id, *, active=True, lock=False):
     row = connection.execute(
-        "SELECT * FROM desktop_devices WHERE tenant_id=%s AND owner_id=%s AND id=%s FOR UPDATE",
+        # Ownership checks protect the device identity against revocation while
+        # permitting a poll's non-key updates. Taking an exclusive lock here
+        # reverses the worker's run -> device FK order against device -> run polls.
+        "SELECT * FROM desktop_devices WHERE tenant_id=%s AND owner_id=%s AND id=%s"
+        + (" FOR UPDATE" if lock else " FOR KEY SHARE"),
         (tenant_id, user_id, device_id),
     ).fetchone()
     if not row:
@@ -124,7 +130,7 @@ def owned_device(connection, tenant_id, user_id, device_id, *, active=True):
 
 
 def revoke(connection, tenant, user, device_id):
-    owned_device(connection, tenant["id"], user["id"], device_id, active=False)
+    owned_device(connection, tenant["id"], user["id"], device_id, active=False, lock=True)
     connection.execute("UPDATE desktop_devices SET revoked_at=now() WHERE id=%s", (device_id,))
     pending = connection.execute(
         """UPDATE desktop_jobs SET state='failed',error='This PC was disconnected.',updated_at=now()

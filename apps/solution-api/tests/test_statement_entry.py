@@ -47,6 +47,23 @@ class StatementTests(unittest.TestCase):
         self.assertEqual([r['status'] for r in loaded['result']['records']],['ready','ready','held'])
         return loaded
 
+    def test_device_poll_does_not_block_approved_statement_intents(self):
+        from minkops_platform import desktop
+        from minkops_platform.accounts.statements import StatementHandler
+        run = self.ready()
+        # A poll holds its authentication lock while observing a workflow.
+        # Finishing that workflow must still persist its device FK and enqueue
+        # its native job; otherwise the two paths form a device/run deadlock.
+        with psycopg.connect(URL, row_factory=dict_row) as poll:
+            desktop.authenticate(poll, self.device['credential'])
+            with psycopg.connect(URL, row_factory=dict_row) as writer:
+                writer.execute("SET LOCAL lock_timeout = '250ms'")
+                row = writer.execute('SELECT * FROM account_runs WHERE id=%s FOR NO KEY UPDATE', (run['id'],)).fetchone()
+                StatementHandler().approve(writer, {'id':row['tenant_id']}, {'id':row['actor_id']}, row, {'action':'write_ready'})
+                self.assertEqual(writer.execute('SELECT count(*) FROM account_tally_writes WHERE run_id=%s', (run['id'],)).fetchone()['count'], 2)
+                self.assertEqual(writer.execute("SELECT count(*) FROM desktop_jobs WHERE task_id=%s AND operation='tally.statement'", (run['task_id'],)).fetchone()['count'], 1)
+                writer.rollback()
+
     def test_private_non_ai_preview_manifest_serial_receipts_and_csv(self):
         run=self.ready()
         csv=self.client.get(self.base+f"/runs/{run['id']}/statement-exceptions.csv")
