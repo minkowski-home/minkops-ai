@@ -1,9 +1,12 @@
 {
-  "key":"statement-entry", "version":"0.1.0", "name":"Statement entry",
-  "description":"Check bank statement balances and enter verified Payment and Receipt vouchers without AI.",
+  "key":"statement-entry", "version":"0.2.0", "name":"Statement entry",
+  "description":"Interpret statement transactions using Source Discovery and enter reviewed, verified Payment and Receipt vouchers.",
   "owner":"accounts-desk", "handler":"accounts.statement", "presentation":"accounts-statement",
   "capabilities":["files.snapshot"], "tenant_config_schema":"tenant-config.schema.json",
   "run_config_schema":"run-config.schema.json", "output_schema":"output.schema.json", "instructions":"SKILL.md",
-  "tenant_defaults":{"review_mode":"all_outputs","other_side_ledger":"","counter_mode":"single","date_format":"dmy","opening_balance":""},
-  "run_defaults":{"bank_ledgers":{},"voucher_types":{}}
+  "tenant_defaults":{"review_mode":"all_outputs","date_format":"dmy","opening_balance":""},
+  "run_defaults":{"branch_mapping_file_id":null},
+  "agent_output_schema":"agent-output.schema.json",
+  "execution":{"environment":"openai_hosted","model":"gpt-6-luna","python_packages":["openpyxl"],
+    "instructions":"execution-instructions.md","resources":[],"result_path":"/workspace/outputs/result.json"}
 }

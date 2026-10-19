@@ -112,7 +112,7 @@ function DestinationWorkflowLaunch(props: LaunchProps) {
         onChange={destination.select} required={!proposal} loading={destination.state.loading} />
       {destination.state.error && <><p role="alert">{destination.state.error}</p>
         <button className="button button-ghost" onClick={() => void destination.refresh()}>Retry loading PCs</button></>}
-      <p className="quiet-state">{proposal ? 'This workflow processes selected files online. Choose a PC only when needed for its destination.' : presentationFor(props.workflow)==='accounts-statement' ? 'Destination saves use this PC. Statement rows are processed without AI.' : 'Selected sources and destination saves use this PC. Bill recognition runs online.'}</p>
+      <p className="quiet-state">{proposal ? 'This workflow processes selected files online. Choose a PC only when needed for its destination.' : presentationFor(props.workflow)==='accounts-statement' ? 'Statement interpretation runs online using Source Discovery. Verified Tally saves use this PC.' : 'Selected sources and destination saves use this PC. Bill recognition runs online.'}</p>
     </section>
     {proposal ? <ProposalLaunch {...props} destination={destination.state} /> : <AccountsLaunch {...props} destination={destination.state} />}
   </>;
