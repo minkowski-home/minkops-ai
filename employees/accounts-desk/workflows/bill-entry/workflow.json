@@ -1,6 +1,6 @@
 {
   "key": "bill-entry",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "name": "Bill entry",
   "description": "Enter reviewed PDF and image bills into connected Excel or Tally with verified, repeatable writes.",
   "owner": "accounts-desk",
@@ -45,6 +45,10 @@
     "triage": {
       "instructions": "stages/triage.md",
       "agent_output_schema": "stages/triage.schema.json"
+    },
+    "posting_profile": {
+      "instructions": "stages/posting-profile.md",
+      "agent_output_schema": "stages/posting-profile.schema.json"
     }
   }
 }

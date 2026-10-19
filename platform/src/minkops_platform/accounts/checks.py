@@ -21,6 +21,7 @@ EXCEPTION_LABELS = {
     "date_before_books": "Before books begin",
     "identity_rule_unknown": "Foreign supplier",
     "date_outside_company_period": "Outside company year",
+    "posting_profile_miss": "Unusual posting",
     "destination_changed": "Tally changed",
     "voucher_type_unresolved": "Voucher type needed",
     "extraction_failed": "Recheck bill",

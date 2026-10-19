@@ -11,6 +11,9 @@ interface Item {
   label: string;
   reason: string;
   status: string;
+  kind?: string;
+  /** A company's derived posting pattern awaiting one confirmation. */
+  profile?: { company: string; summary: string[]; waiting: number };
   workflow: string;
   employee: string;
   updated_at: string;
@@ -48,20 +51,21 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
       clearTimeout(timer);
     };
   }, [base, query, attempt]);
-  async function action(path: string) {
+  async function action(path: string, body?: Record<string, string>) {
     if (!user) return;
     setBusy(true);
     setNotice("");
     try {
-      const result = await api<{ queued?: number }>(
+      const result = await api<{ queued?: number; status?: string }>(
         base + path,
-        { method: "POST" },
+        { method: "POST", ...(body ? { body: JSON.stringify(body) } : {}) },
         user.csrf_token
       );
       setNotice(
         result.queued !== undefined
           ? `${result.queued} check${result.queued === 1 ? "" : "s"} queued`
-          : "Marked done"
+          : result.status === "active" ? "Pattern confirmed; waiting bills continue"
+          : result.status ? "Bills left for entry in Tally" : "Marked done"
       );
       setItems(await api<Item[]>(base + query));
     } catch {
@@ -147,7 +151,21 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
                 <p>{i.reason || "This item needs attention in the original system."}</p>
-                {i.status === "pending" ? (
+                {i.profile && (
+                  <div>
+                    <p>How Minkops will post bills for {i.profile.company}
+                      {i.profile.waiting ? ` (${i.profile.waiting} bill${i.profile.waiting === 1 ? "" : "s"} waiting)` : ""}:</p>
+                    <ul>{i.profile.summary.map((line) => <li key={line}>{line}</li>)}</ul>
+                  </div>
+                )}
+                {i.status === "pending" && i.profile ? (
+                  <div className="accounts-toolbar">
+                    <button className="button" disabled={busy}
+                      onClick={() => void action(`/${i.id}/profile`, { action: "confirm" })}>Confirm</button>
+                    <button className="button button-ghost" disabled={busy}
+                      onClick={() => void action(`/${i.id}/profile`, { action: "nothing" })}>Do nothing</button>
+                  </div>
+                ) : i.status === "pending" ? (
                   <div className="accounts-toolbar">
                     <button
                       className="button button-ghost"

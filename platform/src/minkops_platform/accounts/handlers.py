@@ -4,6 +4,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from jsonschema import ValidationError
+from psycopg.types.json import Jsonb
 from minkops_connectors.excel import inspect_workbook
 
 from minkops_platform.errors import ServiceError
@@ -110,10 +111,13 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 raise ServiceError("invalid", "Automatic company selection cannot lock a company.")
             from .voucher_types import apply_choices
 
-            try:
-                apply_choices(target, selections.get("purchase_voucher_types") or {})
-            except ValueError as error:
-                raise ServiceError("invalid", str(error)) from error
+            # Proposal runs take each company's voucher types from its confirmed
+            # posting pattern; only older pinned contracts choose one at launch.
+            if not proposals:
+                try:
+                    apply_choices(target, selections.get("purchase_voucher_types") or {})
+                except ValueError as error:
+                    raise ServiceError("invalid", str(error)) from error
             references = []
             selections.update(
                 {
@@ -364,6 +368,16 @@ class BillHandler(AccountsHandler):
             return
         from .company_scope import needs_triage
 
+        if (len(run["file_ids"]) == 1 and run["config"].get("company_scope")
+                and run["config"]["tally_target"].get("voucher_proposal_version") == 1):
+            # A single bill posts in this run itself, with its company's pattern.
+            from .posting_profiles import attach
+
+            config = dict(run["config"])
+            attach(connection, run, config, config["company_scope"][0])
+            connection.execute("UPDATE workflow_runs SET config=%s WHERE id=%s", (Jsonb(config), run["id"]))
+            run["config"] = config
+            return
         if len(run["file_ids"]) > 1 or needs_triage(run["config"]):
             from .batch import create_children
 
@@ -381,6 +395,17 @@ class BillHandler(AccountsHandler):
                 )
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
+        if run["config"].get("stage") == "posting_profile":
+            from .company_scope import assets_for
+
+            assets, manifest = assets_for(run["config"], 0)
+            guid = run["config"]["company_scope"][0]
+            company = next(c for c in run["config"]["tally_target"]["companies"] if c["references"]["company_guid"] == guid)
+            context["config"] = {k: v for k, v in run["config"].items()
+                                 if k not in ("source_catalog_snapshot", "agent_output_schema")}
+            context.update(source_catalog=manifest, company={"company_guid": guid, "name": company["company"]},
+                           files=[{"id": a["id"], "path": a["path"]} for a in assets])
+            return assets, context, {}
         if run["config"].get("stage") == "triage":
             from .company_scope import directory
 
@@ -415,6 +440,11 @@ class BillHandler(AccountsHandler):
     def validate(self, run, files, context, domain, result):
         from .checks import adopt_exceptions
 
+        if run["config"].get("stage") == "posting_profile":
+            from .posting_profiles import masters_for, validate
+
+            guid = run["config"]["company_scope"][0]
+            return {"profile": validate(result, masters_for(run["config"], guid), guid)}
         if run["config"].get("stage") == "triage":
             known = {c["references"]["company_guid"] for c in run["config"]["tally_target"]["companies"]}
             routed = [b["source_file_id"] for b in result["bills"]]
@@ -460,6 +490,16 @@ class BillHandler(AccountsHandler):
         if run["config"].get("stage") == "triage":
             store.observe(connection, run, "review", "Bills routed to their companies.", 70)
             return
+        if run["config"].get("stage") == "posting_profile":
+            from .posting_profiles import proposed
+
+            proposed(connection, run, result["profile"])
+            store.observe(connection, run, "review", "Posting pattern ready for one confirmation.", 70)
+            return
+        if run["config"].get("posting_profiles"):
+            from .posting_profiles import misses
+
+            misses(connection, run, result)
         if not run.get("parent_run_id"):
             from .attention import flag, issue_record
             for issue in result.get("unresolved", []):

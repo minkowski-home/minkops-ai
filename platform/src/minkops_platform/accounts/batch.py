@@ -51,7 +51,7 @@ def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=
         config.pop(field, None)
     config.pop("stage", None)
     config.pop("expanded", None)
-    file_ids = file_ids or [file_id]
+    file_ids = file_ids if file_ids is not None else [file_id]
     config["file_ids"] = file_ids
     config["review_mode"] = "all_outputs"
     if stage:
@@ -61,8 +61,18 @@ def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=
         config["agent_output_schema"] = stage_schema(config["execution_snapshot"], stage)
     else:
         config["agent_output_schema"] = run["config"].get("agent_output_schema")
-        if config.get("company_scope") and config.get("source_catalog_snapshot"):
-            _bind_scoped_assets(connection, run, config, file_ids)
+    if config.get("company_scope") and config.get("source_catalog_snapshot"):
+        _bind_scoped_assets(connection, run, config, file_ids)
+    if not stage and config.get("company_scope") and config.get("tally_target", {}).get("voucher_proposal_version") == 1:
+        # A posting session uses its company's confirmed pattern, or waits for it.
+        from .posting_profiles import attach
+
+        profile = attach(connection, run, config, config["company_scope"][0])
+        if profile["status"] == "active":
+            connection.execute(
+                """UPDATE workflow_runs SET config=config || jsonb_build_object('posting_profiles',
+                    coalesce(config->'posting_profiles','{}'::jsonb) || %s::jsonb) WHERE id=%s""",
+                (Jsonb({config["company_scope"][0]: config["posting_profiles"][config["company_scope"][0]]}), run["id"]))
     child = connection.execute(
         """INSERT INTO account_runs
             (tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,request_hash,config,file_ids,catalog_id,parent_run_id)
@@ -228,6 +238,10 @@ def recheck_many(connection, tenant, user, run, file_ids):
 
 def reconcile_once(url):
     with psycopg.connect(url, row_factory=dict_row) as connection:
+        from .posting_profiles import sweep
+
+        with connection.transaction():
+            sweep(connection)
         # NO KEY UPDATE still serializes aggregators and business mutations, but
         # lets the separate diagnostics transaction check its run foreign key.
         parents = connection.execute("""SELECT * FROM account_runs WHERE

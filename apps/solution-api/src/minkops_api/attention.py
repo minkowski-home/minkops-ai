@@ -40,6 +40,19 @@ def refresh_one(slug: str, item_id: UUID, request: Request, user: User, connecti
     return _call(attention.refresh, connection, tenant["id"], user, item_id)
 
 
+class ProfileDecision(BaseModel):
+    action: Literal["confirm", "nothing"]
+
+
+@router.post("/{item_id}/profile")
+def profile_decision(slug: str, item_id: UUID, body: ProfileDecision, request: Request, user: User, connection: Db):
+    """Confirm, or decline, a company's derived posting pattern."""
+    from minkops_platform.accounts.posting_profiles import decide as decide_profile
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    return _call(decide_profile, connection, tenant, user, item_id, body.action)
+
+
 class Decision(BaseModel):
     action: Literal["nothing", "guess", "supplier", "retry", "retry_save"]
     # Index of the bill in the run result; a file can hold several bills.

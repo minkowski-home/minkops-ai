@@ -95,7 +95,7 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status"}[group]
     ordering = "a.identifier" if sort == "name" else "a.updated_at DESC"
     rows = connection.execute(
-        f"""SELECT a.id,a.task_id,a.identifier,a.label,a.status,a.created_at,a.updated_at,a.done_at,a.target,
+        f"""SELECT a.id,a.task_id,a.identifier,a.label,a.kind,a.status,a.created_at,a.updated_at,a.done_at,a.target,
         a.done_by,a.authorized_by,w.name AS workflow,
         coalesce((SELECT string_agg(e.name,', ' ORDER BY e.name) FROM employees e
           JOIN workflow_employees we ON we.employee_id=e.id AND we.tenant_id=e.tenant_id
@@ -109,6 +109,10 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     for row in rows:
         target = row.pop("target")
         row["reason"] = target.get("reason") or reason_sentence({}, title=row["label"])
+        if row["kind"] == "profile":
+            # Only what the member confirms: never identities or internal targets.
+            row["profile"] = {"company": target.get("company"), "summary": target.get("summary", [])[:8],
+                              "waiting": target.get("waiting", 0)}
     return rows
 
 

@@ -15,6 +15,8 @@ class WorkflowRunStore:
             AND (NOT config ? 'tally_context_job_id' OR EXISTS
                 (SELECT 1 FROM desktop_jobs j WHERE j.tenant_id=workflow_runs.tenant_id
                  AND j.id::text=config->>'tally_context_job_id' AND j.state IN ('completed','failed')))
+            -- A session waiting for a client profile starts once that profile is active.
+            AND NOT config ? 'awaits'
             ORDER BY updated_at LIMIT 10""").fetchall()
 
     def get(self, connection, tenant_id, run_id):

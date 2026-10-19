@@ -339,6 +339,19 @@ class Masters:
     def identity(self, data):
         return {key: self._text(data.get(key)) for key in ("GUID", "PARENT", "ALTERID")}
 
+    def under(self, parent, groups):
+        """Is a ledger's parent one of `groups`, directly or through its group chain?"""
+        chain = {self.name(d): self.scalar(d, "PARENT") for (kind, _), found in self.by_key.items()
+                 if kind == "GROUP" for d in found}
+        wanted = {g.casefold() for g in groups}
+        for _ in range(50):
+            if not parent:
+                return False
+            if parent.casefold() in wanted:
+                return True
+            parent = chain.get(parent)
+        return False
+
     def family(self, voucher_type):
         return BASE_FAMILY.get(str(self.bases.get(self.name(voucher_type).casefold()) or "").casefold())
 
@@ -408,7 +421,8 @@ class Bill:
             "lines": self.lines,
             "references": {"company_guid": self.target["references"]["company_guid"], "ledgers": self.identities},
             "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice" else ["debit_note"],
-                          "party_ledger": self.party, "number": self.number, "number_fields": ["REFERENCE"],
+                          "party_ledger": self.party, "number": self.number,
+                          "number_fields": getattr(self, "number_fields", ["REFERENCE"]),
                           "window": invoice_window(date.fromisoformat(self.date))},
             "fence": "retry_after_read",
             "expected": {"guid": expected["guid"], "fingerprint": expected["fingerprint"]} if expected else None,
@@ -486,7 +500,12 @@ def check(record, config, *, assume_new_supplier=False):
                                "Select one discovered voucher type of the routed company.")
     if masters.family(voucher_type) != family or masters.scalar(voucher_type, "ISACTIVE").casefold() == "no":
         raise _hold("classification_uncertain", f"The voucher type must be an active {family.replace('_', ' ')} type.")
-    if family == "purchase":
+    profile = (config.get("posting_profiles") or {}).get(target["references"]["company_guid"])
+    if profile:
+        expected = (profile.get("families") or {}).get(document["kind"]) or {}
+        if expected.get("family") != family or expected.get("voucher_type_guid") != masters.scalar(voucher_type, "GUID"):
+            raise _hold("posting_profile_miss", "This document's voucher type differs from the company's confirmed posting pattern.")
+    elif family == "purchase":
         if target.get("voucher_type_error"):
             raise _hold("voucher_type_unresolved", target["voucher_type_error"])
         if (target.get("voucher_type") or {}).get("GUID") != masters.scalar(voucher_type, "GUID"):
@@ -505,11 +524,15 @@ def check(record, config, *, assume_new_supplier=False):
         party_name, party_identity = masters.name(ledger), masters.identity(ledger)
     if not isinstance(party.get("evidence"), str) or not party["evidence"].strip():
         raise _hold("supplier_unresolved", "The supplier selection needs evidence.")
+    if profile and party_identity and not masters.under(party_identity.get("PARENT"), profile["party_groups"]):
+        raise _hold("posting_profile_miss", f"{party_name} is outside the supplier groups of the confirmed posting pattern.")
 
     raw = voucher.get("lines")
     if not isinstance(raw, list) or not 1 <= len(raw) <= 39:
         raise _hold("unsupported_structure", "A bill voucher carries 1–39 lines besides the supplier.")
-    lines, identities, taxes, tds, round_offs = [], {}, [], 0, 0
+    lines, identities, taxes, tds, round_offs = [], {}, [], [], 0
+    pattern_tds = {t["ledger_guid"]: t for t in ((profile or {}).get("tds") or {}).get("ledgers", [])}
+    pattern_round = (profile or {}).get("round_off")
     for item in raw:
         if (not isinstance(item, dict) or item.get("role") not in LINE_ROLES or item.get("side") not in ("debit", "credit")
                 or not isinstance(item.get("evidence"), str) or not item["evidence"].strip()):
@@ -532,11 +555,16 @@ def check(record, config, *, assume_new_supplier=False):
             allocation = {"category": masters.name(category), "category_guid": masters.scalar(category, "GUID"),
                           "centre": masters.name(centre), "centre_guid": masters.scalar(centre, "GUID")}
         if item["role"] == "tds":
-            tds += 1
+            if item["ledger_guid"] not in pattern_tds or item["side"] != PARTY_SIDE[family]:
+                raise _hold("classification_uncertain", "TDS deductions need this company's confirmed posting profile. Enter this bill in Tally.")
+            tds.append((pattern_tds[item["ledger_guid"]], cents))
         if item["role"] == "round_off":
             round_offs += 1
-            if cents > ROUND_OFF_CAP_CENTS:
+            cap = pattern_round["max_cents"] if pattern_round else ROUND_OFF_CAP_CENTS
+            if cents > cap:
                 raise _hold("source_values_conflict", "A round-off above one rupee is not a rounding difference.")
+            if pattern_round and item["ledger_guid"] != pattern_round["ledger_guid"]:
+                raise _hold("posting_profile_miss", "Round-off posts to a different ledger in the confirmed posting pattern.")
         if item["role"] == "tax":
             tax = item.get("tax")
             if (not isinstance(tax, dict) or tax.get("head") not in ("cgst", "sgst", "igst", "cess")
@@ -546,17 +574,25 @@ def check(record, config, *, assume_new_supplier=False):
                           "taxable_cents": _money(tax.get("taxable"), "The taxable value")})
         lines.append(_line(name, item["side"], cents, allocation))
     if tds:
-        raise _hold("classification_uncertain", "TDS deductions need this company's confirmed posting profile. Enter this bill in Tally.")
+        # Deducted on the contract value, the expense lines, never on GST.
+        base = sum(ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] == "expense")
+        from decimal import ROUND_HALF_UP
+        for rule, cents in tds:
+            expected = (Decimal(str(rule["rate"])) * base / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+            if abs(cents - int(expected)) > 100:
+                raise _hold("source_values_conflict", f"TDS does not match {rule['section']} at {rule['rate']}% of the bill's value.")
     if round_offs > 1:
         raise _hold("source_values_conflict", "A bill has at most one round-off line.")
     _tax_consistent(taxes)
-    party_cents = _money(document["total"], "The bill total")
+    party_cents = _money(document["total"], "The bill total") - sum(cents for _, cents in tds)
     party_line = _line(party_name, PARTY_SIDE[family], party_cents)
     native = [party_line, *lines]
     if sum(ln["amount_cents"] for ln in native if ln["side"] == "debit") != sum(ln["amount_cents"] for ln in native if ln["side"] == "credit"):
         raise _hold("source_values_conflict", "The voucher lines must add up exactly to the printed total.")
     voucher_type_ref = {"NAME": masters.name(voucher_type), "GUID": masters.scalar(voucher_type, "GUID")}
-    return Bill(target, record, family, voucher_type_ref, party_name, party_identity, native, identities)
+    bill = Bill(target, record, family, voucher_type_ref, party_name, party_identity, native, identities)
+    bill.number_fields = list((profile or {}).get("invoice_number", {}).get("fields") or ["REFERENCE"])
+    return bill
 
 
 class LegacyBill:

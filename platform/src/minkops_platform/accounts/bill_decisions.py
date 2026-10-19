@@ -8,7 +8,7 @@ from .client_context import select_target
 # The matrix is a ceiling. Complete values, positive supplier evidence and the
 # pinned company/master identities can further restrict these actions.
 HANDLERS = {code: ("nothing", "retry") for code in REASONS}
-for _code in ("source_unreadable", "classification_uncertain", "manual_review"):
+for _code in ("source_unreadable", "classification_uncertain", "manual_review", "posting_profile_miss"):
     HANDLERS[_code] = ("guess", "nothing", "retry")
 HANDLERS["supplier_missing"] = ("supplier", "nothing", "retry")
 for _code in ("company_not_open", "no_company", "duplicate_company", "not_running", "port_closed",
