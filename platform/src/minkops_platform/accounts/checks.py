@@ -19,6 +19,7 @@ EXCEPTION_LABELS = {
     "classification_uncertain": "Ledger unclear",
     "unsupported_structure": "Manual entry needed",
     "date_before_books": "Before books begin",
+    "identity_rule_unknown": "Foreign supplier",
     "destination_changed": "Tally changed",
     "voucher_type_unresolved": "Voucher type needed",
     "extraction_failed": "Recheck bill",
@@ -177,6 +178,42 @@ def check_records(result, catalog, input_ids, contents, checks):
     if not isinstance(result["findings"], list) or not all(
         isinstance(v, str) for v in result["findings"]
     ):
+        raise ValueError("Overall findings must be text.")
+    return result
+
+
+def check_voucher_records(result, input_ids):
+    """Coverage and evidence for voucher proposals; accounting rules live in vouchers.check."""
+    if not isinstance(result, dict) or not isinstance(result.get("records"), list):
+        raise ValueError("Bill extraction must return records.")
+    seen = {i["source_file_id"] for i in result.get("deferred", []) if i.get("source_file_id") in input_ids}
+    for issue in result.get("unresolved", []):
+        if (not isinstance(issue, dict) or issue.get("source_file_id") not in input_ids
+                or not isinstance(issue.get("reason"), str) or not issue["reason"].strip()):
+            raise ValueError("Unresolved routing must identify an authorized bill and explain the issue.")
+        seen.add(issue["source_file_id"])
+    for record in result["records"]:
+        if record.get("source_file_id") not in input_ids:
+            raise ValueError("Result refers to an unauthorized bill.")
+        seen.add(record["source_file_id"])
+        if record.get("operation") not in ("append", "update"):
+            raise ValueError("Result must select append or update.")
+        record.setdefault("findings", [])
+        record["derived_fields"] = {}
+        if not isinstance(record["findings"], list) or not all(isinstance(v, str) for v in record["findings"]):
+            raise ValueError("Findings must be text.")
+        if not isinstance(record.get("evidence"), list) or any(
+                not isinstance(e, dict) or not isinstance(e.get("page"), int) or e["page"] < 1
+                or not isinstance(e.get("quote"), str) for e in record["evidence"]):
+            raise ValueError("Field evidence must name a source page.")
+        quoted = {e.get("field") for e in record["evidence"] if e["quote"].strip()}
+        missing = [field for field in ("number", "date", "total", "supplier") if field not in quoted]
+        if missing:
+            record["findings"] = list(dict.fromkeys([*record["findings"], f"Missing source evidence: {', '.join(missing)}"]))
+    if seen != set(input_ids):
+        raise ValueError("Result must account for every selected input file.")
+    result.setdefault("findings", [])
+    if not isinstance(result["findings"], list) or not all(isinstance(v, str) for v in result["findings"]):
         raise ValueError("Overall findings must be text.")
     return result
 

@@ -81,7 +81,9 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 discovery_id,
                 ["tally"],
             )
-            catalog_snapshot = tally_mapping(discovery_id)
+            # From bill-entry 0.14 the AI proposes vouchers; there is no fixed sheet.
+            proposals = tuple(map(int, definition.metadata["version"].split("."))) >= (0, 14, 0)
+            catalog_snapshot = {"sheets": []} if proposals else tally_mapping(discovery_id)
             if "companies" not in target:
                 raise ServiceError(
                     "conflict",
@@ -93,6 +95,9 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             if tuple(map(int, definition.metadata["version"].split("."))) >= (0, 13, 0):
                 desktop.require_companion(desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 8, 0))
                 target["supplier_creation_version"] = 1
+            if proposals:
+                desktop.require_companion(desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 9, 0))
+                target["voucher_proposal_version"] = 1
             target["locked_company_guid"] = selections.get("locked_company_guid")
             if target["company_mode"] == "locked":
                 from .client_context import select_target
@@ -384,10 +389,18 @@ class BillHandler(AccountsHandler):
             raise ValueError(
                 "Agent proposals must append by default; edits require explicit review."
             )
+        if run["config"].get("tally_target", {}).get("voucher_proposal_version") == 1:
+            from .bills import capture_tally_findings
+            from .checks import check_voucher_records
+
+            if any("voucher" not in r for r in result.get("records", [])):
+                raise ValueError("Tally proposals must state the document and its voucher.")
+            check_voucher_records(result, run["file_ids"])
+            return capture_tally_findings(result, run["config"])
         if run["config"].get("tally_target"):
             from .bills import capture_tally_findings
 
-            capture_tally_findings(result, run["config"]["tally_target"])
+            capture_tally_findings(result, run["config"])
         result = populate_entry_ids(result, context["catalog"], run["id"])
         result = check_records(
             result,

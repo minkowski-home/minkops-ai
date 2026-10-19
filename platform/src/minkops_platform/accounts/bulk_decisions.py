@@ -26,7 +26,7 @@ def _digest(value):
 
 
 def proposal_identity(record):
-    return _digest({key: record.get(key) for key in ("source_file_id", "company_guid", "data", "tax_allocations", "operation")})
+    return _digest({key: record.get(key) for key in ("source_file_id", "company_guid", "data", "tax_allocations", "document", "voucher", "operation")})
 
 
 def subject_for(run, record):

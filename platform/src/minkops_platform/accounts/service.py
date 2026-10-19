@@ -111,11 +111,18 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "evidence",
                     "company_guid",
                     "company_evidence",
+                    "document",
+                    "voucher",
                 ):
                     if edited.get(field) != old.get(field):
                         raise ValueError(
                             "Review may change values and append/edit choice, not source evidence or routing."
                         )
+                if "voucher" in old:
+                    # The document summary is server-derived; the proposal itself is compared above.
+                    if edited.get("operation", old["operation"]) != old["operation"]:
+                        raise ValueError("Edit accounting values in the original system, not Minkops.")
+                    continue
                 if any(
                     edited["data"].get(k) != old["data"].get(k)
                     for k in old.get("derived_fields", {})
@@ -167,26 +174,31 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "UPDATE account_runs SET config=%s WHERE id=%s",
                     (Jsonb(run["config"]), run["id"]),
                 )
-            # User edits can correct bill identity. Recompute app-owned IDs from
-            # the reviewed values rather than retaining an extraction-time ID.
-            populate_entry_ids(
-                {
-                    "records": [
-                        r
-                        for r in reviewed["records"]
-                        if r.get("status") not in ("saved", "duplicate", "rejected")
-                    ]
-                },
-                catalog,
-                run["id"],
-            )
-            checked = check_records(
-                reviewed,
-                catalog,
-                run["file_ids"],
-                contents,
-                [] if tally else run["config"]["checks"],
-            )
+            if (tally or {}).get("voucher_proposal_version") == 1:
+                # Voucher proposals are bound and checked in prepare(); coverage only here.
+                from .checks import check_voucher_records
+                checked = check_voucher_records(reviewed, run["file_ids"])
+            else:
+                # User edits can correct bill identity. Recompute app-owned IDs from
+                # the reviewed values rather than retaining an extraction-time ID.
+                populate_entry_ids(
+                    {
+                        "records": [
+                            r
+                            for r in reviewed["records"]
+                            if r.get("status") not in ("saved", "duplicate", "rejected")
+                        ]
+                    },
+                    catalog,
+                    run["id"],
+                )
+                checked = check_records(
+                    reviewed,
+                    catalog,
+                    run["file_ids"],
+                    contents,
+                    [] if tally else run["config"]["checks"],
+                )
             if (checked["findings"] or any(r["findings"] for r in checked["records"])) and not body[
                 "acknowledge_findings"
             ]:

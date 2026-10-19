@@ -155,28 +155,23 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
         raise ServiceError("invalid", "No supported proposal. Handle this bill in the original system.")
     scope = run["config"].get("tally_target")
     from .client_context import select_target
-    from .bills import validate_tally
+    from .bill_decisions import supported_write
+    from .vouchers import resolve
     try:
         selected = select_target(record, scope) if scope else None
         if action == "supplier":
-            if scope and scope.get("master_selection_version") == 1:
-                from .master_selection import resolve_masters
-
-                # Missing names are not evidence of a genuinely new supplier.
-                # Require an explicit lookup outcome and valid other selections.
-                resolve_masters(record, selected, required=True,
-                                allow_split=scope.get("tax_allocation_version") == 1)
-                if record["master_refs"]["vendor"].get("new_supplier") is not True:
-                    raise ValueError("Supplier match must be resolved before master creation.")
-            if not selected or record["data"].get("vendor") in selected["ledgers"]:
+            # Missing names are not evidence of a genuinely new supplier: the
+            # proposal must establish one, with evidence, and be otherwise valid.
+            if not selected or not supported_write(run, record, supplier=True):
                 raise ValueError("Supplier creation needs a supported bill and a positively new supplier.")
+            if "voucher" in record:
+                from .vouchers import summary
+                record["data"] = summary(record, run["config"])
+            elif scope.get("master_selection_version") == 1:
+                from .master_selection import resolve_masters
+                resolve_masters(record, selected, required=True, allow_split=scope.get("tax_allocation_version") == 1)
             from .supplier_gst import creation_plan
             gst_supplier = creation_plan(run, record, selected)
-            vendor = record["data"]["vendor"]
-            if not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in record["evidence"]):
-                raise ValueError("Supplier name needs bill evidence.")
-            prospective = {**selected, "ledgers": [*selected["ledgers"], vendor]}
-            validate_tally(record["data"], prospective, record.get("tax_allocations"))
             item = flag(connection, run, record, title="Missing supplier", kind="supplier", actor=user["id"])
             if gst_supplier:
                 connection.execute("UPDATE attention_items SET target=target || %s WHERE tenant_id=%s AND id=%s RETURNING *",
@@ -186,7 +181,7 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
         if action != "guess":
             raise ValueError("Unsupported bill decision.")
         if selected:
-            validate_tally(record["data"], selected, record.get("tax_allocations"))
+            resolve(record, run["config"])
         if record.get("findings"):
             flag(connection, run, record, title="Review written bill", kind="review", actor=user["id"])
         # One click authorizes the observed correction; no operation or values
@@ -267,7 +262,8 @@ def check_observation(item, observation):
                 and current["vendor"] == target["vendor"] and bool(current.get("guid"))
                 and bool(current.get("fingerprint")) and len(amounts) >= 2
                 and all(v.is_finite() for v in amounts) and sum(amounts) == 0
-                and any(e["ledger"] == target["vendor"] and Decimal(str(e["amount"])) > 0 for e in entries))
+                # The supplier is credited on purchases and debited on debit notes.
+                and any(e["ledger"] == target["vendor"] and Decimal(str(e["amount"])) != 0 for e in entries))
         except (KeyError, TypeError, InvalidOperation):
             valid = False
     masters = observation.get("ledgers", [])
@@ -364,7 +360,15 @@ def supplier_created(connection, item, job, observation):
         selected["ledgers"] = list(dict.fromkeys([*selected["ledgers"], target["vendor"]]))
         selected["references"]["ledgers"][target["vendor"]] = {k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}
         record["data"]["vendor"] = target["vendor"]
-        if run["config"]["tally_target"].get("master_selection_version") == 1:
+        if "voucher" in record:
+            # The verified native master joins this run's pinned company view.
+            created = {"company_guid": target["company_guid"], "type": "LEDGER",
+                       "data": {"NAME": target["vendor"], **{k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}}}
+            if created not in run["config"].setdefault("created_masters", []):
+                run["config"]["created_masters"].append(created)
+            record["voucher"]["party"] = {"ledger_guid": master["GUID"], "new_supplier": False,
+                                          "evidence": "Explicit supplier creation verified by native readback."}
+        elif run["config"]["tally_target"].get("master_selection_version") == 1:
             from .master_selection import ledger_reference
             identity = selected["references"]["ledgers"][target["vendor"]]
             ref = ledger_reference(selected, target["vendor"], identity)
