@@ -116,6 +116,7 @@ test('one import carries every line with native signs, allocations and the pinne
   const result = await saveVoucher(purchase, io.options);
   assert.equal(result.outcome, 'saved');
   assert.equal(result.current.family, 'purchase');
+  assert.equal(result.current.narration, 'Minkops reviewed bill INV-17');
   assert.equal(io.imports.length, 1);
   const body = io.imports[0];
   for (const fragment of [

@@ -265,7 +265,7 @@ export function documentMatches(voucher, duplicate) {
 /** The observed voucher as receipts and attention observations report it. */
 export function observedVoucher(v, family) {
   return {guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family,
-    reference: v.reference, number: v.number, party_ledger: v.party_ledger, tag: v.tag,
+    reference: v.reference, number: v.number, narration: v.narration, party_ledger: v.party_ledger, tag: v.tag,
     lines: v.entries, allocations: v.allocations, fingerprint: v.fingerprint};
 }
 
