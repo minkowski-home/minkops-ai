@@ -209,8 +209,9 @@ is preferred, then the supplier ID; several bills may share that ID.
 
 ## Source accuracy and recovery
 
-Business identity uses supplier, invoice number and Indian April–March financial
-year when those confirmed concepts exist. Excel otherwise uses complete confirmed
+Business identity uses supplier, invoice number and the Indian April–March
+invoice year (`accounts/vouchers.py` `invoice_year`): supplier serials are unique
+within it, whatever financial year the buyer's books use. Excel otherwise uses complete confirmed
 business keys. IDs do not depend on a task, uploaded filename or processing order.
 Existing external rows/vouchers and backfills are checked against destination
 data, rather than relying only on prior application history.
@@ -222,6 +223,16 @@ corrections compare the complete fetched voucher fingerprint, then target its
 observed original date and MASTER ID. Another intervening edit requires another
 review. Updates retain the observed voucher GUID; Tally may assign its own GUID
 on creation.
+
+Approved plans keep the format they were approved in. A protocol-5 companion
+(0.9.0+) receives each one as a v5 voucher (header plus balanced ledger lines,
+see [Windows app](windows-app.md#companion-090-contracts)) searched within the
+bill's invoice year; its receipt is verified against that upgrade and stored in
+the usual observation shape. The invoice identity hash is unchanged, so vouchers
+saved earlier keep their remote IDs and reservations. Plans without discovered
+ledger and voucher-type GUIDs keep their original writer until they drain.
+Refresh observes bills with the same reader as the save, so a reader change is
+never mistaken for an edit made in Tally.
 
 Pending writes reserve the workbook, or the company GUID and bill identity,
 across runs and registered PCs. Confirmed Tally company/ledger identities and

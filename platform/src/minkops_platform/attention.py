@@ -33,6 +33,10 @@ def resolved(item, observation):
     if item["kind"] == "bill" and not target.get("baseline"):
         return bool(current)
     baseline = target.get("baseline") or {}
+    # Fingerprints from different native readers are not comparable: never
+    # treat a reader change as an edit made in Tally.
+    if str(baseline.get("fingerprint", "")).startswith("v5:") != str(current.get("fingerprint", "")).startswith("v5:"):
+        return False
     return item["kind"] in ("bill", "review") and bool(baseline.get("fingerprint")) and (
         current.get("guid") == baseline.get("guid")
         and bool(current.get("fingerprint"))
@@ -154,7 +158,21 @@ def plan(connection, device, job, *, plan_version=1):
         raise ServiceError("conflict", "Attention item no longer pending on this PC.")
     if item["target"].get("gst_supplier") and plan_version < 4:
         raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later before creating or verifying this GST supplier.")
-    return item["target"]
+    return native_target(item["target"], plan_version)
+
+
+def native_target(target, plan_version):
+    """A protocol-5 companion observes bills with the voucher writer's reader,
+    so a refresh fingerprint is comparable with the one saved at write time.
+    A baseline saved by the older reader keeps being observed by that reader."""
+    baseline = (target.get("baseline") or {}).get("fingerprint")
+    if (plan_version < 5 or target.get("tool") != "tally" or not target.get("date")
+            or (baseline is not None and not str(baseline).startswith("v5:"))):
+        return target
+    from datetime import date
+    from .accounts.vouchers import BILL_FAMILIES, invoice_window
+    return {**target, "document": {"window": invoice_window(date.fromisoformat(target["date"])),
+                                   "number_fields": ["REFERENCE"], "families": BILL_FAMILIES}}
 
 
 def accept(connection, device, job, observation, error=None):

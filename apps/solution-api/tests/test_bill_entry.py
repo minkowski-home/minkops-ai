@@ -670,7 +670,9 @@ class BillEntryTests(unittest.TestCase):
         books_from=None,
         voucher_types=("Purchase",),
         vouchers=(),
+        native_ids=False,
     ):
+        """`native_ids` gives masters the GUID/PARENT/ALTERID a live export carries."""
         self.native = "/api/tenants/mock-tenant/desktop"
         if not reuse_device:
             self.device = self.client.post(
@@ -702,6 +704,10 @@ class BillEntryTests(unittest.TestCase):
             "ledgers": ["Supplier", "Purchases", "Tax", *extra_ledgers],
             "voucher_types": list(voucher_types),
         }
+        if native_ids:
+            for k, parent in (("ledgers", "Sundry Creditors"), ("voucher_types", None)):
+                names[k] = [v if isinstance(v, dict) else {"NAME": v, "GUID": f"{v}-guid", "ALTERID": "4",
+                                                           **({"PARENT": parent} if parent else {})} for v in names[k]]
         receipt = {
             "sources": [
                 {
@@ -842,7 +848,7 @@ class BillEntryTests(unittest.TestCase):
             "exceptions": [],
         }
 
-    def tally_job(self, run):
+    def tally_job(self, run, version="3"):
         payload = {
             "device_id": self.device["id"],
             "request_key": str(uuid.uuid4()),
@@ -854,10 +860,20 @@ class BillEntryTests(unittest.TestCase):
         claim = self.client.post("/api/desktop/worker/claim", headers=self.worker, json={}).json()
         route = f"/api/desktop/worker/jobs/{claim['id']}"
         plan = self.client.get(
-            route + "/plan?claim_token=" + claim["claim_token"], headers={**self.worker,"X-Minkops-Plan-Version":"3"}
+            route + "/plan?claim_token=" + claim["claim_token"], headers={**self.worker,"X-Minkops-Plan-Version":version}
         )
         self.assertEqual(plan.status_code, 200, plan.text)
         return claim, route, plan.json()
+
+    @staticmethod
+    def observed_v5(plan, **overrides):
+        """The voucher a protocol-5 companion reports for exactly this plan."""
+        lines = sorted(({"ledger": ln["ledger"], "amount_cents": ln["amount_cents"] if ln["side"] == "credit" else -ln["amount_cents"]}
+                        for ln in plan["lines"]), key=lambda e: (e["ledger"], e["amount_cents"]))
+        return {"guid": "a1b2c3d4-0000-4000-8000-000000000007", "master_id": "1", "date": plan["header"]["date"].replace("-", ""),
+                "voucher_type": plan["voucher_type"]["NAME"], "family": plan["family"], "reference": plan["header"]["reference"],
+                "number": "", "narration": plan["header"]["narration"], "party_ledger": plan["header"]["party_ledger"],
+                "tag": None, "lines": lines, "allocations": [], "fingerprint": "v5:" + "b" * 64, **overrides}
 
     def current(self, plan, total=118):
         return {
@@ -913,6 +929,44 @@ class BillEntryTests(unittest.TestCase):
         repeat = self.approve(repeat, self.tally_result(repeat, bill))
         _, _, replayed_plan = self.tally_job(repeat)
         self.assertEqual(replayed_plan["remote_id"], plan["remote_id"])
+
+    def test_protocol_five_companion_saves_the_approved_bill_as_a_verified_v5_voucher(self):
+        # Without discovered GUIDs a plan cannot be rechecked natively: it keeps its approved format.
+        legacy_discovery = self.tally_discovery()
+        bill = self.upload_bill()
+        legacy, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
+                                config={"output_mode": "tally_in_place", "discovery_id": legacy_discovery})
+        self.process(legacy, self.tally_result(legacy, bill))
+        legacy = self.approve(legacy, self.tally_result(legacy, bill))
+        self.assertEqual(self.tally_job(legacy, version="5")[2]["format_version"], 3)
+
+        discovery_id = self.tally_discovery(native_ids=True)
+        bill = self.upload_bill("native.pdf")
+        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
+                             config={"output_mode": "tally_in_place", "discovery_id": discovery_id})
+        self.process(run, self.tally_result(run, bill))
+        run = self.approve(run, self.tally_result(run, bill))
+        claim, route, plan = self.tally_job(run, version="5")
+        self.assertEqual((plan["format_version"], plan["family"], plan["fence"]), (5, "purchase", "retry_after_read"))
+        self.assertEqual(plan["duplicate"]["window"], {"from": "2026-04-01", "to": "2027-03-31"})
+        self.assertEqual(sorted((ln["ledger"], ln["side"], ln["amount_cents"]) for ln in plan["lines"]),
+                         [("Purchases", "debit", 10000), ("Supplier", "credit", 11800), ("Tax", "debit", 1800)])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            stored = c.execute("SELECT plan,identity FROM account_tally_writes WHERE run_id=%s", (run["id"],)).fetchone()
+        self.assertEqual(stored["plan"]["format_version"], 3)  # Approved plans are never rewritten.
+        self.assertEqual(plan["identity"]["hash"], stored["identity"])
+        bad = self.observed_v5(plan, lines=[{**e, "amount_cents": e["amount_cents"] + (1 if e["amount_cents"] > 0 else 0)} for e in self.observed_v5(plan)["lines"]])
+        refused = self.client.post(route + "/finish", headers=self.worker,
+                                   json={"claim_token": claim["claim_token"], "result": {"outcome": "saved", "current": bad}})
+        self.assertGreaterEqual(refused.status_code, 400)
+        receipt = {"claim_token": claim["claim_token"], "result": {"outcome": "saved", "current": self.observed_v5(plan)}}
+        r = self.client.post(route + "/finish", headers=self.worker, json=receipt)
+        self.assertEqual(r.status_code, 200, r.text)
+        saved = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual(saved["state"], "completed")
+        current = saved["result"]["records"][0]["current"]
+        self.assertEqual((current["invoice_number"], current["vendor"], current["fingerprint"][:3]), ("MOCK-1", "Supplier", "v5:"))
+        self.assertIn({"ledger": "Supplier", "amount": 11800}, current["entries"])
 
     def test_correction_handoff_preserves_old_snapshot_and_requires_explicit_edit(self):
         did = self.tally_discovery()

@@ -35,6 +35,7 @@ def target_for(connection, run, record):
     return {"tool": "tally", "device_id": scope["device_id"], "company": selected["company"],
             "company_guid": selected["references"]["company_guid"], "port": selected["port"],
             "vendor": record["data"].get("vendor"), "invoice_number": record["data"].get("invoice_number"),
+            "date": record["data"].get("date"),
             "run_id": str(run["id"]), "file_id": record["source_file_id"],
             "baseline": record.get("current")}
 
@@ -254,6 +255,9 @@ def check_observation(item, observation):
     # Native observations are data. The server independently validates the
     # business identity and balanced accounting entries before completion.
     current = observation.get("current")
+    if isinstance(current, dict) and "lines" in current:
+        from .vouchers import observed_document
+        current = observed_document(current, target)
     valid = False
     if current:
         try:

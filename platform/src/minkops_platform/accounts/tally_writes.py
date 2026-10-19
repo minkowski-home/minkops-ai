@@ -309,7 +309,18 @@ def accept(connection, device, payload, receipt):
         raise ServiceError("invalid", "Invalid Tally write receipt.")
     outcome = receipt["outcome"]
     current = receipt.get("current")
-    if outcome in ("saved", "duplicate", "correction"):
+    if outcome in ("saved", "duplicate", "correction") and isinstance(current, dict) and "lines" in current:
+        # Protocol 5: verify against the plan this companion was served.
+        from .vouchers import observed_bill, upgrade
+
+        plan = upgrade(write["plan"], identity=write["identity"])
+        if plan is None:
+            raise ServiceError("invalid", "This approved bill was not served as a protocol 5 voucher.")
+        try:
+            current = observed_bill(plan, outcome, current, identity=write["identity"])
+        except ValueError as error:
+            raise ServiceError("invalid", str(error)) from error
+    elif outcome in ("saved", "duplicate", "correction"):
         if not isinstance(current, dict) or set(current) - {"voucher_type"} != {
             "master_id",
             "guid",
@@ -411,8 +422,9 @@ def accept(connection, device, payload, receipt):
     if current and outcome in ("saved", "duplicate"):
         from .attention import written
         written(connection, run, record, result)
-        connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
-            (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
+        connection.execute("UPDATE attention_items SET target=target||%s,updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
+            (Jsonb({"baseline": current, "date": record["data"].get("date")}), run["tenant_id"],
+             f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":
         add_note(record, "Exact duplicate already exists; no additional voucher was created.")
     elif outcome == "correction":

@@ -233,9 +233,18 @@ def accept(connection, device, payload, receipt):
     if run['workflow_key']!='statement-entry': raise ServiceError('invalid','Not a statement write.')
     if not isinstance(receipt,dict) or receipt.get('outcome') not in ('saved','duplicate','attention'):
         raise ServiceError('invalid','Invalid statement receipt.')
-    outcome=receipt['outcome']; plan=write['plan']; data=plan['data']
+    outcome=receipt['outcome']; plan=write['plan']; data=plan['data']; raw=receipt
     verified=outcome in ('saved','duplicate')
-    if verified:
+    if verified and isinstance(receipt.get('current'),dict) and 'lines' in receipt['current']:
+        # Protocol 5: verify against the upgraded plan, store the row's usual observation.
+        from .vouchers import observed_statement, upgrade
+        upgraded=upgrade(plan,identity=write['identity'])
+        try:
+            if upgraded is None or receipt.get('company_guid')!=plan['company_guid']: raise ValueError('Native statement readback differs from the approved manifest.')
+            receipt={**receipt,'current':observed_statement(upgraded,plan,receipt['current'])}
+        except ValueError as error:
+            raise ServiceError('invalid',str(error)) from error
+    elif verified:
         current=receipt.get('current',{})
         if (not isinstance(current,dict) or not isinstance(current.get('entries'),list)
             or any(not isinstance(e,dict) or set(e)!={'ledger','amount'} or type(e['amount']) is not int or not isinstance(e['ledger'],str) for e in current['entries'])):
@@ -265,7 +274,7 @@ def accept(connection, device, payload, receipt):
             else:
                 sibling.pop('code',None); sibling.pop('reason',None); sibling.pop('save_hold',None)
     connection.execute('UPDATE account_tally_writes SET outcome=%s,receipt=%s,finished_at=now(),verified_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s',
-        (outcome,Jsonb(receipt),verified,write['id']))
+        (outcome,Jsonb(raw),verified,write['id']))
     complete(connection,run,result)
     # finish() still owns the current executing job. Queue the next only after
     # that job is marked terminal (desktop calls dispatch_next after persistence).

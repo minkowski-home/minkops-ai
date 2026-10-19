@@ -82,6 +82,31 @@ class StatementTests(unittest.TestCase):
                 self.assertEqual(writer.execute("SELECT count(*) FROM desktop_jobs WHERE task_id=%s AND operation='tally.statement'", (run['task_id'],)).fetchone()['count'], 1)
                 writer.rollback()
 
+    def test_protocol_five_companion_saves_statement_rows_as_verified_v5_vouchers(self):
+        run=self.ready()
+        approved=self.client.post(self.base+f"/runs/{run['id']}/approve",headers=self.csrf,json={'result':{'action':'write_ready'}})
+        self.assertEqual(approved.status_code,200,approved.text)
+        for _ in range(2):
+            job=self.client.post('/api/desktop/worker/claim',headers=self.worker,json={}).json()
+            route=f"/api/desktop/worker/jobs/{job['id']}"
+            plan=self.client.get(route+'/plan?claim_token='+job['claim_token'],headers={**self.worker,'X-Minkops-Plan-Version':'5'}).json()
+            self.assertEqual((plan['format_version'],plan['fence'],plan['header']['tag'],plan['duplicate']['strategy']),(5,'strict','statement','tag'))
+            self.assertIn(plan['family'],('payment','receipt'))
+            current={'guid':'a1b2c3d4-0000-4000-8000-000000000007','master_id':'5','date':plan['header']['date'].replace('-',''),
+                'voucher_type':plan['voucher_type']['NAME'],'family':plan['family'],'reference':plan['header']['reference'],'number':'',
+                'narration':f"[Minkops statement:{plan['remote_id']}] {plan['header']['narration']}",'party_ledger':'','tag':plan['remote_id'],
+                'lines':sorted(({'ledger':ln['ledger'],'amount_cents':ln['amount_cents'] if ln['side']=='credit' else -ln['amount_cents']} for ln in plan['lines']),key=lambda e:e['ledger']),
+                'allocations':[],'fingerprint':'v5:'+'c'*64}
+            receipt={'claim_token':job['claim_token'],'result':{'outcome':'saved','company_guid':'statement-company','current':current}}
+            tampered={**receipt,'result':{**receipt['result'],'current':{**current,'tag':None}}}
+            self.assertEqual(self.client.post(route+'/finish',headers=self.worker,json=tampered).status_code,422)
+            finished=self.client.post(route+'/finish',headers=self.worker,json=receipt)
+            self.assertEqual(finished.status_code,200,finished.text)
+        updated=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual([r['status'] for r in updated['result']['records']],['saved','saved','held'])
+        saved=updated['result']['records'][0]['current']
+        self.assertEqual((saved['allocation'],saved['fingerprint'][:3],len(saved['entries'])),(None,'v5:',2))
+
     def test_private_ai_preview_manifest_serial_receipts_and_csv(self):
         run=self.ready()
         csv=self.client.get(self.base+f"/runs/{run['id']}/statement-exceptions.csv")
