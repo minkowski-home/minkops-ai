@@ -6,8 +6,11 @@ worker restart without replaying the user's task. Ambiguous creation failures
 are surfaced for explicit intervention, never automatically resubmitted.
 """
 
+import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+
+import psycopg
 
 from minkops_platform.runtime import application, lifecycle
 
@@ -16,6 +19,7 @@ from .run_store import AccountsRunStore
 
 STORE = AccountsRunStore()
 WORKER_LANES = 4
+log = logging.getLogger(__name__)
 
 
 def process(connection, run, *, executor=execute):
@@ -53,8 +57,15 @@ def run_forever(url, *, lanes=WORKER_LANES):
     # source of truth for recovery, including independent paid child sessions.
     with ThreadPoolExecutor(max_workers=lanes) as pool:
         futures = [pool.submit(lane) for _ in range(lanes)]
-        for future in futures:
-            future.result()
+        while True:
+            done, _ = wait(futures,timeout=10,return_when=FIRST_EXCEPTION)
+            for future in done:
+                future.result()
+            from minkops_platform.run_limits import enforce
+            try:
+                enforce(url)
+            except psycopg.Error as error:
+                log.warning('Run limit monitor will retry (%s)',type(error).__name__)
 
 
 def cleanup_once(url):

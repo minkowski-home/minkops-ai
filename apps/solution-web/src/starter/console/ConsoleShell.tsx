@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { ThemePicker } from "../theme/ThemeContext";
 import { Icon } from "./Icon";
 import type { ConsoleRoute } from "./types";
+import { UpdateNotices } from './UpdateNotices';
 
 function initials(name: string) {
   return name.split(" ").slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -70,7 +71,7 @@ export function ConsoleShell({ children, title, tenantName, routeSlug, pendingCo
       <header className="console-header"><h1>{title}</h1><div className="console-header-tools">
         <span className="tenant-label">{tenantName}</span><ThemePicker />
       </div></header>
-      <div className="console-view">{children}</div>
+      <div className="console-view"><UpdateNotices />{children}</div>
     </main>
   </div>;
 }

@@ -29,7 +29,7 @@ async def private_api_cache(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "private, no-store"
-    if os.getenv("WORKER_JOB_RESOURCE") and request.method in {"POST", "PATCH", "DELETE"}:
+    if os.getenv("WORKER_JOB_RESOURCE") and request.url.path.startswith('/api/'):
         from minkops_platform.worker_hosting import dispatch
         from minkops_connectors.cloud_run import run_job
 

@@ -15,7 +15,8 @@
       "target": "console",
       "public": "../apps/solution-web/dist",
       "ignore": ["**/.*", "**/node_modules/**"],
-      "headers": [{"source": "/api/**", "headers": [{"key": "Cache-Control", "value": "private, no-store"}]}],
+      "headers": [{"source": "/api/**", "headers": [{"key": "Cache-Control", "value": "private, no-store"}]},
+                  {"source": "/version.json", "headers": [{"key": "Cache-Control", "value": "no-store"}]}],
       "rewrites": [
         {"source": "/api/**", "run": {"serviceId": "minkops-solution-api", "region": "us-central1"}},
         {"source": "**", "destination": "/index.html"}

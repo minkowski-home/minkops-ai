@@ -73,6 +73,15 @@ def close_session(session_id, *, client=None):
         (client or OpenAI(timeout=30, max_retries=0)).beta.agents.sessions.delete(session_id)
 
 
+def cancel_turn(session_id, turn_id=None, *, client=None):
+    """Cancel execution while preserving work; closing an SSE observer is insufficient."""
+    client = client or OpenAI(timeout=15, max_retries=0)
+    with suppress(NotFoundError):
+        if turn_id and client.beta.agents.sessions.turns.retrieve(turn_id,session_id=session_id).status in ('completed','failed','cancelled'):
+            return
+        client.beta.agents.sessions.events.create(session_id,events=[{'type':'agent.session.input.cancel'}])
+
+
 def execute(
     key,
     files,

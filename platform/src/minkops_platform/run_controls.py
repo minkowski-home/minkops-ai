@@ -46,6 +46,11 @@ def task_control(connection, tenant_id, user, task_id, action):
     A pause lets an underway operation finish; dispatch and approvals are fenced.
     Stop is irreversible and cancels unsaved plans while accepting late receipts.
     """
+    return _task_control(connection, tenant_id, user, task_id, action)
+
+
+def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minutes=None):
+    """Internal automatic stops share the operator's write/receipt fences."""
     if action not in ("pause", "resume", "stop"):
         raise ServiceError("invalid", "Choose pause, resume or stop.")
     connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (f"control:{task_id}",))
@@ -54,23 +59,32 @@ def task_control(connection, tenant_id, user, task_id, action):
     task = connection.execute("SELECT * FROM tasks WHERE tenant_id=%s AND id=%s FOR UPDATE", (tenant_id, task_id)).fetchone()
     if not task:
         raise ServiceError("not_found", "Task not found.")
-    if not owns_task(connection, tenant_id, task_id, user["id"]):
+    if user is not None and not owns_task(connection, tenant_id, task_id, user["id"]):
         raise ServiceError("forbidden", "Only the operator who started this task can control it.")
+    actor = user or {"id": None}
+    if timeout_minutes is not None:
+        from .run_limits import overdue
+        if not overdue(task, timeout_minutes):
+            return task
     target = {"pause": "paused", "resume": "active", "stop": "stopped"}[action]
     if task["control_state"] == target:
         return task
     if task["control_state"] == "stopped" or (task["control_state"] == "active" and task["status"] in ("completed", "failed")):
         raise ServiceError("conflict", "This task has ended. Start a new run to continue.")
     if action == "stop":
+        error = (f'Stopped after {timeout_minutes} minutes of active processing.'
+                 if timeout_minutes is not None else 'Stopped by operator.')
         # Skip an already claimed job rather than waiting in the inverse
         # job -> run lock order. It is an underway operation, not queued work.
         connection.execute("""WITH queued AS (SELECT id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s
             AND state='queued' AND operation<>'attention.refresh' FOR UPDATE SKIP LOCKED)
-            UPDATE desktop_jobs j SET state='failed',error='Stopped by operator.',updated_at=now()
-            FROM queued WHERE j.id=queued.id""", (tenant_id, task_id))
+            UPDATE desktop_jobs j SET state='failed',error=%s,updated_at=now()
+            FROM queued WHERE j.id=queued.id""", (tenant_id, task_id, error))
         for run in runs:
-            connection.execute("UPDATE workflow_runs SET state='failed',error='Stopped by operator.',updated_at=now() WHERE tenant_id=%s AND id=%s AND state NOT IN ('completed','failed')",
-                               (tenant_id, run["id"]))
+            connection.execute("UPDATE workflow_runs SET state='failed',error=%s,updated_at=now() WHERE tenant_id=%s AND id=%s AND state NOT IN ('completed','failed')",
+                               (error, tenant_id, run["id"]))
+            if run['state'] not in ('completed','failed'):
+                connection.execute("UPDATE workflow_runs SET config=config || '{\"timeout_cancel_pending\":true}'::jsonb WHERE id=%s", (run['id'],))
             connection.execute("UPDATE account_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL", (tenant_id, run["id"]))
             connection.execute("UPDATE account_tally_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL", (tenant_id, run["id"]))
             binding = run["config"].get("runtime_binding", {})
@@ -79,12 +93,12 @@ def task_control(connection, tenant_id, user, task_id, action):
             if run.get("parent_run_id") is None and (binding.get("handler") == "accounts.bill"
                                                     or (not binding and run.get("workflow_key") == "bill-entry")):
                 from .accounts.attention import stopped
-                stopped(connection, run, user["id"])
+                stopped(connection, run, actor["id"])
             if run.get('parent_run_id') is None and binding.get('handler'):
                 from .runtime.application import get_handler
                 on_stop = getattr(get_handler(binding['handler']), 'on_stop', None)
                 if on_stop:
-                    on_stop(connection, run, user)
+                    on_stop(connection, run, actor)
     task = connection.execute("UPDATE tasks SET control_state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s RETURNING *",
                               (target, tenant_id, task_id)).fetchone()
     if action == "resume":
@@ -101,10 +115,14 @@ def task_control(connection, tenant_id, user, task_id, action):
     summary = {"pause": "Paused. An operation already underway may finish.",
                "resume": "Resumed from the last observed state.",
                "stop": "Stopped. Completed saves remain; an underway save may still finish."}[action]
+    if timeout_minutes is not None:
+        summary = f'Stopped after {timeout_minutes} minutes of active processing. Progress and completed saves are retained; an underway save may still finish.'
+        connection.execute("UPDATE tasks SET stop_reason='time_limit',summary=%s WHERE tenant_id=%s AND id=%s", (summary,tenant_id,task_id))
+        task = connection.execute('SELECT * FROM tasks WHERE tenant_id=%s AND id=%s',(tenant_id,task_id)).fetchone()
     connection.execute("INSERT INTO task_events(tenant_id,task_id,event_type,summary,progress) VALUES (%s,%s,%s,%s,%s)",
                        (tenant_id, task_id, f"control.{action}", summary, task["progress"]))
     connection.execute("INSERT INTO event_outbox(tenant_id,event_type,aggregate_id,payload) VALUES (%s,%s,%s,%s)",
-                       (tenant_id, f"task.control.{action}", task_id, Jsonb({"actor_id": str(user["id"]), "control_state": target})))
+                       (tenant_id, f"task.control.{action}", task_id, Jsonb({"actor_id": str(actor["id"]) if actor['id'] else None, "control_state": target, "reason": 'time_limit' if timeout_minutes is not None else 'operator'})))
     return task
 
 
