@@ -1,0 +1,18 @@
+{
+  "type":"object","additionalProperties":false,"required":["records"],
+  "properties":{"records":{"type":"array","maxItems":10000,"items":{
+    "type":"object","additionalProperties":false,
+    "required":["source_file_id","sheet","row","company_guid","bank_ledger_guid","counter_ledger_guid","voucher_type_guid","cost_centre_guid","cost_category_guid","evidence","exception"],
+    "properties":{
+      "source_file_id":{"type":"string","minLength":1},"sheet":{"type":"string"},"row":{"type":"integer","minimum":0},
+      "company_guid":{"type":["string","null"]},"bank_ledger_guid":{"type":["string","null"]},
+      "counter_ledger_guid":{"type":["string","null"]},"voucher_type_guid":{"type":["string","null"]},
+      "cost_centre_guid":{"type":["string","null"]},"cost_category_guid":{"type":["string","null"]},
+      "evidence":{"type":"string","minLength":1,"maxLength":3000},
+      "exception":{"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,"required":["code","detail"],"properties":{
+        "code":{"enum":["company_unresolved","ledger_unresolved","classification_uncertain","branch_unresolved","unsupported_structure"]},
+        "detail":{"type":"string","minLength":1,"maxLength":1500}
+      }}]}
+    }
+  }}}
+}
