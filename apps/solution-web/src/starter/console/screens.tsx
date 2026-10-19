@@ -325,6 +325,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
       <Status value={detail.status} /></header>
     <RunTiming task={detail} />
     <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { controlRevision.current++; setDetail(task); setAttempt(value => value + 1); }} />
+    {mode === 'source-discovery' && detail.status === 'stopped' && <p role="status" className="form-message">{progress.activity}</p>}
     {mode !== 'source-discovery' && <TaskProgress view={progress} stale={Boolean(error)} />}
     <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} controlState={detail.control_state ?? 'active'} />
       {error && <p role="alert" className="form-message">Could not refresh <button
