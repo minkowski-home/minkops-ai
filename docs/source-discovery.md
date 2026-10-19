@@ -192,3 +192,18 @@ then the web client and companion together. Older companions honor dispatch gate
 but cannot pause discovery between reads; their current collection may finish.
 Polling exposes company/count summaries; full records remain in downloads and
 the immutable execution package.
+
+## Many companies
+
+Bill Entry routes each bill to one company before posting (a short triage stage
+over a compact company directory), so each posting session receives only that
+company's masters, never sampled, and as much of its history as fits, with the
+supplier's own vouchers first; the manifest records any history cut
+(`vouchers_from`). Companies sharing a GSTIN are year-split siblings: each
+sibling's period ends the day before the next one's books begin, and a bill dated
+in a sibling's period is routed there deterministically with a note.
+
+When every company together exceeds one hosted interpretation session, a
+Tally-only collection stays complete and confirmable; only the optional client
+notes are skipped (`ai_context_skipped`). Collections that also need an Excel
+mapping session still hold until the scope is reduced.

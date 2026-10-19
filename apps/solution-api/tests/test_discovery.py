@@ -34,17 +34,20 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(confirmed.status_code, 200, confirmed.text)
         self.assertTrue(confirmed.json()['ready'])
 
-    def test_hosted_collection_still_holds_an_oversized_interpretation(self):
+    def test_a_complete_collection_too_large_for_one_notes_session_stays_usable(self):
+        """Many companies cannot share one notes session, but their native data is complete."""
         from unittest.mock import patch
 
         run, _ = self.start(ai_context=True)
         with patch('minkops_platform.accounts.client_context.context_assets',
                    side_effect=ValueError('Complete collection exceeds hosted interpretation limits.')):
             current = self.collect(run, analyze=False)
-        self.assertTrue(current['catalog']['partial'])
+        self.assertFalse(current['catalog']['partial'])
+        self.assertTrue(current['catalog']['ai_context_skipped'])
+        self.assertIn("Client notes were skipped", current['catalog']['context_error'])
         self.assertIsNone(current['mapping_run'])
-        self.assertEqual(self.client.post(self.discovery + f"/runs/{run['id']}/confirm",
-                                         headers=self.csrf, json={}).status_code, 409)
+        confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
 
     def test_tally_without_ai_goes_directly_to_review_and_confirms_full_catalog(self):
         run, _ = self.start(ai_context=False)

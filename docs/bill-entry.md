@@ -122,6 +122,7 @@ Best guess retains its separate human-review Attention after native save.
 | `destination_changed` | Do nothing, Recheck |
 | `voucher_type_unresolved` | Do nothing, Recheck |
 | `identity_rule_unknown` | Do nothing, Recheck |
+| `date_outside_company_period` | Do nothing, Recheck |
 | `extraction_failed` | Do nothing, Recheck |
 | `run_stopped` | Do nothing, Recheck (only after an active review) |
 | `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |

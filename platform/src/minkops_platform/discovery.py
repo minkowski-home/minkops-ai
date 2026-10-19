@@ -719,12 +719,22 @@ def collect(connection, device, job, result):
             ):
                 raise ValueError("Complete collection exceeds hosted interpretation limits.")
         except ValueError:
-            partial = catalog["partial"] = True
-            catalog["context_error"] = (
-                "Complete collection exceeds hosted interpretation limits. Reduce the voucher period or hand off; masters cannot be sampled."
-            )
             unchanged = False
             catalog["review"].update(status="required", reused_from=None)
+            if excel_files:
+                partial = catalog["partial"] = True
+                catalog["context_error"] = (
+                    "Complete collection exceeds hosted interpretation limits. Reduce the voucher period or hand off; masters cannot be sampled."
+                )
+            else:
+                # The native collection is complete; only the optional client-notes
+                # session cannot hold every company at once. Workflows route each
+                # document to one company's evidence, so they are not blocked.
+                catalog["ai_context_skipped"] = True
+                catalog["context_error"] = (
+                    "Client notes were skipped: every company together exceeds one interpretation session. "
+                    "Entries still use each company's complete masters and vouchers."
+                )
     if partial:
         from .attention import record
         record(connection,row,f"discovery:{row['id']}","Source discovery","Incomplete discovery")
@@ -737,7 +747,7 @@ def collect(connection, device, job, result):
             (row["tenant_id"], row["actor_id"], "0.4.0", Jsonb(remapped)),
         ).fetchone()
         catalog["excel_catalog_id"] = str(linked["id"])
-    elif config.get("ai_context", True) and not partial and control_state(connection, row["tenant_id"], row["task_id"]) != "stopped":
+    elif config.get("ai_context", True) and not partial and not catalog.get("ai_context_skipped") and control_state(connection, row["tenant_id"], row["task_id"]) != "stopped":
         connection.execute(
             "UPDATE discovery_runs SET catalog=%s WHERE id=%s", (Jsonb(catalog), row["id"])
         )

@@ -676,8 +676,15 @@ class BillEntryTests(unittest.TestCase):
         voucher_types=("Purchase",),
         vouchers=(),
         native_ids=True,
+        siblings=False,
+        voucher_padding=0,
     ):
-        """`native_ids` gives masters the GUID/PARENT/ALTERID a live export carries."""
+        """`native_ids` gives masters the GUID/PARENT/ALTERID a live export carries.
+
+        `multiple` adds companies (True adds Beta); `siblings` makes them one
+        business split by year (shared GSTIN, consecutive books); `voucher_padding`
+        bulks each voucher to model a real period's history.
+        """
         self.native = "/api/tenants/mock-tenant/desktop"
         if not reuse_device:
             self.device = self.client.post(
@@ -750,7 +757,8 @@ class BillEntryTests(unittest.TestCase):
             "status": "ready",
             "masters": {"status": "ready", "count": 0, "records": []},
             "vouchers": {"status": "ready", "count": len(vouchers), "records": [
-                {"type": "VOUCHER", "data": {"GUID": f"v{i}", "DATE": "20261001", "VOUCHERTYPENAME": kind}}
+                {"type": "VOUCHER", "data": {"GUID": f"v{i}", "DATE": "20261001", "VOUCHERTYPENAME": kind,
+                                             **({"NARRATION": "x" * voucher_padding} if voucher_padding else {})}}
                 for i, kind in enumerate(vouchers)]},
         }
         for collection in original["collections"]:
@@ -768,13 +776,14 @@ class BillEntryTests(unittest.TestCase):
             "companies": [company],
             "partial": False,
         }
-        if multiple:
+        if siblings:
+            company["identity"].update(GSTIN="27AAACS1234A1Z5", BOOKSFROM="20250401")
+        for number in range(int(multiple)):
             other = copy.deepcopy(company)
-            other.update(
-                company="Beta",
-                company_guid="beta-guid",
-                identity={"NAME": "Beta", "GUID": "beta-guid", "COMPANYNUMBER": "100001"},
-            )
+            name, guid = ("Beta", "beta-guid") if number == 0 else (f"Company {number}", f"company-{number}-guid")
+            other.update(company=name, company_guid=guid,
+                         identity={"NAME": name, "GUID": guid, "COMPANYNUMBER": str(100001 + number),
+                                   **({"GSTIN": "27AAACS1234A1Z5", "BOOKSFROM": f"{2026 + number}0401"} if siblings else {})})
             receipt["sources"][0]["snapshot"]["companies"].append(other)
         snapshot = receipt["sources"][0]["snapshot"]
         snapshot["company_scope"] = [
@@ -843,6 +852,28 @@ class BillEntryTests(unittest.TestCase):
             ],
             "exceptions": [],
         }
+
+    def route_bills(self, root, routes, dates=None):
+        """Answer each triage stage (file -> company GUID or None), then fan out."""
+        from minkops_platform.accounts.batch import reconcile_once
+
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            stages = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND config->>'stage'='triage' "
+                               "AND NOT coalesce((config->>'expanded')::boolean,false)", (root["id"],)).fetchall()
+        self.assertTrue(stages, "Many open companies route bills before posting.")
+        for stage in stages:
+            self.process(stage, {"bills": [{
+                "source_file_id": f, "company_guid": routes[f],
+                "company_evidence": "Buyer GSTIN matches." if routes[f] else "",
+                "documents": [{"kind": "invoice", "number": "MOCK-1", "date": (dates or {}).get(f, "2026-10-01"),
+                               "supplier_name": "Supplier", "supplier_gstin": None}],
+                "exception": None if routes[f] else {"code": "company_unresolved", "detail": "Two companies fit."},
+            } for f in stage["file_ids"]]})
+        reconcile_once(URL)
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            return {r["file_ids"][0]: r for r in c.execute(
+                "SELECT * FROM account_runs WHERE parent_run_id=%s AND config->>'stage' IS NULL "
+                "AND NOT coalesce((config->>'superseded')::boolean,false)", (root["id"],))}
 
     def tally_job(self, run, version="5"):
         payload = {
@@ -1105,16 +1136,15 @@ class BillEntryTests(unittest.TestCase):
             catalog_id=None,
             config={"output_mode": "tally_in_place", "discovery_id": did},
         )
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            children = c.execute(
-                "SELECT * FROM account_runs WHERE parent_run_id=%s ORDER BY file_ids->>0",
-                (root["id"],),
-            ).fetchall()
-        for child, guid in zip(children, ("beta-guid", "alpha-guid", "beta-guid"), strict=True):
-            result = self.tally_result(root, child["file_ids"][0])
-            result["records"][0].update(
-                company_guid=guid, company_evidence="Buyer registration matches " + guid
-            )
+        routes = dict(zip(inputs, ("beta-guid", "alpha-guid", "beta-guid"), strict=True))
+        children = self.route_bills(root, routes)
+        for file_id, child in children.items():
+            guid = routes[file_id]
+            # Each posting session sees only its routed company's evidence.
+            self.assertEqual(child["config"]["company_scope"], [guid])
+            self.assertEqual([c["references"]["company_guid"] for c in child["config"]["tally_target"]["companies"]], [guid])
+            result = self.tally_result(root, file_id)
+            result["records"][0].update(company_guid=guid, company_evidence="Buyer registration matches " + guid)
             self.process(child, result)
         reconcile_once(URL)
         loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
@@ -1181,6 +1211,48 @@ class BillEntryTests(unittest.TestCase):
             "added": [], "removed": [{"company": "Beta", "company_guid": "beta-guid"}]})
         self.assertEqual(detail(wider)["scope_changes"]["added"][0]["company"], "Beta",
                          "each run compares with the confirmation before it")
+
+    def test_a_bill_moves_to_the_year_split_sibling_whose_books_cover_its_date(self):
+        did = self.tally_discovery("alpha-guid", multiple=True, siblings=True)
+        bills = [self.upload_bill("this-year.pdf"), self.upload_bill("last-year.pdf"), self.upload_bill("future.pdf")]
+        root, _ = self.launch("bill-entry", file_ids=bills, catalog_id=None,
+                              config={"output_mode": "tally_in_place", "discovery_id": did})
+        companies = {c["references"]["company_guid"]: c for c in root["config"]["tally_target"]["companies"]}
+        self.assertEqual((companies["alpha-guid"]["period_to"], companies["beta-guid"]["period_to"]), ("2026-03-31", None))
+        # Triage names the older company for all three; the dates decide.
+        children = self.route_bills(root, dict.fromkeys(bills, "alpha-guid"),
+                                    {bills[0]: "2026-10-01", bills[1]: "2025-11-01", bills[2]: "2024-01-15"})
+        self.assertEqual(children[bills[0]]["config"]["company_scope"], ["beta-guid"])
+        self.assertIn("routed from Test", children[bills[0]]["config"]["triage"]["note"])
+        self.assertEqual(children[bills[1]]["config"]["company_scope"], ["alpha-guid"])
+        held = children[bills[2]]
+        self.assertEqual((held["state"], held["result"]["unresolved"][0]["code"]), ("review", "date_outside_company_period"))
+
+    def test_twenty_open_companies_launch_because_each_bill_gets_one_company(self):
+        import json
+        from minkops_platform.accounts.client_context import context_assets
+
+        did = self.tally_discovery("alpha-guid", multiple=19, vouchers=("Purchase",) * 30, voucher_padding=16_000)
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            catalog = c.execute("SELECT catalog FROM discovery_runs WHERE id=%s", (did,)).fetchone()["catalog"]
+        everything = sum(len(a["content"]) for a in context_assets(catalog)[0])
+        self.assertGreater(everything, 8_000_000, "Sending every company's discovery to a bill no longer fits.")
+        bill = self.upload_bill("twenty.pdf")
+        root, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
+                              config={"output_mode": "tally_in_place", "discovery_id": did})
+        children = self.route_bills(root, {bill: "company-7-guid"})
+        child = children[bill]
+        bound = [b for b in child["config"]["authorized_bindings"] if b["resource_id"].startswith("discovery-")]
+        self.assertTrue(bound)
+        sizes = json.dumps(child["config"]["authorized_bindings"])
+        self.assertLess(len(sizes), 20_000)
+        result = self.tally_result(root, bill)
+        result["records"][0].update(company_guid="company-7-guid", company_evidence="Buyer GSTIN matches Company 7.")
+        self.process(child, result)
+        from minkops_platform.accounts.batch import reconcile_once
+        reconcile_once(URL)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["result"]["records"][0]["company_name"], "Company 7", loaded["result"])
 
     def test_purchase_voucher_type_comes_from_discovery_not_a_fixed_name(self):
         """A practice that books purchases only under its own type can enter bills."""
