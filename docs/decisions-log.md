@@ -1,5 +1,112 @@
 # Decision Logs
 
+## Reconcile a partial native seed after an unacknowledged import (18 October 2026)
+
+**Situation:** A five-company rehearsal verified the new open-company scope,
+including password-protected companies and colliding folder-local numbers.
+The first synthetic master import crashed Tally and left unit exceptions;
+an HTTP timeout could not establish what had persisted. Native collection
+exports omitted those invalid units, while object exports still found them.
+
+**Task:** Prepare realistic test data without duplicating partially applied
+objects, overwriting existing accounting data, or reviving process-control logic.
+
+**Action:** Preserved complete pre-import exports and the import intent, stopped
+on the uncertain outcome, and retained Tally's native error log. The native unit
+form established that digit-bearing symbols were invalid; an alphabetic symbol
+saved successfully. With explicit authorization, computer use removed only the
+five backed-up failed fixture records through Tally's own exception screen.
+The importer now requires an exported valid native unit, alphabetic symbols and
+fresh native identities. Regression tests cover these boundaries, empty native
+XML sections and derived versus entered inventory accounting views.
+The opt-in seeder checks pinned GUIDs, compares existing master
+definitions and voucher allocations, creates only missing objects, and records
+each import attempt independently. It exercises the actual protocol 3 save and
+duplicate reconciliation path before bulk historical vouchers, then requires
+full native readback. Company opening and unlocking remained operator actions;
+no password, file repair or process control entered the product or fixture scripts.
+
+**Result:** All 295 planned masters and 250 vouchers passed native readback, and
+each company's production save/replay returned saved then duplicate. A second
+explicit run created nothing. All 75 two-page bills use permitted dates and were
+visually checked. Testing the actual hosted context serializer also caught the
+five-company full-history package exceeding 8 MB; a verified narrower discovery
+period retains the test cases at 7.09 MB including the largest bill. Evidence
+and repeatable steps are in [the rehearsal guide](tally-rehearsal.md).
+
+## Fence bulk consent to a verified cohort (18 October 2026)
+
+**Situation:** Repeating a single-bill decision N times fails once the first
+approval changes a run to writing. Supplier callbacks could also arrive during
+another save and return without ever continuing their authorized bills.
+
+**Task:** Make one-click batch decisions efficient without widening consent,
+crossing company boundaries, losing actor evidence or duplicating native writes.
+
+**Action:** Derived subjects from company identity and typed supplier/hold data,
+excluding ambiguous masters and best guesses. Added a server preview token over
+the cohort and revision, then one locked transaction for per-member structured
+audit and one approval/job. Native supplier readback continues only proposals
+whose immutable identity matches the stored consent, including while unrelated
+writes are active. Rechecks share one refreshed context and retain independent
+durable child execution. Existing records, summaries and checksums are preserved
+by an additive audit-detail migration.
+
+**Result:** PostgreSQL regressions exercise three matching bills, an untouched
+different supplier, stale previews, replay, one approval, one supplier import
+intent and three continuations, plus a single discovery refresh for recheck.
+The browser verifies the subject/count confirmation and exact token submission.
+
+## Project bill exceptions without changing Attention identity (18 October 2026)
+
+**Situation:** A PDF can contain several independent bills, while durable
+Attention items belong to a file and kind. An exception export needed bill-level
+accuracy without disturbing existing Done, reopen or verified-close behavior.
+
+**Task:** Give accountants one trustworthy list of bills Minkops did not enter,
+with consistent explanations across web, Windows and downloadable sheets.
+
+**Action:** Added a shared server projection over durable run outcomes. It emits
+one row per unsaved proposal and a file row only when no proposal exists,
+prefers the existing open bill/supplier item, and derives reasons from typed
+codes. Deferred inputs retain their reason; extraction failures gain a code.
+Exports require stable aggregate state, tenant authorization, a UTF-8 BOM and
+text-only formula escaping, preserving legitimate negative numeric amounts.
+
+**Result:** Regression tests cover mixed and multi-bill runs, active-save refusal,
+preserved deferrals, native hold labels, authentication, tenant isolation and
+spreadsheet escaping. Existing Attention identity and resolution semantics remain
+in place; live release verification is recorded separately when completed.
+
+## Plan the warehouse around the OLTP's real semantics (17 October 2026)
+
+**Situation:** Minkops needed a warehouse a month before its first real users.
+An audit of the OLTP schema for extraction found file bytes stored in `bytea`
+columns, runs without a creation time, and `updated_at` maintained by hand in
+about 21 places while also serving as worker lease, queue position and refresh
+cursor. The first attempt to record these findings as comments inside
+`0001_baseline.sql` would have changed its checksum and stopped `migrate.py` on
+every existing database, production included.
+
+**Task:** Design a warehouse that is cheap now (pre-launch budget), portable to
+production tools later, safe for a multi-tenant customer analytics product, and
+fix the source schema where analytics exposed real defects.
+
+**Action:** Chose a local PostgreSQL warehouse loaded through `postgres_fdw` in
+one transaction (one consistent OLTP snapshot) and transformed with dbt, with
+BigQuery, Datastream CDC and self-hosted Airflow deferred to explicit gates
+instead of adopted early. Made a column-level extraction manifest the deny-by-default
+contract for what leaves the OLTP. Chose "build pooled, serve bridged" tenancy:
+the pooled OLTP means raw data arrives pooled regardless of hosting, so tenant
+isolation is served through per-tenant view schemas rather than N copies of
+every model. Sequenced the `updated_at` trigger after separating lease, queue
+and refresh timestamps, so the fix cannot change worker behaviour. Findings
+moved into new-migration plan items rather than edits to applied migrations.
+
+**Result:** [docs/warehouse-plan.md](warehouse-plan.md) defines phases, gates,
+risks and an inventory of every OLTP table. No code yet; the plan's CI design
+makes a migration that breaks analytics fail on its own pull request.
+
 ## Work with the user's Tally session instead of controlling it (14 October 2026)
 
 **Situation:** The first client demo failed before any bill was read. Discovery
@@ -1673,3 +1780,46 @@ now reject invalid feeds before publication. A real Windows updater downloaded
 the reviewed 0.7.0 installer, verified its hash, deferred while busy, and dispatched
 the silent installer; installed-app checks passed afterwards. The installer remains
 unsigned, and automatic relaunch was suppressed in the isolated update rehearsal.
+
+### Verified GST supplier creation and company-scoped native reads (MIN-126)
+
+**Situation:** Missing suppliers with GST could not safely use the existing basic ledger action. Live testing also showed Tally object exports returning a same-named ledger from another open company despite the requested company variable.
+
+**Task:** Create only sufficiently evidenced permanent supplier masters, preserving statutory fields and destination identity before continuing authorized bills.
+
+**Action:** Pinned a new capability to Bill Entry 0.13 and companion 0.8/protocol 4. Validate GSTIN/PAN/check character, state, registration, place of supply, address, PIN and literal source evidence. Require a GST-registered template from the same discovered company. Construct only supported registration/mailing fields, never copy balances or bank details, and reject existing GSTIN aliases. Native reads use a fixed company-scoped collection filtered by the expected ledger GUID; independently verify all approved fields after import. Cross-state creation stays held in v1. Bulk consent covers named proposal identities with the earliest authorized effective date.
+
+**Result:** Deterministic and PostgreSQL integration tests cover capability gating, template/evidence validation and callback continuation. Live Tally created synthetic `MIN126 Verified GST Supplier 20261018` only in Test Company, GUID ending `0000010a`; full native GST/address/PIN readback passed. The company-scope regression rejects foreign ledger GUIDs before import.
+
+### Deterministic bank workflows and irreversible-write fencing (MIN-120)
+
+**Situation:** Every workflow entered the hosted AI harness and native Tally saves were Purchase-shaped. Bank rows have no guaranteed unique ID, daily downloads overlap, and Tally imports may succeed despite losing acknowledgement.
+
+**Task:** Deliver a private, maintainable statement workflow without introducing customer-specific schemas or risking duplicate financial writes.
+
+**Action:** Added a trusted deterministic handler capability that cannot declare a hosted bundle. The shared lifecycle keeps authorization, snapshots, diagnostics and controls while skipping model execution. A bounded file adapter validates headers, date conventions and balance chains; a separate routing module resolves unique discovered master kinds through a pluggable counter strategy. Store every approved native intent before dispatch, serialize one voucher at a time, and fsync an encrypted local attempt fence before import. Stable occurrence-aware UUID5 tags support overlapping downloads. Untagged matches and conflicting overlap routing hold for review. Native imports are followed by independent exact readback; uncertain imports are never resent automatically.
+
+**Result:** PostgreSQL integration proves the hosted executor is unreachable, intents precede dispatch, receipts reject altered amounts, retries are idempotent, and controls fence saves. Live Test Company Payment/Receipt readback each found one tagged voucher and replay skipped both. A native date-conversion mismatch initially hid a successfully created Payment; the durable fence prevented resend, reconciliation recovered it, and calendar-component filters plus returned-date checks now cover the regression. The 32-table production backup restored successfully; both pending migrations preserved existing row counts and applied idempotently in rehearsal.
+
+Final installed-app integration also exposed the discovery polling/launch boundary: polling deliberately strips full masters. Statement setup now consumes an explicit compact projection of bank names/GUIDs and Payment/Receipt choices. A browser launch regression uses the actual metadata-only shape, while the authoritative full catalog stays server-side for routing and write validation.
+
+Native-only discovery acceptance found a second boundary error: full collection was subjected to hosted interpretation limits even when AI was disabled. The native validator remains bounded at 64 MB; only requests that actually enable hosted interpretation now apply its tighter packaging limits. Regression tests prove an otherwise valid native-only catalog confirms while an oversized AI-enabled catalog stays held. No native records are sampled or discarded.
+### Bound worker memory at the batch and deployment boundaries
+
+**Situation:** Five-company live acceptance exceeded the pilot worker's 512 MiB memory limit before any hosted session started. Each aggregation decoded every child's repeated immutable catalog, and four lanes amplified that unnecessary allocation.
+
+**Task:** Recover durable queued work without increasing recurring capacity or replaying paid sessions or native writes.
+
+**Action:** Project only child outcome fields during aggregation. A PostgreSQL regression installs a JSON decoder that rejects execution contexts, proving aggregation never loads them. Expose a validated lane count through the existing bootstrap and retain four as the library default; the 512 MiB deployment selects one lane. Keep provider-session recovery and native write fences unchanged.
+
+**Result:** The context-boundary regression reproduced the defect before the fix. Bootstrap tests verify both bounded and persistent workers receive the configured lane count. Production recovery and final acceptance results are recorded in the release verification document.
+### Compatible device locks across native approval and polling
+
+**Situation:** Final live statement replay hit a PostgreSQL deadlock before any native write was dispatched. The worker held its workflow row while inserting an approved intent; a companion poll held an exclusive device lock while updating that same workflow. The intent's device foreign-key check completed the cycle.
+
+**Task:** Preserve device revocation and token-rotation guarantees while allowing durable approvals to coexist with authenticated polling.
+
+**Action:** Use a non-key update lock for authenticated polls and a key-share lock for read-only ownership checks. Revocation explicitly retains the exclusive device lock, and unique-token rotation remains exclusive. This removes the unnecessary device dependency without weakening approval, native readback or credential checks. A real PostgreSQL regression holds a poll transaction open while approving and enqueuing a statement; a second regression proves revocation still waits for authorized work and rejects the credential after completion.
+
+**Result:** The approval regression reproduced the production foreign-key lock timeout before the change. Both regressions and the existing device/statement suites pass. Final live recovery evidence is retained in the release verification document.
+Installed quick-run acceptance also caught a file-selection boundary: statement preferences reused the bill-only eligible-file filter, so CSV/XLSX choices disappeared after navigation. The shared source/path selection helper now accepts the workflow's file pattern while retaining the existing bill default. Unit coverage proves refreshed CSV/XLSX IDs retain only authorized selections; the browser regression restores the saved bank and file, then launches directly from the dashboard with its refreshed ID.

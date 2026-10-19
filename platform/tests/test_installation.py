@@ -16,7 +16,7 @@ class SolutionDefinitionTests(unittest.TestCase):
         installation = load_solution(REPOSITORY_ROOT, "mock-client")
         self.assertEqual(installation.tenant_slug, "mock-tenant")
         self.assertEqual([e.metadata["key"] for e in installation.employees], ["accounts-desk"])
-        self.assertEqual(set(installation.workflows), {"source-discovery", "bill-entry"})
+        self.assertEqual(set(installation.workflows), {"source-discovery", "bill-entry", "statement-entry"})
         self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "accounts.bill")
         self.assertEqual(
             installation.workflows["bill-entry"].tenant_schema["properties"]["output_mode"][
@@ -41,10 +41,12 @@ class SolutionDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_solution(REPOSITORY_ROOT, "../employees")
 
-    def test_empty_client_does_not_install_demo_employees(self):
+    def test_pr_infra_enables_deterministic_statements_without_demo_ledger_defaults(self):
         installation = load_solution(REPOSITORY_ROOT, "pr-infra")
-        self.assertEqual(installation.employees, [])
-        self.assertEqual(installation.workflows, {})
+        self.assertEqual([e.metadata['key'] for e in installation.employees], ['accounts-desk'])
+        self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry'})
+        self.assertEqual(installation.workflows['statement-entry'].metadata['tenant_defaults']['other_side_ledger'], '')
+        self.assertIsNone(installation.workflows['statement-entry'].execution_snapshot)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
@@ -110,6 +112,6 @@ class InstallationDatabaseTests(unittest.TestCase):
         with self.connection.transaction(force_rollback=True):
             install(self.connection, composition, actor_email="installer@example.com")
             self.assertEqual(
-                self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 2
+                self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 3
             )
         self.assertEqual(self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 0)

@@ -46,6 +46,26 @@ class Decision(BaseModel):
     proposal: int | None = Field(default=None, ge=0)
 
 
+class BulkDecision(Decision):
+    preview_token: str = Field(pattern="^[0-9a-f]{64}$")
+
+
+@router.post("/bills/{run_id}/{file_id}/bulk-preview")
+def bulk_preview(slug: str, run_id: UUID, file_id: UUID, body: Decision, request: Request, user: User, connection: Db):
+    from minkops_platform.accounts.bulk_decisions import preview
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    return _call(preview, connection, tenant, user, run_id, str(file_id), body.action, body.proposal)
+
+
+@router.post("/bills/{run_id}/{file_id}/bulk")
+def bulk_apply(slug: str, run_id: UUID, file_id: UUID, body: BulkDecision, request: Request, user: User, connection: Db):
+    from minkops_platform.accounts.bulk_decisions import apply
+    require_csrf(request)
+    tenant, _ = tenant_access(slug, user, connection)
+    return _call(apply, connection, tenant, user, run_id, str(file_id), body.action, body.proposal, body.preview_token)
+
+
 @router.post("/bills/{run_id}/{file_id}")
 def bill_decision(slug: str, run_id: UUID, file_id: UUID, body: Decision, request: Request, user: User, connection: Db):
     require_csrf(request)

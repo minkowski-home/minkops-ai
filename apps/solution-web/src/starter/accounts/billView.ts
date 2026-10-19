@@ -19,13 +19,11 @@ export const missingSupplier = (record: BillRecord) =>
   (Boolean(record.exception_codes?.includes("supplier_missing")) ||
     record.findings.some((f) => f.includes("missing from the confirmed Tally ledgers")));
 
-export function billActions(record: BillRecord, result: BillResult | null): BillAction[] {
+export function billActions(record: BillRecord): BillAction[] {
   if (!isPending(record)) return [];
-  // A destination refusal is fixed in the original system; the same approved
-  // plan is then retried. Reinterpreting it as a best guess would add review.
-  if (record.save_hold) return ["retry_save", "nothing"];
-  const write: BillAction[] = missingSupplier(record) ? (record.data.tax === 0 ? ["supplier"] : []) : ["guess"];
-  return [...write, "nothing", ...(isUnresolved(record, result) ? ["retry" as const] : [])];
+  // Missing policy fails closed during a rolling deployment; the next poll
+  // supplies the authoritative server result. Accounting rules live there.
+  return record.allowed_actions ?? [];
 }
 
 /** Inputs with no proposal: awaiting a decision, or deferred to manual handling. */

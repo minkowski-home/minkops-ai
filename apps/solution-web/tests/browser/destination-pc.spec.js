@@ -67,9 +67,11 @@ test('web destination selection scopes catalogs, persists routing and never fall
   const previous=runs.length;await page.getByRole('article').filter({has:page.getByRole('heading',{name:'Bill entry',exact:true})}).getByRole('button',{name:'Run workflow',exact:true}).click();await page.waitForURL('**/workflows/bill');expect(runs.length).toBe(previous);
   await picker.selectOption('c');await expect(run).toBeDisabled();await page.getByText('Destination and checks',{exact:true}).click();
   await expect(page.getByText('Run and confirm complete Tally Source Discovery on PC C first.',{exact:true})).toBeVisible();
-  await picker.selectOption('a');await expect(run).toBeEnabled();await page.getByLabel('Save bills to',{exact:true}).selectOption('excel_in_place');
-  await expect(page.getByLabel('Confirmed sources',{exact:true})).toHaveValue('excel-a');expect(await page.getByLabel('Confirmed sources',{exact:true}).locator('option[value="excel-b"]').count()).toBe(0);
-  await run.click();await page.waitForURL('**/tasks/task');expect(runs.at(-1).destination_device_id).toBe('a');expect(runs.at(-1).catalog_id).toBe('excel-a');
+  await picker.selectOption('a');await expect(run).toBeEnabled();
+  await expect(page.getByLabel('Save bills to',{exact:true})).toHaveCount(0);
+  await expect(page.getByLabel('Confirmed sources',{exact:true})).toHaveCount(0);
+  await run.click();await page.waitForURL('**/tasks/task');expect(runs.at(-1).destination_device_id).toBe('a');
+  expect(runs.at(-1).config.output_mode).toBe('tally_in_place');expect(runs.at(-1).config.discovery_id).toBe('catalog-a');
   // A persisted PC that disappears must remain an unavailable choice, even with one PC left.
   devices=[activePC('b','PC B')];await page.goto(`${route}/workflows/bill`);await expect(picker).toHaveValue('a');await expect(run).toBeDisabled();await expect(page.getByText('The selected PC is unavailable. Reconnect it or explicitly choose another PC.')).toBeVisible();
   await picker.selectOption('b');await expect(run).toBeEnabled();

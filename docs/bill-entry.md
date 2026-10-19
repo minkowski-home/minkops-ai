@@ -89,6 +89,94 @@ with `MINKOPS_UI_ARTIFACTS`. Unit tests remain `npm test`.
 
 ## Workflow
 
+### Exception review and export
+
+### v1 settings and handler policy
+
+New UI launches are Tally-only. Read bills groups the input format, Tally
+destination groups discovery/company/voucher-type choices, and Review and save
+groups review mode. Exact ledger/amount validation, duplicates and native
+readback are mandatory. Excel/Both/draft and Excel-only checks are hidden in
+v1; pinned legacy runs retain their adapters and recovery contracts.
+
+The server owns the following maximum handler matrix. It further removes write
+actions when mandatory values, company/master identity, source evidence or
+supplier-creation prerequisites fail. Recheck appears only for an unresolved
+input; saved/rejected/writing bills and runs outside review offer no decisions.
+Best guess retains its separate human-review Attention after native save.
+
+| Typed code | Maximum handlers |
+| --- | --- |
+| `source_unreadable` | Best guess write, Do nothing, Recheck |
+| `classification_uncertain` | Best guess write, Do nothing, Recheck |
+| `manual_review` | Best guess write, Do nothing, Recheck |
+| `supplier_missing` | Create this ledger, Do nothing, Recheck |
+| `not_a_bill` | Do nothing, Recheck |
+| `multiple_bills_unclear` | Do nothing, Recheck |
+| `required_value_missing` | Do nothing, Recheck |
+| `source_values_conflict` | Do nothing, Recheck |
+| `company_unresolved` | Do nothing, Recheck |
+| `supplier_unresolved` | Do nothing, Recheck |
+| `unsupported_structure` | Do nothing, Recheck |
+| `date_before_books` | Do nothing, Recheck |
+| `destination_changed` | Do nothing, Recheck |
+| `voucher_type_unresolved` | Do nothing, Recheck |
+| `extraction_failed` | Do nothing, Recheck |
+| `run_stopped` | Do nothing, Recheck (only after an active review) |
+| `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
+| `company_not_open`, `no_company`, `duplicate_company` | Retry save, Do nothing |
+| `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response` | Retry save, Do nothing |
+| `rejected`, `save_hold`, `save_held` | Retry save, Do nothing |
+| `save_waiting`, `save_interrupted`, `pc_unavailable` | Retry save, Do nothing |
+
+Unknown future codes offer only Do nothing/Recheck until a handler is explicitly
+supported. The UI consumes server-derived actions and never infers eligibility
+from free-text findings. Mark Done and Refresh remain shared Attention actions.
+
+**Apply to all similar** is offered for Create this ledger, Retry save, Do
+nothing and Recheck only when the server can identify a shared subject. New
+suppliers group by company GUID, normalized printed name and GSTIN. Native save
+holds group by company and typed hold reason; books-date and voucher-type holds
+also have company-scoped subjects. Ambiguous suppliers/ledger pairs and Best
+guess write have no bulk action in v1.
+
+A fresh server preview shows the subject and count before confirmation. The
+apply request is fenced to that cohort and revision: changed bills require a
+new preview. All member audits and state changes commit together. One bulk save
+uses one approval; one supplier group creates one native job, then continues
+every still-matching, explicitly authorized proposal after readback. Other
+pending writes do not strand a verified supplier continuation. Recheck refreshes
+discovery once and creates independent bounded child sessions. Repeated requests
+return the existing result without queuing another write or duplicating audit.
+
+`attention_events.detail` stores a versioned decision record: company, code,
+structured subject, action, actor, source/trigger item, proposal, count, stable
+decision tuple and snapshot token. MIN-132 can reuse this record for client
+memory; this release does not remember or automatically reuse choices.
+
+### Exception sheet contents
+
+Review lists only bills that Minkops has not successfully saved. Saved bills and
+verified duplicates appear in a collapsed count ("saved · already in Tally").
+Each remaining proposal or unresolved input has a plain-language sentence from
+its typed exception or native save outcome, never from model findings. Do nothing
+preserves that reason in durable deferred state and shared Attention.
+
+**Export CSV** downloads the same server-owned projection in web and Windows.
+It is available once results are combined and the run is in review, completed,
+failed or stopped; processing and active saves disable it with an explanation.
+`GET /api/tenants/{slug}/accounts/runs/{id}/unsaved-bills.csv` uses the run's
+tenant authorization and private/no-store response headers. The UTF-8 BOM makes
+Excel detect the encoding, and text cells are escaped against spreadsheet
+formulas without changing negative numeric amounts.
+
+The sheet contains source file, invoice, supplier, date, subtotal, total tax,
+individual tax allocations, gross total, company, status, reason and Attention ID.
+Statuses are **Needs attention**, **Save held**, and **Not written (Do nothing)**.
+Saved and duplicate bills are excluded. Multi-bill PDFs have one row per bill;
+inputs with no proposal have one file row. The open file-level bill Attention ID
+is preferred, then the supplier ID; several bills may share that ID.
+
 1. Connect the Windows PC and grant the destination folder. Run Source discovery
    and confirm Excel header mappings, then explicitly refresh the real workbook
    before using it as a destination. For Tally, confirm the selected company's
@@ -327,3 +415,7 @@ sessions. Stop the normal worker first; replay claims only the named run.
 uv run --all-packages python scripts/bill_entry_fixtures.py replay RUN_ID packages/<package>
 uv run --all-packages python scripts/bill_entry_fixtures.py score RUN_ID packages/<package> [--dry|--rerun]
 ```
+
+### GST supplier creation (0.13 / Windows 0.8)
+
+Create this ledger requires printed GSTIN, registration type, state, place of supply, address and PIN with literal page evidence, deterministic checksum/state validation, and a compatible registered supplier template in the same confirmed company. Existing GSTIN aliases, missing evidence and cross-state creation require manual handling in v1. Older pinned runs retain their prior behavior. The native callback must verify every approved statutory and mailing field before a bill is queued; an import acknowledgement alone is insufficient.

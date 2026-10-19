@@ -1,13 +1,13 @@
 {
   "name": "minkops-windows-app",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Minkops desktop companion and shared console",
   "author": "Minkops",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",
   "scripts": {
-    "test": "node --test tests/*.test.js ../../connectors/desktop/tests/*.test.js",
+    "test": "node --test tests/*.test.js ../../connectors/desktop/tests/*.test.js ../../scripts/tests/*.test.mjs",
     "test:http": "node tests/http-smoke.mjs",
     "build": "node scripts/build.js",
     "start": "npm run build && electron .",

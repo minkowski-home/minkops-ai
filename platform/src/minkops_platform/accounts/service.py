@@ -28,7 +28,7 @@ from .repository import (
     safe_path,
 )
 
-SUPPORTED = {".xlsx", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+SUPPORTED = {".xlsx", ".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 def launch_run(connection, tenant, user, body, *, task_id=None):

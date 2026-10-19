@@ -90,6 +90,9 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             target["company_mode"] = selections.get("company_mode", "infer")
             target["master_selection_version"] = 1
             target["tax_allocation_version"] = 1
+            if tuple(map(int, definition.metadata["version"].split("."))) >= (0, 13, 0):
+                desktop.require_companion(desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 8, 0))
+                target["supplier_creation_version"] = 1
             target["locked_company_guid"] = selections.get("locked_company_guid")
             if target["company_mode"] == "locked":
                 from .client_context import select_target
@@ -320,6 +323,16 @@ class DiscoveryHandler(AccountsHandler):
 
 
 class BillHandler(AccountsHandler):
+    def on_resume(self, connection, run, user):
+        from .attention import resume_suppliers
+        resume_suppliers(connection, run, user)
+
+    def public_fields(self, connection, run):
+        from .bill_review import attention_items, review
+        from .bill_decisions import public_result
+        return {**super().public_fields(connection, run), "review": review(run, attention_items(connection, run)),
+                "result": public_result(run)}
+
     def launched(self, connection, run):
         if run["config"].get("tally_target", {}).get("schema_only"):
             from .bills import queue_tally_context

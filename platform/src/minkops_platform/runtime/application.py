@@ -27,6 +27,8 @@ RESERVED = {
     "local_discovery_snapshot",
     "source_catalog_snapshot",
     "tally_target",
+    "statement_context",
+    "statement_device_id",
     "tally_context_job_id",
     "batch",
     "retry_file_id",
@@ -56,8 +58,6 @@ def execution_config(definition, selections, *, binding=None, authorized_binding
     """Pin trusted dispatch and access alongside the existing complete skill bundle."""
     if RESERVED.intersection(selections):
         raise ValueError("Run configuration contains reserved runtime fields.")
-    if definition.execution_snapshot is None:
-        raise ValueError("This workflow has no hosted execution definition.")
     runtime = deepcopy(
         binding
         or {
@@ -67,7 +67,11 @@ def execution_config(definition, selections, *, binding=None, authorized_binding
             "capabilities": definition.metadata.get("capabilities", []),
         }
     )
-    get_handler(runtime["handler"])
+    handler = get_handler(runtime["handler"])
+    if definition.execution_snapshot is None and not getattr(handler, "deterministic", False):
+        raise ValueError("This workflow has no hosted execution definition.")
+    if getattr(handler, "deterministic", False) and definition.execution_snapshot is not None:
+        raise ValueError("Deterministic workflows cannot declare hosted execution.")
     validate_policies(runtime.get("policies", []))
     # Capabilities declare needs. Only an adapter's authorized resource lookup
     # can produce bindings; declarations never grant network/tool permissions.
@@ -114,8 +118,14 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
     require_active(connection, run["tenant_id"], run["task_id"])
     store.observe(connection, run, "executing", handler.executing_summary, 20)
     connection.commit()
-    result = lifecycle.execute_proposal(connection, store, run, files, context, executor,
-                                        reuse_environments=cleanup)
+    if getattr(handler, "deterministic", False):
+        # The trusted handler owns this capability. No hosted environments,
+        # model executor or provider session is reachable on this path.
+        with stage(connection, run, "deterministic", "Process immutable inputs without a model"):
+            result = handler.execute(run, files, context, domain)
+    else:
+        result = lifecycle.execute_proposal(connection, store, run, files, context, executor,
+                                            reuse_environments=cleanup)
     # Serialize finishing against Stop. Raw provider output remains diagnostic
     # evidence, but cannot start another operation after the operator stops.
     connection.execute("SELECT id FROM workflow_runs WHERE tenant_id=%s AND id=%s FOR NO KEY UPDATE", (run["tenant_id"], run["id"]))

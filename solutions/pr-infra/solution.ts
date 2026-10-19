@@ -7,5 +7,5 @@ import type { SolutionManifest } from "../../packages/solution-contracts/src";
 export const solution: SolutionManifest = {
   id: "pr-infra",
   displayName: "PR Infra",
-  enabledConnectors: ["whatsapp", "excel"]
+  enabledConnectors: ["tally"]
 };

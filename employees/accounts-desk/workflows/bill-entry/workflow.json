@@ -1,6 +1,6 @@
 {
   "key": "bill-entry",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "name": "Bill entry",
   "description": "Enter reviewed PDF and image bills into connected Excel or Tally with verified, repeatable writes.",
   "owner": "accounts-desk",

@@ -38,6 +38,19 @@ export function desktopBridge() {
   return window.minkopsDesktop?.version === 1 ? window.minkopsDesktop : undefined;
 }
 
+/** Same-origin authenticated downloads also work inside the Windows shell. */
+export async function downloadFile(path: string, filename: string) {
+  if (!path.startsWith("/api/")) throw new Error("Invalid download path.");
+  const response = await fetch(path, { credentials: "same-origin" });
+  if (!response.ok) throw new Error("Could not download the exception sheet.");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url; link.download = filename;
+  document.body.append(link);
+  link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 export function nativeFilesForm(
   files: NativeFile[],
   label: string,

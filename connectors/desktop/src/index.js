@@ -19,7 +19,7 @@ export { discoverClientContext, saveDiscoveryPackage } from './client-context.js
 export { commitTallyBill, readTallyBills, saveTallyBill, classifyRejection, purchaseVoucherTypes } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const SUPPORTED = /\.(xlsx|pdf|png|jpe?g|webp)$/i;
+const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;
 const EXCLUDED = new Set([
   "ground_truth",
   "ground-truth",
@@ -231,3 +231,4 @@ export async function replaceApproved(root, spec, approved, backup) {
   }
 }
 export { inspectTallyAttention } from "./tally.js";
+export { saveTallyStatement } from "./statement.js";

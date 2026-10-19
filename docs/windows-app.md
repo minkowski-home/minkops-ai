@@ -5,7 +5,7 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.7.0 is the current release: it works only with the companies open in
+Companion 0.8.0 is the current release: it works only with the companies open in
 the user's Tally, reports typed session states, sends diagnostics and updates
 itself. Core Tally discovery uses HTTP/XML exports and needs no ODBC driver.
 Installed-RC evidence below is historical. Current production, installed-upgrade
@@ -249,3 +249,7 @@ pass on Linux and Windows; Windows skips only a file-symlink test that requires
 creation privileges (the same guard runs on Linux). A fresh Windows 10/11 device
 matrix, screen-reader audit, production hosting and signed distribution have not
 been verified by this local sweep.
+
+### Companion 0.8.0 contracts
+
+Plan protocol 4 adds deterministic Statement Entry Payment/Receipt saves and verified GST supplier creation. Bill Entry 0.13 requires 0.8.0 for new GST-capable runs; older pinned bills retain their contracts. Statement intents are encrypted and fsynced under the app profile before import, and an uncertain import cannot be resent automatically. Statement rows never enter the hosted model path. See [Statement Entry](statement-entry.md) for routing, balances, preview and recovery. The distributed Windows x64 installer remains an unsigned release candidate; existing unsigned-release disclosure applies.

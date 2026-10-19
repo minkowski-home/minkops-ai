@@ -20,7 +20,7 @@ const record = {
   data: { vendor: 'Ultratech Cement Ltd', invoice_number: 'UC/2026/104', date: '2026-10-01', purchase_ledger: 'Cement Purchases',
     subtotal: 100000, tax: 18000, tax_ledger: null, total: 118000, cost_code: null },
   tax_allocations: [{ ref: 'r1', ledger: 'Input CGST 9%', amount: 9000, evidence: '' }, { ref: 'r2', ledger: 'Input SGST 9%', amount: 9000, evidence: '' }],
-  evidence: [], findings: [], decision: 'approve',
+  evidence: [], findings: [], decision: 'approve', allowed_actions: ['guess', 'nothing'],
 };
 
 test('a Tally run chooses its company and purchase voucher type, and shows what it will enter', async ({ page, context }, testInfo) => {

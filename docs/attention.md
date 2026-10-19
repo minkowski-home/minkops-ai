@@ -16,6 +16,15 @@ books begin" or "Tally changed". They no longer depend on message wording.
 Verified duplicates and repeated batch inputs are recorded as internal notes, so
 they never ask for attention.
 The warehouse is future work; current audit records live in PostgreSQL.
+
+Bill Entry also supplies one plain-language reason sentence to each review row
+and Attention item. Typed exception/native hold codes select the sentence;
+structured supplier identifiers may add context, and detailed model/native
+diagnostics stay internal. Existing items without a stored sentence use their
+typed short label to select a deterministic fallback. Do nothing preserves the
+input's code and reason. The per-run unsaved-bills CSV uses these same sentences
+and repeats the existing file-level Attention ID for multi-bill inputs; it does
+not introduce per-bill Attention items or change Done/Refresh semantics.
 Confirmed discovery catalogs also remain authoritative PostgreSQL snapshots.
 Exact company GUIDs, masters and write contracts need deterministic lookup; a
 future knowledge/vector index may aid retrieval but cannot authorize destinations.
@@ -86,3 +95,5 @@ future execution capability, not part of the current hosted implementation.
 
 Production deployment remains paused. Native restart/licence handoff and device
 acceptance gaps remain tracked in [MIN-124 evidence](verification-min-124.md).
+
+Statement Entry opens one file-level exception summary with counts. Row details and exception CSV live in the task; it does not create one Attention item per bank row. Write ready rows, Retry save checks and Do nothing preserve the immutable native manifest. Correct parsing/routing problems in the original statement or Tally and start a refreshed run. A possible existing untagged voucher or uncertain import stays held for reconciliation.
