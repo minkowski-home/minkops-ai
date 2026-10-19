@@ -55,4 +55,5 @@ test('update errors can retry and frontend refresh happens only on an explicit c
   expect(await page.evaluate(()=>window.performance.timeOrigin)).toBe(firstLoad);
   await page.getByRole('button',{name:'Refresh for latest version'}).click();
   await expect.poll(()=>page.evaluate(()=>window.performance.timeOrigin)).not.toBe(firstLoad);
+  await expect(page).toHaveURL(/_minkops_build=next-build/);
 });

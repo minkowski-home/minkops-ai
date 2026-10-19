@@ -30,7 +30,9 @@ rather than adding their own timers or bypassing dispatch/approval fences.
 
 The console compares its embedded build identifier with uncached `/version.json`
 on launch and every 30 seconds. A new build shows **Refresh for latest version**;
-refresh is explicit and does not stop server or companion work. This feature
+refresh is explicit and uses the advertised build identifier in the navigation
+URL to bypass cached HTML, including Electron's cache. It does not stop server
+or companion work. This feature
 first becomes available after the console containing it has been loaded.
 
 Companion 0.8.1 reports downloading, ready, scheduled and failure states to the
