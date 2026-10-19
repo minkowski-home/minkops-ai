@@ -1,8 +1,8 @@
 {
-  "version": "0.8.0",
-  "filename": "Minkops-Setup-0.8.0.exe",
-  "bytes": 102867070,
-  "sha256": "342b68640c1ffec6e55e3ba57957508667c886a3d2135aa1cd2e89bee031eedf",
-  "sourceCommit": "2eeb89d1ac53efc90a0b7ee3ee5cf573720fa09f",
+  "version": "0.8.1",
+  "filename": "Minkops-Setup-0.8.1.exe",
+  "bytes": 102867279,
+  "sha256": "f9755bdc5b9978db52ec487db0fdd56c7b69130a1a17f9da081f25dd25dac5e6",
+  "sourceCommit": "b58568d09926342db4728de203bd66ed431a9efc",
   "unsigned": true
 }
