@@ -22,3 +22,13 @@ test('same path in different sources remains independently selectable',()=>{
   const other={...source,id:'other',files:[{id:'z',path:'nested/a.PDF',sha256:''}]};
   assert.deepEqual(restoreSelection([source,other],'["other:nested/a.PDF"]'),['z']);
 });
+
+test('statement selections retain CSV and XLSX paths across refreshed IDs without adding bills',()=>{
+  const pattern=/\.(csv|xlsx)$/i;
+  const bank={...source,files:[...source.files,{id:'csv',path:'bank.CSV',sha256:''}]};
+  const keys=selectionKeys([bank],['a','csv','x'],pattern);
+  assert.deepEqual(keys,['s:ledger.xlsx','s:bank.CSV']);
+  const refreshed={...bank,files:[{id:'new-csv',path:'bank.CSV',sha256:'new'},{id:'new-xlsx',path:'ledger.xlsx',sha256:'new'},{id:'new-bill',path:'bill.pdf',sha256:''}]};
+  assert.deepEqual(restoreSelection([refreshed],JSON.stringify(keys),pattern),['new-csv','new-xlsx']);
+  assert.deepEqual(restoreSelection([refreshed],'[]',pattern),[]);
+});
