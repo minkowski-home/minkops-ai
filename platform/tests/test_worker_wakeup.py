@@ -163,6 +163,26 @@ class WorkerWakeupTests(unittest.TestCase):
             )
             c.execute("SELECT pg_advisory_unlock(%s)", (RUNNER_LOCK,))
 
+    def test_monitor_runs_while_every_lane_is_waiting_for_a_silent_provider(self):
+        from concurrent.futures import wait as real_wait
+        from unittest.mock import patch
+        from minkops_platform.worker_hosting import drain
+        started, cancelled = threading.Event(), threading.Event()
+        def work(url):
+            started.set()
+            self.assertTrue(cancelled.wait(5), 'The occupied lane prevented timeout enforcement')
+            return False
+        def monitor(url):
+            if started.is_set():
+                cancelled.set()
+        def short_wait(futures, **kwargs):
+            return real_wait(futures,timeout=0.02,return_when=kwargs['return_when'])
+        with patch('minkops_platform.run_limits.enforce',side_effect=monitor) as check, \
+             patch('minkops_platform.worker_hosting.wait',side_effect=short_wait):
+            drain(self.url,lanes=1,work=work,cleanup=lambda _:False)
+        self.assertGreaterEqual(check.call_count,2)
+        self.assertTrue(cancelled.is_set())
+
     def test_wakeup_is_transactional(self):
         with psycopg.connect(self.url) as c:
             before = c.execute("SELECT generation FROM worker_wakeup").fetchone()[0]

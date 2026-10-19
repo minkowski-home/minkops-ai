@@ -1,5 +1,30 @@
 # Decision Logs
 
+## Durable active-time budgets with financial receipt safety (19 October 2026)
+
+**Situation:** A quiet hosted stream or native collection could continue without
+a shared workflow deadline. Independent bill sessions, review waits and native
+saves made a simple request timer either overcharge users or interrupt writes.
+
+**Task:** Stop every shared workflow after 45 configurable active minutes while
+preserving completed work and accepting evidence of an underway native save.
+
+**Action:** Measure the union of active runs/jobs with a durable task clock,
+excluding queueing, review and pauses. Reuse the existing Stop fences rather
+than add workflow-specific cancellation code. Commit automatic stop intent
+before retryable provider cancellation, monitor independently of stream events,
+and retain IDs across a session-creation race. Keep lock waits bounded and skip
+busy tasks until the next check. Increase the infrastructure cutoff so it cannot
+kill a default-budget run before the application has time to stop it. Expose
+explicit frontend refresh and native restart scheduling; native restart waits
+for work and pending receipts to finish.
+
+**Result:** Real PostgreSQL regressions cover cumulative/parallel clocks,
+pause/review exclusion, locked-task retry, provider cancellation retry, session
+creation races and native-only timeouts with late receipts. Browser regressions
+exercise both update banners on desktop/mobile and older-companion fallback.
+Deployment and installed-update evidence accompany the release verification.
+
 ## Reconcile a partial native seed after an unacknowledged import (18 October 2026)
 
 **Situation:** A five-company rehearsal verified the new open-company scope,

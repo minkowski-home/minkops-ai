@@ -84,6 +84,11 @@ def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline):
     pending = set()
     observed = None
     while time.monotonic() < deadline or pending:
+        from .run_limits import enforce
+        try:
+            enforce(url)
+        except psycopg.Error as error:
+            log.warning('Run limit monitor will retry (%s)',type(error).__name__)
         # A lane can run immediately after submit. Publish the runner lease first
         # so dispatchers never observe active work without its coalescing lease.
         c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")

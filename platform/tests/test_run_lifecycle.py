@@ -18,6 +18,7 @@ class RunLifecycleTests(TestCase):
         return {
             "id": "run",
             "tenant_id": "tenant",
+            "task_id": "task",
             "state": "queued",
             "session_id": None,
             "turn_id": None,
@@ -189,3 +190,18 @@ class RunLifecycleTests(TestCase):
         self.assertEqual(audit.call_args.args[2], "hosted.activity")
         self.assertEqual(audit.call_args.kwargs["details"]["event_counts"],
                          {"agent.session.turn.output_text.delta": 1})
+
+    def test_session_created_across_timeout_keeps_ids_for_cancellation(self):
+        from minkops_platform.errors import ServiceError
+        from minkops_platform.runtime.lifecycle import execute_proposal
+        connection, store = MagicMock(), MagicMock()
+        run = self.make_run(config={"execution_snapshot": {"present": True}}, workflow_key="future-workflow")
+        def execute(key, files, context, event, **kwargs):
+            event('agent.session.turn.created','late-session','late-turn')
+            raise AssertionError('A stopped task must not consume more output')
+        with patch('minkops_platform.run_controls.control_state',return_value='stopped'):
+            with self.assertRaises(ServiceError):
+                execute_proposal(connection,store,run,[],{},execute)
+        store.save_session.assert_called_once_with(connection,run,'late-session','late-turn')
+        connection.commit.assert_called_once()
+        store.save_result.assert_not_called()

@@ -325,6 +325,18 @@ hourly in production).
 **Later:** once the warehouse holds the history, give `workflow_run_diagnostics`
 an explicit retention job too, and document both windows in one place.
 
+**Capture boundary:** keep Cloud Logging and OpenAI as the detailed operational
+log viewers; do not mirror their raw streams into the warehouse. Persist the
+allow-listed diagnostic metadata needed for correlation and history in the
+existing product diagnostic tables: run/task/device identifiers, provider
+session/turn identifiers, pinned definition/build, stage, timings, error class,
+HTTP/SQL status and sanitized outcome. Capture these before deleting a hosted
+session; a provider dashboard is not durable evidence after session deletion.
+Missing capture is an operational instrumentation prerequisite, not a change to
+the warehouse engine or extraction strategy. Raw prompts, documents, credentials,
+local paths and unrestricted provider payloads remain excluded. Apply the same
+allow-list, tenant access and erasure rules when adding any diagnostic fields.
+
 ### 0.6 Tracking
 
 Log each Phase 0 change in `docs/decisions-log.md` only when it is interview-worthy

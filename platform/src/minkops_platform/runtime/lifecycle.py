@@ -63,6 +63,12 @@ def execute_proposal(connection, store: RunStore, run, files, context, executor,
             connection.commit()
             run["session_id"], run["turn_id"] = session_id, turn_id
             last_saved = now
+            from minkops_platform.run_controls import control_state
+            if control_state(connection,run['tenant_id'],run['task_id']) == 'stopped':
+                # Keep a session created across the Stop race visible to the
+                # independent cancellation monitor before closing our stream.
+                from minkops_platform.errors import ServiceError
+                raise ServiceError('conflict','This task was stopped. Saved progress is retained.')
         if kind.endswith(".delta") or kind.startswith((
             "agent.session.turn.item.", "agent.session.turn.content_part.",
             "agent.session.turn.output_text.",

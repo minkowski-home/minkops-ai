@@ -23,6 +23,22 @@ class TaskControlTests(unittest.TestCase):
         return self.client.post(f"/api/tenants/{self.slug}/tasks/{task_id}/control",
                                 headers=self.csrf, json={"action": action})
 
+    def test_native_only_timeout_retains_late_receipt_and_blocks_new_claims(self):
+        self.pair()
+        job,_=self.launch()
+        claim=self.client.post(self.worker_base+'/claim',headers=self.worker,json={}).json()
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE tasks SET processing_started_at=clock_timestamp()-interval '46 minutes' WHERE id=%s",(job['task_id'],))
+        task=self.client.get(f"/api/tenants/{self.slug}/tasks/{job['task_id']}").json()
+        self.assertEqual(task['status'],'stopped')
+        self.assertIn('45 minutes of active processing',task['summary'])
+        receipt={'claim_token':claim['claim_token'],'result':{'available':True,'companies':['Office']}}
+        done=self.client.post(self.worker_base+f"/jobs/{job['id']}/finish",headers=self.worker,json=receipt)
+        self.assertEqual(done.status_code,200,done.text)
+        self.assertEqual(done.json()['result'],receipt['result'])
+        self.assertIsNone(self.client.post(self.worker_base+'/claim',headers=self.worker,json={}).json())
+        self.assertEqual(self.client.get(f"/api/tenants/{self.slug}/tasks/{job['task_id']}").json()['status'],'stopped')
+
     def test_pause_resume_stop_and_duplicate_requests_are_audited_once(self):
         self.pair()
         job, _ = self.launch()

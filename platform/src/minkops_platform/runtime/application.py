@@ -36,6 +36,7 @@ RESERVED = {
     "user_input",
     "hosted_workspace",
     "hosted_session_closed",
+    "timeout_cancel_pending",
 }
 
 
