@@ -23,5 +23,7 @@ body {
 .discovery-panel-heading + .button { margin-bottom: 1rem; }
 
 .statement-summary { min-width: 0; max-width: 100%; overflow-x: auto; }
+.statement-mapping { min-width: 0; }
+.statement-mapping select { min-width: 0; width: 100%; }
 .statement-summary table { width: 100%; border-collapse: collapse; }
 .statement-summary th, .statement-summary td { padding: 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
