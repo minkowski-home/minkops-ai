@@ -281,4 +281,5 @@ directory as protocol 4, so upgraded plans keep their fence) before importing;
 `retry_after_read` lets a later explicit Retry save import only after a fresh
 read. Within one attempt an import is never repeated, and only an exact readback
 of every line, allocation, date and voucher type is accepted. Older plan formats
-keep their existing writers until the server emits v5 plans (MIN-145).
+are upgraded to v5 by the server when this companion fetches them; only bill
+plans without discovered GUIDs still use the legacy bill writer.

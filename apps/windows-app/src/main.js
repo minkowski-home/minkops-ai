@@ -42,7 +42,6 @@ import {
   inspectTallyAttention,
   tallyCrashEvents,
   saveTallyBill,
-  saveTallyStatement,
   saveVoucher,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
@@ -312,8 +311,8 @@ function startWorker() {
         if (plan.format_version === 5)
           return saveVoucher(plan, {request: tallyRequest, beforeImport: durableIntent, pc,
             diagnose: (record) => jobDiagnostics.set(job.id, record)});
-        if (job.operation === "tally.statement")
-          return saveTallyStatement(plan, {request: tallyRequest, beforeImport: durableIntent});
+        // Servers upgrade every statement plan for protocol 5 or refuse it.
+        if (job.operation === "tally.statement") throw new Error("Unsupported statement plan.");
         return saveTallyBill(plan, {
           request: tallyRequest,
           pc,
