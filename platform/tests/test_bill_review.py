@@ -55,7 +55,7 @@ def test_review_and_csv_are_exception_only_per_bill_with_shared_file_attention_i
     assert rows[0]["Source file"] == "'@multi.pdf"
     assert rows[0]["Invoice number"] == "'+H"
     assert rows[0]["Supplier"] == "'=SUM(A1:A2)"
-    assert rows[0]["Amount before taxes"] == "-100"
+    assert rows[0]["Voucher lines"] == "Pending ledger Dr -100; Pending ledger Dr -18"
     assert rows[0]["Tax"] == "-18"
     assert rows[0]["Total"] == "-118"
     assert run == before

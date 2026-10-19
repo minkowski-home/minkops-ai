@@ -121,6 +121,7 @@ Best guess retains its separate human-review Attention after native save.
 | `date_before_books` | Do nothing, Recheck |
 | `destination_changed` | Do nothing, Recheck |
 | `voucher_type_unresolved` | Do nothing, Recheck |
+| `identity_rule_unknown` | Do nothing, Recheck |
 | `extraction_failed` | Do nothing, Recheck |
 | `run_stopped` | Do nothing, Recheck (only after an active review) |
 | `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
@@ -170,8 +171,9 @@ tenant authorization and private/no-store response headers. The UTF-8 BOM makes
 Excel detect the encoding, and text cells are escaped against spreadsheet
 formulas without changing negative numeric amounts.
 
-The sheet contains source file, invoice, supplier, date, subtotal, total tax,
-individual tax allocations, gross total, company, status, reason and Attention ID.
+The sheet contains source file, invoice, supplier, date, the proposed voucher
+lines (`Ledger Dr/Cr amount`), total tax, gross total, company, status, reason
+and Attention ID.
 Statuses are **Needs attention**, **Save held**, and **Not written (Do nothing)**.
 Saved and duplicate bills are excluded. Multi-bill PDFs have one row per bill;
 inputs with no proposal have one file row. The open file-level bill Attention ID
@@ -263,27 +265,35 @@ Excel uses actual confirmed headers, sheet/table boundaries and types; it does
 not impose a universal invoice schema. Existing workbook protections, formulas,
 styles, hash checks, native backups and atomic replacement remain in force.
 
-The Tally mock contract is a balanced accounting Purchase voucher:
-`invoice_number`, `vendor`, `date`, `purchase_ledger`, `subtotal`, `tax`,
-`tax_ledger`, `total`, and nullable `cost_code`. Supplier, purchase and nonzero tax
-allocations must use distinct discovered ledgers. Money must reconcile exactly
-at two decimal places and fit exact native cents. A single tax ledger remains
-supported for legacy runs. Workflow 0.11.1 also supports one to eight separately
-evidenced tax allocations, including CGST and SGST, through company-scoped native
-master references. The server derives canonical names, checks each positive amount
-and the exact tax sum, and rejects mixed scalar/split mappings and repeated ledgers.
-New plans use native plan protocol 3 (pinned purchase voucher type, companion
-0.7.0); older companions receive an update instruction before accessing such a plan. Every selected master
-is rechecked, and every saved allocation must match readback independently. Equal
-gross totals cannot conceal a collapsed or changed tax split. This accounting
-voucher contract does not assert statutory filing readiness.
+From bill-entry 0.14 Tally has no fixed field list. The AI proposes the voucher
+the client's own practice records for each document: the family (an invoice is
+a Purchase or a Journal; a supplier credit note is a Debit Note), the voucher
+type, the supplier and every other line (role, ledger, side, amount, optional
+cost centre/category and tax head/rate/base), each selected by native GUID from
+the routed company's pinned discovery (`accounts/vouchers.py` `check`). The
+application only binds and proves it:
 
-Inventory invoices, bill/payment/cost allocations and additional non-tax ledger splits
-need a richer connector contract; corrections containing those allocations are
-held so they cannot be flattened. Unsupported cost allocations also require
-review. Client-specific rules belong in versioned employee workflow definitions,
-tenant preferences and solution composition, alongside deterministic platform
-validation and connector capabilities. No real-client rules are guessed.
+- every identity belongs to the routed company, is active where that matters,
+  and every ledger is distinct; purchases use the run's chosen voucher type;
+- the server computes the supplier line from the printed total, and debits must
+  equal credits to the paisa;
+- each tax line is within one rupee of its own printed rate × taxable value, and
+  central and state halves of one rate and base are equal;
+- at most one printed round-off of at most one rupee;
+- cost centres must belong to the chosen category on a ledger that enables them;
+- TDS waits for a confirmed posting profile; a foreign supplier holds
+  (`identity_rule_unknown`), because only the Indian invoice year identifies a
+  document;
+- inventory, bill-wise allocations and foreign currency are connector limitations
+  the AI reports as `unsupported_structure`, naming the structure.
+
+Approved bills are stored as native v5 plans (Windows companion 0.9.0+, see
+[Windows app](windows-app.md#companion-090-contracts)) and reviewed through a
+server-built preview of exactly those lines; `data` keeps only the document
+summary (supplier, number, date, total, tax) that attention, policies and exports
+read. Proposals pinned to 0.13 or earlier keep their fixed Purchase mapping and
+writer until they drain (MIN-155). This accounting voucher contract does not
+assert statutory filing readiness.
 
 The adapter uses bounded fixed XML exports/imports on the PC's loopback port;
 there is no renderer-supplied XML, URL, TDL or shell. Tally's documented correction

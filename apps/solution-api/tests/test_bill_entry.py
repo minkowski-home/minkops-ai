@@ -17,21 +17,22 @@ class BillEntryTests(unittest.TestCase):
     launch = accounts_tests.AccountsTests.launch
     execute_discovery = accounts_tests.AccountsTests.execute_discovery
 
-    def test_master_references_canonicalize_before_automatic_write_and_keep_native_contract(self):
+    def test_native_identities_name_the_entry_whatever_the_bill_prints(self):
         did = self.tally_discovery()
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], config={
             "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
         proposal = self.tally_result(run, bill)
-        proposal["records"][0]["data"].update(vendor="sup plier", purchase_ledger=None, tax_ledger=None)
+        proposal["records"][0]["document"]["supplier_name"] = "sup plier"
         self.process(run, proposal)
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         self.assertEqual(loaded["state"], "writing", loaded.get("result"))
         self.assertEqual(loaded["result"]["records"][0]["data"]["vendor"], "Supplier")
+        self.assertEqual([line["ledger"] for line in loaded["result"]["records"][0]["preview"]["lines"]],
+                         ["Supplier", "Purchases", "Tax"])
         _, _, plan = self.tally_job(loaded)
-        self.assertEqual(plan["data"]["purchase_ledger"], "Purchases")
-        self.assertEqual(plan["data"]["tax_ledger"], "Tax")
-        self.assertNotIn("master_refs", plan)
+        self.assertEqual(plan["header"]["party_ledger"], "Supplier")
+        self.assertEqual(sorted(plan["references"]["ledgers"]), ["Purchases", "Supplier", "Tax"])
 
     def test_exception_only_batch_does_not_require_approval_for_clean_sibling(self):
         from minkops_platform.accounts.batch import reconcile_once
@@ -44,7 +45,7 @@ class BillEntryTests(unittest.TestCase):
         for child in children:
             proposal = self.tally_result(root, child["file_ids"][0])
             if child["file_ids"][0] == inputs[1]:
-                proposal["records"][0]["master_refs"]["vendor"]["ref"] = "foreign-catalog"
+                proposal["records"][0]["voucher"]["party"]["ledger_guid"] = "foreign-catalog"
             self.process(child, proposal)
         reconcile_once(URL)
         loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
@@ -83,7 +84,7 @@ class BillEntryTests(unittest.TestCase):
         # Two bills are read; the third is still waiting when the operator stops.
         self.process(children[inputs[0]], self.tally_result(root, inputs[0]))
         held = self.tally_result(root, inputs[1])
-        held["records"][0]["master_refs"]["vendor"]["ref"] = "foreign-catalog"
+        held["records"][0]["voucher"]["party"]["ledger_guid"] = "foreign-catalog"
         self.process(children[inputs[1]], held)
         stop = self.client.post(f"/api/tenants/mock-tenant/tasks/{root['task_id']}/control",
                                 headers=self.csrf, json={"action": "stop"})
@@ -104,9 +105,9 @@ class BillEntryTests(unittest.TestCase):
 
     def numbered_result(self, run, bill, invoice):
         result = self.tally_result(run, bill)
-        result["records"][0]["data"]["invoice_number"] = invoice
+        result["records"][0]["document"]["number"] = invoice
         for evidence in result["records"][0]["evidence"]:
-            if evidence["field"] == "invoice_number":
+            if evidence["field"] == "number":
                 evidence["quote"] = invoice
         return result
 
@@ -161,7 +162,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(offline.status_code, 409, offline.text)
         self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
             "name": "Bill PC", "installation_id": self.device["installation_id"]}).json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.8.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.9.0"}
         retried = self.decide(run, bill, "retry_save")
         self.assertEqual(retried["state"], "writing")
         self.save_receipt(retried, "MOCK-1")
@@ -209,7 +210,8 @@ class BillEntryTests(unittest.TestCase):
 
     def save_receipt(self, run, invoice, error=None):
         claim, route, plan = self.tally_job(run)
-        current = {**self.current(plan), "invoice_number": invoice}
+        current = self.current(plan)
+        self.assertEqual(current["reference"], invoice)
         response = self.client.post(route + "/finish", headers=self.worker, json={
             "claim_token": claim["claim_token"],
             **({"error": error} if error else {"result": {"outcome": "saved", "current": current}})})
@@ -349,51 +351,54 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(record["status"], "held")
         self.assertNotIn(guessed, [i["source_file_id"] for i in loaded["result"]["unresolved"]])
 
-    def split_result(self, run, bill, amounts=(9,9)):
-        result=self.tally_result(run,bill)
-        record=result["records"][0]
-        record["data"]["tax_ledger"]=None
-        record["master_refs"]["tax_ledger"]=None
-        target=run["config"]["tally_target"]["companies"][0]
-        refs={v["name"]:k for k,v in target["ledger_refs"].items()}
-        record["tax_allocations"]=[{"ref":refs[name],"amount":amount,"evidence":"Printed tax component matches native definition."}
-                                   for name,amount in zip(("Tax","SGST"),amounts)]
+    def split_result(self, run, bill, split=True):
+        """Central and state tax as their own lines, or one IGST line, for the same bill."""
+        result = self.tally_result(run, bill)
+        lines = result["records"][0]["voucher"]["lines"]
+        if split:
+            lines[1:] = [{**lines[1], "ledger_guid": f"{name}-guid", "amount": 9, "evidence": f"{head.upper()} 9%",
+                          "tax": {"head": head, "rate": 9, "taxable": 100}} for name, head in (("Tax", "cgst"), ("SGST", "sgst"))]
         return result
 
     def test_split_tax_native_plan_and_receipt_cannot_collapse_components(self):
-        did=self.tally_discovery(extra_ledgers=("SGST",))
-        bill=self.upload_bill()
-        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did,"review_mode":"only_exceptions"})
-        self.process(run,self.split_result(run,bill))
-        loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
-        self.assertEqual(loaded["state"],"writing",loaded.get("result"))
-        claim,route,plan=self.tally_job(loaded)
-        for version in ("1","2"):
-            legacy=self.client.get(route+'/plan?claim_token='+claim["claim_token"],headers={**self.worker,"X-Minkops-Plan-Version":version})
-            self.assertEqual(legacy.status_code,409,legacy.text)
-            self.assertIn("Update Minkops",legacy.json()["detail"])
-        self.assertEqual(plan["format_version"],3)
-        self.assertEqual(plan["references"]["voucher_type"]["NAME"],"Purchase")
-        self.assertEqual(plan["tax_allocations"],[{"ledger":"Tax","amount":9},{"ledger":"SGST","amount":9}])
-        receipt=self.current(plan)
-        rejected=self.client.post(route+'/finish',headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":receipt}})
-        self.assertEqual(rejected.status_code,409,rejected.text)
-        receipt["entries"]=[*receipt["entries"][:2],{"ledger":"Tax","amount":-900},{"ledger":"SGST","amount":-900}]
-        accepted=self.client.post(route+'/finish',headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":receipt}})
-        self.assertEqual(accepted.status_code,200,accepted.text)
+        did = self.tally_discovery(extra_ledgers=("SGST",))
+        bill = self.upload_bill()
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={"output_mode": "tally_in_place", "discovery_id": did,
+                                                                    "review_mode": "only_exceptions"})
+        self.process(run, self.split_result(run, bill))
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual(loaded["state"], "writing", loaded.get("result"))
+        claim, route, plan = self.tally_job(loaded)
+        for version in ("3", "4"):
+            older = self.client.get(route + '/plan?claim_token=' + claim["claim_token"], headers={**self.worker, "X-Minkops-Plan-Version": version})
+            self.assertEqual(older.status_code, 409, older.text)
+            self.assertIn("Update Minkops", older.json()["detail"])
+        self.assertEqual((plan["format_version"], plan["voucher_type"]["NAME"]), (5, "Purchase"))
+        self.assertEqual(sorted((ln["ledger"], ln["amount_cents"]) for ln in plan["lines"] if ln["ledger"] in ("Tax", "SGST")),
+                         [("SGST", 900), ("Tax", 900)])
+        collapsed = self.current(plan, lines=[{"ledger": "Purchases", "amount_cents": -10000}, {"ledger": "Supplier", "amount_cents": 11800},
+                                              {"ledger": "Tax", "amount_cents": -1800}])
+        rejected = self.client.post(route + '/finish', headers=self.worker, json={"claim_token": claim["claim_token"],
+                                                                                 "result": {"outcome": "saved", "current": collapsed}})
+        self.assertGreaterEqual(rejected.status_code, 400, rejected.text)
+        accepted = self.client.post(route + '/finish', headers=self.worker, json={"claim_token": claim["claim_token"],
+                                                                                 "result": {"outcome": "saved", "current": self.current(plan)}})
+        self.assertEqual(accepted.status_code, 200, accepted.text)
 
-    def test_conflicting_splits_with_identical_totals_hold_both_before_dispatch(self):
+    def test_conflicting_tax_treatments_of_one_bill_hold_both_before_dispatch(self):
         from minkops_platform.accounts.batch import reconcile_once
-        did=self.tally_discovery(extra_ledgers=("SGST",))
-        bills=[self.upload_bill("one.pdf"),self.upload_bill("two.pdf")]
-        root,_=self.launch("bill-entry",file_ids=bills,config={"output_mode":"tally_in_place","discovery_id":did,"review_mode":"only_exceptions"})
-        with psycopg.connect(URL,row_factory=dict_row) as c:
-            children=c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s ORDER BY file_ids->>0",(root["id"],)).fetchall()
-        for child,amounts in zip(children,((9,9),(8,10))):self.process(child,self.split_result(root,child["file_ids"][0],amounts))
+        did = self.tally_discovery(extra_ledgers=("SGST",))
+        bills = [self.upload_bill("one.pdf"), self.upload_bill("two.pdf")]
+        root, _ = self.launch("bill-entry", file_ids=bills, config={"output_mode": "tally_in_place", "discovery_id": did,
+                                                                    "review_mode": "only_exceptions"})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s ORDER BY file_ids->>0", (root["id"],)).fetchall()
+        for child, split in zip(children, (True, False), strict=True):
+            self.process(child, self.split_result(root, child["file_ids"][0], split))
         reconcile_once(URL)
-        loaded=self.client.get(self.base+f"/runs/{root['id']}").json()
-        self.assertEqual(loaded["tally_writes"],[])
-        self.assertTrue(all(r.get("status")=="held" for r in loaded["result"]["records"]))
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["tally_writes"], [])
+        self.assertTrue(all(r.get("status") == "held" for r in loaded["result"]["records"]))
 
     def test_child_wide_findings_hold_only_that_input(self):
         from minkops_platform.accounts.batch import reconcile_once
@@ -555,8 +560,8 @@ class BillEntryTests(unittest.TestCase):
             config={"output_mode": "tally_in_place", "discovery_id": discovery},
         )
         proposal = self.tally_result(run, bill)
-        proposal["records"][0]["data"]["vendor"] = "New supplier"
-        proposal["records"][0]["master_refs"]["vendor"] = {"ref": None, "evidence": "No discovered supplier matches the bill identifiers.", "new_supplier": True}
+        proposal["records"][0]["document"]["supplier_name"] = "New supplier"
+        proposal["records"][0]["voucher"]["party"] = {"ledger_guid": None, "evidence": "No discovered supplier matches the bill identifiers.", "new_supplier": True}
         self.process(run, proposal)
         result = self.client.get(self.base + f"/runs/{run['id']}").json()["result"]
         self.assertEqual(result["records"][0]["decision"], "hold")
@@ -670,7 +675,7 @@ class BillEntryTests(unittest.TestCase):
         books_from=None,
         voucher_types=("Purchase",),
         vouchers=(),
-        native_ids=False,
+        native_ids=True,
     ):
         """`native_ids` gives masters the GUID/PARENT/ALTERID a live export carries."""
         self.native = "/api/tenants/mock-tenant/desktop"
@@ -680,7 +685,7 @@ class BillEntryTests(unittest.TestCase):
                 headers=self.csrf,
                 json={"name": "Bill PC", "installation_id": str(uuid.uuid4())},
             ).json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.8.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.9.0"}
         discovery = "/api/tenants/mock-tenant/discovery"
         categories = ["company", "ledgers", "voucher_types"]
         period = {"from": "2026-10-01", "to": "2026-10-31"}
@@ -806,49 +811,40 @@ class BillEntryTests(unittest.TestCase):
         return launched.json()["id"]
 
     def tally_result(self, run, bill, total=118):
-        data = {
-            "invoice_number": "MOCK-1",
-            "vendor": "Supplier",
-            "date": "2026-10-01",
-            "purchase_ledger": "Purchases",
-            "subtotal": total - 18,
-            "tax": 18,
-            "tax_ledger": "Tax",
-            "total": total,
-            "cost_code": None,
-        }
+        """A bill-entry 0.14 voucher proposal: purchase line plus 18% IGST."""
+        company = run["config"]["tally_target"].get("companies", [{}])[0]
+        guid = company.get("references", {}).get("company_guid")
         return {
             "records": [
                 {
                     "source_file_id": bill,
-                    "company_guid": run["config"]["tally_target"]
-                    .get("companies", [{}])[0]
-                    .get("references", {})
-                    .get("company_guid"),
+                    "company_guid": guid,
                     "company_evidence": "Buyer identity matches Test.",
-                    "master_refs": {
-                        field: {"ref": next(ref for ref, master in run["config"]["tally_target"]["companies"][0]["ledger_refs"].items()
-                                            if master["name"] == data[field]),
-                                "evidence": "Bill identifiers and discovered native definition match."}
-                        for field in ("vendor", "purchase_ledger", "tax_ledger")
-                    },
-                    "destination_file_id": run["config"]["tally_target"]["discovery_id"],
-                    "sheet": "Purchase",
-                    "table": None,
                     "operation": "append",
-                    "data": data,
-                    "evidence": [
-                        {"field": k, "page": 1, "quote": str(v)}
-                        for k, v in data.items()
-                        if v is not None
-                    ],
+                    "document": {"kind": "invoice", "number": "MOCK-1", "date": "2026-10-01", "total": total,
+                                 "supplier_name": "Supplier", "supplier_gstin": None, "origin": "domestic"},
+                    "voucher": {
+                        "family": "purchase",
+                        "voucher_type_guid": (company.get("voucher_type") or {}).get("GUID") or "Purchase-guid",
+                        "party": {"ledger_guid": "Supplier-guid", "new_supplier": False,
+                                  "evidence": "Bill identifiers and discovered native definition match."},
+                        "lines": [
+                            {"role": "expense", "ledger_guid": "Purchases-guid", "side": "debit", "amount": total - 18,
+                             "cost_centre_guid": None, "cost_category_guid": None, "tax": None, "evidence": "Item total"},
+                            {"role": "tax", "ledger_guid": "Tax-guid", "side": "debit", "amount": 18,
+                             "cost_centre_guid": None, "cost_category_guid": None,
+                             "tax": {"head": "igst", "rate": 18, "taxable": 100}, "evidence": "IGST 18%"},
+                        ],
+                    },
+                    "evidence": [{"field": f, "page": 1, "quote": q} for f, q in
+                                 (("number", "MOCK-1"), ("date", "01/10/2026"), ("total", str(total)), ("supplier", "Supplier"))],
                     "exceptions": [],
                 }
             ],
             "exceptions": [],
         }
 
-    def tally_job(self, run, version="3"):
+    def tally_job(self, run, version="5"):
         payload = {
             "device_id": self.device["id"],
             "request_key": str(uuid.uuid4()),
@@ -865,8 +861,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(plan.status_code, 200, plan.text)
         return claim, route, plan.json()
 
-    @staticmethod
-    def observed_v5(plan, **overrides):
+    def observed_v5(self, plan, **overrides):
         """The voucher a protocol-5 companion reports for exactly this plan."""
         lines = sorted(({"ledger": ln["ledger"], "amount_cents": ln["amount_cents"] if ln["side"] == "credit" else -ln["amount_cents"]}
                         for ln in plan["lines"]), key=lambda e: (e["ledger"], e["amount_cents"]))
@@ -875,20 +870,14 @@ class BillEntryTests(unittest.TestCase):
                 "number": "", "narration": plan["header"]["narration"], "party_ledger": plan["header"]["party_ledger"],
                 "tag": None, "lines": lines, "allocations": [], "fingerprint": "v5:" + "b" * 64, **overrides}
 
-    def current(self, plan, total=118):
-        return {
-            "master_id": "1",
-            "guid": plan["remote_id"],
-            "date": "20261001",
-            "invoice_number": "MOCK-1",
-            "vendor": "Supplier",
-            "entries": [
-                {"ledger": "Supplier", "amount": total * 100},
-                {"ledger": "Purchases", "amount": -(total - 18) * 100},
-                {"ledger": "Tax", "amount": -1800},
-            ],
-            "fingerprint": "a" * 64,
-        }
+    def current(self, plan, total=None, **overrides):
+        """The v5 voucher a companion reports; `total` reports a different saved version."""
+        current = self.observed_v5(plan, **overrides)
+        if total is not None:
+            current["lines"] = sorted([{"ledger": "Supplier", "amount_cents": total * 100},
+                                       {"ledger": "Purchases", "amount_cents": -(total - 18) * 100},
+                                       {"ledger": "Tax", "amount_cents": -1800}], key=lambda e: e["ledger"])
+        return current
 
     def test_tally_confirmation_approval_scoped_dispatch_and_exact_receipt_replay(self):
         discovery_id = self.tally_discovery()
@@ -909,9 +898,9 @@ class BillEntryTests(unittest.TestCase):
             "result": {"outcome": "saved", "current": self.current(plan)},
         }
         bad = copy.deepcopy(receipt)
-        bad["result"]["current"]["entries"][0]["amount"] += 1
+        bad["result"]["current"]["lines"][0]["amount_cents"] += 1
         self.assertEqual(
-            self.client.post(route + "/finish", headers=self.worker, json=bad).status_code, 409
+            self.client.post(route + "/finish", headers=self.worker, json=bad).status_code, 422
         )
         for _ in range(2):
             r = self.client.post(route + "/finish", headers=self.worker, json=receipt)
@@ -931,15 +920,6 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(replayed_plan["remote_id"], plan["remote_id"])
 
     def test_protocol_five_companion_saves_the_approved_bill_as_a_verified_v5_voucher(self):
-        # Without discovered GUIDs a plan cannot be rechecked natively: it keeps its approved format.
-        legacy_discovery = self.tally_discovery()
-        bill = self.upload_bill()
-        legacy, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
-                                config={"output_mode": "tally_in_place", "discovery_id": legacy_discovery})
-        self.process(legacy, self.tally_result(legacy, bill))
-        legacy = self.approve(legacy, self.tally_result(legacy, bill))
-        self.assertEqual(self.tally_job(legacy, version="5")[2]["format_version"], 3)
-
         discovery_id = self.tally_discovery(native_ids=True)
         bill = self.upload_bill("native.pdf")
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
@@ -953,7 +933,7 @@ class BillEntryTests(unittest.TestCase):
                          [("Purchases", "debit", 10000), ("Supplier", "credit", 11800), ("Tax", "debit", 1800)])
         with psycopg.connect(URL, row_factory=dict_row) as c:
             stored = c.execute("SELECT plan,identity FROM account_tally_writes WHERE run_id=%s", (run["id"],)).fetchone()
-        self.assertEqual(stored["plan"]["format_version"], 3)  # Approved plans are never rewritten.
+        self.assertEqual(stored["plan"], plan)  # New approvals store the native v5 plan itself.
         self.assertEqual(plan["identity"]["hash"], stored["identity"])
         bad = self.observed_v5(plan, lines=[{**e, "amount_cents": e["amount_cents"] + (1 if e["amount_cents"] > 0 else 0)} for e in self.observed_v5(plan)["lines"]])
         refused = self.client.post(route + "/finish", headers=self.worker,
@@ -1007,7 +987,7 @@ class BillEntryTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         _, _, correction = self.tally_job(response.json())
-        self.assertEqual(correction["expected"]["fingerprint"], "a" * 64)
+        self.assertEqual(correction["expected"]["fingerprint"], "v5:" + "b" * 64)
 
     def test_batch_failed_bill_does_not_discard_successful_sibling(self):
         from minkops_platform.accounts.batch import reconcile_once
@@ -1135,10 +1115,6 @@ class BillEntryTests(unittest.TestCase):
             result["records"][0].update(
                 company_guid=guid, company_evidence="Buyer registration matches " + guid
             )
-            selected = next(c for c in root["config"]["tally_target"]["companies"] if c["references"]["company_guid"] == guid)
-            for field, selection in result["records"][0]["master_refs"].items():
-                selection["ref"] = next(ref for ref, master in selected["ledger_refs"].items()
-                                        if master["name"] == result["records"][0]["data"][field])
             self.process(child, result)
         reconcile_once(URL)
         loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
@@ -1151,7 +1127,7 @@ class BillEntryTests(unittest.TestCase):
             ).json()
             route = f"/api/desktop/worker/jobs/{claim['id']}"
             plan = self.client.get(
-                route + f"/plan?claim_token={claim['claim_token']}", headers={**self.worker, "X-Minkops-Plan-Version": "3"}
+                route + f"/plan?claim_token={claim['claim_token']}", headers={**self.worker, "X-Minkops-Plan-Version": "5"}
             ).json()
             observed.append(plan["company"])
             reply = self.client.post(
@@ -1175,7 +1151,7 @@ class BillEntryTests(unittest.TestCase):
         self.native = "/api/tenants/mock-tenant/desktop"
         self.device = self.client.post(self.native + "/devices", headers=self.csrf, json={
             "name": "Old PC", "installation_id": str(uuid.uuid4())}).json()
-        worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.8.0"}
+        worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.9.0"}
         launched = self.client.post("/api/tenants/mock-tenant/discovery/runs", headers=self.csrf, json={
             "device_id": self.device["id"], "request_key": str(uuid.uuid4()),
             "config": {"depth": "client_context", "excel_source_ids": [],
@@ -1219,10 +1195,8 @@ class BillEntryTests(unittest.TestCase):
         self.process(run, self.tally_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         claim, route, plan = self.tally_job(loaded)
-        self.assertEqual(plan["format_version"], 3)
-        self.assertEqual(plan["references"]["voucher_type"],
-                         {"NAME": "Purchase GST", "GUID": "vt-gst", "PARENT": "Purchase", "ALTERID": None})
-        receipt = {**self.current(plan), "voucher_type": "Purchase GST"}
+        self.assertEqual((plan["format_version"], plan["voucher_type"]), (5, {"NAME": "Purchase GST", "GUID": "vt-gst"}))
+        receipt = self.current(plan)
         malformed = self.client.post(route + "/finish", headers=self.worker, json={
             "claim_token": claim["claim_token"], "result": {"outcome": "saved", "current": {**receipt, "voucher_type": ["x"]}}})
         self.assertEqual(malformed.status_code, 422, malformed.text)
@@ -1258,8 +1232,9 @@ class BillEntryTests(unittest.TestCase):
             **config, "purchase_voucher_types": {"alpha-guid": "vt-p"}})
         self.process(run, self.tally_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual(loaded["state"], "writing", loaded["result"])
         _, _, plan = self.tally_job(loaded)
-        self.assertEqual(plan["references"]["voucher_type"]["GUID"], "vt-p")
+        self.assertEqual(plan["voucher_type"]["GUID"], "vt-p")
 
     def test_a_company_without_an_active_purchase_type_cannot_start_a_locked_run(self):
         did = self.tally_discovery("alpha-guid", voucher_types=(
@@ -1446,7 +1421,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(retry[0]["file_ids"], [bad])
         self.assertNotIn("user_input", retry[0]["config"])
         result = self.tally_result(root, bad)
-        result["records"][0]["data"]["invoice_number"] = "MOCK-2"
+        result["records"][0]["document"]["number"] = "MOCK-2"
         self.process(retry[0], result)
         reconcile_once(URL)
         final = self.client.get(self.base + f"/runs/{root['id']}").json()

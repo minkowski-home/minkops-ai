@@ -147,7 +147,7 @@ class SchemaContextTests(unittest.TestCase):
         note = {
             "company_guid": "company-1",
             "observation": "An obscure supplier convention",
-            "evidence_ids": ["Supplier"],
+            "evidence_ids": ["Supplier-guid"],  # Masters with GUIDs are cited by GUID.
             "certainty": "observed",
         }
         with psycopg.connect(URL) as c:

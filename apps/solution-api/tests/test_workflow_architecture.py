@@ -312,7 +312,7 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
                     child["config"]["authorized_bindings"], parent["config"]["authorized_bindings"]
                 )
                 proposal = self.tally_result(parent, child["file_ids"][0])
-                proposal["records"][0]["data"]["invoice_number"] = (
+                proposal["records"][0]["document"]["number"] = (
                     "BATCH-" + child["file_ids"][0][:8]
                 )
                 process(connection, child, executor=lambda *a, payload=proposal, **k: payload)

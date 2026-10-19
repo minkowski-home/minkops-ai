@@ -33,7 +33,8 @@ def test_matrix_is_exhaustive_and_documented():
 
 
 @pytest.mark.parametrize("code", ["company_unresolved", "supplier_unresolved", "required_value_missing",
-    "source_values_conflict", "unsupported_structure", "date_before_books", "destination_changed", "voucher_type_unresolved"])
+    "source_values_conflict", "unsupported_structure", "date_before_books", "destination_changed", "voucher_type_unresolved",
+    "identity_rule_unknown"])
 def test_identity_or_structure_blockers_never_offer_best_guess(code):
     run, record = example(); record["exception_codes"] = [code]
     assert "guess" not in allowed_actions(run, record)

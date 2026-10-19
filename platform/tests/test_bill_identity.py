@@ -16,11 +16,11 @@ class BillIdentityTests(unittest.TestCase):
             {'source_file_id':'unknown','data':data,'findings':[]},
             {'source_file_id':'known','data':{**data,'vendor':'Known Supplier'},'findings':[]},
         ], 'findings':[]}
-        capture_tally_findings(result, target)
+        capture_tally_findings(result, {'tally_target': target})
         self.assertEqual(result['records'][0]['decision'], 'hold')
         self.assertIn('Unknown Supplier', result['unresolved'][0]['reason'])
         self.assertNotIn('decision', result['records'][1])
-        capture_tally_findings(result, target)
+        capture_tally_findings(result, {'tally_target': target})
         self.assertEqual(len(result['unresolved']), 1)
 
     def test_identity_uses_supplier_invoice_and_financial_year(self):
