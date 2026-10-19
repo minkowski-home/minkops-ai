@@ -20,6 +20,32 @@ class DiscoveryTests(unittest.TestCase):
     setUp = test_desktop.DesktopTests.setUp
     pair = test_desktop.DesktopTests.pair
 
+    def test_native_only_collection_does_not_apply_hosted_interpretation_limits(self):
+        from unittest.mock import patch
+
+        run, _ = self.start(ai_context=False)
+        with patch('minkops_platform.accounts.client_context.context_assets',
+                   side_effect=ValueError('Complete collection exceeds hosted interpretation limits.')) as assets:
+            current = self.collect(run)
+        assets.assert_not_called()
+        self.assertFalse(current['catalog']['partial'])
+        confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm",
+                                     headers=self.csrf, json={})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertTrue(confirmed.json()['ready'])
+
+    def test_hosted_collection_still_holds_an_oversized_interpretation(self):
+        from unittest.mock import patch
+
+        run, _ = self.start(ai_context=True)
+        with patch('minkops_platform.accounts.client_context.context_assets',
+                   side_effect=ValueError('Complete collection exceeds hosted interpretation limits.')):
+            current = self.collect(run, analyze=False)
+        self.assertTrue(current['catalog']['partial'])
+        self.assertIsNone(current['mapping_run'])
+        self.assertEqual(self.client.post(self.discovery + f"/runs/{run['id']}/confirm",
+                                         headers=self.csrf, json={}).status_code, 409)
+
     def test_tally_without_ai_goes_directly_to_review_and_confirms_full_catalog(self):
         run, _ = self.start(ai_context=False)
         current = self.collect(run)
