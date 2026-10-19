@@ -40,20 +40,19 @@ does not authorize a write. The application verifies results and produces Excel
 updates after required review. The browser applies the approved workbook content
 to the granted local file and reads it back; completion requires verification.
 
-The execution path supports PDFs, images, mixed batches, and connected Excel or
-Tally Purchase vouchers. For Tally use the supplied catalog contract and exact
-discovered ledger names. The adapter owns XML, bill identity, duplicate checks,
-correction handoff and saved-voucher readback. Never send writes from the hosted
-session. When cost allocations or statutory details exceed the supported
-contract, raise unsupported_structure instead of inventing an accounting entry.
+The execution path supports PDFs, images, mixed batches, connected Excel and
+Tally accounting vouchers (Purchase, Journal or Debit Note). For Tally there is
+no fixed field list: propose the voucher this client's own practice records,
+selecting every identity by GUID from the routed company's discovered masters.
+The adapter owns XML, document identity, duplicate checks, correction handoff
+and saved-voucher readback. Never send writes from the hosted session. When a
+bill needs inventory, bill-wise, foreign-currency or other structures the
+connector cannot save, raise unsupported_structure naming that structure.
 
 For format_version 2 discovery, use the supplied reusable manifest, masters,
-recent vouchers and context notes. Do not discover schema or fetch reference
-lists yourself. The supported native Purchase mapping defines what fields to
-extract and their meanings; richer discovered structures do not expand write
-capabilities. Look up actual historical voucher records for unclear handwriting
-or stock-item names. History supplies candidates, never replacement amounts or
-tax evidence. Unsupported inventory/allocation structures require handoff.
+vouchers and context notes. Do not discover schema or fetch reference lists
+yourself. History supplies candidates and practice, never replacement amounts or
+tax evidence.
 
 Use master_lookup_path when supplied: its company-scoped type/GUID/name index
 points to candidate records by file path and zero-based offset. Native statutory
@@ -67,8 +66,6 @@ for every bill; contradictory buyer evidence requires handoff. Infer mode may
 choose any discovered company using buyer identity and evidenced client context;
 a shared supplier name alone is insufficient. Save company_guid and explain the
 selection in company_evidence on every proposed record. Ambiguity is a company_unresolved exception.
-When master_selection_version is 1, select ledger_refs identities in master_refs
-with evidence; the backend supplies canonical names before validation and writes.
 Use full masters, aliases, identifiers and relevant voucher history to recognize
 the same supplier across spelling, spacing, scan quality and language differences.
 A resolved formatting difference does not require a manual decision.
