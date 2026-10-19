@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import psycopg
 from psycopg.rows import dict_row
@@ -17,7 +17,7 @@ class StatementTests(unittest.TestCase):
     execute_discovery=bills.BillEntryTests.execute_discovery
     tally_discovery=bills.BillEntryTests.tally_discovery
 
-    def ready(self):
+    def ready(self, *, with_mapping=False):
         discovery=self.tally_discovery('statement-company',voucher_types=('Purchase','Payment','Receipt'))
         with psycopg.connect(URL,row_factory=dict_row) as c:
             catalog=c.execute('SELECT catalog FROM discovery_runs WHERE id=%s',(discovery,)).fetchone()['catalog']
@@ -34,16 +34,34 @@ class StatementTests(unittest.TestCase):
         text='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,OUT1,11,,989,Test\n02/10/26,IN1,,17,1006,Test\n02/10/26,HOLD,3,,1003,Unknown branch\n'
         file=self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':'["statement.csv"]'},
             files=[('files',('statement.csv',text.encode('utf-8-sig')))]).json()['files'][0]['id']
-        run,_=self.launch('statement-entry',file_ids=[file],config={'discovery_id':discovery,'bank_ledgers':{'statement-company':'Bank'},'other_side_ledger':'Expense'})
+        mapping=None
+        if with_mapping:
+            mapping=self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':'["branch-mapping.csv"]'},
+                files=[('files',('branch-mapping.csv',b'Client code,Meaning\n17,Test company\n'))]).json()['files'][0]['id']
+        run,_=self.launch('statement-entry',file_ids=[file],config={'discovery_id':discovery,'branch_mapping_file_id':mapping})
         from minkops_platform.accounts.worker import process
-        executor=Mock(side_effect=AssertionError('Bank rows must never reach a model'))
-        with patch('minkops_platform.runtime.lifecycle.execute_proposal',side_effect=AssertionError('No hosted path')):
-            with psycopg.connect(URL,row_factory=dict_row) as c:
-                process(c,c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone(),executor=executor)
-        executor.assert_not_called()
+        def interpret(key,files,context,on_event,**kwargs):
+            self.assertEqual(key,'statement-entry')
+            self.assertEqual(context['branch_mapping_file_id'],mapping)
+            self.assertEqual(len(context['transactions']),3)
+            self.assertEqual({r['source_file_id'] for r in context['transactions']},{file})
+            self.assertTrue(context['source_catalog']['companies'][0]['master_lookup_path'])
+            self.assertTrue(any(f['path'].endswith('masters-lookup-v1-0.json') for f in files))
+            if mapping:self.assertTrue(any(str(f['id'])==mapping for f in files))
+            on_event('agent.session.created','statement-session-'+str(uuid.uuid4()),'turn')
+            return {'records':[{'source_file_id':file,'sheet':'','row':r['row'],
+                'company_guid':'statement-company','bank_ledger_guid':'Bank-guid','counter_ledger_guid':'Expense-guid',
+                'voucher_type_guid':('Payment' if r['amount_cents']<0 else 'Receipt')+'-guid',
+                'cost_centre_guid':None,'cost_category_guid':None,'evidence':'Statement account and discovered expense allocation.',
+                'exception':{'code':'branch_unresolved','detail':'Client label has no supported meaning.'} if r['reference']=='HOLD' else None}
+                for r in context['transactions']]}
+        executor=Mock(side_effect=interpret)
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            process(c,c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone(),executor=executor)
+        executor.assert_called_once()
         loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
-        self.assertIsNone(loaded['session_id'])
-        self.assertIsNone(loaded['config']['execution_snapshot'])
+        self.assertTrue(loaded['session_id'])
+        self.assertEqual(loaded['config']['execution_snapshot']['execution']['model'],'gpt-6-luna')
         self.assertEqual([r['status'] for r in loaded['result']['records']],['ready','ready','held'])
         return loaded
 
@@ -64,7 +82,7 @@ class StatementTests(unittest.TestCase):
                 self.assertEqual(writer.execute("SELECT count(*) FROM desktop_jobs WHERE task_id=%s AND operation='tally.statement'", (run['task_id'],)).fetchone()['count'], 1)
                 writer.rollback()
 
-    def test_private_non_ai_preview_manifest_serial_receipts_and_csv(self):
+    def test_private_ai_preview_manifest_serial_receipts_and_csv(self):
         run=self.ready()
         csv=self.client.get(self.base+f"/runs/{run['id']}/statement-exceptions.csv")
         self.assertEqual(csv.status_code,200,csv.text)
@@ -98,6 +116,32 @@ class StatementTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/tenants/pr-infra/accounts/runs/{run['id']}/statement-exceptions.csv").status_code,404)
         self.assertNotIn('OUT1',self.client.get(self.base+f"/runs/{run['id']}/statement-exceptions.csv").text)
 
+    def test_optional_mapping_is_authorized_and_never_parsed_as_transactions(self):
+        run=self.ready(with_mapping=True)
+        self.assertEqual(len(run['file_ids']),1)
+        self.assertNotIn(run['config']['branch_mapping_file_id'],run['file_ids'])
+        self.assertEqual(len(run['result']['records']),3)
+
+    def test_mapping_reuse_unknown_mapping_and_legacy_settings_fail_before_ai(self):
+        run=self.ready()
+        for changes,status in [({'branch_mapping_file_id':run['file_ids'][0]},422),
+            ({'branch_mapping_file_id':str(uuid.uuid4())},404),({'other_side_ledger':'Expense'},422),
+            ({'bank_ledgers':{'statement-company':'Bank'}},422)]:
+            response=self.client.post(self.base+'/runs',headers=self.csrf,json={'key':'statement-entry','request_key':str(uuid.uuid4()),
+                'file_ids':run['file_ids'],'config':{'discovery_id':run['config']['discovery_id'],**changes}})
+            self.assertEqual(response.status_code,status,response.text)
+
+    def test_older_discovery_is_rejected_even_if_its_collection_config_differs(self):
+        run=self.ready()
+        newer=self.tally_discovery('statement-company',voucher_types=('Purchase','Payment','Receipt'))
+        with psycopg.connect(URL) as c:
+            c.execute('UPDATE discovery_runs SET device_id=%s,config=jsonb_set(config,\'{period,from}\',\'"2026-09-01"\') WHERE id=%s',
+                (run['config']['statement_device_id'],newer))
+        response=self.client.post(self.base+'/runs',headers=self.csrf,json={'key':'statement-entry','request_key':str(uuid.uuid4()),
+            'file_ids':run['file_ids'],'config':{'discovery_id':run['config']['discovery_id']}})
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertIn('latest',response.text)
+
     def test_pause_stop_and_wrong_operation_cannot_dispatch_statement_writes(self):
         run=self.ready()
         paused=self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",headers=self.csrf,json={'action':'pause'})
@@ -115,4 +159,18 @@ class StatementTests(unittest.TestCase):
         loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
         self.assertEqual(loaded['state'],'stopped')
         self.assertTrue(all(r['code']=='run_stopped' for r in loaded['result']['records']))
+
+    def test_stop_during_raw_agent_result_persistence_does_not_require_native_row_state(self):
+        run=self.ready()
+        # The shared lifecycle persists provider JSON before validating it. Stop
+        # may arrive in that interval; raw choices do not have native statuses.
+        raw={'records':[{'source_file_id':run['file_ids'][0],'sheet':'','row':3}]}
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='executing',result=%s WHERE id=%s",(Jsonb(raw),run['id']))
+        response=self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",headers=self.csrf,json={'action':'stop'})
+        self.assertEqual(response.status_code,200,response.text)
+        loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual(loaded['state'],'stopped')
+        self.assertEqual(loaded['result']['records'][0]['code'],'run_stopped')
+        self.assertFalse(loaded['tally_writes'])
 

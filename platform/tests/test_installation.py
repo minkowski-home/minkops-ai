@@ -41,12 +41,12 @@ class SolutionDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_solution(REPOSITORY_ROOT, "../employees")
 
-    def test_pr_infra_enables_deterministic_statements_without_demo_ledger_defaults(self):
+    def test_pr_infra_enables_skill_interpreted_statements_without_ledger_defaults(self):
         installation = load_solution(REPOSITORY_ROOT, "pr-infra")
         self.assertEqual([e.metadata['key'] for e in installation.employees], ['accounts-desk'])
         self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry'})
-        self.assertEqual(installation.workflows['statement-entry'].metadata['tenant_defaults']['other_side_ledger'], '')
-        self.assertIsNone(installation.workflows['statement-entry'].execution_snapshot)
+        self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
+        self.assertEqual(installation.workflows['statement-entry'].execution_snapshot['execution']['model'],'gpt-6-luna')
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")

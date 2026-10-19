@@ -1,4 +1,4 @@
-"""Branch lookup and pluggable counter-ledger strategy over pinned discovery."""
+"""Bind agent-selected native identities; never classify a transaction in Python."""
 from minkops_connectors.statement import normalized
 from .client_context import books_beginning, master_lookup
 from .supplier_gst import scalar
@@ -16,13 +16,6 @@ def one(values, message):
 
 def named(records, kind, value):
     return [r['data'] for r in records if r['type']==kind and normalized(name(r['data']))==normalized(value)]
-
-
-def single_counter(company, records, settings):
-    return one(named(records,'LEDGER',settings.get('other_side_ledger')), 'Choose a discovered Other-side ledger for this company.')
-
-
-COUNTERS = {'single': single_counter}
 
 
 def destination_choices(company):
@@ -43,21 +36,25 @@ def destination_choices(company):
             for m in types if normalized(bases.get(name(m).casefold())) in ('payment','receipt') and scalar(m.get('ISACTIVE')).casefold()!='no']}
 
 
-def route(row, companies, settings):
-    matches=[]
-    for company in companies:
-        records=master_lookup(company)['records']
-        if normalized(company['company'])==normalized(row['branch']):
-            matches.append((company,records,'COMPANY',company['identity']))
-        matches.extend((company,records,r['type'],r['data']) for r in records
-            if r['type'] in ('LEDGER','GROUP','COSTCENTRE','COSTCATEGORY') and normalized(name(r['data']))==normalized(row['branch']))
-    company,records,kind,master=one(matches,'The branch must match exactly one discovered company, ledger, group, cost centre or category.')
+def validated_plan(row, companies, selection):
+    """Financial facts come from the immutable source, identities from discovery.
+
+    The skill chooses company, bank, counter ledger and optional cost allocation.
+    These checks only constrain that proposal to the supported native contract.
+    """
+    company=one([c for c in companies if c['company_guid']==selection.get('company_guid')],
+        'The interpretation must identify one discovered company.')
+    records=master_lookup(company)['records']
+    def selected(kind, field):
+        guid=selection.get(field)
+        return one([r['data'] for r in records if r['type']==kind and guid and scalar(r['data'].get('GUID'))==guid],
+            f'The interpretation must select one discovered {kind.lower()} identity for {field}.')
+    if not str(selection.get('evidence') or '').strip():
+        raise ValueError('The ledger interpretation needs source and discovery evidence.')
     beginning=books_beginning(company['identity'])
     if beginning and row['date']<beginning: raise ValueError('The transaction date precedes the company books beginning date.')
-    strategy=COUNTERS.get(settings.get('counter_mode','single'))
-    if strategy is None: raise ValueError('Unsupported Other-side ledger strategy.')
-    counter=strategy(company,records,settings)
-    bank=one(named(records,'LEDGER',settings.get('bank_ledgers',{}).get(company['company_guid'])), 'Choose the discovered bank ledger for this company.')
+    bank=selected('LEDGER','bank_ledger_guid')
+    counter=selected('LEDGER','counter_ledger_guid')
     groups={normalized(name(r['data'])):scalar(r['data'].get('PARENT')) for r in records if r['type']=='GROUP'}
     def ancestor(ledger, ancestor_name):
         parent=scalar(ledger.get('PARENT'))
@@ -68,14 +65,11 @@ def route(row, companies, settings):
         return False
     if not ancestor(bank,'Bank Accounts'): raise ValueError('The bank ledger must belong to the discovered Bank Accounts group.')
     allocation=None
-    if kind=='LEDGER': counter=master
-    elif kind=='GROUP':
-        counter=one([r['data'] for r in records if r['type']=='LEDGER' and ancestor(r['data'],name(master)) and name(r['data'])!=name(bank)],
-            'This branch group needs exactly one posting ledger; otherwise handle the row manually.')
-    elif kind in ('COSTCENTRE','COSTCATEGORY'):
-        centre=master if kind=='COSTCENTRE' else one([r['data'] for r in records if r['type']=='COSTCENTRE'
-            and normalized(scalar(r['data'].get('CATEGORY')))==normalized(name(master))], 'This branch category needs exactly one cost centre.')
-        category=one(named(records,'COSTCATEGORY',scalar(centre.get('CATEGORY'))), 'The cost centre category is missing or ambiguous.')
+    if selection.get('cost_centre_guid') or selection.get('cost_category_guid'):
+        centre=selected('COSTCENTRE','cost_centre_guid')
+        category=selected('COSTCATEGORY','cost_category_guid')
+        if normalized(scalar(centre.get('CATEGORY')))!=normalized(name(category)):
+            raise ValueError('The selected cost centre does not belong to the selected category.')
         if scalar(counter.get('ISCOSTCENTRESON')).casefold()!='yes':
             raise ValueError('The Other-side ledger must enable cost centres in Tally for this branch.')
         allocation={'centre':name(centre),'category':name(category),'centre_guid':scalar(centre.get('GUID')),
@@ -84,12 +78,11 @@ def route(row, companies, settings):
     base='payment' if row['amount_cents']<0 else 'receipt'
     types=[r['data'] for r in records if r['type']=='VOUCHERTYPE']
     bases=base_types(types)
-    candidates=[r for r in types if normalized(bases.get(name(r).casefold()))==base and scalar(r.get('ISACTIVE')).casefold()!='no']
-    selected=settings.get('voucher_types',{}).get(company['company_guid'],{}).get(base)
-    if selected: candidates=[r for r in candidates if scalar(r.get('GUID'))==selected]
-    voucher=one(candidates,f'Choose exactly one active {base.title()} voucher type from Source Discovery.')
+    voucher=selected('VOUCHERTYPE','voucher_type_guid')
+    if normalized(bases.get(name(voucher).casefold()))!=base or scalar(voucher.get('ISACTIVE')).casefold()=='no':
+        raise ValueError(f'The selected voucher type must be an active {base.title()} type.')
     identities=lambda master:{key:scalar(master.get(key)) for key in ('GUID','PARENT','ALTERID')}
-    return {'company':company['company'],'company_guid':company['company_guid'],'port':company['port'],'matched_kind':kind,
+    return {'company':company['company'],'company_guid':company['company_guid'],'port':company['port'],
         'data':{**row,'bank_ledger':name(bank),'counter_ledger':name(counter)},'allocation':allocation,
         'voucher_type':{'NAME':name(voucher),**identities(voucher)},
         'references':{'company_guid':company['company_guid'],'ledgers':{name(m):identities(m) for m in (bank,counter)}}}

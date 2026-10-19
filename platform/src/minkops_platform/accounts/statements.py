@@ -1,4 +1,4 @@
-"""Deterministic statement lifecycle and immutable native write manifest.
+"""Skill-interpreted statements with an immutable native write manifest.
 
 One native voucher is dispatched at a time. Every approved intent is durable
 before the first import; a receipt independently verifies the observed voucher.
@@ -19,12 +19,35 @@ from minkops_platform.run_controls import require_active, control_state
 from minkops_platform.workflows import resolve_run_config
 from .handlers import AccountsHandler
 from .repository import files_for, run_for, observe
-from .statement_routing import route, named
-from .client_context import master_lookup
+from .statement_routing import validated_plan
+from .client_context import context_assets
 
 
 def companies(context):
     return [c for s in context['sources'] if s['tool']=='tally' for c in s.get('snapshot',{}).get('companies',[])]
+
+
+def prepared_inputs(files, ids, config):
+    """Reuse discovery's full indexed evidence and parse source money once.
+
+    Original files remain available for statement/account headers and the optional
+    mapping. The agent classifies the canonical JSON rows, never rekeys amounts.
+    """
+    rows=[]
+    for file in files:
+        if str(file['id']) not in ids: continue
+        for row in parse_statement(bytes(file['content']),Path(file['path']).suffix,config):
+            row.update(source_file_id=str(file['id']),source_file=file['path'],status='held' if row.get('code') else 'ready')
+            rows.append(row)
+    if len(rows)>10000: raise ValueError('Select at most 10,000 transaction rows in one run.')
+    assets,manifest=context_assets(config['statement_context'])
+    files=[*files,*assets]
+    if len(files)>45 or sum(len(f['content']) for f in files)+len(json.dumps(rows).encode())>8_000_000:
+        raise ValueError('Statement and complete discovery exceed hosted input limits. Select fewer statements or a shorter discovery voucher period; masters cannot be sampled.')
+    context={'config':{k:v for k,v in config.items() if k!='statement_context'},
+        'source_catalog':manifest,'transactions':rows,'branch_mapping_file_id':config.get('branch_mapping_file_id'),
+        'files':[{'id':str(f['id']),'path':f['path']} for f in files]}
+    return files,context,{'rows':rows}
 
 
 def operator(run, user):
@@ -68,23 +91,27 @@ def dispatch_next(connection, run):
 
 
 class StatementHandler(AccountsHandler):
-    deterministic=True
-    queued_summary='Queued for deterministic statement checks.'
-    executing_summary='Checking statement rows and running balances without a model.'
+    queued_summary='Queued for statement interpretation.'
+    executing_summary='Interpreting statement transactions using Source Discovery.'
 
     def prepare_launch(self, connection, tenant, user, body, workflow, definition):
         ids=body['file_ids']
         if len(ids)!=len(set(ids)): raise ValueError('Select each statement file once.')
-        files=files_for(connection,tenant['id'],ids)
+        mapping_id=body['config'].get('branch_mapping_file_id')
+        if mapping_id in ids: raise ValueError('Select the branch mapping separately from statement files.')
+        files=files_for(connection,tenant['id'],[*ids,*([mapping_id] if mapping_id else [])])
         if any(not f['current'] for f in files): raise ValueError('Refresh changed source files first.')
         if any(Path(f['path']).suffix.lower() not in ('.csv','.xlsx') for f in files):
-            raise ValueError('Statement entry accepts CSV and XLSX. Convert legacy XLS files in Excel.')
+            raise ValueError('Statements and branch mappings accept CSV and XLSX. Convert legacy XLS files in Excel.')
         if sum(len(f['content']) for f in files)>30_000_000: raise ValueError('Select at most 30 MB of statements.')
-        from minkops_platform.discovery import workflow_context, get_run
+        from minkops_platform.discovery import workflow_context, get_run, latest_run
         discovery_id=body['config'].get('discovery_id')
         if not discovery_id: raise ValueError('Confirm complete Source Discovery first.')
         found=get_run(connection,tenant['id'],discovery_id)
         if found['actor_id']!=user['id']: raise ValueError('Confirm Source Discovery with this operator account.')
+        latest=latest_run(connection,tenant,user,found['device_id'])
+        if not latest or str(latest['id'])!=str(found['id']):
+            raise ValueError('Use the latest confirmed Source Discovery on this PC.')
         device=desktop.owned_device(connection,tenant['id'],user['id'],found['device_id'])
         desktop.require_companion(device,minimum=(0,8,0))
         if body.get('destination_device_id') and str(device['id'])!=str(body['destination_device_id']):
@@ -93,36 +120,49 @@ class StatementHandler(AccountsHandler):
         selection={**body['config'],'source_ids':list({str(f['source_id']) for f in files})}
         config=resolve_run_config(definition,workflow['config_values'],selection,
             allowed_source_ids=set(selection['source_ids']),allowed_destination_ids=set())
-        if not config['other_side_ledger'].strip(): raise ValueError('Choose the Other-side ledger before starting.')
-        # Validate each explicitly enabled destination, while rows for unknown
-        # branches remain exceptions in the preview instead of blocking siblings.
-        available={c['company_guid']:c for c in companies(context)}
-        if not config.get('bank_ledgers'): raise ValueError('Choose a bank ledger for at least one discovered company.')
-        for guid, bank in config['bank_ledgers'].items():
-            if guid not in available: raise ValueError('The bank destination is outside Source Discovery.')
-            records=master_lookup(available[guid])['records']
-            if len(named(records,'LEDGER',bank))!=1 or len(named(records,'LEDGER',config['other_side_ledger']))!=1:
-                raise ValueError('Choose discovered Bank and Other-side ledgers for each selected company.')
+        files,_,_=prepared_inputs(files,ids,{**config,'statement_context':context})
         return LaunchInputs(files,ids,None,config,{'statement_context':context,'statement_device_id':str(device['id'])})
 
     def prepare(self, connection, run):
-        return files_for(connection,run['tenant_id'],run['file_ids']),{},{}
+        if not run['config'].get('execution_snapshot'):
+            raise ValueError('This older statement run has no AI interpretation bundle. Start a new statement run.')
+        mapping_id=run['config'].get('branch_mapping_file_id')
+        files=files_for(connection,run['tenant_id'],[*run['file_ids'],*([mapping_id] if mapping_id else [])])
+        files,context,domain=prepared_inputs(files,run['file_ids'],run['config'])
+        context['definition_version']=run['definition_version']
+        return files,context,domain
 
-    def execute(self, run, files, context, domain):
-        result={'records':[],'findings':[]}
-        for file in files:
-            for row in parse_statement(bytes(file['content']),Path(file['path']).suffix,run['config']):
-                row.update(source_file_id=str(file['id']),source_file=file['path'],status='held' if row.get('code') else 'ready')
-                if not row.get('code'):
-                    try:
-                        resolved=route(row,companies(run['config']['statement_context']),run['config'])
-                        key=f"statement:{resolved['company_guid']}:{resolved['data']['bank_ledger']}"
-                        token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
-                        row.update(company=resolved['company'],company_guid=resolved['company_guid'],matched_kind=resolved['matched_kind'],
-                            plan={**resolved,'format_version':4,'remote_id':token,'operation':'append','destination_key':key})
-                    except ValueError as error:
-                        row.update(code='statement_routing',reason=str(error),status='held')
-                result['records'].append(row)
+    def validate(self, run, files, context, domain, result):
+        rows=copy.deepcopy(domain['rows'])
+        identity=lambda r:(r['source_file_id'],r['sheet'],r['row'])
+        expected={identity(r) for r in rows}
+        decisions={}
+        for proposal in result['records']:
+            key=identity(proposal)
+            if key not in expected or key in decisions:
+                raise ValueError('Statement interpretation contains an unknown or repeated source row.')
+            decisions[key]=proposal
+        for row in rows:
+            if row.get('code'): continue  # AI cannot clear a source/financial failure.
+            proposal=decisions.get(identity(row))
+            if proposal is None:
+                row.update(status='held',code='statement_interpretation',reason='No ledger interpretation was returned for this transaction.')
+                continue
+            if proposal.get('exception'):
+                exception=proposal['exception']
+                row.update(status='held',code=exception['code'],reason=exception['detail'])
+                continue
+            try:
+                resolved=validated_plan(row,companies(run['config']['statement_context']),proposal)
+                key=f"statement:{resolved['company_guid']}:{resolved['data']['bank_ledger']}"
+                token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
+                row.update(company=resolved['company'],company_guid=resolved['company_guid'],
+                    bank_ledger=resolved['data']['bank_ledger'],counter_ledger=resolved['data']['counter_ledger'],
+                    interpretation=proposal['evidence'],
+                    plan={**resolved,'format_version':4,'remote_id':token,'operation':'append','destination_key':key})
+            except ValueError as error:
+                row.update(code='statement_interpretation',reason=str(error),status='held')
+        result={'records':rows,'findings':[]}
         groups={}
         for index,row in enumerate(result['records']):
             if row.get('plan') and not row.get('code'):
@@ -136,8 +176,6 @@ class StatementHandler(AccountsHandler):
             else:
                 for i in indexes[1:]: result['records'][i]['duplicate_of']=indexes[0]
         return result
-
-    def validate(self, run, files, context, domain, result): return result
 
     def finish(self, connection, store, run, context, domain, result):
         complete(connection,run,result)
@@ -176,9 +214,14 @@ class StatementHandler(AccountsHandler):
     def on_resume(self, connection, run, user): dispatch_next(connection,run)
 
     def on_stop(self, connection, run, user):
-        result=copy.deepcopy(run.get('result') or {'records':[]})
+        raw=run.get('result')
+        rows=raw.get('records',[]) if isinstance(raw,dict) else []
+        # Provider output is durably saved before schema/business validation.
+        # Stop must also work in that interval, with no native row state yet.
+        result={'records':[copy.deepcopy(r) for r in rows if isinstance(r,dict) and r.get('source_file_id') in run['file_ids']]
+            if isinstance(rows,list) else [],'findings':[]}
         for row in result['records']:
-            if row['status'] not in ('saved','duplicate','rejected'):
+            if row.get('status') not in ('saved','duplicate','rejected'):
                 row.update(status='held',code='run_stopped',reason='The run was stopped before this row was saved. Verify any underway operation in Tally.')
         connection.execute('UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s',(Jsonb(result),run['tenant_id'],run['id']))
         sync_attention(connection,run,result)

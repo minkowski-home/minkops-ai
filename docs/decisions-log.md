@@ -1791,7 +1791,10 @@ unsigned, and automatic relaunch was suppressed in the isolated update rehearsal
 
 **Result:** Deterministic and PostgreSQL integration tests cover capability gating, template/evidence validation and callback continuation. Live Tally created synthetic `MIN126 Verified GST Supplier 20261018` only in Test Company, GUID ending `0000010a`; full native GST/address/PIN readback passed. The company-scope regression rejects foreign ledger GUIDs before import.
 
-### Deterministic bank workflows and irreversible-write fencing (MIN-120)
+### Initial deterministic bank workflows and irreversible-write fencing (MIN-120)
+
+The classification approach below was superseded by skill-driven statement
+interpretation; its native write fencing and recovery remain in use.
 
 **Situation:** Every workflow entered the hosted AI harness and native Tally saves were Purchase-shaped. Bank rows have no guaranteed unique ID, daily downloads overlap, and Tally imports may succeed despite losing acknowledgement.
 
@@ -1823,3 +1826,31 @@ Native-only discovery acceptance found a second boundary error: full collection 
 
 **Result:** The approval regression reproduced the production foreign-key lock timeout before the change. Both regressions and the existing device/statement suites pass. Final live recovery evidence is retained in the release verification document.
 Installed quick-run acceptance also caught a file-selection boundary: statement preferences reused the bill-only eligible-file filter, so CSV/XLSX choices disappeared after navigation. The shared source/path selection helper now accepts the workflow's file pattern while retaining the existing bill default. Unit coverage proves refreshed CSV/XLSX IDs retain only authorized selections; the browser regression restores the saved bank and file, then launches directly from the dashboard with its refreshed ID.
+
+### Skill-driven statement classification with independent native guarantees
+
+**Situation:** Statement Entry incorrectly treated an undefined client Branch
+label as a native master name and selected a fixed counter ledger. This encoded
+a business assumption into Python and prevented contextual accounting decisions.
+
+**Task:** Replace that classifier with the managed agent harness, using statement
+transactions, confirmed discovery and optional client branch mapping, while
+preserving the working financial write and recovery contract.
+
+**Action:** Move interpretation into a versioned skill and reuse the existing
+hosted lifecycle. Supply canonical source rows once as JSON, the original files,
+full indexed native masters/history and optional mapping. The skill selects
+company-scoped native identities with evidence and holds unresolved accounting.
+Remove branch matching, ledger defaults and manual bank/type selection. Keep
+application code limited to source arithmetic, identity/contract validation,
+approvals, overlap reconciliation and verified native plans. Scope the settings
+migration to Statement Entry and preserve historical manifests. Keep discovery
+on GUID-identified companies already unlocked and open in Tally; filesystem
+location is never a classification or company-selection signal.
+
+**Result:** Regression coverage proves unfamiliar branch labels can use evidenced
+AI selections, invented identities and changed source values cannot authorize a
+write, missing interpretations remain visible, conflicting overlaps hold, and
+mapping files never become transactions. Database integration exercises the real
+hosted lifecycle boundary and preserved native receipts/controls. Release and live
+agent verification are recorded with the deployment evidence.
