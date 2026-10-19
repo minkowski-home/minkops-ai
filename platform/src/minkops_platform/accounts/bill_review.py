@@ -117,7 +117,17 @@ def review(run, items=()):
 def _text(value):
     """Escape text cells only; negative numeric amounts retain their number type."""
     text = str(value) if value is not None else ""
-    return "'" + text if text.startswith(("=", "+", "-", "@", "\t", "\r", "\n")) else text
+    return "'" + text if text.startswith(("\t", "\r", "\n")) or text.lstrip().startswith(("=", "+", "-", "@")) else text
+
+
+def exception_csv(headers, rows):
+    """Shared exception export: BOM, quoted CSV and text-only formula escaping."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([value if type(value) in (int, float) else _text(value) for value in row])
+    return output.getvalue().encode("utf-8-sig")
 
 
 def export_csv(run, items=()):
@@ -125,22 +135,20 @@ def export_csv(run, items=()):
     if unavailable:
         raise ServiceError("conflict", unavailable)
     view = review(run, items)
-    output = io.StringIO(newline="")
-    writer = csv.writer(output)
-    writer.writerow(["Source file", "Invoice number", "Supplier", "Bill date", "Amount before taxes",
-                     "Tax", "Tax allocations", "Total", "Company", "Status", "Reason", "Attention item ID"])
+    headers = ["Source file", "Invoice number", "Supplier", "Bill date", "Amount before taxes",
+               "Tax", "Tax allocations", "Total", "Company", "Status", "Reason", "Attention item ID"]
+    rows = []
     for row in view["rows"]:
         record = run["result"]["records"][row["record_index"]] if row["record_index"] is not None else {}
         data = record.get("data", {})
         # Tally's supported schema has typed amounts. Malformed/legacy text is
         # escaped instead of being mistaken for a trusted numeric cell.
-        amount = lambda key: data.get(key) if isinstance(data.get(key), (int, float)) else _text(data.get(key))
         taxes = "; ".join(f"{t.get('ledger') or 'Tax'}: {t['amount']}" for t in record.get("tax_allocations", []))
-        writer.writerow([_text(row["source_file"]), _text(data.get("invoice_number")), _text(data.get("vendor")),
-                         _text(data.get("date")), amount("subtotal"), amount("tax"), _text(taxes), amount("total"),
-                         _text(record.get("company_name") or run["config"].get("tally_target", {}).get("company")),
-                         row["status"], _text(row["reason"]), _text(row["attention_item_id"])])
-    return output.getvalue().encode("utf-8-sig")
+        rows.append([row["source_file"], data.get("invoice_number"), data.get("vendor"), data.get("date"),
+                     data.get("subtotal"), data.get("tax"), taxes, data.get("total"),
+                     record.get("company_name") or run["config"].get("tally_target", {}).get("company"),
+                     row["status"], row["reason"], row["attention_item_id"]])
+    return exception_csv(headers, rows)
 
 
 def attention_items(connection, run):

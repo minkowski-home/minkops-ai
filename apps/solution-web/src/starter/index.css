@@ -21,3 +21,7 @@ body {
 .run-settings .accounts-field-grid { margin-block: .75rem; }
 
 .discovery-panel-heading + .button { margin-bottom: 1rem; }
+
+.statement-summary { min-width: 0; max-width: 100%; overflow-x: auto; }
+.statement-summary table { width: 100%; border-collapse: collapse; }
+.statement-summary th, .statement-summary td { padding: 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }

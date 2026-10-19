@@ -13,6 +13,7 @@ import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { progressView } from "../workspace/progress";
+import {StatementReview} from './Statements';
 
 const ACTION_LABELS: Record<BillAction, string> = {
   guess: "Best guess write",
@@ -103,6 +104,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       : "";
     if (
       run?.state === "writing" &&
+      run.workflow_key !== "statement-entry" &&
       controlState === "active" && !loadError &&
       key &&
       key !== attempted.current &&
@@ -156,6 +158,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
   }
   if (!run) return loadError ? <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>
     : loaded ? null : <LoadingIndicator>Loading workflow results…</LoadingIndicator>;
+  if (run.workflow_key === 'statement-entry') return <StatementReview tenant={tenant} run={run} onChanged={setRun} blocked={controlState !== 'active' || Boolean(loadError)}/>;
   const discovery = run.workflow_key === "source-discovery";
   const ownsRun = run.actor_id === user?.id;
   const result = run.result as BillResult | null;

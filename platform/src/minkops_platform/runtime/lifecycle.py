@@ -169,7 +169,10 @@ def work_once(url, store: RunStore, process):
                         else None,
                     },
                 )
-                if current["state"] == "executing" and not current["session_id"]:
+                from .application import binding_for, get_handler
+                binding = current['config'].get('runtime_binding')
+                deterministic = bool(binding and getattr(get_handler(binding_for(current).handler), "deterministic", False))
+                if current["state"] == "executing" and not current["session_id"] and not deterministic:
                     raise ValueError(
                         "Worker stopped before a session ID was saved. Start a new run explicitly; "
                         "the task will not be replayed automatically."

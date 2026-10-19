@@ -274,6 +274,8 @@ async function exchange(company, port, body, request) {
   }).parse(source);
 }
 
+export { exchange as tallyExchange };
+
 /** Vouchers that may record a bill: every purchase-family type, plus Journal
  * types (a bill booked as a Journal must never be entered again). */
 export async function readTallyBills(

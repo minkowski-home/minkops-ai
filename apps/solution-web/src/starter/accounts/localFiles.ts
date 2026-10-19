@@ -101,7 +101,7 @@ async function inventory(folder: Directory, path = '', result: { path: string; f
     if (name.startsWith('.') || ['ground_truth', 'ground-truth', 'pr-infra-sample-bills'].includes(name)) continue;
     const relative = path ? `${path}/${name}` : name;
     if (handle.kind === 'directory') await inventory(handle, relative, result);
-    else if (/\.(xlsx|pdf|png|jpe?g|webp)$/i.test(name)) result.push({ path: relative, file: await handle.getFile() });
+    else if (/\.(xlsx|csv|pdf|png|jpe?g|webp)$/i.test(name)) result.push({ path: relative, file: await handle.getFile() });
     if (result.length > 100) throw new Error('This folder contains more than 100 supported files. Select a narrower folder.');
   }
   return result;

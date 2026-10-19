@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { chooseFolder, refreshFolder, supportsLocalFolder } from './localFiles';
 import type { Run, Source, SavedCatalog } from './types';
 import { initialLockedCompany, voucherTypeLaunch, type DiscoveredCompany } from './voucherTypes';
+import {StatementLaunch,quickStatementRun} from './Statements';
 
 interface NativeCatalog { id:string; ready:boolean; device_id:string; config:{tally:{company?:string}|null};catalog?:{excel_catalog_id?:string;format_version?:string;sources:{tool:string;snapshot?:{companies?:DiscoveredCompany[]}}[]} }
 const discoveredCompanies = (catalog:NativeCatalog|null): DiscoveredCompany[] => catalog?.catalog?.sources.flatMap(s=>s.tool==='tally' ? s.snapshot?.companies ?? [] : []) ?? [];
@@ -158,6 +159,11 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
     const base = `/api/tenants/${tenant}/accounts`;
     const discovery = presentationFor(workflow) === 'accounts-discovery';
     try {
+      if (presentationFor(workflow)==='accounts-statement') {
+        let pc='';try {pc=JSON.parse(localStorage.getItem(destinationPreference(tenant,user.id,workflow.key))??'null') as string;}catch{/* Setup handles an invalid preference. */}
+        const result=pc?await quickStatementRun(tenant,workflow,user,pc):null;
+        navigate(result?`/${routeSlug}/tasks/${result.task_id}`:`/${routeSlug}/workflows/${workflow.id}`);return;
+      }
       if (discovery) {
         const latest=await api<{device_id:string;config:Record<string,unknown>}|null>(`/api/tenants/${tenant}/discovery/latest`);
         if (!latest) { navigate(`/${routeSlug}/workflows/${workflow.id}`); return; }
@@ -213,5 +219,6 @@ export function AccountsQuickRun({ tenant, routeSlug, workflow }: { tenant: stri
 }
 
 export function AccountsLaunch(props:RunSettingsProps & {routeSlug:string;destination?: DestinationPCState}) {
+  if (presentationFor(props.workflow)==='accounts-statement') return <StatementLaunch {...props}/>;
   return presentationFor(props.workflow)==='accounts-discovery'?<DiscoveryLaunch {...props}/>:<BillEntryLaunch {...props}/>;
 }

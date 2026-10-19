@@ -1,0 +1,14 @@
+{
+  "type":"object", "additionalProperties":false,
+  "required":["source_ids","discovery_id","review_mode","other_side_ledger","counter_mode","date_format","opening_balance","bank_ledgers","voucher_types"],
+  "properties":{
+    "source_ids":{"type":"array","items":{"type":"string"},"uniqueItems":true},
+    "discovery_id":{"type":"string","format":"uuid"},
+    "review_mode":{"enum":["all_outputs","only_exceptions"]},
+    "other_side_ledger":{"type":"string","maxLength":200},
+    "counter_mode":{"enum":["single"]},"date_format":{"enum":["dmy","mdy","iso"]},
+    "opening_balance":{"type":"string","maxLength":30},
+    "bank_ledgers":{"type":"object","maxProperties":50,"additionalProperties":{"type":"string","minLength":1,"maxLength":200}},
+    "voucher_types":{"type":"object","maxProperties":50,"additionalProperties":{"type":"object","additionalProperties":false,"properties":{"payment":{"type":"string"},"receipt":{"type":"string"}}}}
+  }
+}
