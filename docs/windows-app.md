@@ -5,7 +5,7 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.7.0 is the current release: it works only with the companies open in
+Companion 0.8.0 is the current release: it works only with the companies open in
 the user's Tally, reports typed session states, sends diagnostics and updates
 itself. Core Tally discovery uses HTTP/XML exports and needs no ODBC driver.
 Installed-RC evidence below is historical. Current production, installed-upgrade

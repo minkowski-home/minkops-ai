@@ -25,6 +25,24 @@ def single_counter(company, records, settings):
 COUNTERS = {'single': single_counter}
 
 
+def destination_choices(company):
+    """Small launch metadata; never send full native masters to the renderer."""
+    records=master_lookup(company)['records']
+    groups={normalized(name(r['data'])):scalar(r['data'].get('PARENT')) for r in records if r['type']=='GROUP'}
+    def bank(master):
+        parent=scalar(master.get('PARENT'))
+        for _ in range(50):
+            if normalized(parent)=='bank accounts':return True
+            parent=groups.get(normalized(parent))
+            if not parent:return False
+        return False
+    types=[r['data'] for r in records if r['type']=='VOUCHERTYPE']
+    bases=base_types(types)
+    return {'banks':[{'name':name(r['data']),'guid':scalar(r['data'].get('GUID'))} for r in records if r['type']=='LEDGER' and bank(r['data'])],
+        'voucher_types':[{'name':name(m),'guid':scalar(m.get('GUID')),'base':normalized(bases.get(name(m).casefold()))}
+            for m in types if normalized(bases.get(name(m).casefold())) in ('payment','receipt') and scalar(m.get('ISACTIVE')).casefold()!='no']}
+
+
 def route(row, companies, settings):
     matches=[]
     for company in companies:

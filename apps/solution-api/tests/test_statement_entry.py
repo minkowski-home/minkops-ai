@@ -27,6 +27,10 @@ class StatementTests(unittest.TestCase):
             for record in records:
                 if record['type']=='VOUCHERTYPE': record['data'].update(GUID=record['data']['NAME']+'-guid',PARENT=record['data']['NAME'])
             c.execute('UPDATE discovery_runs SET catalog=%s WHERE id=%s',(Jsonb(catalog),discovery))
+        summary=self.client.get(f'/api/tenants/mock-tenant/discovery/latest?device_id={self.device["id"]}').json()
+        company=summary['catalog']['sources'][0]['snapshot']['companies'][0]
+        self.assertNotIn('records',company['masters'])
+        self.assertEqual(company['statement_options']['banks'],[{'name':'Bank','guid':'Bank-guid'}])
         text='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,OUT1,11,,989,Test\n02/10/26,IN1,,17,1006,Test\n02/10/26,HOLD,3,,1003,Unknown branch\n'
         file=self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':'["statement.csv"]'},
             files=[('files',('statement.csv',text.encode('utf-8-sig')))]).json()['files'][0]['id']

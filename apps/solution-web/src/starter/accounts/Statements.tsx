@@ -9,11 +9,8 @@ import {chooseFolder, refreshFolder, supportsLocalFolder} from './localFiles';
 import type {Run, Source} from './types';
 import {restoreSelection,selectionKeys} from './fileSelection';
 
-type Master = {type:string;data:Record<string,unknown>};
-type Company = {company:string;company_guid:string;masters:{records:Master[]}};
+type Company = {company:string;company_guid:string;statement_options:{banks:{name:string;guid:string}[];voucher_types:{name:string;guid:string;base:string}[]}};
 interface Discovery {id:string;device_id:string;ready:boolean;catalog?:{sources:{tool:string;snapshot?:{companies?:Company[]}}[]}}
-const scalar=(v:unknown):string=>typeof v==='string'?v:v&&typeof v==='object'&&'#text' in v?String(v['#text']):'';
-const name=(m:Master)=>scalar(m.data['@_NAME']??m.data.NAME);
 const money=(cents:number)=>new Intl.NumberFormat('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}).format(cents/100);
 const preference=(tenant:string,user:string)=>`${tenant}:${user}:statement-entry:setup:v1`;
 interface SavedSetup {deviceId:string;files:string[];banks:Record<string,string>;types:Record<string,Record<string,string>>}
@@ -80,17 +77,13 @@ export function StatementLaunch(props:RunSettingsProps & {routeSlug:string;desti
     </details>)}
     {!discovery?.ready&&<p role="status">Run and confirm complete Source Discovery on the selected PC first.</p>}
     <fieldset><legend>Bank destinations</legend><p>Select a bank ledger for each company this statement can use.</p>{companies.map(company=>{
-      const records=company.masters.records;
-      const voucherTypes=records.filter(m=>m.type==='VOUCHERTYPE');
-      const family=(value:string,depth=0):string=>{const m=voucherTypes.find(t=>name(t).toLowerCase()===value.toLowerCase());
-        if(!m||depth>10)return value.toLowerCase();const base=scalar(m.data['@_RESERVEDNAME'])||scalar(m.data.PARENT);
-        return !base||base.toLowerCase()===value.toLowerCase()?value.toLowerCase():family(base,depth+1);};
+      const choices=company.statement_options;
       return <div className="accounts-field-grid" key={company.company_guid}><label>Bank ledger · {company.company}<select value={banks[company.company_guid]??''} aria-label={`Bank ledger for ${company.company}`}
         onChange={e=>setBanks(old=>{const next={...old};if(e.target.value)next[company.company_guid]=e.target.value;else delete next[company.company_guid];return next;})}>
-        <option value="">Exclude this company</option>{records.filter(m=>m.type==='LEDGER').map(m=><option key={scalar(m.data.GUID)||name(m)} value={name(m)}>{name(m)}</option>)}</select></label>
-        {['payment','receipt'].map(base=>{const candidates=voucherTypes.filter(m=>family(name(m))===base&&scalar(m.data.ISACTIVE).toLowerCase()!=='no');
+        <option value="">Exclude this company</option>{(choices?.banks??[]).map(m=><option key={m.guid||m.name} value={m.name}>{m.name}</option>)}</select></label>
+        {['payment','receipt'].map(base=>{const candidates=(choices?.voucher_types??[]).filter(m=>m.base===base);
           return candidates.length>1?<label key={base}>{base==='payment'?'Payment':'Receipt'} type · {company.company}<select value={types[company.company_guid]?.[base]??''}
-            onChange={e=>setTypes(old=>({...old,[company.company_guid]:{...old[company.company_guid],[base]:e.target.value}}))}><option value="">Choose a voucher type</option>{candidates.map(m=><option key={scalar(m.data.GUID)} value={scalar(m.data.GUID)}>{name(m)}</option>)}</select></label>:null;})}
+            onChange={e=>setTypes(old=>({...old,[company.company_guid]:{...old[company.company_guid],[base]:e.target.value}}))}><option value="">Choose a voucher type</option>{candidates.map(m=><option key={m.guid} value={m.guid}>{m.name}</option>)}</select></label>:null;})}
       </div>;
     })}</fieldset>
     <RunSettings {...props} busy={busy}/>

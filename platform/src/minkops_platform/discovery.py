@@ -108,6 +108,8 @@ def detail(connection, row, *, include_records=True):
                         [r["data"] for r in lookup["records"] if r["type"] == "VOUCHERTYPE"],
                         company.get("vouchers", {}).get("records", []),
                     )
+                    from .accounts.statement_routing import destination_choices
+                    company['statement_options'] = destination_choices(company)
                 except ValueError as error:
                     company["master_lookup_error"] = str(error)
                     catalog["partial"] = True
