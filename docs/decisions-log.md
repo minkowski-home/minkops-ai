@@ -1770,3 +1770,12 @@ unsigned, and automatic relaunch was suppressed in the isolated update rehearsal
 Final installed-app integration also exposed the discovery polling/launch boundary: polling deliberately strips full masters. Statement setup now consumes an explicit compact projection of bank names/GUIDs and Payment/Receipt choices. A browser launch regression uses the actual metadata-only shape, while the authoritative full catalog stays server-side for routing and write validation.
 
 Native-only discovery acceptance found a second boundary error: full collection was subjected to hosted interpretation limits even when AI was disabled. The native validator remains bounded at 64 MB; only requests that actually enable hosted interpretation now apply its tighter packaging limits. Regression tests prove an otherwise valid native-only catalog confirms while an oversized AI-enabled catalog stays held. No native records are sampled or discarded.
+### Bound worker memory at the batch and deployment boundaries
+
+**Situation:** Five-company live acceptance exceeded the pilot worker's 512 MiB memory limit before any hosted session started. Each aggregation decoded every child's repeated immutable catalog, and four lanes amplified that unnecessary allocation.
+
+**Task:** Recover durable queued work without increasing recurring capacity or replaying paid sessions or native writes.
+
+**Action:** Project only child outcome fields during aggregation. A PostgreSQL regression installs a JSON decoder that rejects execution contexts, proving aggregation never loads them. Expose a validated lane count through the existing bootstrap and retain four as the library default; the 512 MiB deployment selects one lane. Keep provider-session recovery and native write fences unchanged.
+
+**Result:** The context-boundary regression reproduced the defect before the fix. Bootstrap tests verify both bounded and persistent workers receive the configured lane count. Production recovery and final acceptance results are recorded in the release verification document.

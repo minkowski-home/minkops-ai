@@ -110,6 +110,28 @@ class BillEntryTests(unittest.TestCase):
                 evidence["quote"] = invoice
         return result
 
+    def test_batch_aggregation_never_decodes_child_execution_contexts(self):
+        import json
+        from psycopg.types.json import set_json_loads
+        from minkops_platform.accounts.batch import _reconcile
+
+        root, inputs, children = self.exception_only_batch()
+        for child in children:
+            self.process(child, self.numbered_result(root, child['file_ids'][0], str(child['id'])))
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            c.execute("UPDATE account_runs SET config=config || '{\"aggregation_context_marker\":true}'::jsonb WHERE parent_run_id=%s", (root['id'],))
+            parent = c.execute('SELECT * FROM account_runs WHERE id=%s', (root['id'],)).fetchone()
+
+            def load_outcome(value):
+                if b'aggregation_context_marker' in bytes(value):
+                    raise AssertionError('Aggregation must not deserialize immutable child execution catalogs.')
+                return json.loads(value)
+
+            set_json_loads(load_outcome, c)
+            _reconcile(c, parent)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(len(loaded['result']['records']), len(inputs))
+
     def test_unavailable_destination_pc_holds_clean_bills_for_retry(self):
         from minkops_platform.accounts.batch import reconcile_once
         root, inputs, children = self.exception_only_batch()
