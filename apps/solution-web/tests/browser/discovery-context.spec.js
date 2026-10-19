@@ -1,6 +1,27 @@
 /* global URL, document, window */
 import { test, expect } from '@playwright/test';
 
+test('a timed-out discovery shows its audited reason even with its custom progress view', async ({page,context}) => {
+  const errors=[];
+  page.on('pageerror', error => errors.push(error.message));
+  const summary='Stopped after 45 minutes of active processing. Progress and completed saves are retained; an underway save may still finish.';
+  const workflow={id:'discovery',key:'source-discovery',presentation:'accounts-discovery',name:'Source discovery',status:'active',employee_ids:[],config_values:{},config_schema:{properties:{}}};
+  const task={id:'task',title:'Discover business sources',workflow_id:'discovery',status:'stopped',control_state:'stopped',progress:30,summary,events:[{id:1,event_type:'control.stop',summary,progress:30}]};
+  await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/,route=>route.fulfill({body:'',contentType:'text/css'}));
+  await context.route('**/api/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    const body=path.endsWith('/auth/session')?{id:'user',name:'QA',email:'qa@example.test',memberships:[{slug:'mock-tenant',role:'admin'}],csrf_token:'csrf'}
+      :path.endsWith('/workspace')?{tenant:{slug:'mock-tenant',name:'QA'},can_edit:true,employees:[],tasks:[task],workflows:[workflow]}
+        :path.endsWith('/discovery/tasks/task')?{id:'run',task_id:'task',state:'stopped',ready:false,observations:[],mapping_run:null,config:{excel_source_ids:[],tally:null},catalog:null}
+          :path.endsWith('/accounts/tasks/task/run')?null:task;
+    return route.fulfill({json:body});
+  });
+  await page.goto('http://127.0.0.1:3000/mock-tenant/tasks/task');
+  await expect(page.getByRole('heading',{name:'Discovery stopped',exact:true})).toBeVisible();
+  await expect(page.getByText(summary,{exact:true})).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('AI-off persists for every source mode and goes directly to confirmable review', async ({ page, context }, testInfo) => {
   const errors = [], requests = [];
   let latest = null;
