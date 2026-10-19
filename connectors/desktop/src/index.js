@@ -232,3 +232,4 @@ export async function replaceApproved(root, spec, approved, backup) {
 }
 export { inspectTallyAttention } from "./tally.js";
 export { saveTallyStatement } from "./statement.js";
+export { saveVoucher, readVouchers, voucherFamilies } from "./voucher.js";
