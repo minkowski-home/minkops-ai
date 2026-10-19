@@ -337,11 +337,6 @@ the warehouse engine or extraction strategy. Raw prompts, documents, credentials
 local paths and unrestricted provider payloads remain excluded. Apply the same
 allow-list, tenant access and erasure rules when adding any diagnostic fields.
 
-### 0.6 Tracking
-
-Log each Phase 0 change in `docs/decisions-log.md` only when it is interview-worthy
-(0.1 lease/heartbeat separation and 0.4 content addressing qualify).
-
 ---
 
 ## Phase 1 — Local warehouse foundation
