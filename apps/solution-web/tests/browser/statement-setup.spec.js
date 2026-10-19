@@ -1,4 +1,4 @@
-/* global URL */
+/* global URL, document, window */
 import {test,expect} from '@playwright/test';
 
 for(const withMapping of [false,true])test(`AI statement launch and quick run preserve sources ${withMapping?'with':'without'} optional mapping`,async({page,context})=>{
@@ -11,7 +11,7 @@ for(const withMapping of [false,true])test(`AI statement launch and quick run pr
   if(path==='/api/auth/session')body={id:'user',name:'QA',memberships:[{slug:'mock-tenant',role:'admin'}],csrf_token:'csrf'};
   else if(path.endsWith('/workspace'))body={tenant:{slug:'mock-tenant',name:'QA'},can_edit:true,employees:[],workflows:[workflow],tasks:[]};
   else if(path.endsWith('/desktop/devices'))body=[{id:'pc',name:'QA PC',owner_id:'user',expires_at:'2099-01-01',revoked_at:null,last_seen_at:new Date().toISOString(),companion_version:'0.8.0'}];
-  else if(path.endsWith('/accounts/sources'))body=[{id:'source',label:'Bank files',writable:false,files:[{id:fileId,path:'statement.csv'},...(mappingAvailable?[{id:fileId+'-mapping',path:'branch-mapping.xlsx'}]:[])]}];
+  else if(path.endsWith('/accounts/sources'))body=[{id:'source',label:'Synthetic Statement AI acceptance with a long client source label',writable:false,files:[{id:fileId,path:'statement.csv'},...(mappingAvailable?[{id:fileId+'-mapping',path:'branch-mapping.xlsx'}]:[])]}];
   else if(path.endsWith('/discovery/latest'))body={id:'discovery',device_id:'pc',ready:true,catalog:{sources:[{tool:'tally',snapshot:{companies:[{company:'Test Company',company_guid:'company',masters:{status:'ready',count:200},statement_options:{banks:[{name:'Discovered Bank',guid:'bank'}],voucher_types:[]}}]}}]}};
   else if(path.endsWith('/accounts/runs')){runs.push(route.request().postDataJSON());body={task_id:'task'};}
   else if(path.endsWith('/discovery/tasks/task')||path.endsWith('/accounts/tasks/task/run'))body=null;
@@ -27,6 +27,9 @@ for(const withMapping of [false,true])test(`AI statement launch and quick run pr
   await page.getByLabel('Branch mapping (optional)',{exact:true}).selectOption('file-mapping');
   await expect(page.getByLabel('branch-mapping.xlsx',{exact:true})).not.toBeChecked();
   await expect(page.getByLabel('branch-mapping.xlsx',{exact:true})).toBeDisabled();
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.setViewportSize({width:1440,height:1000});
  }
  await page.getByRole('button',{name:'Interpret statements',exact:true}).click();
  await page.waitForURL('**/tasks/task');

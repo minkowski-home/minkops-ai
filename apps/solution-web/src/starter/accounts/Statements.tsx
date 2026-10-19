@@ -79,7 +79,7 @@ export function StatementLaunch(props:RunSettingsProps & {routeSlug:string;desti
         onChange={e=>setSelected(old=>e.target.checked?[...old,file.id]:old.filter(id=>id!==file.id))}/>{file.path}</label>)}
     </details>)}
     {!discovery?.ready&&<p role="status">Run and confirm complete Source Discovery on the selected PC first.</p>}
-    <label>Branch mapping (optional)<select aria-label="Branch mapping (optional)" value={mapping} disabled={busy} onChange={e=>{
+    <label className="config-field statement-mapping">Branch mapping (optional)<select aria-label="Branch mapping (optional)" value={mapping} disabled={busy} onChange={e=>{
       setMapping(e.target.value);setSelected(old=>old.filter(id=>id!==e.target.value));
     }}><option value="">No mapping file</option>{mapping==='missing'&&<option value="missing" disabled>Saved mapping unavailable — choose a file or no mapping</option>}
       {sources.flatMap(source=>source.files.filter(f=>STATEMENT_FILES.test(f.path)).map(file=><option key={file.id} value={file.id}>{source.label} · {file.path}</option>))}
