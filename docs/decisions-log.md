@@ -1,5 +1,39 @@
 # Decision Logs
 
+## Reconcile a partial native seed after an unacknowledged import (18 October 2026)
+
+**Situation:** A five-company rehearsal verified the new open-company scope,
+including password-protected companies and colliding folder-local numbers.
+The first synthetic master import crashed Tally and left unit exceptions;
+an HTTP timeout could not establish what had persisted. Native collection
+exports omitted those invalid units, while object exports still found them.
+
+**Task:** Prepare realistic test data without duplicating partially applied
+objects, overwriting existing accounting data, or reviving process-control logic.
+
+**Action:** Preserved complete pre-import exports and the import intent, stopped
+on the uncertain outcome, and retained Tally's native error log. The native unit
+form established that digit-bearing symbols were invalid; an alphabetic symbol
+saved successfully. With explicit authorization, computer use removed only the
+five backed-up failed fixture records through Tally's own exception screen.
+The importer now requires an exported valid native unit, alphabetic symbols and
+fresh native identities. Regression tests cover these boundaries, empty native
+XML sections and derived versus entered inventory accounting views.
+The opt-in seeder checks pinned GUIDs, compares existing master
+definitions and voucher allocations, creates only missing objects, and records
+each import attempt independently. It exercises the actual protocol 3 save and
+duplicate reconciliation path before bulk historical vouchers, then requires
+full native readback. Company opening and unlocking remained operator actions;
+no password, file repair or process control entered the product or fixture scripts.
+
+**Result:** All 295 planned masters and 250 vouchers passed native readback, and
+each company's production save/replay returned saved then duplicate. A second
+explicit run created nothing. All 75 two-page bills use permitted dates and were
+visually checked. Testing the actual hosted context serializer also caught the
+five-company full-history package exceeding 8 MB; a verified narrower discovery
+period retains the test cases at 7.09 MB including the largest bill. Evidence
+and repeatable steps are in [the rehearsal guide](tally-rehearsal.md).
+
 ## Fence bulk consent to a verified cohort (18 October 2026)
 
 **Situation:** Repeating a single-bill decision N times fails once the first

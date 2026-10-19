@@ -35,6 +35,8 @@ ATTENTION_CODES = {
     "ambiguous_supplier": {"supplier_unresolved", "company_unresolved", "classification_uncertain"},
     "missing_supplier": {"supplier_missing"},
     "separate_round_off": {"unsupported_structure", "source_values_conflict"},
+    "before_books": {"date_before_books"},
+    "inventory_required": {"unsupported_structure"},
 }
 
 
@@ -44,6 +46,7 @@ def load_expected(packages):
     for package in packages:
         for bill in json.loads((Path(package) / "evidence/expected-bills.json").read_text()):
             guids = bill.get("master_guids") or {}
+            bill["vendor"] = bill.get("vendor") or bill.get("supplier")
             bill["vendor_guid"] = bill.get("vendor_guid") or guids.get("vendor")
             bill["purchase_guid"] = bill.get("purchase_guid") or guids.get("purchase_ledger")
             bill["package"] = Path(package).name
@@ -109,6 +112,9 @@ def replay_output(bill, file_id, target):
     elif case == "separate_round_off":
         record["exceptions"].append({"code": "unsupported_structure",
                                      "detail": f"Separate printed round-off of {bill['round_off']}."})
+    elif case == "inventory_required":
+        record["exceptions"].append({"code": "unsupported_structure",
+                                     "detail": "Supplier history and bill require native stock allocations."})
     # Ledger fields are filled from master_refs but still quote the bill text.
     printed = {"vendor": bill.get("printed_supplier") or bill.get("printed_vendor") or bill.get("supplier")
                or bill.get("vendor"),
