@@ -95,3 +95,5 @@ future execution capability, not part of the current hosted implementation.
 
 Production deployment remains paused. Native restart/licence handoff and device
 acceptance gaps remain tracked in [MIN-124 evidence](verification-min-124.md).
+
+Statement Entry opens one file-level exception summary with counts. Row details and exception CSV live in the task; it does not create one Attention item per bank row. Write ready rows, Retry save checks and Do nothing preserve the immutable native manifest. Correct parsing/routing problems in the original statement or Tally and start a refreshed run. A possible existing untagged voucher or uncertain import stays held for reconciliation.
