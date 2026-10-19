@@ -705,7 +705,10 @@ def collect(connection, device, job, result):
         },
         "excel_mappings": remapped if unchanged else None,
     }
-    if not partial:
+    # Hosted packaging bounds apply only when interpretation was requested.
+    # Complete native-only catalogs authorize deterministic workflows directly;
+    # native collection validation still enforces its independent 64 MB bound.
+    if not partial and config.get("ai_context", True):
         from .accounts.client_context import context_assets
 
         try:
