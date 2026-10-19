@@ -40,7 +40,9 @@ def work_once(url, *, executor=execute):
     return worked
 
 
-def run_forever(url):
+def run_forever(url, *, lanes=WORKER_LANES):
+    if type(lanes) is not int or not 1 <= lanes <= WORKER_LANES:
+        raise ValueError(f'Worker lanes must be between 1 and {WORKER_LANES}.')
     def lane():
         while True:
             if not work_once(url):
@@ -49,8 +51,8 @@ def run_forever(url):
 
     # Each lane owns a database connection; persisted runs/locks remain the
     # source of truth for recovery, including independent paid child sessions.
-    with ThreadPoolExecutor(max_workers=WORKER_LANES) as pool:
-        futures = [pool.submit(lane) for _ in range(WORKER_LANES)]
+    with ThreadPoolExecutor(max_workers=lanes) as pool:
+        futures = [pool.submit(lane) for _ in range(lanes)]
         for future in futures:
             future.result()
 

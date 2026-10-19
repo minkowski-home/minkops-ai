@@ -220,7 +220,9 @@ def _aggregation_failed(connection, parent, error):
 
 def _reconcile(connection, parent):
     children = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0",
+        # Aggregation consumes outcomes, never the repeated multi-megabyte
+        # execution catalogs pinned independently to every bill child.
+        "SELECT id,file_ids,state,result,error FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) ORDER BY file_ids->>0",
         (parent["tenant_id"], parent["id"]),
     ).fetchall()
     done = [c for c in children if c["state"] in ("review", "failed")]

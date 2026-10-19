@@ -23,7 +23,7 @@ def main(image, interest_image):
     run("run", "jobs", "deploy", "minkops-worker", *common, f"--image={image}",
         f"--service-account=minkops-worker@{PROJECT}.iam.gserviceaccount.com",
         f"--set-cloudsql-instances={INSTANCE}", "--command=python",
-        "--args=-m,minkops_api.accounts_worker,--drain", "--tasks=1", "--parallelism=1",
+        "--args=-m,minkops_api.accounts_worker,--drain,--lanes,1", "--tasks=1", "--parallelism=1",
         "--max-retries=0", "--task-timeout=1800s", f"--set-secrets={database}",
         f"--set-env-vars=AUTH_DEV_MODE=0,WORKER_JOB_RESOURCE={JOB}")
     for account in ("api", "worker", "ops"):
