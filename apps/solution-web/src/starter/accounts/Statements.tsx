@@ -115,6 +115,7 @@ export function StatementReview({tenant,run,onChanged,blocked}:{tenant:string;ru
   }catch(e){setError(e instanceof Error?e.message:'Could not complete this action.');}finally{setBusy(false);}}
   return <section className="accounts-panel" aria-label="Statement preview"><h3>Statement preview</h3>
     <p>{rows.length} rows · {settled.filter(r=>r.status==='saved').length} saved · {settled.filter(r=>r.status==='duplicate').length} already in Tally</p>
+    {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard access to the horizontally scrolling data region. */}
     <div className="statement-summary" role="region" aria-label="Statement branch totals" tabIndex={0}><table><thead><tr><th>Branch</th><th>Rows</th><th>Payments</th><th>Receipts</th><th>Date range</th><th>Checks</th></tr></thead><tbody>{groups.map(g=><tr key={g.branch}><td>{g.branch}</td><td>{g.count}</td><td>{money(g.payment)}</td><td>{money(g.receipt)}</td><td>{g.dates[0]} – {g.dates.at(-1)}</td><td>{g.held?`${g.held} exceptions`:'Balances verified'}</td></tr>)}</tbody></table></div>
     <div className="accounts-toolbar"><button className="button button-ghost" disabled={busy||!run.result||!['review','completed','failed','stopped'].includes(run.state)} onClick={()=>{
       setBusy(true);void downloadFile(`/api/tenants/${tenant}/accounts/runs/${run.id}/statement-exceptions.csv`,`statement-exceptions-${run.id}.csv`)
