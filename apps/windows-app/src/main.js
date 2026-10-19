@@ -24,6 +24,7 @@ import {
   mkdir,
   readdir,
   stat,
+  open,
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -41,6 +42,7 @@ import {
   inspectTallyAttention,
   tallyCrashEvents,
   saveTallyBill,
+  saveTallyStatement,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
 import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
@@ -285,6 +287,22 @@ function startWorker() {
           `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
         );
         return readTallyReferences(plan, { request: tallyRequest });
+      }
+      if (job.operation === "tally.statement") {
+        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
+        return saveTallyStatement(plan, {request: tallyRequest, beforeImport: async intent => {
+          if (state.device !== identity || !safeStorage.isEncryptionAvailable()) throw new Error("PC connection changed.");
+          const directory = join(app.getPath("userData"), "statement-manifests");
+          await mkdir(directory, {recursive: true});
+          let handle;
+          try { handle = await open(join(directory, `${intent.remote_id}.bin`), "wx", 0o600); }
+          catch (error) { if (error.code === "EEXIST") return false; throw error; }
+          try {
+            await handle.writeFile(safeStorage.encryptString(JSON.stringify({job_id:job.id,attempted_at:new Date().toISOString(),plan:intent})));
+            await handle.sync();
+          } finally { await handle.close(); }
+          return state.device === identity;
+        }});
       }
       if (job.operation === "tally.save") {
         const plan = await request(
