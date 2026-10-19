@@ -4,8 +4,6 @@ Identity is business-derived, never a run UUID or upload filename. Destination
 keys remain authoritative for backfills and externally created records.
 """
 
-import hashlib
-import json
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
@@ -48,11 +46,9 @@ def business_identity(data):
         or not invoice.strip()
     ):
         raise ValueError("Supplier and invoice number are required for bill identity.")
-    issued = date.fromisoformat(str(data.get("date")))
-    year = issued.year if issued.month >= 4 else issued.year - 1
-    return hashlib.sha256(
-        json.dumps([normalized(vendor), normalized(invoice), year]).encode()
-    ).hexdigest()
+    from .vouchers import document_identity
+
+    return document_identity(vendor, invoice, date.fromisoformat(str(data.get("date"))))
 
 
 def excel_matches(data, mapping, rows):
