@@ -228,6 +228,18 @@ def with_pattern(payload):
 
 
 class PostingPatternTest(unittest.TestCase):
+    def test_a_parent_group_ancestry_change_invalidates_a_pattern(self):
+        from minkops_platform.accounts.posting_profiles import holds, validate
+        from minkops_platform.accounts.vouchers import Masters
+
+        original = company()
+        original['masters']['records'].append({'type': 'GROUP', 'data': {
+            'NAME': 'Indirect Expenses', 'GUID': 'group-indirect', 'PARENT': 'Expenses'}})
+        pinned = validate(pattern(), Masters(original), 'company')
+        regrouped = copy.deepcopy(original)
+        regrouped['masters']['records'][-1]['data']['PARENT'] = 'Current Liabilities'
+        self.assertFalse(holds(pinned, Masters(regrouped)))
+
     def test_a_confirmed_pattern_allows_its_tds_and_sets_the_supplier_line(self):
         record = proposal()
         record["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 55.00))

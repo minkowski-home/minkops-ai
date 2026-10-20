@@ -11,6 +11,8 @@ identities still hold, so routine master edits never force re-confirmation.
 """
 
 import copy
+import hashlib
+import json
 
 from psycopg.types.json import Jsonb
 
@@ -40,6 +42,24 @@ def masters_for(config, guid):
 def _groups(masters):
     return {masters.name(d) for (kind, _), found in masters.by_key.items() if kind == "GROUP" for d in found} | {
         masters.scalar(d, "PARENT") for (kind, _), found in masters.by_key.items() if kind == "LEDGER" for d in found}
+
+
+def _ancestry(masters, roots):
+    """Only the group chains used by this pattern, excluding routine master edits."""
+    parents = {masters.name(d): masters.scalar(d, "PARENT")
+               for (kind, _), found in masters.by_key.items() if kind == "GROUP" for d in found}
+    found = {}
+    for root in roots:
+        while root and root not in found:
+            found[root] = parents.get(root)
+            root = parents.get(root)
+    return found
+
+
+def _notes(config, guid):
+    notes = config["source_catalog_snapshot"].get("context_notes", [])
+    evidence = sorted(json.dumps(n, sort_keys=True) for n in notes if n.get("company_guid") == guid)
+    return hashlib.sha256(json.dumps(evidence).encode()).hexdigest()
 
 
 def validate(payload, masters, company_guid):
@@ -89,6 +109,7 @@ def validate(payload, masters, company_guid):
             not isinstance(p, dict) or not str(p.get("statement") or "").strip() for p in practice):
         raise ValueError("Practice notes must be short evidenced statements.")
     payload["references"] = references
+    payload["ancestry"] = _ancestry(masters, [*groups, *(r["PARENT"] for r in references.values())])
     return payload
 
 
@@ -103,6 +124,12 @@ def holds(payload, masters):
             return False
         if ref["type"] == "VOUCHERTYPE" and masters.scalar(found[0], "ISACTIVE").casefold() == "no":
             return False
+    if payload.get("ancestry", {}) != _ancestry(masters, payload.get("ancestry", {})):
+        return False
+    try:
+        validate(payload, masters, payload["company_guid"])
+    except ValueError:
+        return False
     return True
 
 
@@ -143,18 +170,20 @@ def attach(connection, run, config, guid):
     from .batch import create_child
 
     discovery_id = config["tally_target"]["discovery_id"]
+    notes = _notes(config, guid)
     live = profiles.current(connection, run["tenant_id"], KIND, guid, lock=True)
-    if live and live["status"] == "active" and live["provenance"].get("discovery_id") != discovery_id:
-        if holds(live["payload"], masters_for(config, guid)):
-            live = profiles.reprove(connection, live, {**live["provenance"], "discovery_id": discovery_id})
+    if live and live["status"] == "active" and (live["provenance"].get("discovery_id") != discovery_id
+                                               or live["provenance"].get("notes_hash", notes) != notes):
+        if live["provenance"].get("notes_hash", notes) == notes and holds(live["payload"], masters_for(config, guid)):
+            live = profiles.reprove(connection, live, {**live["provenance"], "discovery_id": discovery_id, "notes_hash": notes})
         else:
-            profiles.invalidate(connection, live, "Newer discovery no longer contains an identity this pattern uses.")
+            profiles.invalidate(connection, live, "The company's discovered identities, grouping or practice notes changed.")
             live = None
     if live is None:
         live = _inherited(connection, run, config, guid)
     if live is None:
         live, created = profiles.ensure(connection, run["tenant_id"], KIND, guid, actor=run["actor_id"],
-                                        provenance={"discovery_id": discovery_id, "run_id": str(run["id"])})
+                                        provenance={"discovery_id": discovery_id, "run_id": str(run["id"]), "notes_hash": notes})
         if created:
             derivation = create_child(connection, run, None, file_ids=[], stage="posting_profile",
                                       config={**config, "company_scope": [guid], "posting_profile_id": str(live["id"])})
@@ -182,6 +211,7 @@ def _inherited(connection, run, config, guid):
                 return profiles.create(connection, run["tenant_id"], KIND, guid, carried, status="active",
                                        actor=run["actor_id"],
                                        provenance={"discovery_id": config["tally_target"]["discovery_id"],
+                                                   "notes_hash": _notes(config, guid),
                                                    "carried_from": str(source["id"])})
     return None
 

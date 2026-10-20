@@ -88,6 +88,34 @@ class PostingProfileTests(unittest.TestCase):
         self.assertEqual(len(self.derivations(first["id"])) + len(self.derivations(second["id"])), 1)
         self.assertEqual(self.run_row(first["id"])["config"]["awaits"], self.run_row(second["id"])["config"]["awaits"])
 
+    def test_changed_company_notes_require_a_new_pattern_but_other_company_notes_do_not(self):
+        from psycopg.types.json import Jsonb
+
+        did = self.tally_discovery('notes-co', confirmed_patterns=False)
+        first, _ = self.launch_bill(did)
+        self.process(self.derivations(first['id'])[0], payload('notes-co'))
+        card = self.card(first['task_id'])
+        self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile", headers=self.csrf,
+                         json={'action': 'confirm'})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            catalog = c.execute('SELECT catalog FROM discovery_runs WHERE id=%s', (did,)).fetchone()['catalog']
+            catalog['context_notes'] = [{'company_guid': 'another-co', 'observation': 'Unrelated practice.'}]
+            c.execute('UPDATE discovery_runs SET catalog=%s WHERE id=%s', (Jsonb(catalog), did))
+            c.execute("UPDATE workflow_runs SET result=jsonb_set(result,'{context_notes}',%s) "
+                      "WHERE id=(SELECT mapping_run_id FROM discovery_runs WHERE id=%s)",
+                      (Jsonb(catalog['context_notes']), did))
+        unchanged, _ = self.launch_bill(did, 'unrelated.pdf')
+        self.assertEqual(self.derivations(unchanged['id']), [])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            catalog['context_notes'].append({'company_guid': 'notes-co', 'observation': 'Record supplier bills as journals.'})
+            c.execute('UPDATE discovery_runs SET catalog=%s WHERE id=%s', (Jsonb(catalog), did))
+            c.execute("UPDATE workflow_runs SET result=jsonb_set(result,'{context_notes}',%s) "
+                      "WHERE id=(SELECT mapping_run_id FROM discovery_runs WHERE id=%s)",
+                      (Jsonb(catalog['context_notes']), did))
+        changed, _ = self.launch_bill(did, 'changed-practice.pdf')
+        self.assertEqual(len(self.derivations(changed['id'])), 1)
+        self.assertIn('awaits', self.run_row(changed['id'])['config'])
+
     def test_an_invalid_pattern_fails_its_derivation_and_releases_the_scope(self):
         from minkops_platform.accounts.batch import reconcile_once
         did = self.tally_discovery("broken-co", confirmed_patterns=False)
