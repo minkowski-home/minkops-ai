@@ -45,19 +45,23 @@ def sheets(files):
 def resolve(connection, tenant_id, files):
     """Attach each sheet's live layout (by header signature) and where its header sits."""
     entries = sheets(files)
-    candidates = {sig: (entry, index) for entry in entries if "table" in entry
-                  for sig, index in signatures(entry["table"]).items()}
+    candidates = [(entry, signatures(entry["table"])) for entry in entries if "table" in entry]
+    keys = {sig for _, found in candidates for sig in found}
     live = connection.execute(
         "SELECT * FROM client_profiles WHERE tenant_id=%s AND kind=%s AND scope_key=ANY(%s) AND status IN ('proposed','active')",
-        (tenant_id, KIND, list(candidates))).fetchall() if candidates else []
-    for profile in sorted(live, key=lambda p: candidates[p["scope_key"]][1]):
-        entry, index = candidates[profile["scope_key"]]
-        if "profile" not in entry:
-            entry.update(profile=profile, header_index=index)
+        (tenant_id, KIND, list(keys))).fetchall() if keys else []
+    by_signature = {p["scope_key"]: p for p in live}
+    # The same bank header can occur in several files or sheets in one run.
+    # Bind each occurrence independently rather than retaining only the last.
+    for entry, found in candidates:
+        for signature, index in sorted(found.items(), key=lambda pair: pair[1]):
+            if signature in by_signature:
+                entry.update(profile=by_signature[signature], header_index=index)
+                break
     return entries
 
 
-def parse(entries, *, today):
+def parse(entries, *, today, changed_files=()):
     """Canonical rows for every sheet; unknown or unproven layouts hold their sheet."""
     rows, occurrences = [], {}
     for entry in entries:
@@ -69,9 +73,11 @@ def parse(entries, *, today):
             continue
         profile = entry.get("profile")
         if not profile or profile["status"] != "active":
+            changed = str(file["id"]) in changed_files
             rows.append({**base, "row": 0, "sheet": entry["sheet"], "status": "held",
-                         "code": "statement_layout_unknown" if not profile else "statement_layout_unconfirmed",
-                         "reason": "Minkops could not read this sheet's layout." if not profile
+                         "code": "statement_layout_changed" if changed else "statement_layout_unknown" if not profile else "statement_layout_unconfirmed",
+                         "reason": "This statement's layout changed and could not be verified. Check the original file." if changed
+                         else "Minkops could not read this sheet's layout." if not profile
                          else "This statement layout is waiting for one confirmation in Attention."})
             continue
         counter = occurrences.setdefault(str(file["id"]), Counter())
@@ -83,6 +89,27 @@ def parse(entries, *, today):
     if len(rows) > 10000:
         raise ValueError("Select at most 10,000 transaction rows in one run.")
     return rows
+
+
+def recheck(connection, run, files):
+    """Refuted saved layouts get one new reading at launch, never a retry loop."""
+    entries = resolve(connection, run["tenant_id"], files)
+    refuted = {}
+    for entry in entries:
+        profile = entry.get("profile")
+        if not profile or profile["status"] != "active" or not profile["payload"]["columns"].get("balance"):
+            continue
+        rows, proof = apply_layout(entry["table"], profile["payload"], entry["header_index"],
+                                   sheet=entry["sheet"], formulas=entry["formulas"], today=today_for(run))
+        if not proof["amounts"] and any(r.get("code") in ("statement_balance", "statement_closing") for r in rows):
+            refuted[str(profile["id"])] = profile
+    for profile in refuted.values():
+        profiles.invalidate(connection, profile, "A new statement refuted the saved balance-chain reading.")
+    changed = [str(e["file"]["id"]) for e in entries if str(e.get("profile", {}).get("id")) in refuted]
+    if changed:
+        connection.execute("UPDATE workflow_runs SET config=config || %s WHERE id=%s",
+                           (Jsonb({"layout_changed_files": sorted(set(changed))}), run["id"]))
+    return resolve(connection, run["tenant_id"], files) if changed else entries
 
 
 def preview_sheets(connection, tenant_id, files):

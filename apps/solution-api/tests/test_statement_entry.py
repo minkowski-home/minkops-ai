@@ -97,6 +97,23 @@ class StatementTests(unittest.TestCase):
         with psycopg.connect(URL,row_factory=dict_row) as c:
             return c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND config->>'stage'='layout'",(run['id'],)).fetchall()
 
+    def test_one_learned_layout_reads_every_matching_file_and_sheet(self):
+        from datetime import date
+
+        from minkops_platform.accounts.statement_layouts import parse, resolve
+
+        run = self.ready()
+        files = [{'id': str(uuid.uuid4()), 'path': name, 'content': self.TEXT.encode()}
+                 for name in ('first.csv', 'overlap.csv')]
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            tenant = c.execute('SELECT tenant_id FROM workflow_runs WHERE id=%s', (run['id'],)).fetchone()
+            entries = resolve(c, tenant['tenant_id'], files)
+        self.assertTrue(all('profile' in entry for entry in entries),
+                        'Every sheet sharing the learned header must receive the layout.')
+        rows = parse(entries, today=date(2026, 10, 20))
+        self.assertEqual(len(rows), 6)
+        self.assertFalse(any(r.get('code') == 'statement_layout_unknown' for r in rows))
+
     def config(self, run):
         with psycopg.connect(URL,row_factory=dict_row) as c:
             return c.execute('SELECT config FROM account_runs WHERE id=%s',(run['id'],)).fetchone()['config']
@@ -137,6 +154,24 @@ class StatementTests(unittest.TestCase):
         run,_=self.launch('statement-entry',file_ids=[file],config={'discovery_id':first['config']['discovery_id'],'branch_mapping_file_id':None})
         self.assertEqual(self.layout_children(run),[])
         self.assertNotIn('awaits',self.config(run))
+
+    def test_a_saved_layout_refuted_by_new_balances_is_inferred_once(self):
+        first = self.ready()
+        text = 'Date,Reference,Debit,Credit,Balance,Branch\n03/10/26,A,6,,1012,Test\n04/10/26,B,2,,1014,Test\n'
+        file = self.statement('changed.csv', text)
+        run, _ = self.launch('statement-entry', file_ids=[file],
+                             config={'discovery_id': first['config']['discovery_id'], 'branch_mapping_file_id': None})
+        self.assertEqual(len(self.layout_children(run)), 1,
+                         'A learned header cannot hide a changed amount interpretation.')
+        # A second failed reading must hold; it must not create an inference loop.
+        self.learn_layout(run, file)
+        from minkops_platform.accounts.worker import process
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            process(c, c.execute('SELECT * FROM account_runs WHERE id=%s', (run['id'],)).fetchone(),
+                    executor=lambda *a, **k: {'records': []})
+        rows = self.client.get(self.base + f"/runs/{run['id']}").json()['result']['records']
+        self.assertEqual({r['code'] for r in rows}, {'statement_layout_changed'})
+        self.assertEqual(len(self.layout_children(run)), 1)
 
     def test_an_unanswered_date_question_keeps_the_run_waiting(self):
         first=self.ready()

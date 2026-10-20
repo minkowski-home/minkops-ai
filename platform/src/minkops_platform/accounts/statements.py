@@ -41,7 +41,7 @@ def prepared_inputs(connection, tenant_id, files, ids, config, *, today):
     from .statement_layouts import parse, resolve
 
     statements=[f for f in files if str(f['id']) in ids]
-    rows=parse(resolve(connection,tenant_id,statements),today=today)
+    rows=parse(resolve(connection,tenant_id,statements),today=today,changed_files=config.get('layout_changed_files', []))
     assets,manifest=context_assets(config['statement_context'])
     files=[*files,*assets]
     if exceeds_session(files, extra_bytes=len(json.dumps(rows).encode())):
@@ -217,8 +217,8 @@ class StatementHandler(AccountsHandler):
     def launched(self, connection, run):
         """Sheets in a format not seen before are read by one layout session first."""
         from .batch import create_child
-        from .statement_layouts import resolve
-        unknown=[str(e['file']['id']) for e in resolve(connection,run['tenant_id'],files_for(connection,run['tenant_id'],run['file_ids']))
+        from .statement_layouts import recheck
+        unknown=[str(e['file']['id']) for e in recheck(connection,run,files_for(connection,run['tenant_id'],run['file_ids']))
                  if 'table' in e and 'profile' not in e]
         if unknown:
             child=create_child(connection,run,None,file_ids=sorted(set(unknown)),stage='layout')
