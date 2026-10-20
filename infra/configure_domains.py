@@ -1,6 +1,7 @@
 """Request managed custom domains and print Google's required DNS updates."""
 
 import json
+
 from google_api import GoogleApi
 
 BASE = "https://firebasehosting.googleapis.com/v1beta1"

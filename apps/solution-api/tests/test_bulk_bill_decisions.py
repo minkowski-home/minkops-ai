@@ -2,10 +2,9 @@
 import unittest
 
 import psycopg
+import test_bill_entry as fixtures
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-
-import test_bill_entry as fixtures
 
 URL = fixtures.URL
 
@@ -25,11 +24,12 @@ class BulkBillTests(unittest.TestCase):
         for index, file in enumerate(files):
             result = self.tally_result(run, file)
             row = result["records"][0]
-            row["data"].update(vendor="New Supplier" if index < 3 else "Different Supplier", invoice_number=f"BULK-{index}", tax=0, tax_ledger=None, total=100)
-            row["master_refs"]["vendor"] = {"ref": None, "new_supplier": True, "evidence": "Printed supplier name; no discovered match."}
-            row["master_refs"]["tax_ledger"] = None
+            supplier = "New Supplier" if index < 3 else "Different Supplier"
+            row["document"].update(supplier_name=supplier, number=f"BULK-{index}", total=100)
+            row["voucher"]["party"] = {"ledger_guid": None, "new_supplier": True, "evidence": "Printed supplier name; no discovered match."}
+            row["voucher"]["lines"] = [{**row["voucher"]["lines"][0], "amount": 100}]
             for evidence in row["evidence"]:
-                if evidence["field"] == "vendor": evidence["quote"] = row["data"]["vendor"]
+                if evidence["field"] == "supplier": evidence["quote"] = supplier
                 if evidence["field"] == "total": evidence["quote"] = "100"
             self.process(children[file], result)
         reconcile_once(URL)
@@ -66,7 +66,7 @@ class BulkBillTests(unittest.TestCase):
         preview = self.preview(route, "nothing")
         with psycopg.connect(URL, row_factory=dict_row) as c:
             result = c.execute("SELECT result FROM account_runs WHERE id=%s", (run["id"],)).fetchone()["result"]
-            next(r for r in result["records"] if r["source_file_id"] == files[1])["data"]["vendor"] = "Changed Supplier"
+            next(r for r in result["records"] if r["source_file_id"] == files[1])["document"]["supplier_name"] = "Changed Supplier"
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), run["id"]))
         response = self.client.post(route + "/bulk", headers=self.csrf, json={"action": "nothing", "proposal": self.trigger_index, "preview_token": preview["preview_token"]})
         self.assertEqual(response.status_code, 409, response.text)
@@ -92,19 +92,20 @@ class BulkBillTests(unittest.TestCase):
             statuses = {r["source_file_id"]: r.get("status") for r in stored["records"]}
             self.assertEqual([statuses[file] for file in files], ["writing"] * 3 + [None])
             self.assertEqual(c.execute("SELECT count(*) FROM account_tally_writes WHERE run_id=%s", (run["id"],)).fetchone()["count"], 3)
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_retry_save_uses_one_approval_and_replay_does_not_enqueue_more_writes(self):
         from unittest.mock import patch
+
         from minkops_platform.accounts.service import approve_run
         run, files, route = self.group()
         with psycopg.connect(URL, row_factory=dict_row) as c:
             stored = c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone()
-            company = stored["config"]["tally_target"]["companies"][0]
-            supplier_ref = next(ref for ref, master in company["ledger_refs"].items() if master["name"] == "Supplier")
             for record in stored["result"]["records"]:
                 record["data"]["vendor"] = "Supplier"
-                record["master_refs"]["vendor"] = {"ref": supplier_ref, "evidence": "Native supplier identity."}
+                record["voucher"]["party"] = {"ledger_guid": "Supplier-guid", "new_supplier": False, "evidence": "Native supplier identity."}
                 record.update(status="held", save_hold="Destination unavailable", findings=["Destination unavailable"],
                               save_hold_code="company_not_open" if record["source_file_id"] in files[:3] else "rejected", exception_codes=[])
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(stored["result"]), run["id"]))
@@ -118,10 +119,13 @@ class BulkBillTests(unittest.TestCase):
         self.assertEqual(len(response.json()["tally_writes"]), 3)
         statuses = {r["source_file_id"]: r.get("status") for r in response.json()["result"]["records"]}
         self.assertEqual([statuses[file] for file in files], ["writing"] * 3 + ["held"])
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_bulk_recheck_refreshes_once_and_queues_three_children_in_one_transaction(self):
         from unittest.mock import patch
+
         from minkops_platform.accounts.bills import refreshed_tally_target
         run, files, route = self.group()
         preview = self.preview(route, "retry")
@@ -154,4 +158,6 @@ class BulkBillTests(unittest.TestCase):
         self.assertEqual(self.client.post(control, headers=self.csrf, json={"action": "resume"}).status_code, 200)
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         self.assertEqual((loaded["state"], len(loaded["tally_writes"])), ("writing", 3))
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)

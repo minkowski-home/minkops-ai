@@ -6,7 +6,6 @@ separately supported contract; existing supplier vouchers remain unaffected.
 """
 import re
 
-
 STATES = dict(zip(
     [f"{i:02}" for i in range(1, 39)],
     ["Jammu and Kashmir", "Himachal Pradesh", "Punjab", "Chandigarh", "Uttarakhand", "Haryana", "Delhi", "Rajasthan",

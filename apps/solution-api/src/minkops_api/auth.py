@@ -10,11 +10,11 @@ from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, EmailStr, Field
 from psycopg.rows import dict_row
 from pwdlib import PasswordHash
-from minkops_connectors.email import send_email
+from pydantic import BaseModel, EmailStr, Field
 
+from minkops_connectors.email import send_email
 
 router = APIRouter(prefix="/api")
 passwords = PasswordHash.recommended()

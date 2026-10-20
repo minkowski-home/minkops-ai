@@ -1,7 +1,7 @@
 # Source Discovery: reusable client context
 
-Source Discovery 0.8.2 and Windows companion 0.6.6 collect a versioned package
-before Bill Entry can run. Refresh is manual. Existing schema-only catalogs stay
+Source Discovery 0.8.2 and the Windows companion collect a versioned package
+before Bill Entry or Statement Entry can run. Refresh is manual. Existing schema-only catalogs stay
 readable, but a new Tally bill run requires a complete, confirmed version 2
 package from its connected PC. No scheduled collection is introduced.
 
@@ -77,10 +77,9 @@ fields, custom master types, identifiers and leading zeroes remain intact.
 Collection never samples records. Date filters apply only to vouchers. The collection
 identifiers follow [Tally’s XML samples](https://help.tallysolutions.com/sample-xml/);
 **All Masters** alone is an import report.
-Installation-specific customisations and counts require native export comparison.
-The released Windows/Tally checks, including live UDF and batch preservation,
-inclusive periods and empty exports, are recorded in
-[MIN-124 verification](verification-min-124.md).
+Installation-specific customisations and counts require native export comparison;
+live checks have covered UDF and batch preservation, inclusive periods and empty
+exports.
 
 The hosted discovery skill inspects those saved records and proposes only obscure
 conventions or exceptions as subjective notes. Each note identifies its company,
@@ -192,3 +191,18 @@ then the web client and companion together. Older companions honor dispatch gate
 but cannot pause discovery between reads; their current collection may finish.
 Polling exposes company/count summaries; full records remain in downloads and
 the immutable execution package.
+
+## Many companies
+
+Bill Entry routes each bill to one company before posting (a short triage stage
+over a compact company directory), so each posting session receives only that
+company's masters, never sampled, and as much of its history as fits, with the
+supplier's own vouchers first; the manifest records any history cut
+(`vouchers_from`). Companies sharing a GSTIN are year-split siblings: each
+sibling's period ends the day before the next one's books begin, and a bill dated
+in a sibling's period is routed there deterministically with a note.
+
+When every company together exceeds one hosted interpretation session, a
+Tally-only collection stays complete and confirmable; only the optional client
+notes are skipped (`ai_context_skipped`). Collections that also need an Excel
+mapping session still hold until the scope is reduced.

@@ -7,18 +7,5 @@ import type { SolutionManifest } from "../../packages/solution-contracts/src";
 export const solution: SolutionManifest = {
   id: "mock-client",
   tenantSlug: "mock-tenant",
-  displayName: "Starter workspace",
-  enabledConnectors: ["email", "excel", "tally"],
-  ui: {
-    productName: "minkops",
-    navigation: [
-      { route: "dashboard", label: "Dashboard", icon: "home" },
-      { route: "employees", label: "Employees", icon: "agents" },
-      { route: "workflows", label: "Workflows", icon: "tasks" }
-    ],
-    options: {
-      showAnalytics: false,
-      showTeamControls: false
-    }
-  }
+  displayName: "Starter workspace"
 };

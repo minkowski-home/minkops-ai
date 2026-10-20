@@ -1,7 +1,7 @@
 # Corporate Website
 
 The public marketing site for Minkops (minkops.com): a Vite + React + TypeScript
-frontend, plus a small Python + FastAPI API for health checks.
+frontend, plus a Python + FastAPI API for health checks and discovery-form delivery.
 
 The site is built on the Minkops design system in `design/` at the repository root
 (flat, hairline-ruled, Readex Pro / Libre Franklin / IBM Plex Mono, Ember as signal and
@@ -11,32 +11,28 @@ Rust as action). Read `design/readme.md` before changing anything visual or any 
 
 ```
 frontend/
-  index.html              Default meta tags, webfont loading, favicon
-  public/favicon.svg      The Ember dot (the brand has no logo artwork)
+  index.html              Default meta tags, webfont loading, favicon (from design/assets/logos)
   src/
-    styles/tokens.css     Design tokens, vendored from design/tokens/*.css
+    main.tsx              Imports design/tokens/*.css, then the site's own styles
     styles/base.css       Element defaults and site-wide utilities
-    ui/                   Design-system primitives (Button, Card, Badge, OptionRow,
-                          AgentTile, FlowNode, InterruptCard, ...) + ui.css
+    ui/                   Design-system primitives, form controls and icons + ui.css
     layout/               Nav, footer, SiteLayout (scroll + hash handling), Section,
                           PageHero, SeoHead
-    content/              Copy and facts as typed data: agent roster, funnel questions
-                          and estimate maths, blog metadata, site constants
-    sections/             Landing page sections (hero, funnel, roster, console
-                          preview, access form)
+    content/              Funnel questions and workflow outlines, fictional console
+                          scenarios, blog metadata, site constants and release metadata
+    sections/             Landing page sections (hero, workflow model, funnel,
+                          console preview, access form)
     pages/                One file per route; blog posts live in pages/blog/
 api/                      FastAPI service (health and discovery form delivery)
 ```
 
 ## Rules that keep the site consistent
 
-- **One roster.** `src/content/agents.ts` is the only place an agent is defined (name,
-  role, department, glyph, and the "right now" line on its card). The roster, hero
-  counts, funnel, orchestration diagrams and console illustration all read from it,
-  so a new hire is a one-entry change.
+- **Describe workflows truthfully.** `src/content/funnel.ts` provides illustrative
+  workflow outlines, not live integrations or time-saved estimates. Product scope
+  follows the repository's Product Vision.
 - **The console is an illustration.** `src/content/consoleWorkflows.ts` holds the four
   demo businesses. Every name and figure in it is invented, and the page says so.
-  Agents referenced there must exist in the roster.
 - **Legal copy is verbatim.** The clauses in `src/pages/LegalPages.tsx` need legal
   review before they change; only the page intros are marketing copy.
 - **Retired URLs redirect.** Unpublished blog posts are listed in
@@ -53,13 +49,14 @@ api/                      FastAPI service (health and discovery form delivery)
 - **Fonts load from Google Fonts.** No licensed font binaries exist in the repo. If
   woff2 files are supplied, self-host them and drop the Google Fonts link from
   `index.html`.
-- **Design tokens are a copy.** `src/styles/tokens.css` is vendored from `design/tokens/`.
-  If a token changes there, copy it across.
+- **Tokens come from `design/`.** `src/main.tsx` imports the design system's token files
+  through the `@minkops/design` alias, so a token change there reaches the site directly.
+  The site uses the default palette; it does not load the console's selectable themes.
 
 ## Getting started locally
 
 1. `cd apps/corporate-website/frontend`
-2. `npm install`
+2. `npm ci`
 3. `npm run dev` to launch the site on `http://localhost:5173`
 4. `npm run build` to type-check and create a production bundle in `dist/`
 5. `npm run lint` and `npm run format` before committing

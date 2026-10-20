@@ -1,9 +1,12 @@
 """Split tax preserves distinct native identities and exact source amounts."""
 import copy
+
 import pytest
-from test_master_selection import target, record
+from test_master_selection import record, target
+
+from minkops_platform.accounts.bills import allocation_entries, validate_tally
 from minkops_platform.accounts.master_selection import resolve_masters
-from minkops_platform.accounts.bills import validate_tally, allocation_entries
+
 
 def split():
     t = target(extra=[{'NAME':'Input CGST','GUID':'cgst','PARENT':'Duties & Taxes'},
@@ -34,7 +37,9 @@ def test_split_tax_resolves_both_master_ids_and_balances_without_combining():
     lambda r:r['data'].update(tax=0,total=100),
 ])
 def test_invalid_split_is_held_atomically(change):
-    t,r=split();change(r);before=copy.deepcopy(r)
+    t,r=split()
+    change(r)
+    before=copy.deepcopy(r)
     with pytest.raises(ValueError):resolve_masters(r,t,required=True,allow_split=True)
     assert r==before
 

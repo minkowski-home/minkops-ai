@@ -21,8 +21,7 @@ export const SITE = {
 /** In-page anchors shared between the nav, the funnel and the access section. */
 export const ANCHORS = {
   access: "access",
-  funnel: "find-your-stack",
-  roster: "roster"
+  funnel: "find-your-stack"
 } as const;
 
 export const ACCESS_HREF = `/#${ANCHORS.access}`;

@@ -5,6 +5,24 @@ import JSZip from "jszip";
 import { inspectExcel } from "../src/discovery.js";
 import { readTallyReferences } from "../src/tally-references.js";
 
+test('allocation verification fetches and retains the native enablement and category fields', async () => {
+  const result = await readTallyReferences({company:'Test',port:9000,categories:['company','ledgers','cost_centres']}, {
+    request: async (_url, {body}) => {
+      if (body.includes('MinkopsOpenCompanies')) return new Response('<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Test"><NAME>Test</NAME><GUID>company</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>');
+      const centre = body.includes('<TYPE>CostCentre</TYPE>');
+      const ledger = body.includes('<TYPE>Ledger</TYPE>');
+      assert.ok(body.includes(centre ? ',Category' : ',IsCostCentresOn'));
+      const tag = centre ? 'COSTCENTRE' : ledger ? 'LEDGER' : 'COMPANY';
+      const fields = centre ? '<CATEGORY TYPE="String">Projects</CATEGORY>' : '<ISCOSTCENTRESON TYPE="Logical">Yes</ISCOSTCENTRESON>';
+      return new Response(`<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><${tag} NAME="Test"><NAME>Test</NAME><GUID>identity</GUID>${fields}</${tag}></COLLECTION></DATA></BODY></ENVELOPE>`);
+    },
+  });
+  assert.ok(result.collections.every(c => c.status === 'ready'));
+  assert.equal(result.collections[0].records[0].ISCOSTCENTRESON, 'Yes');
+  assert.equal(result.collections[1].records[0].ISCOSTCENTRESON, 'Yes');
+  assert.equal(result.collections[2].records[0].CATEGORY, 'Projects');
+});
+
 test("typed Tally reference identities become exact strings and malformed wrappers fail closed", async () => {
   for (const malformed of [false, true]) {
     const result = await readTallyReferences({ company: "Test", port: 9000, categories: ["company", "ledgers"], }, {

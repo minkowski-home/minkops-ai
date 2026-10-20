@@ -3,7 +3,7 @@
  * Voucher types come from the live company, never a hard-coded name. */
 import { createHash } from "node:crypto";
 import { XMLParser, XMLBuilder, XMLValidator } from "fast-xml-parser";
-import { boundedText } from "./index.js";
+import { tallyExchange as exchange, classifyRejection, readVouchers, voucherFamilies, documentMatches, observedVoucher } from "./voucher.js";
 import { readTallyReferences } from "./tally-references.js";
 import { requireOpenCompany, TallyUnavailable } from "./tally-session.js";
 
@@ -102,10 +102,22 @@ export async function inspectTallyAttention(plan, {request = fetch, createSuppli
     {request, identity: ledgers.find(master => text(master["@_NAME"] ?? master.NAME) === plan.vendor)}) : null;
   if (plan.gst_supplier && !verifyGSTSupplier(supplier, plan.gst_supplier))
     throw actionable("Supplier GST details need review in Tally. The bill has not been queued for saving.");
-  const bills = (await readTallyBills(plan, {request, types})).filter(v =>
-    v[kind] === "purchase" && v.vendor === plan.vendor && v.invoice_number === plan.invoice_number);
-  return {company_guid: plan.company_guid, ledgers, current: bills.length === 1 ? bills[0] : null,
-    ...(supplier ? {supplier} : {})};
+  let current = null;
+  if (plan.document) {
+    // Protocol 5: the same window, number fields and reader as the voucher
+    // writer, so a refresh fingerprint is comparable with the saved one.
+    const {window, number_fields, families} = plan.document;
+    const live = voucherFamilies(snapshot.collections.find(c => c.category === "voucher_types")?.records ?? []);
+    const familyOf = v => live.family.get(v.voucher_type.toLowerCase()) ?? null;
+    const found = (await readVouchers({company: plan.company, port: plan.port, window}, {request})).filter(v =>
+      families.includes(familyOf(v)) && documentMatches(v, {party_ledger: plan.vendor, number: plan.invoice_number, number_fields}));
+    current = found.length === 1 ? observedVoucher(found[0], familyOf(found[0])) : null;
+  } else {
+    const bills = (await readTallyBills(plan, {request, types})).filter(v =>
+      v[kind] === "purchase" && v.vendor === plan.vendor && v.invoice_number === plan.invoice_number);
+    current = bills.length === 1 ? bills[0] : null;
+  }
+  return {company_guid: plan.company_guid, ledgers, current, ...(supplier ? {supplier} : {})};
 }
 
 const gstScalar = value => String(text(value) ?? "").trim();
@@ -240,41 +252,7 @@ const cents = (v) => {
   return Math.round(n * 100);
 };
 
-async function exchange(company, port, body, request) {
-  if (
-    typeof company !== "string" ||
-    !company.trim() ||
-    company.length > 200 ||
-    /[\x00-\x1f]/.test(company) ||
-    !Number.isInteger(port) ||
-    port < 1 ||
-    port > 65535
-  )
-    throw new Error("Invalid Tally target.");
-  const response = await request(`http://127.0.0.1:${port}`, {
-    method: "POST",
-    body,
-    headers: { "Content-Type": "text/xml; charset=utf-8" },
-    redirect: "error",
-    signal: AbortSignal.timeout(20000),
-  });
-  const source = await boundedText(response, 5_000_000);
-  // Tally emits XML 1.0-invalid control-character references in some system
-  // fields. Never silently normalize them in a financial write response.
-  if (
-    /<!DOCTYPE|<!ENTITY|<LINEERROR\b/i.test(source) ||
-    XMLValidator.validate(source) !== true
-  )
-    throw new Error("Tally returned an invalid financial response.");
-  return new XMLParser({
-    ignoreAttributes: false,
-    parseTagValue: false,
-    parseAttributeValue: false,
-    trimValues: true,
-  }).parse(source);
-}
-
-export { exchange as tallyExchange };
+export { tallyExchange, classifyRejection } from './voucher.js';
 
 /** Vouchers that may record a bill: every purchase-family type, plus Journal
  * types (a bill booked as a Journal must never be entered again). */
@@ -532,26 +510,6 @@ export async function commitTallyBill(plan, { request = fetch, reconciliationOnl
       "Tally readback differs from the approved bill. Reconcile before retrying.",
     );
   return { outcome: "saved", current: saved[0] };
-}
-
-// Tally's native reasons stay in diagnostics; users get one short action.
-const REJECTIONS = [
-  ["date", /\bdate\b|financial year|books? beginning/i,
-    "Tally rejected the voucher date. Check the bill date against the company's financial year, then use Retry save."],
-  ["permission", /not (?:authori[sz]ed|allowed|permitted)|access denied|no (?:access|rights)|security/i,
-    "The Tally user who is logged in cannot create this voucher. Log in as a user allowed to enter purchases, then use Retry save."],
-  ["voucher_type", /voucher ?type/i,
-    "Tally rejected the purchase voucher type. Check it in Tally, refresh Source Discovery, then start a new run."],
-  ["voucher_number", /voucher (?:no\b|number)/i,
-    "Tally needs a voucher number for this voucher type. Check its numbering in Tally, then use Retry save."],
-  ["ledger", /ledger|does not exist|not found/i,
-    "Tally rejected a ledger on this bill. Check the ledgers in Tally, then use Retry save."],
-];
-export function classifyRejection(reason) {
-  const match = REJECTIONS.find(([, pattern]) => pattern.test(String(reason ?? "")));
-  return match
-    ? { code: match[0], message: match[2] }
-    : { code: "other", message: "Tally rejected this bill. Check its voucher settings in Tally, then use Retry save." };
 }
 
 /** One approved bill, as the companion saves it: the company must be open

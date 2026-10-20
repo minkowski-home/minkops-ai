@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import psycopg
 from fastapi.testclient import TestClient
-from minkops_api.main import app
 from psycopg.rows import dict_row
 from test_accounts_excel import catalog, workbook
+
+from minkops_api.main import app
 
 URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -76,6 +77,7 @@ class AccountsTests(unittest.TestCase):
 
     def test_invalid_agent_proposal_remains_durable_for_diagnostics(self):
         from jsonschema import ValidationError
+
         from minkops_platform.accounts.worker import process
 
         run, _ = self.launch()
@@ -193,7 +195,9 @@ class AccountsTests(unittest.TestCase):
         self.assertEqual(approved.status_code, 200, approved.text)
         self.assertEqual(len(approved.json()["writes"]), 2)
         self.assertEqual(len({w["source_id"] for w in approved.json()["writes"]}), 2)
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def setUp(self):
         os.environ["DATABASE_URL"] = URL
@@ -208,9 +212,10 @@ class AccountsTests(unittest.TestCase):
         with psycopg.connect(URL) as c:
             # Excel adapter regression cases intentionally use a generic tenant
             # binding. Client-specific policy has separate rejection tests.
+            from psycopg.types.json import Jsonb
+
             from minkops_platform.resources import REPOSITORY_ROOT
             from minkops_platform.workflows import load_definition
-            from psycopg.types.json import Jsonb
 
             definition = load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry')
             # This fixture exercises the unrestricted core variant with explicit
@@ -313,14 +318,14 @@ class AccountsTests(unittest.TestCase):
     def test_full_review_write_receipt_and_repeat_bill(self):
         self.verify_flow()
 
-    def test_cancelled_save_accepts_late_receipt_without_claiming_completion(self):
-        self.verify_flow(cancel=True)
+    def test_stopped_save_accepts_late_receipt_without_claiming_completion(self):
+        self.verify_flow(stop=True)
 
     def test_desktop_save_uses_domain_approval_and_verifies_actual_bytes(self):
         self.verify_flow(desktop=True)
 
-    def test_desktop_cancel_blocks_new_save_but_accepts_late_verified_receipt(self):
-        self.verify_flow(desktop=True, cancel=True)
+    def test_desktop_stop_blocks_new_save_but_accepts_late_verified_receipt(self):
+        self.verify_flow(desktop=True, stop=True)
 
     def test_pause_resume_and_stop_fence_excel_approval_but_accept_late_saved_bytes(self):
         self.verify_flow(desktop=True, control=True)
@@ -344,7 +349,7 @@ class AccountsTests(unittest.TestCase):
         self.assertEqual(stopped["result"], raw)
         self.assertEqual(stopped["writes"], [])
 
-    def verify_flow(self, cancel=False, desktop=False, control=False):
+    def verify_flow(self, stop=False, desktop=False, control=False):
         cat_id = self.execute_discovery()
         bill = self.client.post(
             self.base + "/sources",
@@ -451,7 +456,7 @@ class AccountsTests(unittest.TestCase):
                     "/api/desktop/worker/claim", headers=worker_headers, json={}
                 ).json()
             )
-        # Cancellation releases the pending reservation and keeps a late
+        # Stopping releases the pending reservation and keeps a late
         # receipt honest if the browser saved before losing its connection.
         if control:
             self.assertEqual(self.client.post(control_url, headers=self.csrf, json={"action": "pause"}).status_code, 200)
@@ -459,12 +464,10 @@ class AccountsTests(unittest.TestCase):
             # The existing claim is an underway operation; pause lets it finish.
             self.assertEqual(self.client.get(plan_url, headers=worker_headers).status_code, 200)
             self.assertEqual(self.client.post(control_url, headers=self.csrf, json={"action": "resume"}).status_code, 200)
-        if cancel or control:
-            cancelled = self.client.post(control_url, headers=self.csrf, json={"action": "stop"}) if control else self.client.post(
-                self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf
-            )
-            self.assertEqual(cancelled.status_code, 200, cancelled.text)
-            self.assertEqual(cancelled.json()["status"] if control else cancelled.json()["state"], "stopped" if control else "failed")
+        if stop or control:
+            stopped = self.client.post(control_url, headers=self.csrf, json={"action": "stop"})
+            self.assertEqual(stopped.status_code, 200, stopped.text)
+            self.assertEqual(stopped.json()["status"], "stopped")
             self.assertEqual(self.client.get(path + "/content").status_code, 409)
             if desktop:
                 self.assertEqual(self.client.get(plan_url, headers=worker_headers).status_code, 409)
@@ -491,7 +494,7 @@ class AccountsTests(unittest.TestCase):
             path + "/verify", headers=self.csrf, files={"file": ("records.xlsx", content)}
         )
         self.assertEqual(verified.status_code, 200, verified.text)
-        self.assertEqual(verified.json()["state"], "stopped" if control else "failed" if cancel else "completed")
+        self.assertEqual(verified.json()["state"], "stopped" if stop or control else "completed")
         self.assertIsNotNone(verified.json()["writes"][0]["verified_at"])
         again = self.client.post(
             path + "/verify", headers=self.csrf, files={"file": ("records.xlsx", content)}

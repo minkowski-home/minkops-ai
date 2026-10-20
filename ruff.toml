@@ -19,6 +19,8 @@ select = [
 # Ignore specific rules if needed
 ignore = [
     "E501",  # Line too long (handled by formatter)
+    "E701",  # Compact `if x: return y` guards are house style; splitting adds lines, not clarity
+    "N818",  # Exception names describe outcomes (HoldReason, SmtpRejected), not "Error"
 ]
 
 # Allow autofix for all enabled rules
@@ -48,5 +50,9 @@ indent-style = "space"
 "__init__.py" = ["F401"]
 
 [lint.isort]
-# Configure import sorting
-known-first-party = ["agents"]
+# Workspace packages live under */src, so declare them rather than rely on detection.
+known-first-party = ["minkops_api", "minkops_platform", "minkops_connectors", "minkops_corporate_website_api", "db"]
+
+[lint.flake8-bugbear]
+# FastAPI declares request parameters through call defaults by design.
+extend-immutable-calls = ["fastapi.File", "fastapi.Form", "fastapi.Depends", "fastapi.Query"]

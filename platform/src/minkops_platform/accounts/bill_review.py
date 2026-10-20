@@ -12,7 +12,6 @@ from minkops_platform.errors import ServiceError
 from .checks import EXCEPTION_LABELS
 from .tally_writes import HOLD_TITLES
 
-
 REASONS = {
     "source_unreadable": "The bill could not be read reliably.",
     "not_a_bill": "This source does not contain a bill that can be entered.",
@@ -25,6 +24,9 @@ REASONS = {
     "classification_uncertain": "The appropriate accounting ledger could not be confirmed.",
     "unsupported_structure": "This bill requires accounting entries outside the supported save format.",
     "date_before_books": "The bill date is before the company's books beginning date.",
+    "identity_rule_unknown": "A foreign supplier's invoice numbering cannot be checked for duplicates; enter it in Tally.",
+    "date_outside_company_period": "The bill date is outside the routed company's year and no single sibling company covers it.",
+    "posting_profile_miss": "This bill does not fit the company's confirmed posting pattern.",
     "destination_changed": "The Tally destination changed after Source Discovery.",
     "voucher_type_unresolved": "A supported voucher type must be selected for this company.",
     "company_not_open": "The destination company must be open in Tally before this bill can be saved.",
@@ -130,22 +132,33 @@ def exception_csv(headers, rows):
     return output.getvalue().encode("utf-8-sig")
 
 
+def voucher_lines(record):
+    """The proposed entry as one readable cell: `Ledger Dr 1000.00; ...`."""
+    preview = record.get("preview")
+    if preview:
+        lines = preview["lines"]
+    else:  # Proposals pinned before voucher previews.
+        data = record.get("data", {})
+        taxes = record.get("tax_allocations") or ([{"ledger": data.get("tax_ledger"), "amount": data.get("tax")}] if data.get("tax") else [])
+        lines = [{"ledger": data.get("purchase_ledger"), "side": "debit", "amount": data.get("subtotal")},
+                 *({"ledger": t.get("ledger"), "side": "debit", "amount": t.get("amount")} for t in taxes)]
+    return "; ".join(f"{line.get('ledger') or 'Pending ledger'} {'Dr' if line.get('side') == 'debit' else 'Cr'} {line.get('amount')}"
+                     for line in lines if line.get("amount") is not None)
+
+
 def export_csv(run, items=()):
     unavailable = export_unavailable(run)
     if unavailable:
         raise ServiceError("conflict", unavailable)
     view = review(run, items)
-    headers = ["Source file", "Invoice number", "Supplier", "Bill date", "Amount before taxes",
-               "Tax", "Tax allocations", "Total", "Company", "Status", "Reason", "Attention item ID"]
+    headers = ["Source file", "Invoice number", "Supplier", "Bill date", "Voucher lines",
+               "Tax", "Total", "Company", "Status", "Reason", "Attention item ID"]
     rows = []
     for row in view["rows"]:
         record = run["result"]["records"][row["record_index"]] if row["record_index"] is not None else {}
         data = record.get("data", {})
-        # Tally's supported schema has typed amounts. Malformed/legacy text is
-        # escaped instead of being mistaken for a trusted numeric cell.
-        taxes = "; ".join(f"{t.get('ledger') or 'Tax'}: {t['amount']}" for t in record.get("tax_allocations", []))
         rows.append([row["source_file"], data.get("invoice_number"), data.get("vendor"), data.get("date"),
-                     data.get("subtotal"), data.get("tax"), taxes, data.get("total"),
+                     voucher_lines(record), data.get("tax"), data.get("total"),
                      record.get("company_name") or run["config"].get("tally_target", {}).get("company"),
                      row["status"], row["reason"], row["attention_item_id"]])
     return exception_csv(headers, rows)

@@ -42,7 +42,7 @@ import {
   inspectTallyAttention,
   tallyCrashEvents,
   saveTallyBill,
-  saveTallyStatement,
+  saveVoucher,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
 import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
@@ -159,8 +159,8 @@ function startWorker() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
-        // Plan 4 additionally verifies GST supplier details and bank vouchers.
-        "X-Minkops-Plan-Version": "4",
+        // Plan 5 adds the shared N-line voucher writer for every family.
+        "X-Minkops-Plan-Version": "5",
         // Each poll tells the console which PC and companion run the work.
         "X-Minkops-Companion-Version": app.getVersion(),
         "X-Minkops-Host": pcName().replace(/[^\x20-\x7e]/g, "?"),
@@ -289,26 +289,30 @@ function startWorker() {
         );
         return readTallyReferences(plan, { request: tallyRequest });
       }
-      if (job.operation === "tally.statement") {
+      // An encrypted, fsynced intent per remote ID: once written, no later
+      // attempt may import that voucher again. Upgraded statement plans keep
+      // their remote ID, so this directory must stay the one they used.
+      const durableIntent = async intent => {
+        if (state.device !== identity || !safeStorage.isEncryptionAvailable()) throw new Error("PC connection changed.");
+        const directory = join(app.getPath("userData"), "statement-manifests");
+        await mkdir(directory, {recursive: true});
+        let handle;
+        try { handle = await open(join(directory, `${intent.remote_id}.bin`), "wx", 0o600); }
+        catch (error) { if (error.code === "EEXIST") return false; throw error; }
+        try {
+          await handle.writeFile(safeStorage.encryptString(JSON.stringify({job_id:job.id,attempted_at:new Date().toISOString(),plan:intent})));
+          await handle.sync();
+        } finally { await handle.close(); }
+        return state.device === identity;
+      };
+      if (job.operation === "tally.statement" || job.operation === "tally.save") {
         const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
-        return saveTallyStatement(plan, {request: tallyRequest, beforeImport: async intent => {
-          if (state.device !== identity || !safeStorage.isEncryptionAvailable()) throw new Error("PC connection changed.");
-          const directory = join(app.getPath("userData"), "statement-manifests");
-          await mkdir(directory, {recursive: true});
-          let handle;
-          try { handle = await open(join(directory, `${intent.remote_id}.bin`), "wx", 0o600); }
-          catch (error) { if (error.code === "EEXIST") return false; throw error; }
-          try {
-            await handle.writeFile(safeStorage.encryptString(JSON.stringify({job_id:job.id,attempted_at:new Date().toISOString(),plan:intent})));
-            await handle.sync();
-          } finally { await handle.close(); }
-          return state.device === identity;
-        }});
-      }
-      if (job.operation === "tally.save") {
-        const plan = await request(
-          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
-        );
+        // Protocol 5: one writer for every voucher family.
+        if (plan.format_version === 5)
+          return saveVoucher(plan, {request: tallyRequest, beforeImport: durableIntent, pc,
+            diagnose: (record) => jobDiagnostics.set(job.id, record)});
+        // Servers upgrade every statement plan for protocol 5 or refuse it.
+        if (job.operation === "tally.statement") throw new Error("Unsupported statement plan.");
         return saveTallyBill(plan, {
           request: tallyRequest,
           pc,
@@ -439,7 +443,7 @@ async function collectDiagnostics() {
   }
   return {
     collected_at: new Date().toISOString(),
-    companion: { version: app.getVersion(), plan_version: 4, connected: Boolean(state.device) },
+    companion: { version: app.getVersion(), plan_version: 5, connected: Boolean(state.device) },
     windows: { hostname: pc, release: release(), remote_session: remoteSession() },
     tally: {
       session,

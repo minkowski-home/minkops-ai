@@ -10,9 +10,30 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { boundedText } from "./index.js";
 
 const MAX_OPEN_COMPANIES = 50;
+
+/** Read a Tally HTTP response, refusing oversized bodies before parsing. */
+export async function boundedText(response, limit = 1_000_000) {
+  if (!response.ok || !response.body)
+    throw new Error("Tally did not accept the connection check.");
+  const reader = response.body.getReader();
+  const parts = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit)
+        throw new Error("Tally returned too much data for a connection check.");
+      parts.push(Buffer.from(value));
+    }
+    return Buffer.concat(parts).toString("utf8");
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
 
 /** A failure the user can act on. Its message is safe to show verbatim. */
 export class TallyUnavailable extends Error {

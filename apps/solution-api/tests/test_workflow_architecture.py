@@ -11,11 +11,12 @@ from unittest.mock import patch
 import psycopg
 import test_accounts_api as accounts
 import test_bill_entry as bills
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
 from minkops_platform.accounts.worker import process
 from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.workflows import load_definition, register_workflow
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
 URL = os.getenv("TEST_DATABASE_URL")
 
@@ -257,7 +258,9 @@ class WorkflowArchitectureTests(unittest.TestCase):
         )
         self.assertEqual(approved.status_code, 200, approved.text)
         self.assertEqual(approved.json()["state"], "writing")
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def clear_policy(self):
         with psycopg.connect(URL) as connection:
@@ -312,7 +315,7 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
                     child["config"]["authorized_bindings"], parent["config"]["authorized_bindings"]
                 )
                 proposal = self.tally_result(parent, child["file_ids"][0])
-                proposal["records"][0]["data"]["invoice_number"] = (
+                proposal["records"][0]["document"]["number"] = (
                     "BATCH-" + child["file_ids"][0][:8]
                 )
                 process(connection, child, executor=lambda *a, payload=proposal, **k: payload)
@@ -341,7 +344,9 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
         approved = self.approve(loaded, loaded["result"])
         self.assertEqual(approved["state"], "writing")
         self.assertEqual(len(approved["tally_writes"]), 2)
-        self.client.post(self.base + f"/runs/{parent['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{parent['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_tally_child_cannot_execute_changed_authorized_input(self):
         from unittest.mock import MagicMock

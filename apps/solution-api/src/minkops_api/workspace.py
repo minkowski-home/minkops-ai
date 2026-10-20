@@ -5,12 +5,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from jsonschema import Draft202012Validator
-from minkops_platform.runtime.launch import installed_definition
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict
-from minkops_platform.run_controls import task_control, owns_task
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
+from minkops_platform.run_controls import owns_task, task_control
+from minkops_platform.runtime.launch import installed_definition
+
 from .desktop import call
 
 router = APIRouter(prefix="/api/tenants/{slug}")

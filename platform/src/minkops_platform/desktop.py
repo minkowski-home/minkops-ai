@@ -575,6 +575,41 @@ def _claimed_job(connection, device, job_id, claim_token):
     return job
 
 
+def _native_plan(run, write, plan_version):
+    """The approved plan in the newest format this companion executes.
+
+    Protocol-5 companions receive every upgradable plan as a v5 voucher; a plan
+    without pinned native identities keeps its approved format and writer.
+    Statement siblings with the same day, bank and amount are proven distinct
+    by the run's verified balance chain, so they never hold each other.
+    """
+    from .accounts.vouchers import FORMAT, upgrade
+
+    plan = write["plan"]
+    if plan_version >= FORMAT:
+        distinct = []
+        if plan.get("format_version") == 4:
+            def facts(sibling):
+                if sibling.get("format_version") == FORMAT:
+                    match = sibling["duplicate"]["match"]
+                    amount = match["amount_cents"] * (-1 if match["side"] == "credit" else 1)
+                    return sibling["header"]["date"], amount
+                return sibling["data"]["date"], sibling["data"]["amount_cents"]
+
+            distinct = [row["plan"]["remote_id"] for row in run["result"]["records"]
+                        if row.get("plan") and row["plan"]["remote_id"] != plan["remote_id"]
+                        and row["plan"]["destination_key"] == plan["destination_key"]
+                        and facts(row["plan"]) == facts(plan)]
+        upgraded = upgrade(plan, identity=write["identity"], distinct=distinct)
+        if upgraded is not None:
+            return upgraded
+        if plan.get("format_version") == 4:
+            raise ServiceError("conflict", "This approved statement row lacks pinned Tally identities. Start a new run.")
+    if plan.get("format_version", 1) > plan_version:
+        raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then use Retry save.")
+    return plan
+
+
 def plan(connection, device, job_id, claim_token, plan_version=1):
     job = _claimed_job(connection, device, job_id, claim_token)
     from .run_controls import control_state
@@ -588,7 +623,7 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
         run, write = spec(connection, device, job["input"], underway=True)
         if run["workflow_key"] != "statement-entry" or plan_version < 4:
             raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later for statement saves.")
-        return write["plan"]
+        return _native_plan(run, write, plan_version)
     if job["state"] == "executing" and job["operation"] == "tally.references":
         from .accounts.bills import context_plan
 
@@ -605,15 +640,13 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
         from .accounts.tally_writes import spec
 
         run, write = spec(connection, device, job["input"], underway=True)
-        if write["plan"].get("format_version", 1) > plan_version:
-            raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then use Retry save.")
         recheck_target(
             connection,
             {"id": device["tenant_id"]},
             {"id": device["owner_id"]},
             run["config"]["tally_target"],
         )
-        return write["plan"]
+        return _native_plan(run, write, plan_version)
     if job["state"] != "executing" or job["operation"] != "accounts.save":
         raise ServiceError("conflict", "This save is no longer running.")
     _, spec = _save_spec(connection, device, job["input"], underway=True)
@@ -770,8 +803,8 @@ def finish(connection, device, job_id, receipt):
         (state, Jsonb(result), error, fingerprint, job_id),
     ).fetchone()
     if job["operation"] == "tally.statement":
-        from .accounts.statements import dispatch_next
         from .accounts.repository import run_for
+        from .accounts.statements import dispatch_next
         dispatch_next(connection, run_for(connection, device["tenant_id"], job["input"]["run_id"]))
     summary = (
         error

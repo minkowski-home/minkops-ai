@@ -4,6 +4,7 @@ import argparse
 import os
 
 import psycopg
+
 from minkops_platform.installation import install, load_solution
 from minkops_platform.resources import REPOSITORY_ROOT
 

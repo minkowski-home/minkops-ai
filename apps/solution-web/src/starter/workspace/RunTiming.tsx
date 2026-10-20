@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Task } from "../api";
-import { elapsedLabel } from "../workflows/runSettings";
+import { elapsedLabel } from "./progress";
 
 /** Overall wall time includes waits and pauses; it is never a completion estimate. */
 export function RunTiming({ task }: { task: Task }) {

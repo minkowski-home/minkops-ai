@@ -2,11 +2,13 @@
 import copy
 import unittest
 import uuid
+
 import psycopg
-from psycopg.rows import dict_row
-from fastapi.testclient import TestClient
-from minkops_api.main import app
 import test_bill_entry as fixtures
+from fastapi.testclient import TestClient
+from psycopg.rows import dict_row
+
+from minkops_api.main import app
 
 URL = fixtures.URL
 UNCLEAR = [{"code": "source_unreadable", "detail": "Unclear handwriting"}]
@@ -24,8 +26,10 @@ class AttentionTests(unittest.TestCase):
             held = copy.deepcopy(stored["records"][0])
             held["data"].update(invoice_number="=DANGEROUS()", vendor="@supplier", subtotal=-100, tax=-18, total=-118)
             held.update(status="held", save_hold="Internal diagnostic")
-            saved = copy.deepcopy(held); saved.update(status="saved")
-            duplicate = copy.deepcopy(held); duplicate.update(status="duplicate")
+            saved = copy.deepcopy(held)
+            saved.update(status="saved")
+            duplicate = copy.deepcopy(held)
+            duplicate.update(status="duplicate")
             stored["records"] = [saved, held, duplicate]
             from psycopg.types.json import Jsonb
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(stored), run["id"]))
@@ -51,7 +55,7 @@ class AttentionTests(unittest.TestCase):
         self.client.cookies.clear()
         self.assertEqual(self.client.get(route).status_code, 401)
 
-    for _method in ("setUp", "launch", "upload_bill", "process", "tally_discovery", "tally_result", "approve", "tally_job", "current"):
+    for _method in ("setUp", "launch", "upload_bill", "process", "tally_discovery", "tally_result", "approve", "tally_job", "current", "observed_v5"):
         locals()[_method] = getattr(fixtures.BillEntryTests, _method)
 
     def ready(self, exceptions=None):
@@ -64,6 +68,15 @@ class AttentionTests(unittest.TestCase):
         result["records"][0]["exceptions"]=exceptions or []
         self.process(run,result)
         return run,bill,adopt_exceptions(copy.deepcopy(result))
+
+    @staticmethod
+    def untaxed_supplier(result, name, evidence, *, new):
+        """An untaxed 100.00 bill whose printed supplier has no discovered ledger."""
+        record = result["records"][0]
+        record["document"].update(supplier_name=name, total=100)
+        record["voucher"]["party"] = {"ledger_guid": None, "new_supplier": new, "evidence": evidence}
+        record["voucher"]["lines"] = [{**record["voucher"]["lines"][0], "amount": 100}]
+        record["evidence"] = [e for e in record["evidence"] if e["field"] != "supplier"] + [{"field": "supplier", "page": 1, "quote": name}]
 
     def decision(self,run,bill,action):
         return self.client.post(f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",headers=self.csrf,json={"action":action})
@@ -97,7 +110,9 @@ class AttentionTests(unittest.TestCase):
         with psycopg.connect(URL,row_factory=dict_row) as c:
             item=c.execute("SELECT * FROM attention_items WHERE task_id=%s AND kind='review'",(run["task_id"],)).fetchone()
             self.assertEqual(item["status"],"pending")
-            self.assertEqual(item["target"]["baseline"],current)
+            baseline=item["target"]["baseline"]
+            self.assertEqual((baseline["guid"],baseline["fingerprint"],baseline["invoice_number"]),(current["guid"],current["fingerprint"],"MOCK-1"))
+            self.assertEqual(item["target"]["date"],"2026-10-01")
             self.assertEqual(c.execute("SELECT status FROM attention_items WHERE task_id=%s AND kind='bill'",(run['task_id'],)).fetchone()['status'],'done')
         base="/api/tenants/mock-tenant/attention"
         for changed,expected in [(False,"pending"),(True,"done")]:
@@ -105,7 +120,7 @@ class AttentionTests(unittest.TestCase):
             self.assertEqual(requested.status_code,200,requested.text)
             job=self.client.post("/api/desktop/worker/claim",headers=self.worker,json={}).json()
             observed=copy.deepcopy(current)
-            if changed: observed["fingerprint"]="b"*64
+            if changed: observed["fingerprint"]="v5:"+"c"*64  # Same reader, edited in Tally.
             result=self.client.post(f"/api/desktop/worker/jobs/{job['id']}/finish",headers=self.worker,
                 json={"claim_token":job["claim_token"],"result":{"company_guid":"company-attention","ledgers":[],"current":observed}})
             self.assertEqual(result.status_code,200,result.text)
@@ -146,7 +161,7 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual(retried.status_code,200,retried.text)
         self.assertEqual((retried.json()["state"],len(retried.json()["tally_writes"])),("writing",2))
         claim,route,replayed=self.tally_job(retried.json())
-        self.assertEqual((replayed["remote_id"],replayed["data"]),(plan["remote_id"],plan["data"]))
+        self.assertEqual((replayed["remote_id"],replayed["lines"]),(plan["remote_id"],plan["lines"]))
         response=self.client.post(route+"/finish",headers=self.worker,json={"claim_token":claim["claim_token"],"result":{"outcome":"saved","current":self.current(replayed)}})
         self.assertEqual(response.status_code,200,response.text)
         final=self.client.get(self.base+f"/runs/{run['id']}").json()
@@ -201,7 +216,8 @@ class AttentionTests(unittest.TestCase):
         bill=self.upload_bill("two-bills.pdf")
         run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
         result=self.tally_result(run,bill)
-        second=copy.deepcopy(result["records"][0]);second["data"]["invoice_number"]="MOCK-2"
+        second=copy.deepcopy(result["records"][0])
+        second["document"]["number"]="MOCK-2"
         result["records"].append(second)
         self.process(run,result)
         self.assertEqual(self.decision(run,bill,"nothing").status_code,422)
@@ -241,7 +257,7 @@ class AttentionTests(unittest.TestCase):
 
     def test_accounting_edits_and_prompt_input_rejected(self):
         run,bill,result=self.ready()
-        result["records"][0]["data"]["total"]=999
+        result["records"][0]["document"]["total"]=999
         response=self.client.post(self.base+f"/runs/{run['id']}/approve",headers=self.csrf,json={"result":result,"acknowledge_findings":True})
         self.assertEqual(response.status_code,422,response.text)
 
@@ -263,21 +279,28 @@ class AttentionTests(unittest.TestCase):
     def test_excel_refresh_uses_business_keys_and_requires_a_valid_external_edit(self):
         import base64
         from io import BytesIO
+
         from openpyxl import load_workbook
-        from test_accounts_excel import workbook, catalog
+        from test_accounts_excel import catalog, workbook
+
         from minkops_platform.accounts.attention import check_observation
         from minkops_platform.attention import resolved
         item={'kind':'review','target':{'tool':'excel','mapping':catalog()['sheets'][0],
             'keys':{'Invoice':'A-1','Vendor':'Acme'},'baseline':None}}
-        observe=lambda content:check_observation(item,{'content':base64.b64encode(content).decode()})
+        def observe(content):
+            return check_observation(item,{'content':base64.b64encode(content).decode()})
         baseline=observe(workbook())
         self.assertTrue(baseline['valid'])
         item['target']['baseline']=baseline['current']
         self.assertFalse(resolved(item,observe(workbook())))
-        book=load_workbook(BytesIO(workbook()));book['Bills']['C3']=42
-        content=BytesIO();book.save(content)
+        book=load_workbook(BytesIO(workbook()))
+        book['Bills']['C3']=42
+        content=BytesIO()
+        book.save(content)
         self.assertTrue(resolved(item,observe(content.getvalue())))
-        book['Bills']['A3']='different-bill';content=BytesIO();book.save(content)
+        book['Bills']['A3']='different-bill'
+        content=BytesIO()
+        book.save(content)
         self.assertFalse(resolved(item,observe(content.getvalue())))
         self.assertFalse(observe(b'broken workbook')['valid'])
 
@@ -296,8 +319,10 @@ class AttentionTests(unittest.TestCase):
 
     def test_member_can_override_run_config_but_not_saved_workflow_or_employee_config(self):
         import json
-        from minkops_api.auth import digest
+
         from test_accounts_excel import workbook
+
+        from minkops_api.auth import digest
         with psycopg.connect(URL,row_factory=dict_row) as c:
             tenant=c.execute("SELECT id FROM tenants WHERE slug='mock-tenant'").fetchone()['id']
             member=c.execute("INSERT INTO users(name,email,password_hash,email_verified_at) VALUES ('Member',%s,'unused',now()) RETURNING id",
@@ -307,7 +332,8 @@ class AttentionTests(unittest.TestCase):
             c.execute("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES (%s,%s,now()+interval '1 hour')",(member,digest(token)))
             workflow=c.execute("SELECT * FROM workflows WHERE tenant_id=%s AND key='source-discovery'",(tenant,)).fetchone()
             employee=c.execute('SELECT * FROM employees WHERE tenant_id=%s LIMIT 1',(tenant,)).fetchone()
-        client=TestClient(app);client.cookies.set('minkops_session',token)
+        client=TestClient(app)
+        client.cookies.set('minkops_session',token)
         csrf={'x-csrf-token':client.get('/api/auth/me').json()['csrf_token']}
         uploaded=client.post(self.base+'/sources',headers=csrf,data={'label':'Member files','writable':'true','paths':json.dumps(['own.xlsx'])},
             files=[('files',('own.xlsx',workbook()))])
@@ -332,7 +358,8 @@ class AttentionTests(unittest.TestCase):
             from minkops_api.auth import digest
             token=str(uuid.uuid4())
             c.execute("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES (%s,%s,now()+interval '1 hour')",(member,digest(token)))
-        client=TestClient(app);client.cookies.set("minkops_session",token)
+        client=TestClient(app)
+        client.cookies.set("minkops_session",token)
         csrf={"x-csrf-token":client.get("/api/auth/me").json()["csrf_token"]}
         self.assertEqual(client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/done",headers=csrf).status_code,200)
         self.assertEqual(self.client.post(f"/api/tenants/pr-infra/attention/{item['id']}/done",headers=self.csrf).status_code,404)
@@ -341,11 +368,12 @@ class AttentionTests(unittest.TestCase):
 
     def test_unresolved_supplier_does_not_authorize_master_creation(self):
         run,bill,result=self.ready()
-        result["records"][0]["data"].update(vendor="Unresolved spelling",tax=0,tax_ledger=None,total=100)
-        result["records"][0]["master_refs"].update(vendor={"ref": None, "evidence": "Two possible existing suppliers."}, tax_ledger=None)
-        result["records"][0]["evidence"].append({"field":"vendor","page":1,"quote":"Unresolved spelling"})
-        with psycopg.connect(URL) as c:
+        self.untaxed_supplier(result, "Unresolved spelling", "Two possible existing suppliers.", new=False)
+        with psycopg.connect(URL,row_factory=dict_row) as c:
             from psycopg.types.json import Jsonb
+
+            from minkops_platform.accounts.bills import capture_tally_findings
+            capture_tally_findings(result,c.execute("SELECT config FROM account_runs WHERE id=%s",(run["id"],)).fetchone()["config"])
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s",(Jsonb(result),run["id"]))
         response=self.decision(run,bill,"supplier")
         self.assertEqual(response.status_code,422,response.text)
@@ -354,12 +382,10 @@ class AttentionTests(unittest.TestCase):
     def test_supplier_creation_authorizes_fixed_native_plan_then_continues(self):
         run,bill,result=self.ready()
         with psycopg.connect(URL,row_factory=dict_row) as c:
-            result["records"][0]["data"].update(vendor="New supplier",tax=0,tax_ledger=None,total=100)
-            result["records"][0]["master_refs"].update(vendor={"ref": None, "evidence": "No discovered supplier matches.", "new_supplier": True}, tax_ledger=None)
-            result["records"][0]["evidence"].append({"field":"vendor","page":1,"quote":"New supplier"})
+            self.untaxed_supplier(result, "New supplier", "No discovered supplier matches.", new=True)
             from minkops_platform.accounts.bills import capture_tally_findings
             config=c.execute("SELECT config FROM account_runs WHERE id=%s",(run["id"],)).fetchone()["config"]
-            capture_tally_findings(result,config["tally_target"])
+            capture_tally_findings(result,config)
             from psycopg.types.json import Jsonb
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s",(Jsonb(result),run["id"]))
         response=self.decision(run,bill,"supplier")
@@ -373,7 +399,8 @@ class AttentionTests(unittest.TestCase):
         updated=self.client.get(self.base+f"/runs/{run['id']}").json()
         self.assertEqual(updated["state"],"writing")
         _,_,plan=self.tally_job(updated)
-        self.assertEqual(plan["data"]["vendor"],"New supplier")
+        self.assertEqual(plan["header"]["party_ledger"],"New supplier")
+        self.assertEqual(plan["references"]["ledgers"]["New supplier"]["GUID"],"supplier-guid")
 
 
     def test_company_not_open_hold_is_labelled_and_retryable(self):

@@ -24,7 +24,7 @@ function database(): Promise<IDBDatabase> {
   });
 }
 
-export async function localValue<T>(key: string): Promise<T | undefined> {
+async function localValue<T>(key: string): Promise<T | undefined> {
   const db = await database();
   try { return await new Promise((resolve, reject) => {
     const request = db.transaction('bindings').objectStore('bindings').get(key);

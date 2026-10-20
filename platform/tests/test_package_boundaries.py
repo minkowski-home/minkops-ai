@@ -1,54 +1,72 @@
-"""The worker and connectors must remain usable without the web application."""
+"""Repository boundaries: shared packages stay usable without the web application,
+and every tracked path resolves identically on case-sensitive and case-insensitive
+file systems."""
 
 import ast
-import hashlib
-import importlib
-from pathlib import Path
-from unittest import TestCase
+import shutil
+import subprocess
+from collections import defaultdict
+from pathlib import PurePosixPath
+from unittest import TestCase, skipUnless
+
+from minkops_platform.resources import REPOSITORY_ROOT
+
+# Import specifiers omit these extensions, so `./RunSettings` and `./runSettings`
+# name the same module on macOS/Windows even when the files differ by extension.
+MODULE_SUFFIXES = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+
+
+def case_collisions(paths):
+    """Groups of tracked paths or module specifiers that differ only by case."""
+    groups = defaultdict(set)
+    for path in map(PurePosixPath, paths):
+        groups[str(path).lower()].add(str(path))
+        if path.suffix in MODULE_SUFFIXES:
+            groups[f"module:{path.with_suffix('')}".lower()].add(str(path.with_suffix("")))
+    return sorted(sorted(group) for group in groups.values() if len(group) > 1)
+
+
+class RepositoryLayoutTests(TestCase):
+    def test_detects_module_names_that_differ_only_by_case(self):
+        self.assertEqual(
+            case_collisions(["web/RunSettings.tsx", "web/runSettings.ts", "web/api.ts"]),
+            [["web/RunSettings", "web/runSettings"]],
+        )
+        self.assertEqual(case_collisions(["a/README.md", "b/readme.md", "a/x.ts"]), [])
+
+    @skipUnless(shutil.which("git") and (REPOSITORY_ROOT / ".git").exists(), "needs a git checkout")
+    def test_no_tracked_paths_differ_only_by_case(self):
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=REPOSITORY_ROOT, check=True, capture_output=True
+        ).stdout.decode().split("\0")
+        self.assertEqual(case_collisions(filter(None, tracked)), [])
+
+
+# Shared packages and what each must never import.
+FORBIDDEN_IMPORTS = {
+    "platform/src/minkops_platform": ("minkops_api", "fastapi", "starlette"),
+    "connectors/src/minkops_connectors": ("minkops_api", "fastapi", "starlette", "minkops_platform"),
+}
+
+
+def imported_names(path):
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield node.module
+        elif isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
 
 
 class PackageBoundaryTests(TestCase):
-    def test_shared_services_import_without_web_application_dependencies(self):
-        for name in (
-            "minkops_platform.desktop",
-            "minkops_platform.attention",
-            "minkops_platform.accounts.attention",
-            "minkops_platform.accounts.service",
-            "minkops_platform.accounts.repository",
-            "minkops_platform.accounts.checks",
-            "minkops_platform.accounts.catalog",
-            "minkops_platform.accounts.agent",
-            "minkops_platform.artifacts",
-            "minkops_platform.accounts.worker",
-            "minkops_platform.runtime.openai_hosted",
-            "minkops_platform.runtime.workflow",
-            "minkops_platform.runtime.bundles",
-            "minkops_platform.runtime.lifecycle",
-            "minkops_platform.accounts.run_store",
-            "minkops_connectors.excel",
-        ):
-            module = importlib.import_module(name)
-            tree = ast.parse(Path(module.__file__).read_text())
-            for node in ast.walk(tree):
-                names = (
-                    [node.module or ""]
-                    if isinstance(node, ast.ImportFrom)
-                    else [a.name for a in node.names]
-                    if isinstance(node, ast.Import)
-                    else []
-                )
-                self.assertFalse(any(n.startswith(("minkops_api", "fastapi")) for n in names), name)
-                if name.startswith("minkops_connectors"):
-                    self.assertFalse(any(n.startswith("minkops_platform") for n in names), name)
-
-    def test_versioned_workflow_prompts_match_reviewed_schema_context_contract(self):
-        from minkops_platform.accounts.agent import bill_prompt, discovery_prompt
-
-        self.assertEqual(
-            hashlib.sha256(discovery_prompt().encode()).hexdigest(),
-            "1689b7e187dc39ff7fbc443543dfd928994b88355d8b8233545bc460ae76852e",
-        )
-        self.assertEqual(
-            hashlib.sha256(bill_prompt().encode()).hexdigest(),
-            "73eb30176ca57e012c2f60f74ffad509898d7111c5ff52b7b5cde622f41f3d1f",
-        )
+    def test_every_shared_module_imports_without_the_web_application(self):
+        """The worker, companion jobs and connectors run without the API process;
+        dependencies flow apps -> platform -> connectors, never back."""
+        checked = 0
+        for package, forbidden in FORBIDDEN_IMPORTS.items():
+            for path in sorted((REPOSITORY_ROOT / package).rglob("*.py")):
+                checked += 1
+                for name in imported_names(path):
+                    with self.subTest(module=str(path.relative_to(REPOSITORY_ROOT)), imports=name):
+                        self.assertFalse(name.startswith(forbidden))
+        self.assertGreater(checked, 50)

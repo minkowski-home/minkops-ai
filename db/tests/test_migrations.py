@@ -18,6 +18,20 @@ URL = os.environ.get("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class MigrationTests(unittest.TestCase):
+    def test_client_profiles_allow_one_live_version_per_scope(self):
+        with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
+            tenant = connection.execute("INSERT INTO tenants(slug,name) VALUES (%s,'Profiles') RETURNING id",
+                                        ("profiles-" + uuid4().hex,)).fetchone()[0]
+            insert = """INSERT INTO client_profiles(tenant_id,kind,scope_key,version,status,payload)
+                VALUES (%s,'posting_profile','company',%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id"""
+            self.assertIsNotNone(connection.execute(insert, (tenant, 1, "deriving", None)).fetchone())
+            self.assertIsNone(connection.execute(insert, (tenant, 2, "deriving", None)).fetchone())
+            connection.execute("UPDATE client_profiles SET status='failed' WHERE tenant_id=%s", (tenant,))
+            self.assertIsNotNone(connection.execute(insert, (tenant, 2, "deriving", None)).fetchone())
+            with self.assertRaises(psycopg.errors.CheckViolation), connection.transaction():
+                connection.execute(insert, (tenant, 3, "superseded", None))
+                connection.execute("UPDATE client_profiles SET status='active' WHERE tenant_id=%s AND version=3", (tenant,))
+
     def test_retired_discovery_preference_is_removed_without_changing_other_settings(self):
         from psycopg.types.json import Jsonb
 

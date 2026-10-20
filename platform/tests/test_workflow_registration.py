@@ -9,9 +9,10 @@ from pathlib import Path
 
 import psycopg
 from jsonschema import ValidationError
-from minkops_platform.workflows import load_definition, register_workflow
 from psycopg import sql
 from psycopg.types.json import Jsonb
+
+from minkops_platform.workflows import load_definition, register_workflow
 
 ROOT = Path(__file__).resolve().parents[2]
 URL = os.environ.get("TEST_DATABASE_URL")

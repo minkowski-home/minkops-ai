@@ -2,8 +2,7 @@ import asyncio
 
 import pytest
 
-from minkops_connectors import workspace_smtp
-from minkops_connectors import smtp_diagnostics
+from minkops_connectors import smtp_diagnostics, workspace_smtp
 
 
 def _configure(monkeypatch):

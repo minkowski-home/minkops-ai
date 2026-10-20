@@ -8,10 +8,10 @@ import json
 from pathlib import Path
 
 from jsonschema import ValidationError
-from minkops_connectors.excel import open_workbook
 from psycopg import errors
 from psycopg.types.json import Jsonb
 
+from minkops_connectors.excel import open_workbook
 from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
 from minkops_platform.workflows import load_definition as load_definition
@@ -111,11 +111,18 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "evidence",
                     "company_guid",
                     "company_evidence",
+                    "document",
+                    "voucher",
                 ):
                     if edited.get(field) != old.get(field):
                         raise ValueError(
                             "Review may change values and append/edit choice, not source evidence or routing."
                         )
+                if "voucher" in old:
+                    # The document summary is server-derived; the proposal itself is compared above.
+                    if edited.get("operation", old["operation"]) != old["operation"]:
+                        raise ValueError("Edit accounting values in the original system, not Minkops.")
+                    continue
                 if any(
                     edited["data"].get(k) != old["data"].get(k)
                     for k in old.get("derived_fields", {})
@@ -167,26 +174,31 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "UPDATE account_runs SET config=%s WHERE id=%s",
                     (Jsonb(run["config"]), run["id"]),
                 )
-            # User edits can correct bill identity. Recompute app-owned IDs from
-            # the reviewed values rather than retaining an extraction-time ID.
-            populate_entry_ids(
-                {
-                    "records": [
-                        r
-                        for r in reviewed["records"]
-                        if r.get("status") not in ("saved", "duplicate", "rejected")
-                    ]
-                },
-                catalog,
-                run["id"],
-            )
-            checked = check_records(
-                reviewed,
-                catalog,
-                run["file_ids"],
-                contents,
-                [] if tally else run["config"]["checks"],
-            )
+            if (tally or {}).get("voucher_proposal_version") == 1:
+                # Voucher proposals are bound and checked in prepare(); coverage only here.
+                from .checks import check_voucher_records
+                checked = check_voucher_records(reviewed, run["file_ids"])
+            else:
+                # User edits can correct bill identity. Recompute app-owned IDs from
+                # the reviewed values rather than retaining an extraction-time ID.
+                populate_entry_ids(
+                    {
+                        "records": [
+                            r
+                            for r in reviewed["records"]
+                            if r.get("status") not in ("saved", "duplicate", "rejected")
+                        ]
+                    },
+                    catalog,
+                    run["id"],
+                )
+                checked = check_records(
+                    reviewed,
+                    catalog,
+                    run["file_ids"],
+                    contents,
+                    [] if tally else run["config"]["checks"],
+                )
             if (checked["findings"] or any(r["findings"] for r in checked["records"])) and not body[
                 "acknowledge_findings"
             ]:
@@ -405,28 +417,6 @@ def verify_write(connection, tenant, run_id, write_id, content):
             )
     elif not pending and run["state"] == "writing":
         observe(connection, run, "completed", "Excel entries saved in place and verified.", 100)
-    return public_run(connection, run_for(connection, tenant["id"], run_id))
-
-
-def cancel_writes(connection, tenant, run_id):
-    run = run_for(connection, tenant["id"], run_id, True)
-    if run["state"] != "writing":
-        raise ServiceError("conflict", "This run has no pending local writes.")
-    connection.execute(
-        """UPDATE account_writes SET cancelled_at=now() WHERE tenant_id=%s
-         AND run_id=%s AND verified_at IS NULL""",
-        (tenant["id"], run_id),
-    )
-    connection.execute(
-        "UPDATE account_tally_writes SET cancelled_at=now() WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL",
-        (tenant["id"], run_id),
-    )
-    message = "Remaining saves cancelled. Inspect the destinations before refreshing discovery; already applied changes remain."
-    connection.execute(
-        "UPDATE account_runs SET error=%s WHERE tenant_id=%s AND id=%s",
-        (message, tenant["id"], run_id),
-    )
-    observe(connection, run, "failed", message, 85)
     return public_run(connection, run_for(connection, tenant["id"], run_id))
 
 

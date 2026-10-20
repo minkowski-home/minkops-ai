@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("AUTH_DEV_MODE", "1")
 from minkops_api.main import app
 
-
 ROOT = Path(__file__).resolve().parents[3]
 URL = os.environ.get("TEST_DATABASE_URL")
 PASSWORD = "long test password 123!"
@@ -136,8 +135,25 @@ class WorkspaceTests(unittest.TestCase):
         ).status_code, 403)
 
     def test_task_detail_has_visual_progress_events(self):
+        # The test owns its task; the demo seed no longer fabricates activity.
+        with psycopg.connect(URL) as connection:
+            tenant_id, workflow_id = connection.execute(
+                """SELECT t.id, w.id FROM tenants t JOIN workflows w ON w.tenant_id = t.id
+                   WHERE t.slug = 'mock-tenant' AND w.key = 'bill-entry'"""
+            ).fetchone()
+            task_id = connection.execute(
+                """INSERT INTO tasks (tenant_id, workflow_id, title, status, progress, summary)
+                   VALUES (%s, %s, 'Progress fixture', 'running', 40, 'Reading bills.')
+                   RETURNING id""",
+                (tenant_id, workflow_id),
+            ).fetchone()[0]
+            connection.execute(
+                """INSERT INTO task_events (tenant_id, task_id, event_type, summary, progress)
+                   VALUES (%s, %s, 'executing', 'Reading bills.', 40)""",
+                (tenant_id, task_id),
+            )
         workspace = self.client.get("/api/tenants/mock-tenant/workspace").json()
-        task = workspace["tasks"][0]
+        task = next(t for t in workspace["tasks"] if t["id"] == str(task_id))
         detail = self.client.get(f"/api/tenants/mock-tenant/tasks/{task['id']}")
         self.assertEqual(detail.status_code, 200, detail.text)
         self.assertTrue(detail.json()["events"])

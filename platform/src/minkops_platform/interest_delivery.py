@@ -11,10 +11,10 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 from minkops_connectors.workspace_smtp import (
-    SmtpRejected,
-    SmtpSetupFailure,
     SmtpConfigurationError,
     SmtpOutcomeUncertain,
+    SmtpRejected,
+    SmtpSetupFailure,
     send_discovery_notification,
 )
 

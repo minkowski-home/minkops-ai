@@ -3,7 +3,7 @@
 from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
-from minkops_platform.run_controls import observe_task, control_state
+from minkops_platform.run_controls import control_state, observe_task
 
 
 class WorkflowRunStore:
@@ -15,6 +15,8 @@ class WorkflowRunStore:
             AND (NOT config ? 'tally_context_job_id' OR EXISTS
                 (SELECT 1 FROM desktop_jobs j WHERE j.tenant_id=workflow_runs.tenant_id
                  AND j.id::text=config->>'tally_context_job_id' AND j.state IN ('completed','failed')))
+            -- A session waiting for a client profile starts once that profile is active.
+            AND NOT config ? 'awaits'
             ORDER BY updated_at LIMIT 10""").fetchall()
 
     def get(self, connection, tenant_id, run_id):
@@ -92,7 +94,7 @@ def observe(connection, run, state, summary, progress):
     if run.get("parent_run_id"):
         return
     if state == "failed":
-        from minkops_platform.attention import record, audit
+        from minkops_platform.attention import audit, record
         item = record(connection, run, f"run:{run['id']}", run.get("workflow_key", "Workflow"), "Needs attention")
         audit(connection, item, None, "failed", summary)
     observe_task(

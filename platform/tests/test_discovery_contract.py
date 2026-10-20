@@ -2,6 +2,7 @@
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
+
 from minkops_platform.discovery import CONFIG_SCHEMA
 from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.workflows import load_definition

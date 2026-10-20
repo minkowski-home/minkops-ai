@@ -1,6 +1,7 @@
 """Attention completion is evidence-based, never inferred from a UI visit."""
 import unittest
-from minkops_platform.attention import resolved, label
+
+from minkops_platform.attention import label, resolved
 
 
 class AttentionEvidenceTests(unittest.TestCase):

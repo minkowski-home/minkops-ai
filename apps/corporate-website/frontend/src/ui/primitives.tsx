@@ -211,39 +211,3 @@ export function StatusDot({
     </span>
   );
 }
-
-/* ---- Avatar ------------------------------------------------------------ */
-
-function initials(name: string) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
-/** Agents get a graphite square; humans get a pale circle. */
-export function Avatar({
-  name,
-  kind = "agent",
-  size = 30
-}: {
-  name: string;
-  kind?: "agent" | "human";
-  size?: number;
-}) {
-  return (
-    <span
-      className={cx("mk-avatar", `mk-avatar--${kind}`)}
-      style={{
-        width: size,
-        height: size,
-        fontSize: Math.max(10, Math.round(size * 0.36))
-      }}
-      aria-hidden="true"
-    >
-      {initials(name)}
-    </span>
-  );
-}

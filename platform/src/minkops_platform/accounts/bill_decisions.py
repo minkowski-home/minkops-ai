@@ -2,14 +2,12 @@
 import copy
 
 from .bill_review import REASONS
-from .bills import validate_tally
 from .client_context import select_target
-
 
 # The matrix is a ceiling. Complete values, positive supplier evidence and the
 # pinned company/master identities can further restrict these actions.
-HANDLERS = {code: ("nothing", "retry") for code in REASONS}
-for _code in ("source_unreadable", "classification_uncertain", "manual_review"):
+HANDLERS = dict.fromkeys(REASONS, ("nothing", "retry"))
+for _code in ("source_unreadable", "classification_uncertain", "manual_review", "posting_profile_miss"):
     HANDLERS[_code] = ("guess", "nothing", "retry")
 HANDLERS["supplier_missing"] = ("supplier", "nothing", "retry")
 for _code in ("company_not_open", "no_company", "duplicate_company", "not_running", "port_closed",
@@ -25,21 +23,33 @@ def supported_write(run, record, *, supplier=False):
         return not supplier  # Pinned Excel runs retain their existing validation.
     candidate = copy.deepcopy(record)
     try:
-        selected = select_target(candidate, scope)
-        if scope.get("master_selection_version") == 1:
-            from .master_selection import resolve_masters
-            resolve_masters(candidate, selected, required=True, allow_split=scope.get("tax_allocation_version") == 1)
+        from .vouchers import resolve
+
         if supplier:
-            vendor = candidate["data"]["vendor"]
-            refs = candidate.get("master_refs")
-            if (vendor in selected["ledgers"]
-                    or (refs is not None and refs.get("vendor", {}).get("new_supplier") is not True)
-                    or not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in candidate.get("evidence", []))):
-                return False
+            selected = select_target(candidate, scope)
+            if "voucher" in candidate:
+                party = candidate["voucher"]["party"]
+                vendor = candidate["document"].get("supplier_name")
+                if (party.get("ledger_guid") is not None or party.get("new_supplier") is not True
+                        or not any(e.get("field") == "supplier" and e.get("quote", "").strip()
+                                   for e in candidate.get("evidence", []))):
+                    return False
+            else:
+                if scope.get("master_selection_version") == 1:
+                    from .master_selection import resolve_masters
+                    resolve_masters(candidate, selected, required=True, allow_split=scope.get("tax_allocation_version") == 1)
+                vendor = candidate["data"]["vendor"]
+                refs = candidate.get("master_refs")
+                if (vendor in selected["ledgers"]
+                        or (refs is not None and refs.get("vendor", {}).get("new_supplier") is not True)
+                        or not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in candidate.get("evidence", []))):
+                    return False
             from .supplier_gst import creation_plan
+            if "voucher" in candidate:
+                from .vouchers import summary
+                candidate["data"] = summary(candidate, run["config"])
             creation_plan(run, candidate, selected)
-            selected = {**selected, "ledgers": [*selected["ledgers"], vendor]}
-        validate_tally(candidate["data"], selected, candidate.get("tax_allocations"))
+        resolve(candidate, run["config"], assume_new_supplier=supplier)
         return True
     except (ValueError, KeyError, TypeError, AttributeError):
         return False

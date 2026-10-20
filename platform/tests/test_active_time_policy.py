@@ -12,8 +12,8 @@ def test_default_and_configured_budget_reject_invalid_operator_settings():
         with patch.dict('os.environ', {'MINKOPS_RUN_TIMEOUT_MINUTES': value}):
             assert limit_minutes() == int(value)
     for value in ('0', '-1', '1.5', 'disabled', '1441'):
-        with patch.dict('os.environ', {'MINKOPS_RUN_TIMEOUT_MINUTES': value}):
-            with pytest.raises(ValueError): limit_minutes()
+        with patch.dict('os.environ', {'MINKOPS_RUN_TIMEOUT_MINUTES': value}), pytest.raises(ValueError):
+            limit_minutes()
 
 
 def test_cancellation_uses_the_documented_event_and_skips_finished_turns():

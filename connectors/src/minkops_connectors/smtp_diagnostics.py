@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 from dataclasses import dataclass
 
 import aiosmtplib
+
 from .workspace_smtp import SMTP_HOSTS
 
 
@@ -80,10 +82,9 @@ async def check_relay() -> DiagnosticResult:
         return DiagnosticResult("authenticated", None, None)
     finally:
         if connected:
-            try:
+            # The diagnosis is already decided; a failed QUIT must not replace it.
+            with contextlib.suppress(Exception):
                 await client.quit()
-            except Exception:
-                pass
 
 
 async def _main() -> int:

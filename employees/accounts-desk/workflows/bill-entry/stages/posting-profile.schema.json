@@ -1,0 +1,228 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "company_guid",
+    "families",
+    "invoice_number",
+    "round_off",
+    "tds",
+    "party_groups",
+    "practice",
+    "summary"
+  ],
+  "properties": {
+    "company_guid": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "families": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invoice",
+        "credit_note"
+      ],
+      "properties": {
+        "invoice": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "voucher_type_guid"
+          ],
+          "properties": {
+            "family": {
+              "enum": [
+                "purchase",
+                "journal"
+              ]
+            },
+            "voucher_type_guid": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        },
+        "credit_note": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "family",
+                "voucher_type_guid"
+              ],
+              "properties": {
+                "family": {
+                  "enum": [
+                    "debit_note"
+                  ]
+                },
+                "voucher_type_guid": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "invoice_number": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "REFERENCE",
+              "VOUCHERNUMBER",
+              "NARRATION"
+            ]
+          }
+        }
+      }
+    },
+    "round_off": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ledger_guid",
+            "max_cents"
+          ],
+          "properties": {
+            "ledger_guid": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "max_cents": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        }
+      ]
+    },
+    "tds": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "deducted_at",
+            "ledgers"
+          ],
+          "properties": {
+            "deducted_at": {
+              "enum": [
+                "booking",
+                "payment"
+              ]
+            },
+            "ledgers": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ledger_guid",
+                  "section",
+                  "rate"
+                ],
+                "properties": {
+                  "ledger_guid": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "section": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20
+                  },
+                  "rate": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 30
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "party_groups": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "practice": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "statement",
+          "evidence_vouchers"
+        ],
+        "properties": {
+          "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "evidence_vouchers": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    }
+  }
+}

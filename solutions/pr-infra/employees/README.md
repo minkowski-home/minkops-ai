@@ -1,6 +1,7 @@
 # PR Infra employee configuration
 
-Create `employees/<employee-id>/` here when PR Infra enables an actual shared
-employee. Refer to the canonical workflow under the repository's top-level
-`employees/` directory and store only PR Infra-specific configuration here.
-No employee or workflow has been approved or implemented in this directory yet.
+`accounts-desk/binding.json` enables the shared Source discovery and Statement
+entry workflows. Their canonical definitions remain under the repository's
+top-level `employees/accounts-desk/` directory. Store only PR Infra-specific
+configuration here; resource authorization and saved operator settings remain
+in the application.

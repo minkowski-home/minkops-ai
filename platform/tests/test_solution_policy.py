@@ -6,8 +6,9 @@ import unittest
 from pathlib import Path
 
 from jsonschema import ValidationError
-from minkops_platform.solution_policy import bind_definition, validate_destination, validate_option
+
 from minkops_platform.resources import REPOSITORY_ROOT
+from minkops_platform.solution_policy import bind_definition, validate_destination, validate_option
 from minkops_platform.workflows import load_definition, validate
 
 

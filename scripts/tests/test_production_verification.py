@@ -32,7 +32,8 @@ def test_existing_review_blocks_unsafe_approval_or_retry(tmp_path, monkeypatch, 
     monkeypatch.setattr(verification.httpx, "Client", lambda **kwargs: client)
     with pytest.raises(ValueError):
         verification.main(tmp_path, phase, None)
-    assert not any(path.endswith(("/approve", "/resolve-bill")) for _, path in requests)
+    assert not any(path.endswith("/approve") or path.startswith(verification.DECISIONS)
+                   for _, path in requests)
 
 
 def review_client(tmp_path, problem=None):
@@ -92,8 +93,8 @@ def review_client(tmp_path, problem=None):
                     },
                 },
             )
-        if request.url.path.endswith("/resolve-bill"):
-            assert json.loads(request.content) == {"file_id": "owned-file"}
+        if request.url.path == verification.DECISIONS + "/owned-run/owned-file":
+            assert json.loads(request.content) == {"action": "retry"}
             return httpx.Response(200, json={"id": "owned-run", "state": "queued"})
         if request.url.path.endswith("/approve"):
             approval = json.loads(request.content)
@@ -112,7 +113,7 @@ def test_retry_uses_original_evidence_without_correction_text(tmp_path, monkeypa
     client, requests = review_client(tmp_path)
     monkeypatch.setattr(verification.httpx, "Client", lambda **kwargs: client)
     verification.main(tmp_path, "bill-retry", None)
-    assert ("POST", verification.BASE + "/runs/owned-run/resolve-bill") in requests
+    assert ("POST", verification.DECISIONS + "/owned-run/owned-file") in requests
     assert json.loads((tmp_path / "release-bill-result.json").read_text())["state"] == "queued"
 
 

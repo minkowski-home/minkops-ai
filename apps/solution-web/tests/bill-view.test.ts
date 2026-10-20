@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { billActions, inputsWithoutProposal } from "../src/starter/accounts/billView.ts";
+import { billActions, billOutcome, inputsWithoutProposal } from "../src/starter/accounts/billView.ts";
 import type { BillRecord, BillResult } from "../src/starter/accounts/types.ts";
 
 const record = (source_file_id: string, extra: Partial<BillRecord> = {}): BillRecord => ({
@@ -74,4 +74,28 @@ test("details name the outcome and the routed company for inferred runs", () => 
   assert.deepEqual(billDetails(single, tallyConfig()).rows.slice(6, 7), [["Input GST", "18,000.00"]]);
   const older = { tally_target: { company: "Test" } };
   assert.equal(billDetails(proposal(), older).rows[1][1], "Purchase", "runs before voucher-type choice wrote Purchase");
+});
+
+test("voucher previews list every proposed line with its side, whatever the voucher family", () => {
+  const preview = { company: "Sachin Infra (2026-27)", voucher_type: "Debit Note", family: "debit_note", date: "2026-10-14",
+    number: "CN-7", party: "Ultratech Cement", total: 1180.4,
+    lines: [{ ledger: "Ultratech Cement", side: "debit" as const, amount: 1180.4 },
+      { ledger: "Purchase Returns 18%", side: "credit" as const, amount: 1000 },
+      { ledger: "Input IGST 18%", side: "credit" as const, amount: 180 },
+      { ledger: "Round Off", side: "credit" as const, amount: 0.4 }] };
+  const details = billDetails(record("note", { preview, data: {} }), tallyConfig());
+  assert.deepEqual(details.rows, [
+    ["Company", "Sachin Infra (2026-27)"], ["Voucher type", "Debit Note"], ["Date", "14 Oct 2026"],
+    ["Supplier ledger", "Ultratech Cement"], ["Invoice number", "CN-7"],
+    ["Purchase Returns 18%", "1,000.00 Cr"], ["Input IGST 18%", "180.00 Cr"], ["Round Off", "0.40 Cr"],
+    ["Total", "1,180.40"],
+  ]);
+});
+
+test("write outcomes take precedence over findings and retain attention", () => {
+  assert.equal(billOutcome('saved', true), 'Saved and verified · check Attention');
+  assert.equal(billOutcome('saved', false), 'Saved and verified');
+  assert.equal(billOutcome('duplicate', true), 'Duplicate skipped · check Attention');
+  assert.equal(billOutcome('writing', true), 'Saving and checking');
+  assert.equal(billOutcome('held', true), 'Needs attention');
 });

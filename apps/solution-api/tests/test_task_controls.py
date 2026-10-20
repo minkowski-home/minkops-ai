@@ -2,12 +2,13 @@
 
 import os
 import unittest
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import test_desktop
-import uuid
-from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
+
 from minkops_api.main import app
 
 URL = os.getenv("TEST_DATABASE_URL")

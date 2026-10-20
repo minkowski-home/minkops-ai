@@ -7,7 +7,7 @@ const SETTLED = ["saved", "duplicate", "rejected", "writing"];
 
 export const isPending = (record: BillRecord) => !SETTLED.includes(record.status ?? "");
 
-export const isUnresolved = (record: BillRecord, result: BillResult | null) =>
+const isUnresolved = (record: BillRecord, result: BillResult | null) =>
   Boolean(result?.unresolved?.some((i) => i.source_file_id === record.source_file_id));
 
 export const needsAttention = (record: BillRecord, result: BillResult | null) =>
@@ -15,7 +15,8 @@ export const needsAttention = (record: BillRecord, result: BillResult | null) =>
 
 /** A positively new supplier; older runs without codes are recognised by their message. */
 export const missingSupplier = (record: BillRecord) =>
-  (!record.master_refs || record.master_refs.vendor?.new_supplier === true) &&
+  (record.voucher ? record.voucher.party.new_supplier === true
+    : !record.master_refs || record.master_refs.vendor?.new_supplier === true) &&
   (Boolean(record.exception_codes?.includes("supplier_missing")) ||
     record.findings.some((f) => f.includes("missing from the confirmed Tally ledgers")));
 
@@ -55,6 +56,23 @@ export function billDetails(record: BillRecord, config: Record<string, unknown>)
   const target = config.tally_target as TallyTarget | undefined;
   const title = record.status === "saved" ? "Saved in Tally" : record.status === "duplicate" ? "Already in Tally"
     : record.operation === "update" ? "Corrects an existing Tally voucher" : "Will be entered in Tally";
+  const preview = record.preview;
+  if (preview) {
+    // The server bound every ledger to discovery; render its lines as they will post.
+    return {
+      title,
+      rows: [
+        ["Company", preview.company ?? "—"],
+        ["Voucher type", preview.voucher_type],
+        ["Date", calendar(preview.date)],
+        ["Supplier ledger", String(preview.party ?? "—")],
+        ["Invoice number", String(preview.number ?? "—")],
+        ...preview.lines.filter((line) => line.ledger !== preview.party)
+          .map((line): [string, string] => [line.ledger ?? "Pending ledger", `${money(line.amount)} ${line.side === "debit" ? "Dr" : "Cr"}`]),
+        ["Total", money(preview.total)],
+      ],
+    };
+  }
   if (!target) return { title: record.status === "saved" ? "Saved" : "Will be entered",
     rows: Object.entries(data).filter(([, value]) => value != null).map(([key, value]) => [key, String(value)]) };
   const guid = target.company_mode === "locked" ? target.locked_company_guid : record.company_guid;
@@ -76,4 +94,15 @@ export function billDetails(record: BillRecord, config: Record<string, unknown>)
       ["Total", money(data.total)],
     ],
   };
+}
+
+/** A completed write and outstanding human attention are independent outcomes. */
+export function billOutcome(status: string | undefined, attention: boolean): string {
+  const suffix = attention ? " · check Attention" : "";
+  if (status === "saved") return "Saved and verified" + suffix;
+  if (status === "duplicate") return "Duplicate skipped" + suffix;
+  if (status === "writing") return "Saving and checking";
+  if (status === "rejected") return "Not written";
+  if (status === "held" || attention) return "Needs attention";
+  return "Ready to write";
 }

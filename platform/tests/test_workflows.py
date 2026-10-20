@@ -5,11 +5,10 @@ import unittest
 from pathlib import Path
 
 from jsonschema import ValidationError
+
 from minkops_platform.workflows import (
     load_definition,
     resolve_run_config,
-    validate,
-    validate_output,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,118 +77,6 @@ class WorkflowContractTests(unittest.TestCase):
         values.pop("catalog_version")
         with self.assertRaises(ValidationError):
             self.resolve("bill-entry", values)
-
-    def output_case(self, data, schema):
-        run = self.resolve("bill-entry")
-        references = {key: run[key] for key in ("catalog_version", "schema_id", "schema_version")}
-        result = {
-            **references,
-            "records": [
-                {
-                    "source_file_id": "rajtrack-01",
-                    "data": data,
-                    "evidence": [],
-                    "findings": [],
-                    "review_required": True,
-                    "reconciliation_status": "insufficient_evidence",
-                }
-            ],
-            "findings": [],
-            "artifact_id": None,
-            "status": "review_required",
-        }
-        return run, result, {**references, "schema": schema}
-
-    def check_output(self, case):
-        run, result, confirmed = case
-        validate_output(
-            self.definition("bill-entry"), result, run_config=run, confirmed_schema=confirmed
-        )
-
-    def test_different_client_fields_use_the_same_envelope(self):
-        for data, properties in [
-            (
-                {"invoice_ref": "A-1", "payable": "18.99"},
-                {"invoice_ref": {"type": "string"}, "payable": {"type": "string"}},
-            ),
-            (
-                {"project_code": "SITE-A", "vehicle_number": "TEST-123", "amount": 19},
-                {
-                    "project_code": {"type": "string"},
-                    "vehicle_number": {"type": "string"},
-                    "amount": {"type": "integer"},
-                },
-            ),
-        ]:
-            with self.subTest(data=data):
-                self.check_output(
-                    self.output_case(
-                        data,
-                        {
-                            "type": "object",
-                            "properties": properties,
-                            "required": list(properties),
-                            "additionalProperties": False,
-                        },
-                    )
-                )
-
-    def test_business_data_requires_second_validation_layer(self):
-        schema = {
-            "type": "object",
-            "properties": {"project_code": {"type": "string"}},
-            "required": ["project_code"],
-            "additionalProperties": False,
-        }
-        for data in [{}, {"project_code": 42}, {"project_code": "A", "unknown": True}]:
-            with self.subTest(data=data):
-                case = self.output_case(data, schema)
-                validate(self.definition("bill-entry").output_schema, case[1])
-                with self.assertRaises(ValidationError):
-                    self.check_output(case)
-
-    def test_business_types_and_dates_follow_the_confirmed_schema(self):
-        schema = {
-            "type": "object",
-            "properties": {
-                "payable": {"type": "string", "pattern": r"^\d+\.\d{2}$"},
-                "issued_on": {"type": "string", "format": "date"},
-            },
-            "required": ["payable", "issued_on"],
-            "additionalProperties": False,
-        }
-        for data in [
-            {"payable": 18.99, "issued_on": "2026-10-01"},
-            {"payable": "18.99", "issued_on": "2026-02-30"},
-        ]:
-            with self.subTest(data=data), self.assertRaises(ValidationError):
-                self.check_output(self.output_case(data, schema))
-
-    def test_schema_references_must_match_the_run(self):
-        for key in ("catalog_version", "schema_id", "schema_version"):
-            for index in (1, 2):
-                case = self.output_case({}, {"type": "object"})
-                case[index][key] = "different"
-                with self.subTest(key=key, index=index), self.assertRaises(ValueError):
-                    self.check_output(case)
-
-    def test_business_schema_cannot_fetch_external_references(self):
-        with self.assertRaises(ValueError):
-            self.check_output(
-                self.output_case(
-                    {},
-                    {
-                        "type": "object",
-                        "$ref": "https://example.invalid/schema.json",
-                    },
-                )
-            )
-
-    def test_result_needs_envelope_even_when_business_fields_are_valid(self):
-        case = self.output_case({"custom": 1}, {"type": "object"})
-        del case[1]["records"][0]["evidence"]
-        with self.assertRaises(ValidationError):
-            self.check_output(case)
 
     def test_run_requires_explicit_business_schema_selection(self):
         for key in ("schema_id", "schema_version"):

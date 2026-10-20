@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
-from minkops_platform.interest_delivery import DeliveryError, InterestSubmission
 
 from minkops_corporate_website_api import main
+from minkops_platform.interest_delivery import DeliveryError, InterestSubmission
 
 
 @pytest.fixture

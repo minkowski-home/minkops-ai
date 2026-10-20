@@ -8,16 +8,6 @@ from minkops_platform.runtime.workflow import execute as workflow_execute
 from minkops_platform.workflows import load_definition
 
 WORKFLOWS = REPOSITORY_ROOT / "employees/accounts-desk/workflows"
-# Compatibility export for earlier callers; execution uses the pinned descriptor.
-MODEL = "gpt-6-luna"
-
-
-def discovery_prompt():
-    return (WORKFLOWS / "source-discovery/execution-instructions.md").read_text()
-
-
-def bill_prompt():
-    return (WORKFLOWS / "bill-entry/execution-instructions.md").read_text()
 
 
 def execute(key, files, context, on_event, *, client=None, session_id=None, turn_id=None,

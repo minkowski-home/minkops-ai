@@ -1,11 +1,10 @@
 import type { SolutionManifest } from "../../packages/solution-contracts/src";
 
 /**
- * Composition only. PR Infra starts with the shared starter workspace and no
- * bespoke UI, workflow implementation, or customer-specific data.
+ * Console identity only. Employee installation and tool policy live beside
+ * this manifest; workflow implementations remain shared.
  */
 export const solution: SolutionManifest = {
   id: "pr-infra",
-  displayName: "PR Infra",
-  enabledConnectors: ["tally"]
+  displayName: "PR Infra"
 };

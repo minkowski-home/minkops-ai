@@ -337,11 +337,6 @@ the warehouse engine or extraction strategy. Raw prompts, documents, credentials
 local paths and unrestricted provider payloads remain excluded. Apply the same
 allow-list, tenant access and erasure rules when adding any diagnostic fields.
 
-### 0.6 Tracking
-
-Log each Phase 0 change in `docs/decisions-log.md` only when it is interview-worthy
-(0.1 lease/heartbeat separation and 0.4 content addressing qualify).
-
 ---
 
 ## Phase 1 — Local warehouse foundation
@@ -627,7 +622,6 @@ a failing PR on the migration itself, which is where the fix belongs.
 
 - `dbt docs generate` locally; every model and column described in YAML.
 - Update the root `README.md` repository map entry for `warehouse/`.
-- Decisions-log entries for interview-worthy items only.
 
 **Done for the local phase** = Phases 0.1–0.3 merged, 1–4 merged, CI green,
 `run` completes from a fresh clone in under 10 minutes using only the README.

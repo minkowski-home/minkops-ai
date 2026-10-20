@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import "./index.css";
-import { api, tenantSlug, type Workflow, type Workspace } from "./api";
+import { api, tenantSlug, type Workspace } from "./api";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ConsoleShell } from "./console/ConsoleShell";
 import { AccessScreen, DashboardScreen, EmployeeDetail, EmployeesScreen, TaskDetail,
@@ -30,7 +30,6 @@ function Console() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [collapsed, setCollapsed] = useState(false);
-  const [workflowError, setWorkflowError] = useState("");
 
   const refreshWorkspace = useCallback(async () => {
     try {
@@ -62,29 +61,6 @@ function Console() {
     <Link className="button button-primary" to="/join">Request access</Link></main>;
   if (!workspace) return <main className="loading-state"><LoadingIndicator>Loading workspace…</LoadingIndicator></main>;
 
-  function runTest(workflow: Workflow) {
-    setWorkflowError("");
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file || !user) return;
-      const form = new FormData();
-      form.append("file", file);
-      try {
-        await api(`/api/tenants/${slug}/test/image-to-excel`, {
-          method: "POST", body: form,
-        }, user.csrf_token);
-        await refreshWorkspace();
-      } catch (caught) {
-        setWorkflowError(caught instanceof Error ? caught.message : "Test run failed.");
-      }
-    };
-    input.click();
-    void workflow;
-  }
-
   const path = location.pathname;
   const title = path.includes("/employees/") ? "Employee" : path.endsWith("/employees") ? "Employees"
     : path.includes("/workflows/") ? "Workflow" : path.endsWith("/workflows") ? "Workflows"
@@ -96,8 +72,7 @@ function Console() {
     pendingCount={attentionCount} collapsed={collapsed} onToggleSidebar={() => setCollapsed((value) => !value)}
     canEdit={workspace.can_edit}>
     <Routes>
-      <Route path="dashboard" element={<DashboardScreen workspace={workspace} routeSlug={routeSlug}
-        onRunTest={runTest} workflowError={workflowError} />} />
+      <Route path="dashboard" element={<DashboardScreen workspace={workspace} routeSlug={routeSlug} />} />
       <Route path="employees" element={<EmployeesScreen workspace={workspace} routeSlug={routeSlug} />} />
       <Route path="employees/:id" element={<EmployeeRoute workspace={workspace} routeSlug={routeSlug}
         onSaved={refreshWorkspace} />} />

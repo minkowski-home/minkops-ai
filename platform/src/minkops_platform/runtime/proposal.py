@@ -14,6 +14,7 @@ from minkops_platform.resources import files_for
 from minkops_platform.workflows import resolve_run_config
 
 from .application import enforce_policies
+from .environments import exceeds_session
 from .launch import LaunchInputs
 from .store import observe
 
@@ -33,7 +34,7 @@ class ProposalHandler:
         files = files_for(connection, tenant["id"], ids)
         if any(not f["current"] for f in files):
             raise ServiceError("conflict", "Refresh changed source files before launching.")
-        if len(files) > 45 or sum(len(f["content"]) for f in files) > 8_000_000:
+        if exceeds_session(files):
             raise ServiceError("invalid", "Selected inputs exceed the supported run size.")
         sources = {str(f["source_id"]) for f in files}
         selections = {**body["config"]}

@@ -6,9 +6,10 @@ from dataclasses import replace
 
 import test_workflow_registration as registration
 from jsonschema import ValidationError
+from psycopg.types.json import Jsonb
+
 from minkops_platform.installation import install, load_solution
 from minkops_platform.resources import REPOSITORY_ROOT
-from psycopg.types.json import Jsonb
 
 
 class SolutionDefinitionTests(unittest.TestCase):
