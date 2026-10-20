@@ -1,7 +1,7 @@
 # Accounts desk: Excel and Tally workflows
 
-Source discovery and Bill entry execute through the shared tenant API, durable
-PostgreSQL worker and OpenAI-hosted Agents API. All model calls use `gpt-6-luna`.
+Source discovery, Bill entry and Statement entry execute through the shared
+tenant API, durable PostgreSQL worker and OpenAI-hosted Agents API. All model calls use `gpt-6-luna`.
 The existing `apps/solution-api/.env` key is reused by the API and worker; it is
 never included in agent files or exposed to the browser.
 
@@ -43,9 +43,10 @@ commits. OpenAI owns reasoning and its execution environment. This first web
 version synchronizes selected bytes to the API and hosted session; it is not
 fully local processing. The Windows companion implements the same approved
 write contract for granted folders, including requests started from the web.
-See [Windows setup and recovery](windows-app.md). MIN-118 provides confirmed
-Tally discovery; [MIN-119 bill entry](bill-entry.md) adds reviewed Purchase
-vouchers, duplicate alerts, correction handoff and exact destination readback.
+See [Windows setup and recovery](windows-app.md). [Source discovery](source-discovery.md)
+provides confirmed Tally context; [Bill entry](bill-entry.md) and
+[Statement entry](statement-entry.md) add reviewed native vouchers, duplicate
+alerts, correction handoff and exact destination readback.
 
 ## Run contracts and recovery
 
@@ -93,7 +94,6 @@ export DATABASE_URL=postgresql://minkops:minkops-local@127.0.0.1:5433/minkops_ac
 uv sync --all-packages
 uv run --all-packages python db/migrate.py
 uv run --all-packages python db/seed_demo.py
-uv run --all-packages --with pymupdf python scripts/prepare_accounts_demo.py
 AUTH_DEV_MODE=1 uv run --all-packages uvicorn minkops_api.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -101,15 +101,16 @@ Create that database first if it does not exist. In another terminal with the
 same DATABASE_URL, run `uv run --all-packages python -m minkops_api.accounts_worker`.
 Start the existing Vite app in `apps/solution-web` (`npm run dev`, port 3000).
 Sign in at `/login` with `demo@example.com` and the seed's printed
-password. The seed activates these two workflows only for the mock tenant and
-preserves existing operator settings and paused workflows.
+password. The seed installs the mock-client composition (Source discovery,
+Statement entry and Bill entry) for the mock tenant and preserves existing
+operator settings and paused workflows.
 
-Connect `apps/solution-api/data/mock-workspace`, select its three reference
-workbooks for discovery, and confirm the register as a destination. The sample
-register's `record_id` can be confirmed as `entry_id` for application-generated
-IDs; this is an explicit mapping, not an assumption made for all tenants.
-Select the three PDFs and PNG for a mixed Bill entry run. The preparation script
-refuses to replace an existing workspace and never modifies source samples.
+The mock client's workflow policy enables Tally only, so discovery and saves
+need the [Windows companion](windows-app.md) connected to a PC with the test
+companies open in Tally. The [five-company rehearsal](tally-rehearsal.md) seeds
+synthetic companies and bills for that. The Excel adapter below serves
+compositions whose policy enables Excel; its behaviour is covered by the
+database-backed API tests.
 
 ## Supported scope and verification
 

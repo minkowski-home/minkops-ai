@@ -21,12 +21,12 @@ compatibility is retained.
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
 | Save approved Excel entries | Yes | Yes | Accounts approval, before/after hashes, backup, atomic replacement and saved-byte verification |
-| Save approved Tally bills | Yes | Yes | Confirmed company/ledger references, immutable approved Purchase plan, read-before-write and exact readback |
+| Save approved Tally vouchers | Yes | Yes | Confirmed company/ledger references, immutable approved plan, durable intent before import and exact readback |
 | Existing hosted workflows | Yes | Yes | Existing server and OpenAI-hosted Agents API contracts |
 
 This version adds bounded native operations, not customer-machine agent hosting
-or a general remote shell. See [source discovery](source-discovery.md) for MIN-118.
-Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Initially open Tally with its HTTP server enabled on port 9000; discovery must
+or a general remote shell. See [Source discovery](source-discovery.md),
+[Bill entry](bill-entry.md) and [Statement entry](statement-entry.md). Initially open Tally with its HTTP server enabled on port 9000; discovery must
 see every company the run may use. A company listing is a connection
 check, not verification of financial writes.
 
@@ -160,7 +160,7 @@ branch. Install or adopt the final baseline before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
-For an installed local RC, `Minkops.exe --local-demo` uses the fixed
+For a locally installed build, `Minkops.exe --local-demo` uses the fixed
 `http://127.0.0.1:3018` origin and isolated `Minkops Local Demo` profile. The normal
 packaged profile remains HTTPS-only. This switch grants no general URL override.
 The local profile retains encrypted registration credentials and folder grants
@@ -224,30 +224,20 @@ replays the receipt, checks Tally availability and revokes the PC. It makes no
 accounting writes or paid agent calls.
 
 Set `MINKOPS_SMOKE_EXPECT_COMPANY` to an open test company's exact name to require
-a successful live Tally export and verified server task completion. The live
-Windows check on 5 October 2026 returned `Minkops Test`, with queued → executing
-→ completed observations. Typed XML name elements are parsed as text; malformed
-nested names are rejected rather than converted into misleading object strings.
+a successful live Tally export and verified server task completion. Typed XML
+name elements are parsed as text; malformed nested names are rejected rather
+than converted into misleading object strings.
 
-On 6 October 2026 the unsigned 0.3.1 NSIS installer was installed successfully on
-Windows 11 Pro (build 26300) and launched against the shared production UI build. MIN-122's
-historical sweep covered four themes, native folder selection, bounded JSON catalog
-Save As, missing-supplier Needs Attention, independent clarification, approve/
-hold/reject/edit controls, duplicate alerts, source previews and web/desktop task
-synchronization. Closing the main window leaves the native worker in the tray;
-a web-requested discovery finishes there and reopening shows its result.
+Closing the main window leaves the native worker in the tray; a web-requested
+discovery finishes there and reopening shows its result. Catalog exports fetch
+only the authorized tenant/run endpoint, use a user-selected `.json` destination,
+enforce a size bound, reject symlinks/nonregular files and write through a synced
+temporary file with atomic replacement (bounded IPC, not a Chromium download).
 
-Catalog exports fetch only the authorized tenant/run endpoint, use a user-selected
-`.json` destination, enforce a size bound and reject symlinks/nonregular files.
-The connector writes through a synced temporary file and atomic replacement.
-The earlier Chromium download path left an incomplete temporary file in the
-installed shell; the explicit bounded IPC export fixes that failure.
-
-Evidence lives in the RC's OneDrive `evidence` and `schema` folders. Native suites
-pass on Linux and Windows; Windows skips only a file-symlink test that requires
-creation privileges (the same guard runs on Linux). A fresh Windows 10/11 device
-matrix, screen-reader audit, production hosting and signed distribution have not
-been verified by this local sweep.
+Native suites pass on Linux and Windows; Windows skips only a file-symlink test
+that requires creation privileges (the same guard runs on Linux). A fresh
+Windows 10/11 device matrix, screen-reader audit and signed distribution have
+not been verified.
 
 ### Companion 0.8.0 contracts
 

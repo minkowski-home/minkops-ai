@@ -1,8 +1,11 @@
 # Statement entry
 
-Version 0.2 uses the same managed hosted agent runtime as Bill Entry, with its
-procedure in the Statement Entry skill. Windows companion 0.8.0 / plan protocol
-4 applies and independently verifies approved Payment/Receipt plans.
+Version 0.4 uses the same managed hosted agent runtime as Bill Entry, with its
+procedure in the Statement Entry skill. The Windows companion applies and
+independently verifies approved plans. Simple Payment/Receipt rows are stored as
+plan protocol 4 and served to a 0.9.0+ companion upgraded to protocol 5; split
+lines and Contra transfers are stored as protocol 5 vouchers and need companion
+0.9.0+.
 
 Select CSV/XLSX statements and the latest confirmed complete Source Discovery on
 the destination PC. Optionally select a separate CSV/XLSX branch mapping. Both

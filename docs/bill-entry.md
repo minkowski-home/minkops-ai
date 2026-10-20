@@ -1,8 +1,9 @@
-# Bill entry (MIN-119): mock-client demonstration
+# Bill entry
 
-MIN-119 connects the shared desktop/web review to MIN-117's registered Windows
-companion and MIN-118's confirmed source catalogs. The demo seed activates the
-workflow only for `mock-tenant`. No PR Infra rules or customer data are added.
+Bill entry connects the shared desktop/web review to the registered Windows
+companion and confirmed Source discovery context. The mock-client composition
+installs it for `mock-tenant`; PR Infra does not. No customer rules or data are
+added.
 The existing hosted Agents API runs all Accounts proposals on `gpt-6-luna`;
 launch rejects another model. The model never writes financial systems.
 
@@ -319,30 +320,16 @@ selector needs its original DATE and MASTER ID. References:
 [Tally sample XML](https://help.tallysolutions.com/sample-xml/) and
 [Tally voucher alteration](https://help.tallysolutions.com/scenario-2/).
 
-## Complex synthetic fixtures
+## Synthetic companies and saves
 
-The current RC fixtures, generated history, source catalogs and evidence live in
-`C:\Users\gauss\OneDrive\Minkops\MockClient\ReleaseCandidate-20261006`, outside
-the repository and iCloud. Four vendors provide a cement tax invoice, skewed steel
-phone photo, faint aggregate carbon copy and two-page equipment hire bill. A JPEG
-copy of the steel PDF exercises duplicate identities across files. Separate
-`evidence/expected-bills.json` records exact dates, ledgers and amounts.
-
-Test Company is preserved: baseline exports capture every original voucher and
-master before adding RC-prefixed suppliers, purchase/tax ledgers, units, stock
-items and site references, plus two history vouchers. The hire supplier is
-initially absent. Its bill appears in Needs Attention while known bills save;
-after creating the supplier and confirming discovery, only that bill is retried.
-No live Excel data or writes are included in this RC.
-The three display-only seed tasks are backed up and removed from the RC database
-so its Active/Needs Attention sections reflect executable workflow outcomes.
+Synthetic Tally companies, bills and expected outcomes for live checks come from
+the [five-company rehearsal](tally-rehearsal.md); labelled packages are graded
+with the fixture scorer described under Verification. Never point either at a
+real client company.
 
 Discovery is mandatory before dependent workflows, with manual refresh afterward.
 Its date range applies only to vouchers; all masters are exported comprehensively.
-New runs use Source Discovery 0.7.2, Bill Entry 0.9.0 and companion 0.6.0. The RC
-evidence below predates this refactor. Repeat live acceptance and deployment under
-[MIN-124](https://linear.app/minkops/issue/MIN-124). No scheduling or new accounting
-layer is introduced. The existing native Purchase contract remains bounded.
+No scheduling is introduced.
 
 Bill saves run against the user's open Tally session; Minkops never starts or
 restarts Tally. Before each save the run's company must be open and match the
