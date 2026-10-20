@@ -160,6 +160,7 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
         window = {"from": (issued - timedelta(days=3)).isoformat(), "to": (issued + timedelta(days=3)).isoformat()}
     return {
         "format_version": FORMAT, "family": resolved.get("family") or ("payment" if amount < 0 else "receipt"),
+        "fence": "strict",
         "operation": "append", "company": resolved["company"], "company_guid": resolved["company_guid"],
         "port": resolved.get("port") or 9000, "remote_id": remote_id,
         "voucher_type": {"NAME": resolved["voucher_type"]["NAME"], "GUID": resolved["voucher_type"]["GUID"]},

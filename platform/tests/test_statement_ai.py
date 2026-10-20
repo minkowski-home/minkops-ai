@@ -131,6 +131,7 @@ def test_bank_charges_with_gst_split_into_native_lines_that_add_up_exactly():
     [record]=validate(rows,[choice(counter_ledger_guid='Expense-guid',lines=split)])
     plan=record['plan']
     assert (plan['format_version'],plan['family'],plan['duplicate']['strategy'])==(5,'payment','tag')
+    assert plan['fence']=='strict'
     assert lines_of(plan)==[('Bank','credit',1770),('Expense','debit',1500),('Input GST','debit',270)]
     assert record['counter_ledger']=='Expense + Input GST'
     off=[{**split[0],'amount':16.0},split[1]]
@@ -147,6 +148,7 @@ def test_both_legs_of_a_transfer_become_one_contra_written_by_the_paying_leg():
     rows=[row(row=3,amount_cents=-500000,identity='leg-out'),row(row=4,amount_cents=500000,date='2026-10-02',identity='leg-in')]
     out,into=validate(rows,[contra(3,'Bank','ICICI',4),contra(4,'ICICI','Bank',3)])
     assert lines_of(out['plan'])==[('Bank','credit',500000),('ICICI','debit',500000)]
+    assert out['plan']['fence']=='strict'
     assert out['plan']['identity']['legs']==['leg-in','leg-out'] and out['plan']['destination_key']=='statement:company:contra'
     assert (into.get('plan'),into['duplicate_of'],into['covered_by_transfer'])==(None,0,True)
 

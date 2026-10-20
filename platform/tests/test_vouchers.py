@@ -135,6 +135,18 @@ class UpgradeTest(unittest.TestCase):
         self.assertIs(vouchers.upgrade(plan, identity=IDENTITY), plan)
         self.assertIsNone(vouchers.upgrade({**STATEMENT, "format_version": 7}, identity="row"))
 
+    def test_legacy_statement_upgrade_compares_siblings_in_both_plan_formats(self):
+        from minkops_platform.desktop import _native_plan
+
+        same = vouchers.upgrade({**STATEMENT, "remote_id": "same-v5"}, identity="same")
+        other = vouchers.upgrade({**STATEMENT, "remote_id": "other-v5",
+            "data": {**STATEMENT["data"], "amount_cents": 1770}}, identity="other")
+        for plan in (same, other):
+            plan["destination_key"] = STATEMENT["destination_key"]
+        run = {"result": {"records": [{"plan": p} for p in (STATEMENT, same, other)]}}
+        upgraded = _native_plan(run, {"plan": STATEMENT, "identity": "legacy"}, 5)
+        self.assertEqual(upgraded["duplicate"]["distinct"], ["same-v5"])
+
 
 class ReceiptTest(unittest.TestCase):
     def setUp(self):

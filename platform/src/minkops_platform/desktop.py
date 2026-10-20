@@ -589,12 +589,17 @@ def _native_plan(run, write, plan_version):
     if plan_version >= FORMAT:
         distinct = []
         if plan.get("format_version") == 4:
-            data = plan["data"]
+            def facts(sibling):
+                if sibling.get("format_version") == FORMAT:
+                    match = sibling["duplicate"]["match"]
+                    amount = match["amount_cents"] * (-1 if match["side"] == "credit" else 1)
+                    return sibling["header"]["date"], amount
+                return sibling["data"]["date"], sibling["data"]["amount_cents"]
+
             distinct = [row["plan"]["remote_id"] for row in run["result"]["records"]
                         if row.get("plan") and row["plan"]["remote_id"] != plan["remote_id"]
                         and row["plan"]["destination_key"] == plan["destination_key"]
-                        and row["plan"]["data"]["date"] == data["date"]
-                        and row["plan"]["data"]["amount_cents"] == data["amount_cents"]]
+                        and facts(row["plan"]) == facts(plan)]
         upgraded = upgrade(plan, identity=write["identity"], distinct=distinct)
         if upgraded is not None:
             return upgraded
