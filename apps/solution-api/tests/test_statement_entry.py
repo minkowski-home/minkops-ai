@@ -173,6 +173,16 @@ class StatementTests(unittest.TestCase):
         self.assertEqual({r['code'] for r in rows}, {'statement_layout_changed'})
         self.assertEqual(len(self.layout_children(run)), 1)
 
+    def test_new_statement_launch_requires_the_protocol_five_companion_release(self):
+        first = self.ready()
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE desktop_devices SET companion_version='0.8.1' WHERE id=%s", (self.device['id'],))
+        response = self.client.post(self.base + '/runs', headers=self.csrf, json={
+            'key': 'statement-entry', 'request_key': str(uuid.uuid4()), 'file_ids': first['file_ids'],
+            'config': {'discovery_id': first['config']['discovery_id']}})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn('0.9.0', response.text)
+
     def test_an_unanswered_date_question_keeps_the_run_waiting(self):
         first=self.ready()
         text='Txn Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,500,\n01/10/26,A,1,,499,X\n02/10/26,B,1,,498,X\n'
