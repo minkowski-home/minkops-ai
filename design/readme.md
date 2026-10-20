@@ -1,6 +1,6 @@
 # Minkops design system
 
-`design/` is the visual source for the shared Minkops app. The current console lets a signed-in member see Employees, their Workflows, and task Activity. Tenant admins and Minkops operators may edit employee and workflow settings; other members can view them. The mock tenant carries a test Image to Excel workflow. A new PR Infra tenant begins with no employees or workflows.
+`design/` is the visual source for the shared Minkops app. The current console lets a signed-in member see Employees, their Workflows, and task Activity. Tenant admins and Minkops operators may edit employee and workflow settings; other members can view them. The local mock tenant carries the installed Accounts desk workflows; a new tenant begins with no employees or workflows.
 
 The app implements four selectable themes: **Minkops Light**, **Minkops Dark**, **Slate Light**, and **Slate Dark**. They all use the locked brand colors and the same components. The orange and slate logo variants supplied with the brand kit are preserved in `assets/logos/`.
 

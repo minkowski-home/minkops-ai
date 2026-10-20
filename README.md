@@ -127,8 +127,8 @@ of its execution.
 
 The shared app now supports verified accounts and tenant membership, employee
 and workflow settings, task observations, and four selectable brand themes.
-`mock-tenant` exposes Source discovery and Bill entry as executable workflows,
-alongside the older image-to-Excel test. Agent results, reviews and verified local
+`mock-tenant` exposes Source discovery, Statement entry and Bill entry as
+executable workflows. Agent results, reviews and verified local
 writes appear in task progress and timelines. The outbox has no production
 publisher yet; the app polls durable state. Production uses Firebase Hosting,
 Cloud Run and an isolated PostgreSQL database. See [deployment and MIN-123 gates](docs/deployment-min-123.md)

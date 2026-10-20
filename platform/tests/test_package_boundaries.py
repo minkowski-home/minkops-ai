@@ -55,7 +55,6 @@ class PackageBoundaryTests(TestCase):
             "minkops_platform.accounts.checks",
             "minkops_platform.accounts.catalog",
             "minkops_platform.accounts.agent",
-            "minkops_platform.artifacts",
             "minkops_platform.accounts.worker",
             "minkops_platform.runtime.openai_hosted",
             "minkops_platform.runtime.workflow",

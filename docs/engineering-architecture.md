@@ -93,7 +93,9 @@ pipeline; its design is reserved for separate work.
 
 ## Test fixture
 
-`db/seed_demo.py` creates `mock-tenant` with sample employees, workflows, and
-tasks for manual testing. Its image-to-Excel route is a mock-tenant-only test
-workflow. PR Infra starts with zero employees and zero workflows. The two Accounts desk workflows are active for the mock tenant and execute
-against explicit folder grants. Local fixtures do not imply a production release.
+`db/seed_demo.py` creates `mock-tenant` for manual testing, installs the
+mock-client composition (Source discovery, Statement entry and Bill entry, all
+active) and adds two example workflows in paused and planned states. It creates
+no tasks; activity comes only from real runs. The local PR Infra tenant starts
+with zero employees and zero workflows. Local fixtures do not imply a production
+release.

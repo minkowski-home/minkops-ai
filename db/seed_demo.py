@@ -41,62 +41,12 @@ def seed_demo(url: str, password: str | None = None) -> str:
             (mock, user),
         )
 
-        employees = [
-            (
-                "image-desk",
-                "Image desk",
-                "Receives images and prepares structured records.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "review_mode": {
-                            "type": "string",
-                            "title": "Review mode",
-                            "enum": ["Only exceptions", "All outputs"],
-                        },
-                        "notify_in_app": {"type": "boolean", "title": "In-app updates"},
-                    },
-                    "additionalProperties": False,
-                },
-                {"review_mode": "Only exceptions", "notify_in_app": True},
-            ),
-        ]
         composition = load_solution(ROOT, "mock-client")
         employee_ids = {
             e.metadata["key"]: register_employee(connection, mock, e) for e in composition.employees
         }
-        for key, name, description, schema, values in employees:
-            employee_ids[key] = connection.execute(
-                """INSERT INTO employees (tenant_id, key, name, description, config_schema, config_values)
-                   VALUES (%s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (tenant_id, key) DO UPDATE SET
-                   name = EXCLUDED.name, description = EXCLUDED.description,
-                   config_schema = EXCLUDED.config_schema
-                   RETURNING id""",
-                (mock, key, name, description, Jsonb(schema), Jsonb(values)),
-            ).fetchone()[0]
 
         workflows = [
-            (
-                "image-to-excel-test",
-                "Image to Excel",
-                "Test image extraction and spreadsheet output.",
-                "active",
-                ["image-desk"],
-                {
-                    "type": "object",
-                    "properties": {
-                        "approval_required": {"type": "boolean", "title": "Ask before saving"},
-                        "output_format": {
-                            "type": "string",
-                            "title": "Output format",
-                            "enum": ["Excel", "CSV"],
-                        },
-                    },
-                    "additionalProperties": False,
-                },
-                {"approval_required": True, "output_format": "Excel"},
-            ),
             (
                 "account-reconciliation",
                 "Account reconciliation",
@@ -121,7 +71,7 @@ def seed_demo(url: str, password: str | None = None) -> str:
                 "Vendor intake",
                 "Example planned workflow.",
                 "planned",
-                ["image-desk", "accounts-desk"],
+                ["accounts-desk"],
                 {"type": "object", "properties": {}, "additionalProperties": False},
                 {},
             ),
@@ -168,47 +118,6 @@ def seed_demo(url: str, password: str | None = None) -> str:
                 )
         install(connection, composition, actor_email="demo@example.com")
 
-        samples = [
-            (
-                "Extract the latest receipt",
-                "running",
-                65,
-                "Image received. Fields are being checked.",
-                [("received", "Image received", 15), ("extracting", "Fields extracted", 65)],
-            ),
-            (
-                "Review a low-confidence field",
-                "attention",
-                80,
-                "The date needs a quick human check.",
-                [("received", "Image received", 15), ("review", "Date needs review", 80)],
-            ),
-            (
-                "Hand off the approved sheet",
-                "handoff",
-                90,
-                "Waiting for the next owner.",
-                [("prepared", "Sheet prepared", 80), ("handoff", "Ready to hand off", 90)],
-            ),
-        ]
-        for title, status, progress, summary, events in samples:
-            row = connection.execute(
-                "SELECT id FROM tasks WHERE tenant_id = %s AND title = %s",
-                (mock, title),
-            ).fetchone()
-            if row:
-                continue
-            task_id = connection.execute(
-                """INSERT INTO tasks (tenant_id, workflow_id, title, status, progress, summary)
-                   VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-                (mock, workflow_ids["image-to-excel-test"], title, status, progress, summary),
-            ).fetchone()[0]
-            for event_type, event_summary, event_progress in events:
-                connection.execute(
-                    """INSERT INTO task_events (tenant_id, task_id, event_type, summary, progress)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (mock, task_id, event_type, event_summary, event_progress),
-                )
     return password
 
 
