@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 from fastapi.testclient import TestClient
+
 from minkops_api.main import app
 
 URL = os.getenv("TEST_DATABASE_URL")
@@ -100,6 +101,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_revocation_waits_for_authorized_device_work(self):
         from psycopg.rows import dict_row
+
         from minkops_platform import desktop
         self.pair()
         with psycopg.connect(URL, row_factory=dict_row) as writer:

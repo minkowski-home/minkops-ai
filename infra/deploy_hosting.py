@@ -11,11 +11,10 @@ import hashlib
 import json
 import shutil
 from pathlib import Path
-from urllib.request import Request, urlopen
 from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import yaml
-
 from google_api import GoogleApi
 
 SITES = {"corporate": "minkops-ai-prod", "console": "minkops-ai-console"}

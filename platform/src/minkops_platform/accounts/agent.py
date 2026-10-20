@@ -10,14 +10,6 @@ from minkops_platform.workflows import load_definition
 WORKFLOWS = REPOSITORY_ROOT / "employees/accounts-desk/workflows"
 
 
-def discovery_prompt():
-    return (WORKFLOWS / "source-discovery/execution-instructions.md").read_text()
-
-
-def bill_prompt():
-    return (WORKFLOWS / "bill-entry/execution-instructions.md").read_text()
-
-
 def execute(key, files, context, on_event, *, client=None, session_id=None, turn_id=None,
             environment_lease=None):
     if context["config"].get("execution_snapshot"):

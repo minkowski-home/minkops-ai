@@ -21,7 +21,7 @@ test('mixed runs show exceptions, saved counts, reasons and an authenticated CSV
     else if (path.endsWith('/accounts/tasks/task/run')) body = {
       id: 'run', actor_id: 'user', task_id: 'task', workflow_key: 'bill-entry', state,
       config: { file_provenance: [{ id: 'multi', path: 'multi.pdf' }, { id: 'blank', path: 'blank.pdf' }] },
-      result: { records: [record('saved', 'SAVED-1'), record('duplicate', 'EXISTING-1'), { ...record('held', 'HELD-1'), save_hold: 'diagnostic', allowed_actions: ['retry_save', 'nothing'], bulk_actions: {retry_save: 3} }],
+      result: { records: [record('saved', 'SAVED-1'), record('duplicate', 'EXISTING-1'), { ...record('held', 'HELD-1'), save_hold: 'diagnostic', allowed_actions: ['retry_save', 'nothing'], bulk_actions: {retry_save: 3} }, record('ready', 'READY-1')],
         findings: [], deferred: [{ source_file_id: 'blank' }] }, writes: [], tally_writes: [],
       review: { saved: 1, duplicates: 1, rows, export_unavailable: state === 'writing' ? 'Export is ready after destination saves have finished.' : null },
     };
@@ -36,7 +36,8 @@ test('mixed runs show exceptions, saved counts, reasons and an authenticated CSV
   });
   await page.goto('http://127.0.0.1:3000/mock-tenant/tasks/task');
   await expect(page.getByText('1 saved · 1 already in Tally')).toBeVisible();
-  await expect(page.locator('.accounts-bill')).toHaveCount(2);
+  await expect(page.locator('.accounts-bill')).toHaveCount(3);
+  await expect(page.locator('.accounts-bill').filter({hasText: 'READY-1'})).not.toContainText('manual review in the original system');
   await expect(page.locator('.accounts-bill').getByText('SAVED-1')).toHaveCount(0);
   await expect(page.getByText(rows[0].reason)).toBeVisible();
   await expect(page.getByText(rows[1].reason)).toBeVisible();

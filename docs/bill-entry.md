@@ -1,8 +1,9 @@
-# Bill entry (MIN-119): mock-client demonstration
+# Bill entry
 
-MIN-119 connects the shared desktop/web review to MIN-117's registered Windows
-companion and MIN-118's confirmed source catalogs. The demo seed activates the
-workflow only for `mock-tenant`. No PR Infra rules or customer data are added.
+Bill entry connects the shared desktop/web review to the registered Windows
+companion and confirmed Source discovery context. The mock-client composition
+installs it for `mock-tenant`; PR Infra does not. No customer rules or data are
+added.
 The existing hosted Agents API runs all Accounts proposals on `gpt-6-luna`;
 launch rejects another model. The model never writes financial systems.
 
@@ -121,6 +122,9 @@ Best guess retains its separate human-review Attention after native save.
 | `date_before_books` | Do nothing, Recheck |
 | `destination_changed` | Do nothing, Recheck |
 | `voucher_type_unresolved` | Do nothing, Recheck |
+| `identity_rule_unknown` | Do nothing, Recheck |
+| `date_outside_company_period` | Do nothing, Recheck |
+| `posting_profile_miss` | Best guess write, Do nothing, Recheck |
 | `extraction_failed` | Do nothing, Recheck |
 | `run_stopped` | Do nothing, Recheck (only after an active review) |
 | `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
@@ -170,8 +174,9 @@ tenant authorization and private/no-store response headers. The UTF-8 BOM makes
 Excel detect the encoding, and text cells are escaped against spreadsheet
 formulas without changing negative numeric amounts.
 
-The sheet contains source file, invoice, supplier, date, subtotal, total tax,
-individual tax allocations, gross total, company, status, reason and Attention ID.
+The sheet contains source file, invoice, supplier, date, the proposed voucher
+lines (`Ledger Dr/Cr amount`), total tax, gross total, company, status, reason
+and Attention ID.
 Statuses are **Needs attention**, **Save held**, and **Not written (Do nothing)**.
 Saved and duplicate bills are excluded. Multi-bill PDFs have one row per bill;
 inputs with no proposal have one file row. The open file-level bill Attention ID
@@ -209,8 +214,9 @@ is preferred, then the supplier ID; several bills may share that ID.
 
 ## Source accuracy and recovery
 
-Business identity uses supplier, invoice number and Indian April–March financial
-year when those confirmed concepts exist. Excel otherwise uses complete confirmed
+Business identity uses supplier, invoice number and the Indian April–March
+invoice year (`accounts/vouchers.py` `invoice_year`): supplier serials are unique
+within it, whatever financial year the buyer's books use. Excel otherwise uses complete confirmed
 business keys. IDs do not depend on a task, uploaded filename or processing order.
 Existing external rows/vouchers and backfills are checked against destination
 data, rather than relying only on prior application history.
@@ -222,6 +228,16 @@ corrections compare the complete fetched voucher fingerprint, then target its
 observed original date and MASTER ID. Another intervening edit requires another
 review. Updates retain the observed voucher GUID; Tally may assign its own GUID
 on creation.
+
+Approved plans keep the format they were approved in. A protocol-5 companion
+(0.9.0+) receives each one as a v5 voucher (header plus balanced ledger lines,
+see [Windows app](windows-app.md#companion-090-contracts)) searched within the
+bill's invoice year; its receipt is verified against that upgrade and stored in
+the usual observation shape. The invoice identity hash is unchanged, so vouchers
+saved earlier keep their remote IDs and reservations. Plans without discovered
+ledger and voucher-type GUIDs keep their original writer until they drain.
+Refresh observes bills with the same reader as the save, so a reader change is
+never mistaken for an edit made in Tally.
 
 Pending writes reserve the workbook, or the company GUID and bill identity,
 across runs and registered PCs. Confirmed Tally company/ledger identities and
@@ -252,27 +268,51 @@ Excel uses actual confirmed headers, sheet/table boundaries and types; it does
 not impose a universal invoice schema. Existing workbook protections, formulas,
 styles, hash checks, native backups and atomic replacement remain in force.
 
-The Tally mock contract is a balanced accounting Purchase voucher:
-`invoice_number`, `vendor`, `date`, `purchase_ledger`, `subtotal`, `tax`,
-`tax_ledger`, `total`, and nullable `cost_code`. Supplier, purchase and nonzero tax
-allocations must use distinct discovered ledgers. Money must reconcile exactly
-at two decimal places and fit exact native cents. A single tax ledger remains
-supported for legacy runs. Workflow 0.11.1 also supports one to eight separately
-evidenced tax allocations, including CGST and SGST, through company-scoped native
-master references. The server derives canonical names, checks each positive amount
-and the exact tax sum, and rejects mixed scalar/split mappings and repeated ledgers.
-New plans use native plan protocol 3 (pinned purchase voucher type, companion
-0.7.0); older companions receive an update instruction before accessing such a plan. Every selected master
-is rechecked, and every saved allocation must match readback independently. Equal
-gross totals cannot conceal a collapsed or changed tax split. This accounting
-voucher contract does not assert statutory filing readiness.
+From bill-entry 0.14 Tally has no fixed field list. The AI proposes the voucher
+the client's own practice records for each document: the family (an invoice is
+a Purchase or a Journal; a supplier credit note is a Debit Note), the voucher
+type, the supplier and every other line (role, ledger, side, amount, optional
+cost centre/category and tax head/rate/base), each selected by native GUID from
+the routed company's pinned discovery (`accounts/vouchers.py` `check`). The
+application only binds and proves it:
 
-Inventory invoices, bill/payment/cost allocations and additional non-tax ledger splits
-need a richer connector contract; corrections containing those allocations are
-held so they cannot be flattened. Unsupported cost allocations also require
-review. Client-specific rules belong in versioned employee workflow definitions,
-tenant preferences and solution composition, alongside deterministic platform
-validation and connector capabilities. No real-client rules are guessed.
+- every identity belongs to the routed company, is active where that matters,
+  and every ledger is distinct; purchases use the run's chosen voucher type;
+- the server computes the supplier line from the printed total, and debits must
+  equal credits to the paisa;
+- each tax line is within one rupee of its own printed rate × taxable value, and
+  central and state halves of one rate and base are equal;
+- at most one printed round-off of at most one rupee;
+- cost centres must belong to the chosen category on a ledger that enables them;
+- TDS waits for a confirmed posting profile; a foreign supplier holds
+  (`identity_rule_unknown`), because only the Indian invoice year identifies a
+  document;
+- inventory, bill-wise allocations and foreign currency are connector limitations
+  the AI reports as `unsupported_structure`, naming the structure.
+
+**Posting patterns.** Each company's way of recording supplier documents is
+derived once (the `posting_profile` stage reads that company's discovery only)
+and stored as a versioned client profile. Code proves every identity it names;
+a member confirms it once from the Attention card "Confirm posting pattern"
+(**Confirm** / **Do nothing**), and the company's bills wait until then. Bills are
+then checked against it: its voucher type per document kind, supplier party
+groups, round-off ledger and cap, TDS ledgers with their section and rate
+(deducted on the expense value), and where supplier document numbers are
+recorded for duplicate checks. A bill that does not fit holds as
+`posting_profile_miss`; three misses retire the pattern. A year-split sibling
+inherits a confirmed pattern when every identity re-binds by exact name and
+parent group, and newer discovery keeps a pattern while its identities and
+groups still hold, so routine master edits never ask again. Concurrent runs
+share one derivation; a failed derivation releases the company so its bills
+hold and the next run derives again.
+
+Approved bills are stored as native v5 plans (Windows companion 0.9.0+, see
+[Windows app](windows-app.md#companion-090-contracts)) and reviewed through a
+server-built preview of exactly those lines; `data` keeps only the document
+summary (supplier, number, date, total, tax) that attention, policies and exports
+read. Proposals pinned to 0.13 or earlier keep their fixed Purchase mapping and
+writer until they drain (MIN-155). This accounting voucher contract does not
+assert statutory filing readiness.
 
 The adapter uses bounded fixed XML exports/imports on the PC's loopback port;
 there is no renderer-supplied XML, URL, TDL or shell. Tally's documented correction
@@ -280,30 +320,16 @@ selector needs its original DATE and MASTER ID. References:
 [Tally sample XML](https://help.tallysolutions.com/sample-xml/) and
 [Tally voucher alteration](https://help.tallysolutions.com/scenario-2/).
 
-## Complex synthetic fixtures
+## Synthetic companies and saves
 
-The current RC fixtures, generated history, source catalogs and evidence live in
-`C:\Users\gauss\OneDrive\Minkops\MockClient\ReleaseCandidate-20261006`, outside
-the repository and iCloud. Four vendors provide a cement tax invoice, skewed steel
-phone photo, faint aggregate carbon copy and two-page equipment hire bill. A JPEG
-copy of the steel PDF exercises duplicate identities across files. Separate
-`evidence/expected-bills.json` records exact dates, ledgers and amounts.
-
-Test Company is preserved: baseline exports capture every original voucher and
-master before adding RC-prefixed suppliers, purchase/tax ledgers, units, stock
-items and site references, plus two history vouchers. The hire supplier is
-initially absent. Its bill appears in Needs Attention while known bills save;
-after creating the supplier and confirming discovery, only that bill is retried.
-No live Excel data or writes are included in this RC.
-The three display-only seed tasks are backed up and removed from the RC database
-so its Active/Needs Attention sections reflect executable workflow outcomes.
+Synthetic Tally companies, bills and expected outcomes for live checks come from
+the [five-company rehearsal](tally-rehearsal.md); labelled packages are graded
+with the fixture scorer described under Verification. Never point either at a
+real client company.
 
 Discovery is mandatory before dependent workflows, with manual refresh afterward.
 Its date range applies only to vouchers; all masters are exported comprehensively.
-New runs use Source Discovery 0.7.2, Bill Entry 0.9.0 and companion 0.6.0. The RC
-evidence below predates this refactor. Repeat live acceptance and deployment under
-[MIN-124](https://linear.app/minkops/issue/MIN-124). No scheduling or new accounting
-layer is introduced. The existing native Purchase contract remains bounded.
+No scheduling is introduced.
 
 Bill saves run against the user's open Tally session; Minkops never starts or
 restarts Tally. Before each save the run's company must be open and match the
@@ -322,78 +348,19 @@ Journal voucher holds. Choosing "Use one company for this run" suits practices t
 keep one Tally company per financial year. **Show details** on each proposal lists
 the company, voucher type, date, ledgers and amounts it will enter.
 
-The following generator and live scripts describe the earlier development proof.
-Do not run them against this preserved Test Company: their fixed fixture IDs
-belong to that earlier disposable environment.
-
-Generate a fresh set with the existing Python stack plus development-only PDF
-libraries:
-
-```sh
-uv run --all-packages --with reportlab --with pymupdf python scripts/prepare_bill_entry_demo.py
-```
-
-The script refuses to overwrite an existing demo folder. `--refresh-scans`
-rerenders only generated PDFs, preserving an already tested workbook.
-Files appear in `apps/solution-api/data/min119-hard-demo`; ground truth is outside
-the synchronized input folder. Each readable bill includes two pages, dense
-small text, skew, stamps, competing PO/GRN/date identifiers, trading and registered
-names, gross/discount/base amounts, split tax, excluded prior balances, repeated
-totals and an allocation memo. Scan PDFs contain raster pages with no text layer.
-The set includes new bills, a backfill, a correction and a valid blank image.
-The register uses obscure headers such as `Party.External`, `Txn.Base` and
-`Settlement.Due`, requiring discovery and extraction to infer business meaning.
-
-Only the explicitly selected test company should be used. Seed mock supplier,
-purchase and tax ledgers there before the live proof; do not overwrite existing
-masters. Run `db/migrate.py` against the isolated demo database to install or adopt
-the final baseline, then seed its demo composition.
-
 ## Verification
 
 Offline tests replace the paid proposal boundary and exercise real PostgreSQL,
 authenticated API transport and immutable financial plans. They cover
 117/118/119 wiring, parallel sessions, isolated failures, duplicate uploads,
 backfills, corrections, stale review, cross-PC reservations, receipt replay,
-lease expiry, cancellation and late receipts. Native tests run on Windows and
+lease expiry, stopped tasks and late receipts. Native tests run on Windows and
 Linux and include the Tally alteration selector regression. Shared UI build,
-lint and existing web tests are run. The 6 October RC additionally verifies the
-installed Windows 0.3.1 app, folder picker, catalog Save As, four desktop themes,
-shared web review at the minimum desktop width, source previews, and tray/reopen
-execution. See `docs/windows-app.md` for distribution limitations.
-That historical RC showed expandable evidence and findings. The current review
-shows concise identifiers and one-click decisions; detailed evidence and logs
-remain internal. See [attention](attention.md) and [current verification](verification-min-124.md).
-
-The 6 October proof used `minkops_mock_rc20261006`, with an independently migrated
-`minkops_min119_tests` database for regression tests. Initial extraction saves
-four unique bills and skips the steel copy. A complete second run skips all five
-inputs after an ambiguous steel reference is clarified independently; it creates
-no additional vouchers. Worker restart retains existing paid session IDs. Live
-correction verification holds a changed RC history voucher before import, then
-checks approved Alter and restoration with the same GUID/MASTER ID and count.
-Original company vouchers remain unchanged; master comparison allows only Tally's
-automatic Purchase `PREVNARRATION` bookkeeping, not configured accounting fields.
-
-Opt-in live proofs use the dedicated `minkops_min119_live` database. From WSL,
-set `DATABASE_URL`, `MINKOPS_TALLY_TEST_COMPANY` and `MINKOPS_WINDOWS_NODE` to the
-Windows Node executable. `MINKOPS_WINDOWS_ROOT` is optional; otherwise `wslpath`
-resolves this checkout. Model credentials are loaded only in the server process
-and removed from the Windows adapter environment.
-
-```sh
-uv run --all-packages python scripts/verify_bill_entry_live.py
-uv run --all-packages python scripts/verify_bill_entry_excel_live.py
-```
-
-The Tally script prints the batch ID and supports `--resume ID` after an
-interruption. The Excel proof saves checkpoint IDs beside the generated fixtures.
-Both reconcile persisted sessions; they do not resend completed input. The live
-proofs verified all three readable hard scans against independent expected
-values, Tally writes/readback, schema discovery, extraction into exact complex
-Excel headers, a native workbook save and repeated receipts. A provider rate
-limit interrupted the blank-image turn; explicit retry isolated that image and
-retained three verified sibling saves.
+lint and web tests are run. The review shows concise identifiers and one-click
+decisions; detailed evidence and logs remain internal (see [attention](attention.md)).
+Live checks against real Tally companies use the
+[five-company rehearsal](tally-rehearsal.md) and the labelled fixture scoring
+below; see [the Windows companion](windows-app.md) for distribution limitations.
 
 ### Scoring and replaying labelled fixture packages
 

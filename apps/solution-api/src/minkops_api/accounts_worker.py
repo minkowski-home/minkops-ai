@@ -1,12 +1,19 @@
 """Application bootstrap retaining the existing worker launch command."""
 
-import logging
 import argparse
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from minkops_platform.accounts.worker import WORKER_LANES, cleanup_once, process, run_forever, work_once
+
+from minkops_platform.accounts.worker import (
+    WORKER_LANES,
+    cleanup_once,
+    process,
+    run_forever,
+    work_once,
+)
 
 __all__ = ["cleanup_once", "process", "work_once", "main"]
 
@@ -22,8 +29,8 @@ def main():
                         default=WORKER_LANES, help='Concurrent runs within provisioned memory')
     args = parser.parse_args()
     if args.drain:
-        from minkops_platform.worker_hosting import drain, dispatch
         from minkops_connectors.cloud_run import run_job
+        from minkops_platform.worker_hosting import dispatch, drain
 
         drain(os.environ["DATABASE_URL"], lanes=args.lanes)
         if os.getenv("WORKER_JOB_RESOURCE"):

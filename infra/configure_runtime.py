@@ -2,13 +2,12 @@
 
 import base64
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from dotenv import dotenv_values
-from psycopg.conninfo import make_conninfo
-
 from google_api import GoogleApi
+from psycopg.conninfo import make_conninfo
 
 PROJECT = "minkops-ai-prod"
 SQL_PROJECT = "myndral-prod"

@@ -5,12 +5,12 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.8.1 is the current release: it works only with the companies open in
-the user's Tally, reports typed session states, sends diagnostics and updates
-itself. Core Tally discovery uses HTTP/XML exports and needs no ODBC driver.
-Installed-RC evidence below is historical. Current production, installed-upgrade
-and live Tally/Excel evidence is in [MIN-124 verification](verification-min-124.md).
-Windows 10 device testing was deferred by the owner; compatibility is retained.
+This revision builds companion 0.9.0 (plan protocol 5; see its contracts below);
+0.8.1 is the latest published release. The companion works only with the
+companies open in the user's Tally, reports typed session states, sends
+diagnostics and updates itself. Core Tally discovery uses HTTP/XML exports and
+needs no ODBC driver. Windows 10 device testing was deferred by the owner;
+compatibility is retained.
 
 ## Local capabilities
 
@@ -21,12 +21,12 @@ Windows 10 device testing was deferred by the owner; compatibility is retained.
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
 | Save approved Excel entries | Yes | Yes | Accounts approval, before/after hashes, backup, atomic replacement and saved-byte verification |
-| Save approved Tally bills | Yes | Yes | Confirmed company/ledger references, immutable approved Purchase plan, read-before-write and exact readback |
+| Save approved Tally vouchers | Yes | Yes | Confirmed company/ledger references, immutable approved plan, durable intent before import and exact readback |
 | Existing hosted workflows | Yes | Yes | Existing server and OpenAI-hosted Agents API contracts |
 
 This version adds bounded native operations, not customer-machine agent hosting
-or a general remote shell. See [source discovery](source-discovery.md) for MIN-118.
-Bill-to-Tally writes are covered in [MIN-119](bill-entry.md); bank statement logic remains MIN-120. Initially open Tally with its HTTP server enabled on port 9000; discovery must
+or a general remote shell. See [Source discovery](source-discovery.md),
+[Bill entry](bill-entry.md) and [Statement entry](statement-entry.md). Initially open Tally with its HTTP server enabled on port 9000; discovery must
 see every company the run may use. A company listing is a connection
 check, not verification of financial writes.
 
@@ -129,14 +129,10 @@ Versioned discovery packages are saved locally as described in
 
 ## Build and run
 
-The consolidated branch retains Windows baseline `c3b050c`, the shared workflow
-architecture, and Bill Entry's financial-write work through `3dc6552`. Its API/UI
-uses installed bindings and shared dispatch, including independent bill sessions,
-native Tally reconciliation, and verified Excel/Tally writes. Run `db/migrate.py`
-before starting this revision. It installs the final baseline or adopts archived
-upgrade history. Either predecessor can upgrade without resetting run history.
-See [branch convergence](branch-convergence.md) for the tested paths.
-See [workflow authoring](workflow-authoring.md) for installation and recovery.
+Run `db/migrate.py` before starting a new revision; it installs the baseline or
+adopts archived upgrade history without resetting run history (see
+[database upgrades](../db/README.md)). See [workflow authoring](workflow-authoring.md)
+for installation and recovery.
 
 Use Node 24 and the existing Python/uv workspace. From the repository root:
 
@@ -164,7 +160,7 @@ branch. Install or adopt the final baseline before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
-For an installed local RC, `Minkops.exe --local-demo` uses the fixed
+For a locally installed build, `Minkops.exe --local-demo` uses the fixed
 `http://127.0.0.1:3018` origin and isolated `Minkops Local Demo` profile. The normal
 packaged profile remains HTTPS-only. This switch grants no general URL override.
 The local profile retains encrypted registration credentials and folder grants
@@ -228,31 +224,48 @@ replays the receipt, checks Tally availability and revokes the PC. It makes no
 accounting writes or paid agent calls.
 
 Set `MINKOPS_SMOKE_EXPECT_COMPANY` to an open test company's exact name to require
-a successful live Tally export and verified server task completion. The live
-Windows check on 5 October 2026 returned `Minkops Test`, with queued → executing
-→ completed observations. Typed XML name elements are parsed as text; malformed
-nested names are rejected rather than converted into misleading object strings.
+a successful live Tally export and verified server task completion. Typed XML
+name elements are parsed as text; malformed nested names are rejected rather
+than converted into misleading object strings.
 
-On 6 October 2026 the unsigned 0.3.1 NSIS installer was installed successfully on
-Windows 11 Pro (build 26300) and launched against the shared production UI build. MIN-122's
-historical sweep covered four themes, native folder selection, bounded JSON catalog
-Save As, missing-supplier Needs Attention, independent clarification, approve/
-hold/reject/edit controls, duplicate alerts, source previews and web/desktop task
-synchronization. Closing the main window leaves the native worker in the tray;
-a web-requested discovery finishes there and reopening shows its result.
+Closing the main window leaves the native worker in the tray; a web-requested
+discovery finishes there and reopening shows its result. Catalog exports fetch
+only the authorized tenant/run endpoint, use a user-selected `.json` destination,
+enforce a size bound, reject symlinks/nonregular files and write through a synced
+temporary file with atomic replacement (bounded IPC, not a Chromium download).
 
-Catalog exports fetch only the authorized tenant/run endpoint, use a user-selected
-`.json` destination, enforce a size bound and reject symlinks/nonregular files.
-The connector writes through a synced temporary file and atomic replacement.
-The earlier Chromium download path left an incomplete temporary file in the
-installed shell; the explicit bounded IPC export fixes that failure.
-
-Evidence lives in the RC's OneDrive `evidence` and `schema` folders. Native suites
-pass on Linux and Windows; Windows skips only a file-symlink test that requires
-creation privileges (the same guard runs on Linux). A fresh Windows 10/11 device
-matrix, screen-reader audit, production hosting and signed distribution have not
-been verified by this local sweep.
+Native suites pass on Linux and Windows; Windows skips only a file-symlink test
+that requires creation privileges (the same guard runs on Linux). A fresh
+Windows 10/11 device matrix, screen-reader audit and signed distribution have
+not been verified.
 
 ### Companion 0.8.0 contracts
 
 Plan protocol 4 adds verified Statement Entry Payment/Receipt saves and GST supplier creation. Bill Entry 0.13 requires 0.8.0 or newer for new GST-capable runs; older pinned bills retain their contracts. Statement intents are encrypted and fsynced under the app profile before import, and an uncertain import cannot be resent automatically. Statement classification now uses the hosted skill with confirmed discovery and optional client branch mapping; native authorization and readback remain independent. See [Statement Entry](statement-entry.md) for routing, balances, preview and recovery. The distributed Windows x64 installer remains an unsigned release candidate; existing unsigned-release disclosure applies.
+
+### Companion 0.9.0 contracts
+
+Plan protocol 5 adds one native writer for every accounting voucher family:
+Purchase, Journal, Debit Note, Payment, Receipt and Contra
+(`connectors/desktop/src/voucher.js`). A v5 plan states a header and 2–40
+balanced ledger lines, each with at most one cost centre/category allocation.
+The companion rechecks the pinned company, ledgers (GUID, parent, AlterID),
+voucher type (GUID, active, family) and allocation masters, then reads only the
+plan's date window before deciding:
+
+- `document` plans (bills) match party plus document number in the client's
+  number fields (Reference, voucher number, or a whole token in narration);
+  another family recording the same document needs attention.
+- `tag` plans (statements) treat any other voucher on the same day with the
+  same bank line as possibly existing, unless the server proved it a distinct
+  sibling transaction.
+- `counterpart` plans (a Contra's lone leg) are covered by one Minkops transfer
+  already holding both lines; an untagged one holds.
+
+A `strict` fence writes the encrypted intent (same `statement-manifests`
+directory as protocol 4, so upgraded plans keep their fence) before importing;
+`retry_after_read` lets a later explicit Retry save import only after a fresh
+read. Within one attempt an import is never repeated, and only an exact readback
+of every line, allocation, date and voucher type is accepted. Older plan formats
+are upgraded to v5 by the server when this companion fetches them; only bill
+plans without discovered GUIDs still use the legacy bill writer.

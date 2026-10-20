@@ -4,8 +4,6 @@ Identity is business-derived, never a run UUID or upload filename. Destination
 keys remain authoritative for backfills and externally created records.
 """
 
-import hashlib
-import json
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
@@ -48,11 +46,9 @@ def business_identity(data):
         or not invoice.strip()
     ):
         raise ValueError("Supplier and invoice number are required for bill identity.")
-    issued = date.fromisoformat(str(data.get("date")))
-    year = issued.year if issued.month >= 4 else issued.year - 1
-    return hashlib.sha256(
-        json.dumps([normalized(vendor), normalized(invoice), year]).encode()
-    ).hexdigest()
+    from .vouchers import document_identity
+
+    return document_identity(vendor, invoice, date.fromisoformat(str(data.get("date"))))
 
 
 def excel_matches(data, mapping, rows):
@@ -134,6 +130,8 @@ def capture_excel_state(result, catalog, contents):
     return result
 
 
+# Legacy contract for proposals pinned to bill-entry 0.13 or earlier only; new
+# runs propose N-line vouchers (vouchers.check). Delete with MIN-155.
 TALLY_COLUMNS = [
     ("invoice_number", "string", True),
     ("vendor", "string", True),
@@ -478,26 +476,26 @@ def validate_tally(data, target, allocations=None):
     return identity
 
 
-def capture_tally_findings(result, target):
+def capture_tally_findings(result, config):
     """Hold invalid proposals before approval, preserving independent siblings.
 
     Discovery references are deterministic authority. An agent's confident
     interpretation must never make an unknown master silently writable.
     """
+    from .client_context import select_target
+    from .vouchers import resolve, summary
+
+    target = config["tally_target"]
     unresolved = result.setdefault("unresolved", [])
     for record in result["records"]:
+        if "voucher" in record:
+            record["data"] = summary(record, config)
         try:
-            from .client_context import select_target
-
             selected = select_target(record, target)
-            from .master_selection import resolve_masters
-
-            resolve_masters(record, selected, required=target.get("master_selection_version") == 1,
-                            allow_split=target.get("tax_allocation_version") == 1)
             if "companies" in target:
                 record["company_guid"] = selected["references"]["company_guid"]
                 record["company_name"] = selected["company"]
-            validate_tally(record["data"], selected, record.get("tax_allocations"))
+            record["preview"] = resolve(record, config).preview()
         except ValueError as error:
             note_hold(record, error)
             record["decision"] = "hold"
@@ -525,6 +523,12 @@ def refreshed_tally_target(connection, tenant, user, current):
             c["destination_key"] for c in updated.get("companies", [])
         }:
             raise ServiceError("conflict", "Company scope changed. Start a new bill run.")
+        # The run's voucher type choice per company survives a master refresh.
+        pinned = {c["destination_key"]: c for c in current["companies"]}
+        for company in updated["companies"]:
+            for key in ("voucher_type", "voucher_type_error"):
+                if key in pinned[company["destination_key"]]:
+                    company[key] = pinned[company["destination_key"]][key]
         return {
             **updated,
             "company_mode": current["company_mode"],
@@ -532,6 +536,8 @@ def refreshed_tally_target(connection, tenant, user, current):
             **({"master_selection_version": 1} if current.get("master_selection_version") == 1 else {}),
             **({"tax_allocation_version": 1} if current.get("tax_allocation_version") == 1 else {}),
             **({"supplier_creation_version": 1} if current.get("supplier_creation_version") == 1 else {}),
+            **({"voucher_proposal_version": 1} if current.get("voucher_proposal_version") == 1 else {}),
+            **({"voucher_type_version": 1} if current.get("voucher_type_version") == 1 else {}),
         }
     latest = connection.execute(
         """SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s

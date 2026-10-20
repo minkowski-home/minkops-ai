@@ -2,9 +2,9 @@
 import unittest
 
 import psycopg
+import test_bill_entry as bills
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-import test_bill_entry as bills
 
 URL = bills.URL
 
@@ -40,14 +40,14 @@ class GSTSupplierTests(unittest.TestCase):
             c.execute("UPDATE account_runs SET config=%s WHERE id=%s", (Jsonb(config), run["id"]))
         result = self.tally_result(run, bill)
         row = result["records"][0]
-        row["data"]["vendor"] = "Synthetic GST supplier"
-        row["master_refs"]["vendor"] = {"ref": None, "new_supplier": True, "evidence": "No discovered supplier matches printed identifiers."}
+        row["document"]["supplier_name"] = "Synthetic GST supplier"
+        row["voucher"]["party"] = {"ledger_guid": None, "new_supplier": True, "evidence": "No discovered supplier matches printed identifiers."}
         row["supplier_details"] = {"gstin": "27AABCM1256F1ZR", "registration_type": "Regular", "state_code": "27",
             "state": "Maharashtra", "place_of_supply": "Maharashtra", "address": ["Synthetic Road", "Pune"], "pincode": "411001",
             "evidence": [{"field": key, "page": 1, "quote": text} for key, text in {
                 "gstin": "27AABCM1256F1ZR", "registration_type": "Regular", "state": "Maharashtra",
                 "place_of_supply": "Maharashtra", "address": "Synthetic Road, Pune 411001"}.items()]}
-        row["evidence"].append({"field": "vendor", "page": 1, "quote": "Synthetic GST supplier"})
+        row["evidence"] = [e for e in row["evidence"] if e["field"] != "supplier"] + [{"field": "supplier", "page": 1, "quote": "Synthetic GST supplier"}]
         self.process(run, result)
         route = f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}"
         decision = self.client.post(route, headers=self.csrf, json={"action": "supplier"})

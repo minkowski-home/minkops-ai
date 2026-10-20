@@ -1,6 +1,6 @@
 # Minkops design system
 
-`design/` is the visual source for the shared Minkops app. The current console lets a signed-in member see Employees, their Workflows, and task Activity. Tenant admins and Minkops operators may edit employee and workflow settings; other members can view them. The mock tenant carries a test Image to Excel workflow. A new PR Infra tenant begins with no employees or workflows.
+`design/` is the visual source for the shared Minkops app. The current console lets a signed-in member see Employees, their Workflows, and task Activity. Tenant admins and Minkops operators may edit employee and workflow settings; other members can view them. The local mock tenant carries the installed Accounts desk workflows; a new tenant begins with no employees or workflows.
 
 The app implements four selectable themes: **Minkops Light**, **Minkops Dark**, **Slate Light**, and **Slate Dark**. They all use the locked brand colors and the same components. The orange and slate logo variants supplied with the brand kit are preserved in `assets/logos/`.
 
@@ -32,7 +32,7 @@ The shared app uses a 216px sidebar (56px collapsed), a 52px header, and indepen
 
 The theme selection is a personal preference stored by the browser. Each option changes the entire app, including sign-in, chrome, forms, settings, and task progress. Slate Light uses the pale slate background from the supplied slate logo; Slate Dark uses the same Slate accents against the existing dark ramp. Minkops Light remains the original light direction.
 
-`styles.css` loads shared tokens and element defaults. `console.css` and `login.css` are the actual shared app styles, imported by `apps/solution-web`. The static preview at `ui_kits/console/index.html` uses these same files and local sample data to illustrate the screens and interactions. The connected app owns authentication, persistence, and workflow execution.
+`design/` is the only home of the brand kit; apps import from it rather than keeping copies. `styles.css` loads shared tokens and element defaults. `console.css`, `login.css`, `accounts.css` and `desktop.css` are the actual shared app styles, imported by `apps/solution-web` through the `@minkops/design` alias. The corporate website imports the same `tokens/*.css` (without `themes.css` and `fonts.css`, since it uses the default palette and loads webfonts from its page head) and keeps only its own element and page styles. The static preview at `ui_kits/console/index.html` uses these same files and local sample data to illustrate the screens and interactions. The connected app owns authentication, persistence, and workflow execution.
 
 ## Files and scope
 
@@ -42,10 +42,12 @@ The theme selection is a personal preference stored by the browser. Each option 
 | `tokens/typography.css`, `tokens/fonts.css` | Type roles and font loading |
 | `tokens/spacing.css`, `tokens/surfaces.css`, `tokens/motion.css`, `tokens/layout.css`, `tokens/base.css` | Shared foundations |
 | `styles.css`, `console.css`, `login.css` | App style entry points |
-| `assets/logos/` | Supplied orange and slate artwork |
+| `assets/logos/` | Supplied orange and slate artwork, and the website (`favicon-website.svg`) and console (`favicon-console.svg`) favicons, which each app's Vite config serves and emits at `/favicon.svg` |
 | `assets/icons/` | Existing product icons |
 | `guidelines/` | Brand and theme specimens |
 | `ui_kits/console/` | Current shared-console static preview |
 | `ui_kits/website/`, `components/product/` | Historical marketing and agent-console specimens; they are not the current console contract |
+
+The Windows app's `assets/icon.ico` and `assets/tray.png` are packaged renditions of the orange logo; they stay in `apps/windows-app/assets/` because the installer and tray load them from the application bundle.
 
 The warehouse has no UI contract in this migration. The client-specific apps do not define these shared screens or theme rules.

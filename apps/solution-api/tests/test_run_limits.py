@@ -3,8 +3,8 @@ import unittest
 from unittest.mock import patch
 
 import psycopg
-from psycopg.rows import dict_row
 import test_accounts_api as accounts
+from psycopg.rows import dict_row
 
 URL=accounts.URL
 
@@ -23,11 +23,13 @@ class RunLimitTests(unittest.TestCase):
         with psycopg.connect(URL,row_factory=dict_row) as c:
             self.assertIsNone(self.clock(c,run['task_id'])['processing_started_at'])
             c.execute("UPDATE workflow_runs SET state='executing' WHERE id=%s",(run['id'],))
-            started=self.clock(c,run['task_id'])['processing_started_at'];self.assertIsNotNone(started)
+            started=self.clock(c,run['task_id'])['processing_started_at']
+            self.assertIsNotNone(started)
             c.execute("UPDATE tasks SET processing_started_at=clock_timestamp()-interval '3 minutes' WHERE id=%s",(run['task_id'],))
             actor=c.execute('SELECT actor_id FROM workflow_runs WHERE id=%s',(run['id'],)).fetchone()['actor_id']
             task_control(c,run['tenant_id'],{'id':actor},run['task_id'],'pause')
-            paused=self.clock(c,run['task_id']);self.assertIsNone(paused['processing_started_at'])
+            paused=self.clock(c,run['task_id'])
+            self.assertIsNone(paused['processing_started_at'])
             self.assertAlmostEqual(paused['processing_seconds'],180,delta=2)
             task_control(c,run['tenant_id'],{'id':actor},run['task_id'],'resume')
             self.assertIsNotNone(self.clock(c,run['task_id'])['processing_started_at'])
@@ -49,21 +51,25 @@ class RunLimitTests(unittest.TestCase):
             self.assertIsNone(self.clock(c,run['task_id'])['processing_started_at'])
 
     def test_timeout_preserves_output_ids_and_cancel_intent_without_operator_attribution(self):
-        from minkops_platform.run_limits import expire
         from psycopg.types.json import Jsonb
+
+        from minkops_platform.run_limits import expire
         run,_=self.launch()
         raw={'records':[],'checkpoint':'already stored'}
         with psycopg.connect(URL,row_factory=dict_row) as c:
             c.execute("UPDATE workflow_runs SET state='executing',session_id='limit-session',turn_id='limit-turn',result=%s WHERE id=%s",(Jsonb(raw),run['id']))
             c.execute("UPDATE tasks SET processing_started_at=clock_timestamp()-interval '46 minutes' WHERE id=%s",(run['task_id'],))
             self.assertGreaterEqual(expire(c),1)
-            task=self.clock(c,run['task_id']);self.assertEqual((task['control_state'],task['stop_reason']),('stopped','time_limit'))
+            task=self.clock(c,run['task_id'])
+            self.assertEqual((task['control_state'],task['stop_reason']),('stopped','time_limit'))
             self.assertIsNone(task['processing_started_at'])
             stopped=c.execute('SELECT * FROM workflow_runs WHERE id=%s',(run['id'],)).fetchone()
-            self.assertEqual(stopped['result'],raw);self.assertEqual(stopped['session_id'],'limit-session')
+            self.assertEqual(stopped['result'],raw)
+            self.assertEqual(stopped['session_id'],'limit-session')
             self.assertTrue(stopped['config']['timeout_cancel_pending'])
             event=c.execute("SELECT payload FROM event_outbox WHERE aggregate_id=%s AND event_type='task.control.stop' ORDER BY id DESC LIMIT 1",(run['task_id'],)).fetchone()
-            self.assertIsNone(event['payload']['actor_id']);self.assertEqual(event['payload']['reason'],'time_limit')
+            self.assertIsNone(event['payload']['actor_id'])
+            self.assertEqual(event['payload']['reason'],'time_limit')
             self.assertEqual(expire(c),0)
 
     def test_configured_cap_and_review_wait_are_separate_from_wall_time(self):

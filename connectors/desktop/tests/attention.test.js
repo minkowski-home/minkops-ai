@@ -57,3 +57,19 @@ test('lost supplier acknowledgement is never replayed automatically',async()=>{
   assert.equal(observed.ledgers[0].GUID,'ledger-guid');
   assert.equal(io.calls.filter(c=>c.includes('<TALLYREQUEST>Import')).length,1);
 });
+
+test('a protocol-5 refresh reads the document window with the voucher writer\'s reader',async()=>{
+  const voucher='<VOUCHER><MASTERID>9</MASTERID><GUID>v-guid</GUID><DATE>20261001</DATE><REFERENCE>NEW-1</REFERENCE>'
+    +'<PARTYLEDGERNAME>New &amp; Co</PARTYLEDGERNAME><VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>'
+    +'<ALLLEDGERENTRIES.LIST><LEDGERNAME>New &amp; Co</LEDGERNAME><AMOUNT>118</AMOUNT></ALLLEDGERENTRIES.LIST>'
+    +'<ALLLEDGERENTRIES.LIST><LEDGERNAME>Purchases</LEDGERNAME><AMOUNT>-118</AMOUNT></ALLLEDGERENTRIES.LIST></VOUCHER>';
+  const calls=[];
+  const request=async(_url,{body})=>{calls.push(body);return new Response(envelope(
+    body.includes('<TYPE>Ledger</TYPE>')?ledger:body.includes('<TYPE>VoucherType</TYPE>')?'<VOUCHERTYPE NAME="Purchase" RESERVEDNAME="Purchase"><GUID>p</GUID></VOUCHERTYPE>'
+    :body.includes('<TYPE>Voucher</TYPE>')?voucher:company('company-guid')));};
+  const document={window:{from:'2026-04-01',to:'2027-03-31'},number_fields:['REFERENCE'],families:['purchase','journal']};
+  const observed=await inspectTallyAttention({...plan,document},{request});
+  assert.ok(calls.some(c=>c.includes('<SVFROMDATE TYPE="Date">20260401</SVFROMDATE>')));
+  assert.deepEqual([observed.current.guid,observed.current.family,observed.current.lines.length],['v-guid','purchase',2]);
+  assert.match(observed.current.fingerprint,/^v5:/);
+});

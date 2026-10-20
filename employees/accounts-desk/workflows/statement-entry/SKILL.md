@@ -9,6 +9,10 @@ every transaction without a source `code`. Return one interpretation per source
 file ID, sheet and row; never omit an uncertain row. Source amounts, dates,
 balances and identities are immutable and cannot be returned as replacements.
 
+Each transaction was read through a layout Minkops proved against the running
+balances. `account` names the bank account when one sheet mixes several; all
+rows of one account belong to one bank ledger unless the source shows otherwise.
+`branch` carries a client-added routing hint column when the statement has one.
 The Branch column is a client business label. Its business meaning is not
 predefined; **it is not a bank branch**. Never equate it to a company, ledger,
 group or cost centre by a fixed rule or require its text to match a master name.
@@ -49,14 +53,23 @@ companies already unlocked and open in the running Tally instance. Those GUIDs
 are the entire destination scope; never open companies or search the client's PC.
 
 Select exact native GUIDs from the chosen company's records. A negative signed
-amount is money out (Payment); positive is money in (Receipt). The native write
-contract supports one bank entry and one counter-ledger entry, optionally one
-cost centre/category allocation for the full counter amount. When the evidence
-requires cost allocation, select its actual discovered centre and category and
-a counter ledger with cost centres enabled. When split allocations, inventory,
-tax breakdowns, billwise allocations, Contra or other unsupported structures
-are required, use `unsupported_structure`. Do not simplify unsupported accounting
-into an incorrect two-ledger entry or create any master.
+amount is money out (Payment); positive is money in (Receipt). One counter
+ledger is the usual entry, optionally with one cost centre/category allocation
+for the full amount. When the client books one bank line to several ledgers
+(for example bank charges with GST on them, or TDS), add `lines`: each counter,
+tax, tds or charge line with its ledger GUID, amount and optional allocation,
+adding up exactly to the bank amount, the first being counter_ledger_guid.
+
+A transfer between the client's own bank or cash accounts is a Contra (`family:
+contra`): the counter ledger is the other own bank or cash ledger. When both legs
+appear in these statements (one money out, one money in, equal amount, within
+three days), set each row's `pair` to the other row; Minkops enters one Contra.
+When only one leg is here, leave pair null; Minkops first checks Tally for the
+transfer the other leg may already have entered.
+
+Inventory, bill-wise allocations, split cost allocations or other structures the
+connector cannot save use `unsupported_structure`. Do not simplify them into an
+incorrect entry or create any master.
 
 Return a supported, well-evidenced selection with `exception:null`. If company,
 bank, counter ledger or classification remains genuinely ambiguous, set an

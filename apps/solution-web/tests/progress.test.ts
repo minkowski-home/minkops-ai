@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { progressView } from "../src/starter/workspace/progress.ts";
+import { elapsedLabel, progressView } from "../src/starter/workspace/progress.ts";
 
 test("automatic stops show the recorded active-time limit and retained-progress explanation", () => {
   const summary = "Stopped after 45 minutes of active processing. Progress and completed saves are retained; an underway save may still finish.";
@@ -95,4 +95,10 @@ test("discovery has no fictional save step and a folder refresh has no review st
     "Read folder",
     "Finished"
   ]);
+});
+
+test("elapsed time uses recorded timestamps and refuses missing or future starts", () => {
+  assert.equal(elapsedLabel('2026-10-12T10:00:00Z', Date.parse('2026-10-12T10:01:29Z')), '1m 29s');
+  assert.equal(elapsedLabel('missing', Date.now()), null);
+  assert.equal(elapsedLabel('2099-01-01', Date.now()), null);
 });

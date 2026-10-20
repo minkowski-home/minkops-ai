@@ -9,114 +9,22 @@
     "records": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "source_file_id",
-          "destination_file_id",
-          "sheet",
-          "operation",
-          "data",
-          "evidence",
-          "exceptions"
-        ],
-        "properties": {
-          "source_file_id": {
-            "type": "string",
-            "minLength": 1
+        "oneOf": [
+          {
+            "$ref": "#/$defs/excel_record"
           },
-          "destination_file_id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "sheet": {
-            "type": "string",
-            "minLength": 1
-          },
-          "table": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "minLength": 1
-          },
-          "operation": {
-            "enum": [
-              "append"
-            ]
-          },
-          "data": {
-            "type": "object",
-            "additionalProperties": {
-              "type": [
-                "string",
-                "number",
-                "boolean",
-                "null"
-              ]
-            }
-          },
-          "evidence": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "field",
-                "page",
-                "quote"
-              ],
-              "properties": {
-                "field": {
-                  "type": "string"
-                },
-                "page": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "quote": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "exceptions": {"$ref": "#/$defs/exceptions"},
-          "notes": {"$ref": "#/$defs/notes"},
-          "company_guid": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "minLength": 1
-          },
-          "company_evidence": {
-            "type": "string",
-            "maxLength": 2000
-          },
-          "tax_allocations": {
-            "type": "array", "minItems": 1, "maxItems": 8,
-            "items": {"type":"object", "additionalProperties":false,
-              "required":["ref","amount","evidence"],
-              "properties":{"ref":{"type":"string","minLength":1},
-                "amount":{"type":"number","exclusiveMinimum":0},
-                "evidence":{"type":"string","minLength":1,"maxLength":2000}}}
-          },
-          "supplier_details": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/supplier_details"}]},
-          "master_refs": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["vendor", "purchase_ledger", "tax_ledger"],
-            "properties": {
-              "vendor": {"$ref": "#/$defs/master_selection"},
-              "purchase_ledger": {"$ref": "#/$defs/master_selection"},
-              "tax_ledger": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/master_selection"}]}
-            }
+          {
+            "$ref": "#/$defs/tally_record"
           }
-        }
+        ]
       }
     },
-    "exceptions": {"$ref": "#/$defs/exceptions"},
-    "notes": {"$ref": "#/$defs/notes"},
+    "exceptions": {
+      "$ref": "#/$defs/exceptions"
+    },
+    "notes": {
+      "$ref": "#/$defs/notes"
+    },
     "unresolved": {
       "type": "array",
       "items": {
@@ -131,7 +39,9 @@
           "source_file_id": {
             "type": "string"
           },
-          "code": {"$ref": "#/$defs/exception_code"},
+          "code": {
+            "$ref": "#/$defs/exception_code"
+          },
           "reason": {
             "type": "string",
             "minLength": 1
@@ -142,21 +52,92 @@
   },
   "$defs": {
     "supplier_details": {
-      "type": "object", "additionalProperties": false,
-      "required": ["gstin", "registration_type", "state_code", "state", "place_of_supply", "address", "pincode", "evidence"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gstin",
+        "registration_type",
+        "state_code",
+        "state",
+        "place_of_supply",
+        "address",
+        "pincode",
+        "evidence"
+      ],
       "properties": {
-        "gstin": {"type": "string", "minLength": 15, "maxLength": 15},
-        "registration_type": {"enum": ["Regular", "Composition"]},
-        "state_code": {"type": "string", "pattern": "^[0-9]{2}$"},
-        "state": {"type": "string", "minLength": 1, "maxLength": 100},
-        "place_of_supply": {"type": "string", "minLength": 1, "maxLength": 100},
-        "address": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 250}},
-        "pincode": {"type": "string", "pattern": "^[1-9][0-9]{5}$"},
-        "evidence": {"type": "array", "minItems": 5, "maxItems": 12, "items": {
-          "type": "object", "additionalProperties": false, "required": ["field", "page", "quote"],
-          "properties": {"field": {"enum": ["gstin", "registration_type", "state", "place_of_supply", "address"]},
-            "page": {"type": "integer", "minimum": 1}, "quote": {"type": "string", "minLength": 1, "maxLength": 2000}}
-        }}
+        "gstin": {
+          "type": "string",
+          "minLength": 15,
+          "maxLength": 15
+        },
+        "registration_type": {
+          "enum": [
+            "Regular",
+            "Composition"
+          ]
+        },
+        "state_code": {
+          "type": "string",
+          "pattern": "^[0-9]{2}$"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "place_of_supply": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "address": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          }
+        },
+        "pincode": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{5}$"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "page",
+              "quote"
+            ],
+            "properties": {
+              "field": {
+                "enum": [
+                  "gstin",
+                  "registration_type",
+                  "state",
+                  "place_of_supply",
+                  "address"
+                ]
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        }
       }
     },
     "exception_code": {
@@ -177,27 +158,400 @@
     "exception": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["code", "detail"],
+      "required": [
+        "code",
+        "detail"
+      ],
       "properties": {
-        "code": {"$ref": "#/$defs/exception_code"},
-        "detail": {"type": "string", "minLength": 1, "maxLength": 1000}
+        "code": {
+          "$ref": "#/$defs/exception_code"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
       }
     },
-    "exceptions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/exception"}},
+    "exceptions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/exception"
+      }
+    },
     "notes": {
       "description": "Non-blocking internal observations.",
       "type": "array",
       "maxItems": 20,
-      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
     },
-    "master_selection": {
+    "excel_record": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ref", "evidence"],
+      "required": [
+        "source_file_id",
+        "destination_file_id",
+        "sheet",
+        "operation",
+        "data",
+        "evidence",
+        "exceptions"
+      ],
       "properties": {
-        "ref": {"type": ["string", "null"], "minLength": 1},
-        "evidence": {"type": "string", "minLength": 1, "maxLength": 2000},
-        "new_supplier": {"type": "boolean"}
+        "source_file_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destination_file_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sheet": {
+          "type": "string",
+          "minLength": 1
+        },
+        "table": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "operation": {
+          "enum": [
+            "append"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "page",
+              "quote"
+            ],
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "exceptions": {
+          "$ref": "#/$defs/exceptions"
+        },
+        "notes": {
+          "$ref": "#/$defs/notes"
+        }
+      }
+    },
+    "tally_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_file_id",
+        "operation",
+        "company_guid",
+        "company_evidence",
+        "document",
+        "voucher",
+        "evidence",
+        "exceptions"
+      ],
+      "properties": {
+        "source_file_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation": {
+          "enum": [
+            "append"
+          ]
+        },
+        "company_guid": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "company_evidence": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "number",
+            "date",
+            "total",
+            "supplier_name",
+            "supplier_gstin",
+            "origin"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "invoice",
+                "credit_note"
+              ]
+            },
+            "number": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "date": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "total": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "supplier_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "supplier_gstin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 15
+            },
+            "origin": {
+              "enum": [
+                "domestic",
+                "foreign"
+              ]
+            }
+          }
+        },
+        "voucher": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "voucher_type_guid",
+            "party",
+            "lines"
+          ],
+          "properties": {
+            "family": {
+              "enum": [
+                "purchase",
+                "journal",
+                "debit_note"
+              ]
+            },
+            "voucher_type_guid": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "party": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ledger_guid",
+                "new_supplier",
+                "evidence"
+              ],
+              "properties": {
+                "ledger_guid": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "new_supplier": {
+                  "type": "boolean"
+                },
+                "evidence": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
+              }
+            },
+            "lines": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 39,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "role",
+                  "ledger_guid",
+                  "side",
+                  "amount",
+                  "cost_centre_guid",
+                  "cost_category_guid",
+                  "tax",
+                  "evidence"
+                ],
+                "properties": {
+                  "role": {
+                    "enum": [
+                      "expense",
+                      "tax",
+                      "round_off",
+                      "freight",
+                      "other_charge",
+                      "discount",
+                      "tds"
+                    ]
+                  },
+                  "ledger_guid": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "side": {
+                    "enum": [
+                      "debit",
+                      "credit"
+                    ]
+                  },
+                  "amount": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "cost_centre_guid": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "cost_category_guid": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "tax": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "head",
+                          "rate",
+                          "taxable"
+                        ],
+                        "properties": {
+                          "head": {
+                            "enum": [
+                              "cgst",
+                              "sgst",
+                              "igst",
+                              "cess"
+                            ]
+                          },
+                          "rate": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 100
+                          },
+                          "taxable": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "page",
+              "quote"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "pattern": "^(number|date|total|supplier|line:[0-9]+)$"
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "exceptions": {
+          "$ref": "#/$defs/exceptions"
+        },
+        "notes": {
+          "$ref": "#/$defs/notes"
+        },
+        "supplier_details": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/supplier_details"
+            }
+          ]
+        }
       }
     }
   }

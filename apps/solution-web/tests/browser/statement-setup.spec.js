@@ -4,7 +4,7 @@ import {test,expect} from '@playwright/test';
 for(const withMapping of [false,true])test(`AI statement launch and quick run preserve sources ${withMapping?'with':'without'} optional mapping`,async({page,context})=>{
  let fileId='file',mappingAvailable=true; const errors=[],runs=[];page.on('pageerror',e=>errors.push(e.message));
  const workflow={id:'statement',key:'statement-entry',presentation:'accounts-statement',name:'Statement entry',status:'active',employee_ids:[],
-  config_values:{review_mode:'all_outputs',date_format:'dmy',opening_balance:''},config_schema:{properties:{}}};
+  config_values:{review_mode:'all_outputs'},config_schema:{properties:{}}};
  await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/,route=>route.fulfill({body:'',contentType:'text/css'}));
  await context.route('**/api/**',async route=>{
   const path=new URL(route.request().url()).pathname;let body;

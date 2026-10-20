@@ -303,6 +303,13 @@ async function failedReceipt(operation, error) {
   return finished[0];
 }
 
+test("statement failures direct reconciliation to Tally without folder instructions", async () => {
+  const receipt = await failedReceipt("tally.statement", new Error("private error"));
+  assert.match(receipt.error, /Tally/);
+  assert.match(receipt.error, /Retry save/);
+  assert.doesNotMatch(receipt.error, /folder|private/);
+});
+
 test("a typed Tally state reaches the user verbatim instead of a generic guess", async () => {
   const typed = Object.assign(new Error("Tally isn't open on PRAHLAD-GADHWAL. Open it and your companies, then try again."), {
     userSafe: true, tallyState: "not_running",

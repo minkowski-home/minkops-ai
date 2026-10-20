@@ -6,20 +6,20 @@ Skill-driven execution using the OpenAI-managed Codex harness and adequate
 authorized MCP/REST tools is the canonical workflow architecture. New workflows
 start with employee procedures, tool capabilities, and business contracts;
 custom implementation follows only demonstrated gaps or enforceable guarantees.
-The pre-refactor methodology is historical, with no parallel-maintenance
-requirement. Existing deterministic adapters, checks, and non-agent application
+Earlier workflow implementations live only in Git history. Existing deterministic adapters, checks, and non-agent application
 services remain appropriate for their concrete integration and control roles.
 
 OpenAI-hosted Agents API environments are the selected execution architecture.
-Self-hosted Codex executors are outside the current refactor. Hosted sandbox
+Self-hosted Codex executors are out of scope. Hosted sandbox
 Python execution and browser-granted local file saves do not imply an agent
 running on the customer's machine. The four workflow methods and their current
 scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
 
 The Windows shell shares the web UI and adds an authenticated outbound companion
-for bounded native folder operations and a Tally connection check. Durable
-device/job controls live in `platform/`; native filesystem/Tally adapters live
-in `connectors/`. The companion does not host or replace the managed AI harness.
+for bounded native work: folder snapshots and approved Excel saves, Tally
+discovery, approved voucher saves with readback, and verified GST supplier
+creation. Durable device/job controls live in `platform/`; native
+filesystem/Tally adapters live in `connectors/`. The companion does not host or replace the managed AI harness.
 See [Windows app architecture and recovery](windows-app.md).
 
 Product development centers on `apps/`; workflow execution should maximize
@@ -81,19 +81,22 @@ extension points, and migration/rollback guidance.
 ## Persistence and events
 
 `db/migrations/` is the versioned OLTP source of truth. Migrations are applied
-transactionally with a checksum, and changed migrations are rejected. The
-initial PostgreSQL schema starts clean: identity, membership, employees,
-workflows, task observations, and an event outbox. Writes to observable task
-state and settings insert outbox records in the same transaction. Accounts desk now has a durable database worker and OpenAI-hosted runtime.
-The app polls task state; there is no production outbox publisher or message
-broker yet. See [Accounts desk](accounts-desk.md) for run and write ownership.
+transactionally with a checksum, and changed migrations are rejected. The schema
+covers identity and membership, employees and workflows, task observations, runs
+and their native writes, desktop devices and jobs, shared attention, client
+profiles, and an event outbox. Writes to observable task state and settings
+insert outbox records in the same transaction. Accounts desk runs on a durable
+database worker and the OpenAI-hosted runtime. The app polls task state; there
+is no production outbox publisher or message broker yet. See [Accounts desk](accounts-desk.md) for run and write ownership.
 
 `warehouse/` is intentionally empty. It has no schema, dbt project, or
 pipeline; its design is reserved for separate work.
 
 ## Test fixture
 
-`db/seed_demo.py` creates `mock-tenant` with sample employees, workflows, and
-tasks for manual testing. Its image-to-Excel route is a mock-tenant-only test
-workflow. PR Infra starts with zero employees and zero workflows. The two Accounts desk workflows are active for the mock tenant and execute
-against explicit folder grants. Local fixtures do not imply a production release.
+`db/seed_demo.py` creates `mock-tenant` for manual testing, installs the
+mock-client composition (Source discovery, Statement entry and Bill entry, all
+active) and adds two example workflows in paused and planned states. It creates
+no tasks; activity comes only from real runs. The local PR Infra tenant starts
+with zero employees and zero workflows. Local fixtures do not imply a production
+release.

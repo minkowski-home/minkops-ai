@@ -34,17 +34,20 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(confirmed.status_code, 200, confirmed.text)
         self.assertTrue(confirmed.json()['ready'])
 
-    def test_hosted_collection_still_holds_an_oversized_interpretation(self):
+    def test_a_complete_collection_too_large_for_one_notes_session_stays_usable(self):
+        """Many companies cannot share one notes session, but their native data is complete."""
         from unittest.mock import patch
 
         run, _ = self.start(ai_context=True)
         with patch('minkops_platform.accounts.client_context.context_assets',
                    side_effect=ValueError('Complete collection exceeds hosted interpretation limits.')):
             current = self.collect(run, analyze=False)
-        self.assertTrue(current['catalog']['partial'])
+        self.assertFalse(current['catalog']['partial'])
+        self.assertTrue(current['catalog']['ai_context_skipped'])
+        self.assertIn("Client notes were skipped", current['catalog']['context_error'])
         self.assertIsNone(current['mapping_run'])
-        self.assertEqual(self.client.post(self.discovery + f"/runs/{run['id']}/confirm",
-                                         headers=self.csrf, json={}).status_code, 409)
+        confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={})
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
 
     def test_tally_without_ai_goes_directly_to_review_and_confirms_full_catalog(self):
         run, _ = self.start(ai_context=False)
@@ -77,8 +80,9 @@ class DiscoveryTests(unittest.TestCase):
                                          headers=self.csrf, json={}).status_code, 409)
 
     def test_excel_without_ai_saves_structure_without_creating_entry_mappings(self):
-        from minkops_connectors.excel import schema_projection
         from openpyxl import Workbook, load_workbook
+
+        from minkops_connectors.excel import schema_projection
 
         initial, _ = self.start()
         self.client.post(f"/api/tenants/{self.slug}/tasks/{initial['task_id']}/control",
@@ -137,10 +141,11 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertEqual(rejected.status_code, 422, rejected.text)
 
     def test_paused_excel_tool_is_rejected_server_side(self):
+        from psycopg.types.json import Jsonb
+
         from minkops_platform.resources import REPOSITORY_ROOT
         from minkops_platform.solution_policy import bind_definition
         from minkops_platform.workflows import load_definition
-        from psycopg.types.json import Jsonb
 
         _, body = self.start()
         bound = bind_definition(load_definition(
@@ -188,10 +193,11 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 422, rejected.text)
 
     def test_excel_and_tally_collection_review_reuse_and_layout_change(self):
+        from openpyxl import load_workbook
+
         from minkops_platform.accounts.worker import process
         from minkops_platform.resources import REPOSITORY_ROOT
         from minkops_platform.workflows import load_definition, register_workflow
-        from openpyxl import load_workbook
 
         self.pair()
         self.discovery = f"/api/tenants/{self.slug}/discovery"
@@ -591,14 +597,14 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual((reviewed["state"], reviewed["ready"]), ("review", False))
 
     def test_failed_optional_analysis_leaves_a_complete_tally_collection_confirmable(self):
-        from minkops_platform.accounts.run_store import AccountsRunStore
+        from minkops_platform.runtime.store import WorkflowRunStore
 
         run, _ = self.start()
         current = self.collect(run, analyze=False)
         with psycopg.connect(URL, row_factory=dict_row) as c:
             mapping = c.execute("SELECT * FROM account_runs WHERE id=%s",
                                 (current["mapping_run"]["id"],)).fetchone()
-            AccountsRunStore().fail(c, mapping, "Hosted workflow failed (APIError).")
+            WorkflowRunStore().fail(c, mapping, "Hosted workflow failed (APIError).")
         failed = self.client.get(self.discovery + f"/runs/{run['id']}").json()
         self.assertEqual((failed["state"], failed["analysis_failed"]), ("review", True))
         confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={})

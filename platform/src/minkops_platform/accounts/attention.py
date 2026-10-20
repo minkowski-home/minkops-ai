@@ -1,16 +1,22 @@
 """Accounts evidence and one-click decisions over shared attention state."""
-import copy
 import base64
+import copy
 import hashlib
 import json
 from decimal import Decimal, InvalidOperation
+
 from psycopg.types.json import Jsonb
+
 from minkops_platform import attention
 from minkops_platform.errors import ServiceError
-from .repository import run_for, public_run
+
+from .repository import public_run, run_for
 
 
 def target_for(connection, run, record):
+    # Stop can race the interval between provider-result persistence and bill
+    # validation. Preserve the source link without trusting raw document values.
+    data = record.get("data") or {}
     scope = run["config"].get("tally_target")
     if not scope:
         mapping = next((s for s in run["config"]["catalog_snapshot"]["sheets"]
@@ -25,7 +31,7 @@ def target_for(connection, run, record):
             return {}
         return {"tool": "excel", "device_id": str(file["device_id"]), "source_id": str(file["source_id"]),
                 "path": file["path"], "mapping": mapping,
-                "keys": {k: record["data"].get(k) for k in mapping["key_columns"]},
+                "keys": {k: data.get(k) for k in mapping["key_columns"]},
                 "run_id": str(run["id"]), "file_id": record["source_file_id"], "baseline": None}
     from .client_context import select_target
     try:
@@ -34,7 +40,8 @@ def target_for(connection, run, record):
         return {}
     return {"tool": "tally", "device_id": scope["device_id"], "company": selected["company"],
             "company_guid": selected["references"]["company_guid"], "port": selected["port"],
-            "vendor": record["data"].get("vendor"), "invoice_number": record["data"].get("invoice_number"),
+            "vendor": data.get("vendor"), "invoice_number": data.get("invoice_number"),
+            "date": data.get("date"),
             "run_id": str(run["id"]), "file_id": record["source_file_id"],
             "baseline": record.get("current")}
 
@@ -111,8 +118,8 @@ def _proposal(run, file_id, proposal):
 
 
 def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
-    from .service import approve_run
     from .batch import resolve_bill
+    from .service import approve_run
     run = run_for(connection, tenant["id"], run_id, True)
     from minkops_platform.run_controls import require_active
     require_active(connection, tenant["id"], run["task_id"])
@@ -133,7 +140,7 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     if action not in allowed_actions(run, record):
         raise ServiceError("invalid", "This decision is unavailable for this bill. Use an offered action or handle it in the original system.")
     if action == "retry":
-        return resolve_bill(connection, tenant, user, run_id, file_id, "", False)
+        return resolve_bill(connection, tenant, user, run_id, file_id, False)
     if action == "retry_save":
         return _retry_save(connection, tenant, user, run, index)
     if record.get("save_hold") and action in ("guess", "supplier"):
@@ -143,7 +150,7 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
         attention.audit(connection, item, user["id"], "deferred", "No write. Manual handling required.")
         if not original:
             # An input without any proposal is deferred as a whole.
-            return resolve_bill(connection, tenant, user, run_id, file_id, "", True)
+            return resolve_bill(connection, tenant, user, run_id, file_id, True)
         # Only this proposal is final; the input settles once all of its bills do.
         result = copy.deepcopy(run["result"])
         result["records"][index].update(decision="reject", status="rejected")
@@ -153,29 +160,24 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     if not original:
         raise ServiceError("invalid", "No supported proposal. Handle this bill in the original system.")
     scope = run["config"].get("tally_target")
+    from .bill_decisions import supported_write
     from .client_context import select_target
-    from .bills import validate_tally
+    from .vouchers import resolve
     try:
         selected = select_target(record, scope) if scope else None
         if action == "supplier":
-            if scope and scope.get("master_selection_version") == 1:
-                from .master_selection import resolve_masters
-
-                # Missing names are not evidence of a genuinely new supplier.
-                # Require an explicit lookup outcome and valid other selections.
-                resolve_masters(record, selected, required=True,
-                                allow_split=scope.get("tax_allocation_version") == 1)
-                if record["master_refs"]["vendor"].get("new_supplier") is not True:
-                    raise ValueError("Supplier match must be resolved before master creation.")
-            if not selected or record["data"].get("vendor") in selected["ledgers"]:
+            # Missing names are not evidence of a genuinely new supplier: the
+            # proposal must establish one, with evidence, and be otherwise valid.
+            if not selected or not supported_write(run, record, supplier=True):
                 raise ValueError("Supplier creation needs a supported bill and a positively new supplier.")
+            if "voucher" in record:
+                from .vouchers import summary
+                record["data"] = summary(record, run["config"])
+            elif scope.get("master_selection_version") == 1:
+                from .master_selection import resolve_masters
+                resolve_masters(record, selected, required=True, allow_split=scope.get("tax_allocation_version") == 1)
             from .supplier_gst import creation_plan
             gst_supplier = creation_plan(run, record, selected)
-            vendor = record["data"]["vendor"]
-            if not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in record["evidence"]):
-                raise ValueError("Supplier name needs bill evidence.")
-            prospective = {**selected, "ledgers": [*selected["ledgers"], vendor]}
-            validate_tally(record["data"], prospective, record.get("tax_allocations"))
             item = flag(connection, run, record, title="Missing supplier", kind="supplier", actor=user["id"])
             if gst_supplier:
                 connection.execute("UPDATE attention_items SET target=target || %s WHERE tenant_id=%s AND id=%s RETURNING *",
@@ -185,7 +187,7 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
         if action != "guess":
             raise ValueError("Unsupported bill decision.")
         if selected:
-            validate_tally(record["data"], selected, record.get("tax_allocations"))
+            resolve(record, run["config"])
         if record.get("findings"):
             flag(connection, run, record, title="Review written bill", kind="review", actor=user["id"])
         # One click authorizes the observed correction; no operation or values
@@ -227,7 +229,8 @@ def _retry_save(connection, tenant, user, run, index):
 def check_observation(item, observation):
     target = item["target"]
     if target.get("tool") == "excel":
-        from minkops_connectors.excel import sheet_records, open_workbook, mapped_columns
+        from minkops_connectors.excel import mapped_columns, open_workbook, sheet_records
+
         from .catalog import validate_data
         try:
             content = base64.b64decode(observation["content"], validate=True)
@@ -254,6 +257,9 @@ def check_observation(item, observation):
     # Native observations are data. The server independently validates the
     # business identity and balanced accounting entries before completion.
     current = observation.get("current")
+    if isinstance(current, dict) and "lines" in current:
+        from .vouchers import observed_document
+        current = observed_document(current, target)
     valid = False
     if current:
         try:
@@ -263,7 +269,8 @@ def check_observation(item, observation):
                 and current["vendor"] == target["vendor"] and bool(current.get("guid"))
                 and bool(current.get("fingerprint")) and len(amounts) >= 2
                 and all(v.is_finite() for v in amounts) and sum(amounts) == 0
-                and any(e["ledger"] == target["vendor"] and Decimal(str(e["amount"])) > 0 for e in entries))
+                # The supplier is credited on purchases and debited on debit notes.
+                and any(e["ledger"] == target["vendor"] and Decimal(str(e["amount"])) != 0 for e in entries))
         except (KeyError, TypeError, InvalidOperation):
             valid = False
     masters = observation.get("ledgers", [])
@@ -272,7 +279,7 @@ def check_observation(item, observation):
     names = [m.get("@_NAME", m.get("NAME")) for m in masters]
     supplier_valid = target.get("vendor") in names
     if item["kind"] == "supplier" and target.get("gst_supplier"):
-        from .supplier_gst import verified_supplier, scalar
+        from .supplier_gst import scalar, verified_supplier
         supplier = observation.get("supplier")
         reference = next((m for m in masters if m.get("@_NAME", m.get("NAME")) == target["vendor"]), None)
         supplier_valid = (supplier_valid and verified_supplier(supplier, target["gst_supplier"])
@@ -331,10 +338,10 @@ def supplier_created(connection, item, job, observation):
     if run["state"] not in ("review", "writing"):
         return
     from .client_context import select_target
-    from .tally_writes import prepare, complete_run
+    from .tally_writes import complete_run, prepare
     result = copy.deepcopy(run["result"])
-    from .tally_writes import SETTLED
     from .bulk_decisions import proposal_identity
+    from .tally_writes import SETTLED
     consent = target.get("authorized_proposals")
     eligible = []
     for index, record in enumerate(result["records"]):
@@ -360,7 +367,15 @@ def supplier_created(connection, item, job, observation):
         selected["ledgers"] = list(dict.fromkeys([*selected["ledgers"], target["vendor"]]))
         selected["references"]["ledgers"][target["vendor"]] = {k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}
         record["data"]["vendor"] = target["vendor"]
-        if run["config"]["tally_target"].get("master_selection_version") == 1:
+        if "voucher" in record:
+            # The verified native master joins this run's pinned company view.
+            created = {"company_guid": target["company_guid"], "type": "LEDGER",
+                       "data": {"NAME": target["vendor"], **{k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}}}
+            if created not in run["config"].setdefault("created_masters", []):
+                run["config"]["created_masters"].append(created)
+            record["voucher"]["party"] = {"ledger_guid": master["GUID"], "new_supplier": False,
+                                          "evidence": "Explicit supplier creation verified by native readback."}
+        elif run["config"]["tally_target"].get("master_selection_version") == 1:
             from .master_selection import ledger_reference
             identity = selected["references"]["ledgers"][target["vendor"]]
             ref = ledger_reference(selected, target["vendor"], identity)

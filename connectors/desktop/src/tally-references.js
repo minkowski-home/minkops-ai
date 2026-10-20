@@ -1,7 +1,6 @@
 /** Fixed, bounded identity reads for destination verification and legacy pinned writes. */
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { boundedText } from "./index.js";
-import { readOpenCompanies, TallyUnavailable } from "./tally-session.js";
+import { boundedText, readOpenCompanies, TallyUnavailable } from "./tally-session.js";
 
 export const TALLY_COLLECTIONS = Object.freeze({
   company: ["Company", "COMPANY"],
@@ -16,6 +15,10 @@ export const TALLY_COLLECTIONS = Object.freeze({
   cost_categories: ["CostCategory", "COSTCATEGORY"],
   currencies: ["Currency", "CURRENCY"],
 });
+const EXTRA_FIELDS = {
+  company: ',IsCostCentresOn', ledgers: ',IsCostCentresOn',
+  voucher_types: ',IsActive', cost_centres: ',Category',
+};
 const escapeXml = (s) =>
   s.replace(
     /[&<>"']/g,
@@ -72,7 +75,7 @@ export async function readTallyReferences(
     await onProgress(category, "reading");
     const [type, tag] = TALLY_COLLECTIONS[category];
     try {
-      const xml = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsDiscovery</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsDiscovery" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>Name,GUID,Parent,AlterID${category === "voucher_types" ? ",IsActive" : ""}</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+      const xml = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsDiscovery</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsDiscovery" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>Name,GUID,Parent,AlterID${EXTRA_FIELDS[category] ?? ''}</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
       const response = await request(`http://127.0.0.1:${port}`, {
         method: "POST",
         body: xml,
@@ -109,7 +112,7 @@ export async function readTallyReferences(
           Object.entries(r)
             .filter(([key]) =>
               // RESERVEDNAME and ISACTIVE classify voucher types (see tally.js).
-              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE"].includes(key),
+              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE", "ISCOSTCENTRESON", "CATEGORY"].includes(key),
             )
             .map(([key, value]) => [key, tallyReferenceScalar(value)]),
         ),

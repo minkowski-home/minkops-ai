@@ -60,9 +60,8 @@ class EnvironmentSlotTests(TestCase):
                               (str(uuid4()) + "@example.test",)).fetchone()["id"]
             run = self.insert(c, self.parent["id"], actor=other)
             c.commit()
-            with self.assertRaisesRegex(ValueError, "scope"):
-                with acquire(c, run):
-                    pass
+            with self.assertRaisesRegex(ValueError, "scope"), acquire(c, run):
+                pass
 
     def complete(self, c, run, *, state="review"):
         c.execute("UPDATE workflow_runs SET state=%s,config=config || '{\"hosted_session_closed\":true}' WHERE id=%s",
@@ -83,9 +82,8 @@ class EnvironmentSlotTests(TestCase):
                 self.assertEqual(saved["hosted_workspace"]["environment_id"], "environment")
             self.complete(c, first)
         # A process-local cache would lose reuse on this new connection.
-        with psycopg.connect(self.url, row_factory=dict_row) as c:
-            with acquire(c, second) as lease:
-                self.assertEqual(lease.prepare(provider, {}), "environment")
+        with psycopg.connect(self.url, row_factory=dict_row) as c, acquire(c, second) as lease:
+            self.assertEqual(lease.prepare(provider, {}), "environment")
         provider.post.assert_called_once()
 
     def test_limits_failed_runs_and_changed_grants_rotate_compute(self):

@@ -75,8 +75,8 @@ Production builds use `VITE_INTEREST_API_URL=/api/interest`; Firebase routes tha
 path to the separate `minkops-interest-api` Cloud Run service. Local Vite
 development uses its `/api` proxy, and preview hosts do not default to the live
 inbox. The API CORS allowlist includes Minkops production and local origins.
-The Minkops Vercel project has been deleted. See the repository's
-`docs/deployment-min-123.md` for the owner-operated deployment and rollback steps.
+See [production operations](../../../infra/README.md#production) for the
+owner-operated deployment and rollback steps.
 
 ### Cloud Run deployment
 

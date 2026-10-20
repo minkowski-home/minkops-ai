@@ -121,8 +121,7 @@ node scripts/seed_tally_demo.mjs NEW_PACKAGE --apply
 
 The baseline is a complete `discoverClientContext` snapshot covering the live
 companies. First create one simple `MKQANos` unit in any company through Tally
-(formal name `QA Pieces`, three decimal places). Like the earlier
-`prepare_discovery_context_demo.mjs` live fixture, this seeder requires an
+(formal name `QA Pieces`, three decimal places). The seeder requires an
 exported unit created by this installation before importing inventory masters.
 It retains native fields, replaces the name, and removes native identity fields
 when cloning the template. The seeder defaults to a dry-run, validates the plan before

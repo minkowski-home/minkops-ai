@@ -5,8 +5,8 @@ import importlib.util
 import os
 import unittest
 from pathlib import Path
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
 import psycopg
 from psycopg import sql
@@ -126,9 +126,9 @@ class BranchUpgradeTests(unittest.TestCase):
                         result[migrations.BASELINE] = (source, "unverified-baseline-edit")
                     return result
 
-                with patch.object(migrations, "sources", changed_sources):
-                    with self.assertRaisesRegex(RuntimeError, "Applied migration changed"):
-                        migrations.migrate(scoped)
+                with patch.object(migrations, "sources", changed_sources), \
+                        self.assertRaisesRegex(RuntimeError, "Applied migration changed"):
+                    migrations.migrate(scoped)
             with psycopg.connect(scoped) as connection:
                 self.assertEqual(
                     connection.execute(

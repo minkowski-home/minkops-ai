@@ -1,12 +1,14 @@
 """Client discovery evidence is pinned; routing never guesses a company."""
 
 import copy
+
 import pytest
+
 from minkops_platform.accounts.client_context import (
-    validate_snapshot,
-    targets_from_snapshot,
-    select_target,
     context_assets,
+    select_target,
+    targets_from_snapshot,
+    validate_snapshot,
 )
 
 
@@ -281,7 +283,7 @@ def test_detail_summary_does_not_change_stored_catalog(monkeypatch):
     value = snapshot()
     catalog = {"sources": [{"tool": "tally", "snapshot": value}], "partial": False}
     original = copy.deepcopy(catalog)
-    row = {key: None for key in ("id", "task_id", "device_id", "config", "observations", "created_at")}
+    row = dict.fromkeys(("id", "task_id", "device_id", "config", "observations", "created_at"))
     row.update(tenant_id="tenant", catalog=catalog, mapping_run_id=None, state="completed", confirmed_at="now")
     result = detail(None, row)
     assert catalog == original

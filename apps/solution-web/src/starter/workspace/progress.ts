@@ -102,3 +102,11 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
     activity: controlled ? task.status === "paused" ? "Resume to continue. An operation already underway may finish." : stopSummary || "Remaining work stopped. Completed saves remain." : task.summary,
     percent: finished ? 100 : null, meterLabel: finished ? "Workflow complete" : controlled ? "Run paused or stopped" : label };
 }
+
+/** Wall-clock run time from recorded timestamps; never a guess for missing or future starts. */
+export function elapsedLabel(start: string, end: number): string | null {
+  const beginning = Date.parse(start);
+  if (!Number.isFinite(beginning) || !Number.isFinite(end) || beginning > end) return null;
+  const seconds = Math.floor((end - beginning) / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}

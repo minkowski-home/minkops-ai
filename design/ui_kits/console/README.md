@@ -2,7 +2,7 @@
 
 Open `index.html` through a local file server to inspect the current base app design. This static specimen reuses `design/styles.css`, `design/console.css`, and `design/login.css` from the connected app. `preview.css` contains only preview-specific adjustments, and `preview.js` provides local sample data.
 
-The preview includes sign-in/sign-up, Dashboard and resizable Activity pane, Employees and employee detail, Workflows and workflow detail, task progress, Access, sidebar collapse, and all four themes. Settings changes in this specimen last only until the page reloads. Sign-in is simulated; no credentials are sent. The Image to Excel test run is available only in the connected app.
+The preview includes sign-in/sign-up, Dashboard and resizable Activity pane, Employees and employee detail, Workflows and workflow detail, task progress, Access, sidebar collapse, and all four themes. Settings changes in this specimen last only until the page reloads. Sign-in is simulated; no credentials are sent.
 
 The sample belongs to a mock tenant. It illustrates two employees, three workflows in active/paused/planned states, and three task states. It is not a production seed or a claim that these workflows execute. The real app enforces tenant access and saves settings through the API. A new PR Infra tenant has no employees or workflows.
 

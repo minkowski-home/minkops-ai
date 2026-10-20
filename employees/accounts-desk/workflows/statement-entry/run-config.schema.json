@@ -1,12 +1,36 @@
 {
-  "type":"object", "additionalProperties":false,
-  "required":["source_ids","discovery_id","review_mode","date_format","opening_balance","branch_mapping_file_id"],
-  "properties":{
-    "source_ids":{"type":"array","items":{"type":"string"},"uniqueItems":true},
-    "discovery_id":{"type":"string","format":"uuid"},
-    "review_mode":{"enum":["all_outputs","only_exceptions"]},
-    "date_format":{"enum":["dmy","mdy","iso"]},
-    "opening_balance":{"type":"string","maxLength":30},
-    "branch_mapping_file_id":{"type":["string","null"],"format":"uuid"}
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_ids",
+    "discovery_id",
+    "review_mode",
+    "branch_mapping_file_id"
+  ],
+  "properties": {
+    "source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "discovery_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "review_mode": {
+      "enum": [
+        "all_outputs",
+        "only_exceptions"
+      ]
+    },
+    "branch_mapping_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    }
   }
 }

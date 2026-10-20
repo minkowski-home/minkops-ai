@@ -44,8 +44,8 @@ export class CompanionWorker {
                 ? error.message.slice(0, 300)
               : ["tally.probe", "tally.references"].includes(job.operation)
                 ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
-                : job.operation === "tally.save"
-                  ? "Tally could not confirm this bill. Check the company, then use Retry save; existing vouchers are reconciled before writing."
+                : ["tally.save", "tally.statement"].includes(job.operation)
+                  ? "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing."
                   : job.operation === "accounts.save"
                   ? "The workbook could not be saved. Close Excel, check the original folder, and select Resume saves."
                   : "The connected folder could not be read. Reconnect it and try again.",

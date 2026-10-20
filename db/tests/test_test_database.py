@@ -6,8 +6,8 @@ import unittest
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
-from db.testing import disposable_database
 from db.migrate import MIGRATIONS
+from db.testing import disposable_database
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")

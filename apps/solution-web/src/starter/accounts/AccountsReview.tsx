@@ -1,4 +1,3 @@
-import { billOutcome } from "../workflows/runSettings";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
@@ -8,7 +7,7 @@ import { CatalogReview } from "./CatalogReview";
 import { BillDetailsButton } from "./BillDetails";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
-import { billActions, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
+import { billActions, billOutcome, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
 import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";
@@ -248,7 +247,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
                 {" "}
                 {supplierMissing && pending ? "Missing supplier" : billOutcome(r.status, attention)}
               </span>
-              <p>{reason(r.source_file_id, index)}</p>
+              {(attention || r.save_hold || r.status === "rejected") && <p>{reason(r.source_file_id, index)}</p>}
               {pending && run.state === "review" && ownsRun && (
                 decisionButtons(r.source_file_id, index, billActions(r), r.bulk_actions ?? {}, attention)
               )}

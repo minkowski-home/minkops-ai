@@ -119,7 +119,24 @@ def validate_snapshot(snapshot):
     name, description = skill_manifest(files["SKILL.md"])
     if name != snapshot["skill_name"] or description != snapshot["description"]:
         raise ValueError("Execution bundle must match its skill manifest.")
+    for stage in stages(snapshot).values():
+        if stage["instructions"] not in files or stage["agent_output_schema"] not in files:
+            raise ValueError("Execution bundle is missing a declared stage resource.")
     return snapshot
+
+
+def stages(snapshot):
+    """The workflow's named stages, as pinned in its bundle's own workflow.json."""
+    import json
+
+    return json.loads(snapshot["files"].get("workflow.json", "{}")).get("stages", {})
+
+
+def stage_schema(snapshot, stage):
+    """The pinned agent output schema of one stage."""
+    import json
+
+    return json.loads(snapshot["files"][stages(snapshot)[stage]["agent_output_schema"]])
 
 
 def build_snapshot(directory, metadata):
@@ -136,6 +153,8 @@ def build_snapshot(directory, metadata):
     }
     if metadata.get("agent_output_schema"):
         names.add(metadata["agent_output_schema"])
+    for stage in metadata.get("stages", {}).values():
+        names.update((stage["instructions"], stage["agent_output_schema"]))
     files = {name: read_resource(directory, name) for name in sorted(names)}
     # Skills have a fixed entrypoint even when the descriptor uses another filename.
     files["SKILL.md"] = files[metadata["instructions"]]

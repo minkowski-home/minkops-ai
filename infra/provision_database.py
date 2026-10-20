@@ -8,15 +8,15 @@ The temporary bootstrap account is removed only after migration/grant checks.
 import argparse
 import json
 import os
-from pathlib import Path
 import secrets
+from pathlib import Path
 
 import psycopg
+from google_api import GoogleApi
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from google_api import GoogleApi
-from db.migrate import migrate, MIGRATIONS, sources
+from db.migrate import MIGRATIONS, migrate, sources
 
 
 def provision(project, instance, state_dir):

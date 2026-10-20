@@ -6,8 +6,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
-from minkops_platform import desktop, discovery
 from pydantic import BaseModel, ConfigDict
+
+from minkops_platform import desktop, discovery
 
 from .auth import Db, User, require_csrf, tenant_access
 from .desktop import Device, call

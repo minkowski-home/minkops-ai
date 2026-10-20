@@ -4,6 +4,7 @@ import json
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
+
 from minkops_platform.accounts.attention import exception_label, issue_record
 from minkops_platform.accounts.checks import EXCEPTION_LABELS, adopt_exceptions
 from minkops_platform.resources import REPOSITORY_ROOT

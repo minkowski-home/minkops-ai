@@ -5,7 +5,9 @@ unchanged destination never establishes human review. Domain adapters attach
 exact identifiers and resolution evidence, not free-form automation commands.
 """
 from uuid import uuid4
+
 from psycopg.types.json import Jsonb
+
 from .errors import ServiceError
 
 
@@ -33,6 +35,10 @@ def resolved(item, observation):
     if item["kind"] == "bill" and not target.get("baseline"):
         return bool(current)
     baseline = target.get("baseline") or {}
+    # Fingerprints from different native readers are not comparable: never
+    # treat a reader change as an edit made in Tally.
+    if str(baseline.get("fingerprint", "")).startswith("v5:") != str(current.get("fingerprint", "")).startswith("v5:"):
+        return False
     return item["kind"] in ("bill", "review") and bool(baseline.get("fingerprint")) and (
         current.get("guid") == baseline.get("guid")
         and bool(current.get("fingerprint"))
@@ -91,7 +97,7 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status"}[group]
     ordering = "a.identifier" if sort == "name" else "a.updated_at DESC"
     rows = connection.execute(
-        f"""SELECT a.id,a.task_id,a.identifier,a.label,a.status,a.created_at,a.updated_at,a.done_at,a.target,
+        f"""SELECT a.id,a.task_id,a.identifier,a.label,a.kind,a.status,a.created_at,a.updated_at,a.done_at,a.target,
         a.done_by,a.authorized_by,w.name AS workflow,
         coalesce((SELECT string_agg(e.name,', ' ORDER BY e.name) FROM employees e
           JOIN workflow_employees we ON we.employee_id=e.id AND we.tenant_id=e.tenant_id
@@ -104,7 +110,16 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     from .accounts.bill_review import reason_sentence
     for row in rows:
         target = row.pop("target")
-        row["reason"] = target.get("reason") or reason_sentence({}, title=row["label"])
+        confirmation = {"profile": "Confirm this company's posting pattern to continue.",
+                        "layout": "Confirm how to read this statement."}
+        row["reason"] = target.get("reason") or confirmation.get(row["kind"]) or reason_sentence({}, title=row["label"])
+        if row["kind"] == "layout":
+            row["layout"] = {"prompt": target.get("prompt"), "actions": target.get("actions", []),
+                             "samples": target.get("samples", [])[:3]}
+        if row["kind"] == "profile":
+            # Only what the member confirms: never identities or internal targets.
+            row["profile"] = {"company": target.get("company"), "summary": target.get("summary", [])[:8],
+                              "waiting": target.get("waiting", 0)}
     return rows
 
 
@@ -154,7 +169,22 @@ def plan(connection, device, job, *, plan_version=1):
         raise ServiceError("conflict", "Attention item no longer pending on this PC.")
     if item["target"].get("gst_supplier") and plan_version < 4:
         raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later before creating or verifying this GST supplier.")
-    return item["target"]
+    return native_target(item["target"], plan_version)
+
+
+def native_target(target, plan_version):
+    """A protocol-5 companion observes bills with the voucher writer's reader,
+    so a refresh fingerprint is comparable with the one saved at write time.
+    A baseline saved by the older reader keeps being observed by that reader."""
+    baseline = (target.get("baseline") or {}).get("fingerprint")
+    if (plan_version < 5 or target.get("tool") != "tally" or not target.get("date")
+            or (baseline is not None and not str(baseline).startswith("v5:"))):
+        return target
+    from datetime import date
+
+    from .accounts.vouchers import BILL_FAMILIES, invoice_window
+    return {**target, "document": {"window": invoice_window(date.fromisoformat(target["date"])),
+                                   "number_fields": ["REFERENCE"], "families": BILL_FAMILIES}}
 
 
 def accept(connection, device, job, observation, error=None):

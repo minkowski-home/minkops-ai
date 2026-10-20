@@ -26,7 +26,7 @@ def _digest(value):
 
 
 def proposal_identity(record):
-    return _digest({key: record.get(key) for key in ("source_file_id", "company_guid", "data", "tax_allocations", "operation")})
+    return _digest({key: record.get(key) for key in ("source_file_id", "company_guid", "data", "tax_allocations", "document", "voucher", "operation")})
 
 
 def subject_for(run, record):
@@ -125,8 +125,8 @@ def preview(connection, tenant, user, run_id, file_id, action, proposal=None):
 
 def apply(connection, tenant, user, run_id, file_id, action, proposal, preview_token):
     from .attention import decide, flag
-    from .tally_writes import complete_run, defer_input
     from .service import approve_run
+    from .tally_writes import complete_run, defer_input
 
     run = _owned(connection, tenant, user, run_id)
     # The audit and application commit atomically. An existing token is a

@@ -3,10 +3,10 @@
 import argparse
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gcloud", default="gcloud")
@@ -16,7 +16,7 @@ args = parser.parse_args()
 token = subprocess.run(
     [args.gcloud, "auth", "print-access-token"], check=True, capture_output=True, text=True
 ).stdout.strip()
-end = datetime.now(timezone.utc)
+end = datetime.now(UTC)
 summary = {}
 for metric in (
     "cpu/utilization",

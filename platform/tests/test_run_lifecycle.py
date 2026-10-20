@@ -74,6 +74,7 @@ class RunLifecycleTests(TestCase):
 
     def test_raw_proposal_is_committed_before_schema_rejection(self):
         from jsonschema import ValidationError
+
         from minkops_platform.runtime.lifecycle import execute_proposal
 
         connection, store = MagicMock(), MagicMock()
@@ -183,9 +184,9 @@ class RunLifecycleTests(TestCase):
             raise RuntimeError("Provider disconnected")
 
         with patch("minkops_platform.runtime.lifecycle.time.monotonic", return_value=0), \
-             patch("minkops_platform.runtime.lifecycle.record") as audit:
-            with self.assertRaisesRegex(RuntimeError, "Provider disconnected"):
-                execute_proposal(connection, store, run, [], {}, execute)
+             patch("minkops_platform.runtime.lifecycle.record") as audit, \
+             self.assertRaisesRegex(RuntimeError, "Provider disconnected"):
+            execute_proposal(connection, store, run, [], {}, execute)
         store.save_result.assert_not_called()
         self.assertEqual(audit.call_args.args[2], "hosted.activity")
         self.assertEqual(audit.call_args.kwargs["details"]["event_counts"],
@@ -199,9 +200,8 @@ class RunLifecycleTests(TestCase):
         def execute(key, files, context, event, **kwargs):
             event('agent.session.turn.created','late-session','late-turn')
             raise AssertionError('A stopped task must not consume more output')
-        with patch('minkops_platform.run_controls.control_state',return_value='stopped'):
-            with self.assertRaises(ServiceError):
-                execute_proposal(connection,store,run,[],{},execute)
+        with patch('minkops_platform.run_controls.control_state',return_value='stopped'), self.assertRaises(ServiceError):
+            execute_proposal(connection,store,run,[],{},execute)
         store.save_session.assert_called_once_with(connection,run,'late-session','late-turn')
         connection.commit.assert_called_once()
         store.save_result.assert_not_called()

@@ -2,14 +2,14 @@
 
 import json
 import os
-import uuid
 import unittest
+import uuid
 from unittest.mock import patch
 
 import psycopg
-from psycopg.rows import dict_row
-import test_bill_entry as bills
 import test_accounts_api as accounts
+import test_bill_entry as bills
+from psycopg.rows import dict_row
 
 URL = accounts.URL
 
@@ -133,9 +133,9 @@ class SchemaContextTests(unittest.TestCase):
         )
         self.tally_discovery("company-2", reuse_device=True)
         response = self.client.post(
-            self.base + f"/runs/{run['id']}/resolve-bill",
+            f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
             headers=self.csrf,
-            json={"file_id": bill, "user_input": "", "reject": False},
+            json={"action": "retry"},
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("Company scope changed", response.text)
@@ -147,7 +147,7 @@ class SchemaContextTests(unittest.TestCase):
         note = {
             "company_guid": "company-1",
             "observation": "An obscure supplier convention",
-            "evidence_ids": ["Supplier"],
+            "evidence_ids": ["Supplier-guid"],  # Masters with GUIDs are cited by GUID.
             "certainty": "observed",
         }
         with psycopg.connect(URL) as c:

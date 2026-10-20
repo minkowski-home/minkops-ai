@@ -19,8 +19,15 @@ The archive is a **compatibility artifact**, not an active fresh-install migrati
 chain. Never edit or remove it while a supported installation can need it. New
 changes go in new ordered files under `migrations/`; never squash again after this
 pre-client baseline. Back up and rehearse adoption on a restored database before
-deployment. Deployed migration and restore evidence is recorded in
-[the release verification](../docs/verification-accounts-release-20261019.md).
+deployment (see [production restores](../infra/README.md#production)).
+
+The archive exists because two branches were released before the shared workflow
+architecture. Their original `0009` files and `0010` stay byte-identical (the
+runner keys versions by full filename stem, so the shared prefix is harmless).
+`0008z` runs before both and temporarily restores the `account_runs` table name
+their ALTER statements expect; `0011` restores `workflow_runs` and the updatable
+`account_runs` view. Each predecessor's source is preserved under the tags
+`archive/2026-10-07/*-before-convergence`; recover from one in a new branch.
 
 Tests compare fresh and upgraded schemas and verify preserved paid sessions,
 approvals, native write plans, company reservations, checksums and view updates.

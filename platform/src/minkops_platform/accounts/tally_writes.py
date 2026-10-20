@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
 
-from .bills import add_note, allocation_entries, validate_tally
+from .bills import add_note, allocation_entries
 from .repository import observe, run_for
 
 PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
@@ -63,13 +63,13 @@ def prepare_automatic(connection, run, result):
     unresolved = {issue["source_file_id"] for issue in result.get("unresolved", [])}
     rechecked = run["config"].get("retry_file_id")
     for record in result["records"]:
-        if record.get("findings") or record["source_file_id"] in unresolved:
-            if record.get("status") not in ("saved", "duplicate", "writing", "rejected"):
-                record["decision"] = "hold"
-                # Under standing authorization the exceptions are the work; they
-                # belong in shared attention, not only in this run's review.
-                # Only a rechecked input's hold is new; siblings are restated.
-                flag(connection, run, record, reopen=record["source_file_id"] == rechecked)
+        flagged = record.get("findings") or record["source_file_id"] in unresolved
+        if flagged and record.get("status") not in ("saved", "duplicate", "writing", "rejected"):
+            record["decision"] = "hold"
+            # Under standing authorization the exceptions are the work; they
+            # belong in shared attention, not only in this run's review.
+            # Only a rechecked input's hold is new; siblings are restated.
+            flag(connection, run, record, reopen=record["source_file_id"] == rechecked)
     prepare(connection, run, result)
     complete_run(connection, run, result)
     return True
@@ -80,15 +80,12 @@ def prepare(connection, run, result, *, approved=False):
 
     if enforce_policies(run["config"], result).get("requires_review") and not approved:
         raise ValueError("Client policy requires explicit review before destination writes.")
-    scope = run["config"]["tally_target"]
-    from .client_context import select_target
+    from .vouchers import resolve
 
     seen = {}
     ordered = sorted(
         enumerate(result["records"]), key=lambda pair: pair[1].get("company_guid") or ""
     )
-    from .master_selection import resolve_masters
-
     candidates, errors, groups = {}, {}, {}
     # Compare the complete accounting versions before enqueuing any intent.
     # Otherwise the first conflicting duplicate could be written by ordering.
@@ -96,19 +93,13 @@ def prepare(connection, run, result, *, approved=False):
         if record.get("status") in ("saved", "duplicate", "rejected", "writing") or record.get("decision") in ("hold", "reject"):
             continue
         try:
-            target = select_target(record, scope)
-            resolve_masters(record, target, required=scope.get("master_selection_version") == 1,
-                            allow_split=scope.get("tax_allocation_version") == 1)
-            identity = validate_tally(record["data"], target, record.get("tax_allocations"))
-            candidates[index] = target, identity
-            groups.setdefault((target["destination_key"], identity), []).append(index)
+            bill = resolve(record, run["config"])
+            candidates[index] = bill
+            groups.setdefault((bill.target["destination_key"], bill.identity), []).append(index)
         except ValueError as error:
             errors[index] = str(error)
-    def taxes(record):
-        return sorted(allocation_entries(record["data"], record.get("tax_allocations")), key=lambda line: line["ledger"])
     for indexes in groups.values():
-        first = result["records"][indexes[0]]
-        if any(first["data"] != result["records"][i]["data"] or taxes(first) != taxes(result["records"][i]) for i in indexes[1:]):
+        if len({candidates[i].accounting() for i in indexes}) > 1:
             for index in indexes:
                 errors[index] = "This batch contains conflicting versions of the same bill. Review the correction separately."
     for index, record in ordered:
@@ -123,11 +114,11 @@ def prepare(connection, run, result, *, approved=False):
         try:
             if index in errors:
                 raise ValueError(errors[index])
-            target, identity = candidates[index]
+            bill = candidates[index]
+            target, identity = bill.target, bill.identity
             key = (target["destination_key"], identity)
             if key in seen:
-                first = result["records"][seen[key]]
-                if first["data"] == record["data"] and taxes(first) == taxes(record):
+                if candidates[seen[key]].accounting() == bill.accounting():
                     record["duplicate_of"] = seen[key]
                     record["status"] = "writing"
                     continue
@@ -144,23 +135,7 @@ def prepare(connection, run, result, *, approved=False):
                     f"minkops:{run['tenant_id']}:{target['destination_key']}:{identity}",
                 )
             )
-            plan = {
-                "company": target["company"],
-                "port": target["port"],
-                "data": record["data"],
-                "remote_id": token,
-                "operation": record["operation"],
-                "expected": record.get("current") if record["operation"] == "update" else None,
-                "discovery_id": target["discovery_id"],
-                "references": target.get("references"),
-            }
-            if record.get("tax_allocations") is not None:
-                plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
-            if target.get("voucher_type"):
-                # Format 3 pins the run's purchase voucher type; companions that
-                # predate it would write "Purchase", so they cannot receive it.
-                plan["references"] = {**plan["references"], "voucher_type": target["voucher_type"]}
-                plan["format_version"] = 3
+            plan = bill.native_plan(token, record["operation"], record.get("current"))
             try:
                 with connection.transaction():
                     write = connection.execute(
@@ -309,7 +284,18 @@ def accept(connection, device, payload, receipt):
         raise ServiceError("invalid", "Invalid Tally write receipt.")
     outcome = receipt["outcome"]
     current = receipt.get("current")
-    if outcome in ("saved", "duplicate", "correction"):
+    if outcome in ("saved", "duplicate", "correction") and isinstance(current, dict) and "lines" in current:
+        # Protocol 5: verify against the plan this companion was served.
+        from .vouchers import observed_bill, upgrade
+
+        plan = upgrade(write["plan"], identity=write["identity"])
+        if plan is None:
+            raise ServiceError("invalid", "This approved bill was not served as a protocol 5 voucher.")
+        try:
+            current = observed_bill(plan, outcome, current, identity=write["identity"])
+        except ValueError as error:
+            raise ServiceError("invalid", str(error)) from error
+    elif outcome in ("saved", "duplicate", "correction"):
         if not isinstance(current, dict) or set(current) - {"voucher_type"} != {
             "master_id",
             "guid",
@@ -411,8 +397,9 @@ def accept(connection, device, payload, receipt):
     if current and outcome in ("saved", "duplicate"):
         from .attention import written
         written(connection, run, record, result)
-        connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s),updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
-            (Jsonb(current), run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review"))
+        connection.execute("UPDATE attention_items SET target=target||%s,updated_at=now() WHERE tenant_id=%s AND event_key=%s AND status='pending'",
+            (Jsonb({"baseline": current, "date": record["data"].get("date")}), run["tenant_id"],
+             f"bill:{run['id']}:{record['source_file_id']}:review"))
     if outcome == "duplicate":
         add_note(record, "Exact duplicate already exists; no additional voucher was created.")
     elif outcome == "correction":

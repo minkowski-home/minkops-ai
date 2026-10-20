@@ -216,9 +216,7 @@ function TaskLinks({ title, tasks, routeSlug }: { title: string; tasks: Task[]; 
   </section>;
 }
 
-export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError }: {
-  workspace: Workspace; routeSlug: string; onRunTest: (workflow: Workflow) => void; workflowError: string;
-}) {
+export function DashboardScreen({ workspace, routeSlug }: { workspace: Workspace; routeSlug: string }) {
   const { user } = useAuth();
   const [paneWidth, setPaneWidth] = useState(340);
   const active = workspace.workflows.filter((workflow) => workflow.status === "active");
@@ -239,7 +237,6 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
   return <div className="dashboard-workspace" style={{ "--pane-width": `${paneWidth}px` } as CSSProperties}>
     <main className="dashboard-main"><header className="launchpad-heading">
       <h2>{welcome}</h2><p>Your work and decisions are in one place.</p></header>
-      {workflowError && <p role="alert" className="workflow-feedback">{workflowError}</p>}
       <section className="dashboard-section"><div className="section-heading"><div><h3>Ready workflows</h3>
         <p>Start with the work that is available today.</p></div></div>
         {active.length ? <div className="workflow-launch-grid">{active.map((workflow) =>
@@ -247,8 +244,6 @@ export function DashboardScreen({ workspace, routeSlug, onRunTest, workflowError
             <div className="workflow-launch-card__mark"><Icon name="tasks" size={20} /></div>
             <div><h4>{workflow.name}</h4><p>{workflow.description}</p></div>
             <footer><Link className="button button-ghost" to={`/${routeSlug}/workflows/${workflow.id}`}>View details</Link>
-              {workspace.tenant.slug === "mock-tenant" && workflow.key === "image-to-excel-test"
-                && <button className="button button-primary" onClick={() => onRunTest(workflow)}>Run test</button>}
               {presentationFor(workflow) && <WorkflowQuickRun
                 tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={workflow} />}
             </footer>

@@ -3,7 +3,6 @@
 from copy import copy
 from datetime import date, datetime
 from io import BytesIO
-from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
 from openpyxl import Workbook, load_workbook
@@ -308,19 +307,3 @@ def apply_records(content, mapping, records, *, validate_record):
                 raise ValueError("Workbook verification failed.")
     return output.getvalue(), changes
 
-
-def append_rows(path: Path, sheet_name: str, columns: list[str], rows):
-    """Legacy append/create operation with an explicit destination and layout."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        workbook = load_workbook(path)
-        sheet = workbook[sheet_name]
-    else:
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = sheet_name
-        sheet.append(columns)
-    for row in rows:
-        sheet.append(row)
-    workbook.save(path)
-    return path

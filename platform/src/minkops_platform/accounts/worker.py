@@ -13,11 +13,11 @@ from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 import psycopg
 
 from minkops_platform.runtime import application, lifecycle
+from minkops_platform.runtime.store import WorkflowRunStore
 
 from .agent import close_session, execute
-from .run_store import AccountsRunStore
 
-STORE = AccountsRunStore()
+STORE = WorkflowRunStore()
 WORKER_LANES = 4
 log = logging.getLogger(__name__)
 

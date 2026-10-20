@@ -37,6 +37,9 @@ RESERVED = {
     "hosted_workspace",
     "hosted_session_closed",
     "timeout_cancel_pending",
+    "stage",
+    "company_scope",
+    "triage",
 }
 
 
@@ -98,9 +101,10 @@ def get_handler(key):
 
 
 def process(connection, store, run, *, executor, close_session, cleanup=True):
+    from minkops_platform.run_controls import control_state, require_active
+
     from . import lifecycle
     from .diagnostics import stage
-    from minkops_platform.run_controls import control_state, require_active
 
     require_active(connection, run["tenant_id"], run["task_id"])
 

@@ -10,13 +10,14 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.responses import JSONResponse
+
 from minkops_platform.interest_delivery import (
     DeliveryError,
     InterestSubmission,
     deliver_interest,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from starlette.responses import JSONResponse
 
 EMAIL_PATTERN = re.compile(r"^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$")
 INTEREST_VALUES = {

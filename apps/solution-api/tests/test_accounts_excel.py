@@ -3,10 +3,11 @@
 import unittest
 from io import BytesIO
 
-from minkops_connectors.excel import inspect_workbook
-from minkops_platform.accounts.catalog import apply_records, validate_catalog
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.table import Table
+
+from minkops_connectors.excel import inspect_workbook
+from minkops_platform.accounts.catalog import apply_records, validate_catalog
 
 
 def workbook():

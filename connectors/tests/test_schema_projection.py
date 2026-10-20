@@ -2,7 +2,8 @@ from io import BytesIO
 from unittest import TestCase
 
 from openpyxl import Workbook
-from minkops_connectors.excel import schema_projection, open_workbook
+
+from minkops_connectors.excel import open_workbook, schema_projection
 
 
 class SchemaProjectionTests(TestCase):

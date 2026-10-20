@@ -622,7 +622,6 @@ a failing PR on the migration itself, which is where the fix belongs.
 
 - `dbt docs generate` locally; every model and column described in YAML.
 - Update the root `README.md` repository map entry for `warehouse/`.
-- Decisions-log entries for interview-worthy items only.
 
 **Done for the local phase** = Phases 0.1–0.3 merged, 1–4 merged, CI green,
 `run` completes from a fresh clone in under 10 minutes using only the README.
