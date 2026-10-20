@@ -4,6 +4,7 @@ One native voucher is dispatched at a time. Every approved intent is durable
 before the first import; a receipt independently verifies the observed voucher.
 """
 import copy
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -46,6 +47,53 @@ def prepared_inputs(connection, tenant_id, files, ids, config, *, today):
         'source_catalog':manifest,'transactions':rows,'branch_mapping_file_id':config.get('branch_mapping_file_id'),
         'files':[{'id':str(f['id']),'path':f['path']} for f in files]}
     return files,context,{'rows':rows}
+
+
+def native_plans(run, rows, decisions):
+    """v5 vouchers for split and transfer rows; a transfer's two legs become one Contra.
+
+    The leg where money leaves writes the Contra; the other leg is covered by it.
+    A leg whose partner is not in this run looks for that transfer in Tally first.
+    """
+    from datetime import date
+    from minkops_platform.accounts.vouchers import statement_voucher
+    position={(r['source_file_id'],r['sheet'],r['row']):i for i,r in enumerate(rows)}
+    def held(row, reason):
+        row.pop('_resolved',None); row.update(status='held',code='statement_transfer_unpaired',reason=reason)
+    for row in rows:
+        resolved=row.get('_resolved')
+        if not resolved or row.get('plan') or row.get('duplicate_of') is not None: continue
+        proposal=decisions[(row['source_file_id'],row['sheet'],row['row'])]
+        pair=proposal.get('pair') if resolved['family']=='contra' else None
+        if pair:
+            j=position.get((pair.get('source_file_id'),pair.get('sheet'),pair.get('row')))
+            other=rows[j] if j is not None else None
+            back=(decisions.get((other['source_file_id'],other['sheet'],other['row'])) or {}).get('pair') if other else None
+            theirs=(other or {}).get('_resolved')
+            if (not theirs or theirs['family']!='contra' or back!={'source_file_id':row['source_file_id'],'sheet':row['sheet'],'row':row['row']}
+                    or theirs['company_guid']!=resolved['company_guid'] or row['amount_cents']!=-other['amount_cents']
+                    or theirs['data']['bank_ledger']!=resolved['data']['counter_ledger']
+                    or theirs['data']['counter_ledger']!=resolved['data']['bank_ledger']
+                    or abs((date.fromisoformat(row['date'])-date.fromisoformat(other['date'])).days)>3):
+                held(row,'The two legs of this transfer do not match each other.')
+                if other: held(other,'The two legs of this transfer do not match each other.')
+                continue
+            debit,credit=(row,other) if row['amount_cents']<0 else (other,row)
+            legs=sorted([row['identity'],other['identity']])
+            identity=hashlib.sha256(json.dumps(legs).encode()).hexdigest()
+            key=f"statement:{resolved['company_guid']}:contra"
+            token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{identity}"))
+            debit['plan']={**statement_voucher(debit['_resolved'],remote_id=token,identity=identity,legs=legs),'destination_key':key}
+            credit['duplicate_of']=rows.index(debit); credit['covered_by_transfer']=True
+            continue
+        key=f"statement:{resolved['company_guid']}:{resolved['data']['bank_ledger']}"
+        token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
+        siblings=[str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{r['identity']}")) for r in rows
+                  if r is not row and r.get('bank_ledger')==row['bank_ledger'] and r.get('company_guid')==row['company_guid']
+                  and r.get('date')==row['date'] and r.get('amount_cents')==row['amount_cents'] and r.get('identity')]
+        row['plan']={**statement_voucher(resolved,remote_id=token,identity=row['identity'],distinct=siblings,
+                                         counterpart=resolved['family']=='contra'),'destination_key':key}
+    for row in rows: row.pop('_resolved',None)
 
 
 def operator(run, user):
@@ -218,18 +266,28 @@ class StatementHandler(AccountsHandler):
                 token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
                 row.update(company=resolved['company'],company_guid=resolved['company_guid'],
                     bank_ledger=resolved['data']['bank_ledger'],counter_ledger=resolved['data']['counter_ledger'],
-                    interpretation=proposal['evidence'],
-                    plan={**resolved,'format_version':4,'remote_id':token,'operation':'append','destination_key':key})
+                    interpretation=proposal['evidence'])
+                if resolved['family']=='contra' or resolved['lines']:
+                    row['_resolved']=resolved  # Native v5 voucher, built once pairs are known.
+                    if resolved['lines']:
+                        row['counter_ledger']=' + '.join(line['ledger'] for line in resolved['lines'])
+                else:
+                    row['plan']={**{k:v for k,v in resolved.items() if k not in ('family','lines')},
+                        'format_version':4,'remote_id':token,'operation':'append','destination_key':key}
             except ValueError as error:
                 row.update(code='statement_interpretation',reason=str(error),status='held')
+        native_plans(run,rows,decisions)
         result={'records':rows,'findings':[]}
         groups={}
         for index,row in enumerate(result['records']):
             if row.get('plan') and not row.get('code'):
-                groups.setdefault((row['plan']['destination_key'],row['identity']),[]).append(index)
+                groups.setdefault((row['plan']['destination_key'],(row['plan'].get('identity') or {}).get('hash',row['identity'])),[]).append(index)
         for indexes in groups.values():
             def accounting(index):
-                plan=result['records'][index]['plan']; data=plan['data']
+                plan=result['records'][index]['plan']
+                if plan['format_version']==5:
+                    return json.dumps([plan['family'],plan['header']['date'],plan['lines'],plan['voucher_type']],sort_keys=True)
+                data=plan['data']
                 return json.dumps([data['date'],data['amount_cents'],data['bank_ledger'],data['counter_ledger'],plan['voucher_type'],plan['allocation']],sort_keys=True)
             if len({accounting(i) for i in indexes})>1:
                 for i in indexes: result['records'][i].update(status='held',code='statement_conflict',reason='Overlapping files route the same bank transaction differently. Correct the sources before saving.')
@@ -266,7 +324,7 @@ class StatementHandler(AccountsHandler):
                 with connection.transaction():
                     connection.execute('''INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)''',(run['tenant_id'],run['id'],run['config']['statement_device_id'],
-                        plan['company'],row['identity'],index,Jsonb(plan),plan['destination_key']))
+                        plan['company'],(plan.get('identity') or {}).get('hash',row['identity']),index,Jsonb(plan),plan['destination_key']))
                 row['status']='writing'; row.pop('save_hold',None); row.pop('code',None); row.pop('reason',None)
             except UniqueViolation:
                 row.update(status='held',code='statement_save_waiting',reason='Another approved run is reconciling this transaction. Finish it before retrying.',save_hold=True)
@@ -299,7 +357,7 @@ def accept(connection, device, payload, receipt):
     if run['workflow_key']!='statement-entry': raise ServiceError('invalid','Not a statement write.')
     if not isinstance(receipt,dict) or receipt.get('outcome') not in ('saved','duplicate','attention'):
         raise ServiceError('invalid','Invalid statement receipt.')
-    outcome=receipt['outcome']; plan=write['plan']; data=plan['data']; raw=receipt
+    outcome=receipt['outcome']; plan=write['plan']; data=plan.get('data'); raw=receipt
     verified=outcome in ('saved','duplicate')
     if verified and isinstance(receipt.get('current'),dict) and 'lines' in receipt['current']:
         # Protocol 5: verify against the upgraded plan, store the row's usual observation.
