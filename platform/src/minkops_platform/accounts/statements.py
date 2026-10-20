@@ -14,6 +14,7 @@ from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from minkops_platform import attention, desktop
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.environments import exceeds_session
 from minkops_platform.runtime.launch import LaunchInputs
 from minkops_platform.run_controls import require_active, control_state
 from minkops_platform.workflows import resolve_run_config
@@ -41,7 +42,7 @@ def prepared_inputs(connection, tenant_id, files, ids, config, *, today):
     rows=parse(resolve(connection,tenant_id,statements),today=today)
     assets,manifest=context_assets(config['statement_context'])
     files=[*files,*assets]
-    if len(files)>45 or sum(len(f['content']) for f in files)+len(json.dumps(rows).encode())>8_000_000:
+    if exceeds_session(files, extra_bytes=len(json.dumps(rows).encode())):
         raise ValueError('Statement and complete discovery exceed hosted input limits. Select fewer statements or a shorter discovery voucher period; masters cannot be sampled.')
     context={'config':{k:v for k,v in config.items() if k!='statement_context'},
         'source_catalog':manifest,'transactions':rows,'branch_mapping_file_id':config.get('branch_mapping_file_id'),

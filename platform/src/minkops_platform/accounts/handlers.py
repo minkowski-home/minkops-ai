@@ -8,6 +8,11 @@ from psycopg.types.json import Jsonb
 from minkops_connectors.excel import inspect_workbook
 
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.environments import (
+    SESSION_BYTE_LIMIT,
+    SESSION_FILE_LIMIT,
+    exceeds_session,
+)
 from minkops_platform.runtime.launch import LaunchInputs
 from minkops_platform.solution_policy import validate_destination
 from minkops_platform.workflows import resolve_run_config
@@ -165,10 +170,11 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
     is_bill = definition.metadata["handler"] == "accounts.bill"
     reference_files = files[len(ids):] if is_bill else []
     sessions = [[f, *reference_files] for f in files[:len(ids)]] if is_bill else [files]
-    if any(len(session) > 45 or sum(len(f["content"]) for f in session) > 8_000_000 for session in sessions):
+    if any(exceeds_session(session) for session in sessions):
         raise ServiceError(
             "invalid",
-            "Select a smaller scope: up to 45 files and 8 MB including references per run.",
+            f"Select a smaller scope: up to {SESSION_FILE_LIMIT} files and "
+            f"{SESSION_BYTE_LIMIT // 1_000_000} MB including references per run.",
         )
     try:
         config = resolve_run_config(
@@ -243,7 +249,7 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         assets, _ = context_assets(source_context)
         files += assets
         sessions = [[f, *reference_files, *assets] for f in files[:len(ids)]] if is_bill else [files]
-        if any(len(session) > 45 or sum(len(f["content"]) for f in session) > 8_000_000 for session in sessions):
+        if any(exceeds_session(session) for session in sessions):
             raise ServiceError(
                 "invalid",
                 "Complete discovery context exceeds hosted input limits. Reduce the voucher period or hand off; master records cannot be sampled.",

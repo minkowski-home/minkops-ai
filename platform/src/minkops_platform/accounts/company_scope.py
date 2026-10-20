@@ -13,10 +13,10 @@ from datetime import date, timedelta
 
 from psycopg.types.json import Jsonb
 
+from minkops_platform.runtime.environments import SESSION_BYTE_LIMIT
+
 from .client_context import books_beginning, context_assets, text
 
-SESSION_FILES = 45
-SESSION_BYTES = 8_000_000
 TRIAGE_FILES = 40
 TRIAGE_BYTES = 7_500_000
 GST_FIELDS = {"GSTIN", "PARTYGSTIN", "LEDGSTIN", "GSTREGISTRATIONNUMBER", "GSTREGNUMBER", "TAXREGISTRATION"}
@@ -85,10 +85,10 @@ def assets_for(config, bill_bytes):
     catalog, scope = config["source_catalog_snapshot"], config.get("company_scope")
     gstins = (config.get("triage") or {}).get("supplier_gstins", [])
     assets, manifest = context_assets(catalog, companies=scope)
-    if bill_bytes + sum(len(a["content"]) for a in assets) <= SESSION_BYTES - 100_000:
+    if bill_bytes + sum(len(a["content"]) for a in assets) <= SESSION_BYTE_LIMIT - 100_000:
         return assets, manifest
     masters = sum(len(a["content"]) for a in assets if "-vouchers-" not in a["path"])
-    budget = SESSION_BYTES - 200_000 - bill_bytes - masters
+    budget = SESSION_BYTE_LIMIT - 200_000 - bill_bytes - masters
     if budget <= 0:
         raise ValueError("This company's discovered masters alone exceed the hosted input limit.")
     return context_assets(catalog, companies=scope, voucher_budget=budget, supplier_gstins=gstins)

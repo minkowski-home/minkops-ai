@@ -20,6 +20,7 @@ from .accounts.repository import files_for, public_run
 from .errors import ServiceError
 from .resources import REPOSITORY_ROOT
 from .run_controls import observe_task, resolve_request, control_state, require_active
+from .runtime.environments import SESSION_BYTE_LIMIT, SESSION_FILE_LIMIT
 
 
 def latest_run(connection, tenant, user, device_id=None):
@@ -654,8 +655,10 @@ def collect(connection, device, job, result):
                     "workbooks": books,
                 }
             )
-    if len(excel_files) > 45 or sum(len(f["content"]) for f in excel_files) > 8_000_000:
-        raise ServiceError("invalid", "Choose up to 45 workbooks and 8 MB for discovery.")
+    if (len(excel_files) > SESSION_FILE_LIMIT
+            or sum(len(f["content"]) for f in excel_files) > SESSION_BYTE_LIMIT):
+        raise ServiceError("invalid", f"Choose up to {SESSION_FILE_LIMIT} workbooks and "
+                           f"{SESSION_BYTE_LIMIT // 1_000_000} MB for discovery.")
     config = row["config"]
     previous = connection.execute(
         "SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config=%s AND confirmed_at IS NOT NULL ORDER BY created_at DESC LIMIT 1",
@@ -714,8 +717,8 @@ def collect(connection, device, job, result):
         try:
             assets, _ = context_assets(catalog)
             if (
-                len(assets) + len(excel_files) > 45
-                or sum(len(f["content"]) for f in assets + excel_files) > 8_000_000
+                len(assets) + len(excel_files) > SESSION_FILE_LIMIT
+                or sum(len(f["content"]) for f in assets + excel_files) > SESSION_BYTE_LIMIT
             ):
                 raise ValueError("Complete collection exceeds hosted interpretation limits.")
         except ValueError:

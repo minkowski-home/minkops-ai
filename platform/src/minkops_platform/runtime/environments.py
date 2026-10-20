@@ -17,6 +17,16 @@ from .diagnostics import record, stage
 
 SLOTS = 4
 ATTACHMENT_LIMIT = 128
+# What one hosted session accepts: the inputs plus complete discovery context.
+# Launch checks refuse a larger scope instead of sampling masters or history.
+SESSION_FILE_LIMIT = 45
+SESSION_BYTE_LIMIT = 8_000_000
+
+
+def exceeds_session(files, extra_bytes=0):
+    """Whether these inputs, plus any inline payload, overflow one hosted session."""
+    return (len(files) > SESSION_FILE_LIMIT
+            or sum(len(f["content"]) for f in files) + extra_bytes > SESSION_BYTE_LIMIT)
 
 
 class Lease:
