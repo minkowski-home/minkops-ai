@@ -14,6 +14,9 @@ from .repository import public_run, run_for
 
 
 def target_for(connection, run, record):
+    # Stop can race the interval between provider-result persistence and bill
+    # validation. Preserve the source link without trusting raw document values.
+    data = record.get("data") or {}
     scope = run["config"].get("tally_target")
     if not scope:
         mapping = next((s for s in run["config"]["catalog_snapshot"]["sheets"]
@@ -28,7 +31,7 @@ def target_for(connection, run, record):
             return {}
         return {"tool": "excel", "device_id": str(file["device_id"]), "source_id": str(file["source_id"]),
                 "path": file["path"], "mapping": mapping,
-                "keys": {k: record["data"].get(k) for k in mapping["key_columns"]},
+                "keys": {k: data.get(k) for k in mapping["key_columns"]},
                 "run_id": str(run["id"]), "file_id": record["source_file_id"], "baseline": None}
     from .client_context import select_target
     try:
@@ -37,8 +40,8 @@ def target_for(connection, run, record):
         return {}
     return {"tool": "tally", "device_id": scope["device_id"], "company": selected["company"],
             "company_guid": selected["references"]["company_guid"], "port": selected["port"],
-            "vendor": record["data"].get("vendor"), "invoice_number": record["data"].get("invoice_number"),
-            "date": record["data"].get("date"),
+            "vendor": data.get("vendor"), "invoice_number": data.get("invoice_number"),
+            "date": data.get("date"),
             "run_id": str(run["id"]), "file_id": record["source_file_id"],
             "baseline": record.get("current")}
 

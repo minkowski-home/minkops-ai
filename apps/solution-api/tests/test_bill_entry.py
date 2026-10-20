@@ -124,6 +124,32 @@ class BillEntryTests(unittest.TestCase):
                 "SELECT event_key FROM attention_items WHERE task_id=%s ORDER BY event_key", (root["task_id"],))]
         self.assertEqual(keys, sorted(f"bill:{root['id']}:{f}:bill" for f in inputs[:2]))
 
+    def test_stopping_before_bill_validation_retains_input_without_trusting_raw_values(self):
+        from psycopg.types.json import Jsonb
+
+        did = self.tally_discovery()
+        bill = self.upload_bill("raw-stop.pdf")
+        root, _ = self.launch("bill-entry", file_ids=[bill, self.upload_bill("unread-stop.pdf")], config={
+            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "all_outputs"})
+        # Provider output is persisted before normalization. A concurrent Stop
+        # must preserve the input even though no trusted display data exists yet.
+        raw = self.tally_result(root, bill)
+        self.assertNotIn("data", raw["records"][0])
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE account_runs SET state='executing',result=%s WHERE parent_run_id=%s AND file_ids=%s",
+                      (Jsonb(raw), root["id"], Jsonb([bill])))
+        response = self.client.post(f"/api/tenants/mock-tenant/tasks/{root['task_id']}/control",
+                                    headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(response.status_code, 200, response.text)
+        loaded = self.client.get(self.base + f"/runs/{root['id']}").json()
+        self.assertEqual(loaded["state"], "stopped")
+        self.assertFalse(loaded["tally_writes"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            items = c.execute("SELECT target FROM attention_items WHERE task_id=%s", (root["task_id"],)).fetchall()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["target"]["file_id"], bill)
+        self.assertIsNone(items[0]["target"]["vendor"])
+
     def exception_only_batch(self, count=2):
         did = self.tally_discovery()
         inputs = [self.upload_bill(f"bill-{i}.pdf") for i in range(count)]
