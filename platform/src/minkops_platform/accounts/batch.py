@@ -106,7 +106,11 @@ def _bind_scoped_assets(connection, run, config, file_ids):
     ] + [{"capability": "files.snapshot", "resource_id": a["id"], "sha256": a["sha256"]} for a in assets]
 
 
-def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
+def resolve_bill(connection, tenant, user, run_id, file_id, reject):
+    """Defer an unresolved input, or recheck it against refreshed discovery.
+
+    Reached only through audited Attention decisions (Do nothing, Recheck).
+    """
     from .repository import public_run
     from .tally_writes import complete_run, defer_input
 
@@ -129,8 +133,6 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
         )
         complete_run(connection, run, defer_input(run["result"], file_id))
     else:
-        if user_input.strip():
-            raise ServiceError("invalid", "Edit the original system, refresh discovery, then retry.")
         original_target = run["config"].get("tally_target")
         if original_target:
             from .bills import refreshed_tally_target
@@ -217,7 +219,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, user_input, reject):
 def recheck_many(connection, tenant, user, run, file_ids):
     """Refresh discovery once, then enqueue independent children atomically."""
     from .bills import queue_tally_context
-    resolve_bill(connection, tenant, user, run["id"], file_ids[0], "", False)
+    resolve_bill(connection, tenant, user, run["id"], file_ids[0], False)
     template = connection.execute("""SELECT config FROM account_runs WHERE tenant_id=%s
         AND parent_run_id=%s AND file_ids @> %s AND NOT coalesce((config->>'superseded')::boolean,false)
         ORDER BY updated_at DESC LIMIT 1""", (tenant["id"], run["id"], Jsonb([file_ids[0]]))).fetchone()

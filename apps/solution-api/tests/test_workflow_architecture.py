@@ -257,7 +257,9 @@ class WorkflowArchitectureTests(unittest.TestCase):
         )
         self.assertEqual(approved.status_code, 200, approved.text)
         self.assertEqual(approved.json()["state"], "writing")
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def clear_policy(self):
         with psycopg.connect(URL) as connection:
@@ -341,7 +343,9 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
         approved = self.approve(loaded, loaded["result"])
         self.assertEqual(approved["state"], "writing")
         self.assertEqual(len(approved["tally_writes"]), 2)
-        self.client.post(self.base + f"/runs/{parent['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{parent['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_tally_child_cannot_execute_changed_authorized_input(self):
         from unittest.mock import MagicMock

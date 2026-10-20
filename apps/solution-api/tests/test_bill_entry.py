@@ -601,13 +601,9 @@ class BillEntryTests(unittest.TestCase):
             "same-company", extra_ledgers=["New supplier"], reuse_device=True
         )
         response = self.client.post(
-            self.base + f"/runs/{run['id']}/resolve-bill",
+            f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
             headers=self.csrf,
-            json={
-                "file_id": bill,
-                "user_input": "",
-                "reject": False,
-            },
+            json={"action": "retry"},
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["config"]["tally_target"]["discovery_id"], new_discovery)
@@ -644,9 +640,9 @@ class BillEntryTests(unittest.TestCase):
         )
         self.tally_discovery("replacement-company", reuse_device=True)
         response = self.client.post(
-            self.base + f"/runs/{run['id']}/resolve-bill",
+            f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
             headers=self.csrf,
-            json={"file_id": bill, "user_input": "", "reject": False},
+            json={"action": "retry"},
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("scope changed", response.text)
@@ -1418,13 +1414,7 @@ class BillEntryTests(unittest.TestCase):
         )
         self.assertEqual(loaded["state"], "review")
 
-    def test_cancellation_late_tally_receipt_and_lease_expiry_do_not_replay_or_claim_success(self):
-        self.verify_cancelled_tally_receipt()
-
-    def test_stop_preserves_late_tally_receipt_and_prevents_new_save_plans(self):
-        self.verify_cancelled_tally_receipt(control=True)
-
-    def verify_cancelled_tally_receipt(self, control=False):
+    def test_stop_keeps_late_tally_receipt_without_replay_or_claiming_success(self):
         did = self.tally_discovery()
         bill = self.upload_bill()
         run, _ = self.launch(
@@ -1444,10 +1434,9 @@ class BillEntryTests(unittest.TestCase):
         self.assertIsNone(
             self.client.post("/api/desktop/worker/claim", headers=self.worker, json={}).json()
         )
-        cancelled = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control", headers=self.csrf, json={"action": "stop"}) if control else self.client.post(
-            self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf
-        )
-        self.assertEqual(cancelled.status_code, 200, cancelled.text)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
         self.assertEqual(
             self.client.get(
                 route + "/plan?claim_token=" + claim["claim_token"], headers={**self.worker, "X-Minkops-Plan-Version": "3"}
@@ -1464,7 +1453,7 @@ class BillEntryTests(unittest.TestCase):
         )
         self.assertEqual(late.status_code, 200, late.text)
         final = self.client.get(self.base + f"/runs/{run['id']}").json()
-        self.assertEqual(final["state"], "stopped" if control else "failed")
+        self.assertEqual(final["state"], "stopped")
         self.assertIsNotNone(final["tally_writes"][0]["verified_at"])
 
     def test_human_clarification_retries_only_failed_bill_without_replaying_good_input(self):
@@ -1507,9 +1496,9 @@ class BillEntryTests(unittest.TestCase):
         )
         self.assertEqual(receipt.status_code, 200, receipt.text)
         resumed = self.client.post(
-            self.base + f"/runs/{root['id']}/resolve-bill",
+            f"/api/tenants/mock-tenant/attention/bills/{root['id']}/{bad}",
             headers=self.csrf,
-            json={"file_id": bad},
+            json={"action": "retry"},
         )
         self.assertEqual(resumed.status_code, 200, resumed.text)
         with psycopg.connect(URL, row_factory=dict_row) as c:
@@ -1519,7 +1508,6 @@ class BillEntryTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual(len(retry), 1)
         self.assertEqual(retry[0]["file_ids"], [bad])
-        self.assertNotIn("user_input", retry[0]["config"])
         result = self.tally_result(root, bad)
         result["records"][0]["document"]["number"] = "MOCK-2"
         self.process(retry[0], result)
@@ -1598,7 +1586,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(resumed.status_code, 200, resumed.text)
         self.assertEqual(resumed.json()["state"], "writing")
 
-    def test_late_cancelled_excel_receipt_retains_newer_observed_source_bytes(self):
+    def test_late_excel_receipt_after_stop_retains_newer_observed_source_bytes(self):
         from io import BytesIO
 
         from openpyxl import load_workbook
@@ -1612,9 +1600,8 @@ class BillEntryTests(unittest.TestCase):
         write = approved["writes"][0]
         route = self.base + f"/runs/{run['id']}/writes/{write['id']}"
         saved = self.client.get(route + "/content").content
-        response = self.client.post(
-            self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf
-        )
+        response = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                    headers=self.csrf, json={"action": "stop"})
         self.assertEqual(response.status_code, 200, response.text)
         book = load_workbook(BytesIO(saved))
         book["Bills"]["C2"] = 33
@@ -1632,7 +1619,7 @@ class BillEntryTests(unittest.TestCase):
                 route + "/verify", headers=self.csrf, files={"file": ("records.xlsx", saved)}
             )
             self.assertEqual(receipt.status_code, 200, receipt.text)
-            self.assertEqual(receipt.json()["state"], "failed")
+            self.assertEqual(receipt.json()["state"], "stopped")
         with psycopg.connect(URL, row_factory=dict_row) as c:
             actual = c.execute(
                 "SELECT id,content FROM account_files WHERE source_id=%s AND current",
@@ -1658,16 +1645,10 @@ class BillEntryTests(unittest.TestCase):
                 (root["id"],),
             )
         reconcile_once(URL)
-        route = self.base + f"/runs/{root['id']}/resolve-bill"
-        rejected = self.client.post(
-            route, headers=self.csrf, json={"file_id": ids[0], "reject": True}
-        )
+        decide = f"/api/tenants/mock-tenant/attention/bills/{root['id']}/"
+        rejected = self.client.post(decide + ids[0], headers=self.csrf, json={"action": "nothing"})
         self.assertEqual(rejected.status_code, 200, rejected.text)
-        retry = self.client.post(
-            route,
-            headers=self.csrf,
-            json={"file_id": ids[1]},
-        )
+        retry = self.client.post(decide + ids[1], headers=self.csrf, json={"action": "retry"})
         self.assertEqual(retry.status_code, 200, retry.text)
         with psycopg.connect(URL, row_factory=dict_row) as c:
             child = c.execute(

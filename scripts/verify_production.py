@@ -15,6 +15,7 @@ import httpx
 
 ORIGIN = "https://app.minkops.com"
 BASE = "/api/tenants/mock-tenant/accounts"
+DECISIONS = "/api/tenants/mock-tenant/attention/bills"
 REVIEWED_BILLS = json.loads(Path(__file__).with_name("release-bill-fixtures.json").read_text())
 
 
@@ -71,9 +72,9 @@ def main(state_dir, phase, invoice):
                         "Only unresolved reviews may be retried")
                 require(result["config"]["tally_target"]["company"] == "Test Company",
                         "Release retry is restricted to Test Company")
-                retry = api.post(BASE + f"/runs/{previous['id']}/resolve-bill", json={
-                    "file_id": provenance[0]["id"],
-                })
+                # Recheck is the same audited decision the review screen offers.
+                retry = api.post(f"{DECISIONS}/{previous['id']}/{provenance[0]['id']}",
+                                 json={"action": "retry"})
                 retry.raise_for_status()
                 result = retry.json()
             if phase == "bill-approve":

@@ -420,28 +420,6 @@ def verify_write(connection, tenant, run_id, write_id, content):
     return public_run(connection, run_for(connection, tenant["id"], run_id))
 
 
-def cancel_writes(connection, tenant, run_id):
-    run = run_for(connection, tenant["id"], run_id, True)
-    if run["state"] != "writing":
-        raise ServiceError("conflict", "This run has no pending local writes.")
-    connection.execute(
-        """UPDATE account_writes SET cancelled_at=now() WHERE tenant_id=%s
-         AND run_id=%s AND verified_at IS NULL""",
-        (tenant["id"], run_id),
-    )
-    connection.execute(
-        "UPDATE account_tally_writes SET cancelled_at=now() WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL",
-        (tenant["id"], run_id),
-    )
-    message = "Remaining saves cancelled. Inspect the destinations before refreshing discovery; already applied changes remain."
-    connection.execute(
-        "UPDATE account_runs SET error=%s WHERE tenant_id=%s AND id=%s",
-        (message, tenant["id"], run_id),
-    )
-    observe(connection, run, "failed", message, 85)
-    return public_run(connection, run_for(connection, tenant["id"], run_id))
-
-
 def upload_source(
     connection,
     tenant,

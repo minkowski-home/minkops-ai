@@ -134,7 +134,7 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     if action not in allowed_actions(run, record):
         raise ServiceError("invalid", "This decision is unavailable for this bill. Use an offered action or handle it in the original system.")
     if action == "retry":
-        return resolve_bill(connection, tenant, user, run_id, file_id, "", False)
+        return resolve_bill(connection, tenant, user, run_id, file_id, False)
     if action == "retry_save":
         return _retry_save(connection, tenant, user, run, index)
     if record.get("save_hold") and action in ("guess", "supplier"):
@@ -144,7 +144,7 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
         attention.audit(connection, item, user["id"], "deferred", "No write. Manual handling required.")
         if not original:
             # An input without any proposal is deferred as a whole.
-            return resolve_bill(connection, tenant, user, run_id, file_id, "", True)
+            return resolve_bill(connection, tenant, user, run_id, file_id, True)
         # Only this proposal is final; the input settles once all of its bills do.
         result = copy.deepcopy(run["result"])
         result["records"][index].update(decision="reject", status="rejected")

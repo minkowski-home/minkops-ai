@@ -133,9 +133,9 @@ class SchemaContextTests(unittest.TestCase):
         )
         self.tally_discovery("company-2", reuse_device=True)
         response = self.client.post(
-            self.base + f"/runs/{run['id']}/resolve-bill",
+            f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}",
             headers=self.csrf,
-            json={"file_id": bill, "user_input": "", "reject": False},
+            json={"action": "retry"},
         )
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("Company scope changed", response.text)

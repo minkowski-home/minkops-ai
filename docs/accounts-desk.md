@@ -75,10 +75,11 @@ pending cleanup. Audit IDs and results stay in PostgreSQL.
 Local writes reserve each workbook, reject duplicates and changed local files,
 and serialize same-browser tabs. A disconnected receipt can be retried: an
 already matching workbook is verified without appending again. Unverified
-recovery copies remain in IndexedDB; verified writes remove them. Cancel
-remaining saves releases reservations, retains audit records, and does not
-undo changes already saved. A late valid receipt is recorded without converting
-a cancelled run into success. External workbook changes require rediscovery;
+recovery copies remain in IndexedDB; verified writes remove them. Stopping the
+task cancels unsaved writes, releases their reservations, keeps unsaved bills in
+Attention and records the actor; it does not undo changes already saved. A late
+valid receipt is recorded without converting a stopped run into success. Held
+bills are rechecked or deferred only through Attention decisions. External workbook changes require rediscovery;
 Minkops' own verified writes can advance the confirmed catalog safely.
 
 ## Local setup

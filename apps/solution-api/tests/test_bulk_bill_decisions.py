@@ -93,7 +93,9 @@ class BulkBillTests(unittest.TestCase):
             statuses = {r["source_file_id"]: r.get("status") for r in stored["records"]}
             self.assertEqual([statuses[file] for file in files], ["writing"] * 3 + [None])
             self.assertEqual(c.execute("SELECT count(*) FROM account_tally_writes WHERE run_id=%s", (run["id"],)).fetchone()["count"], 3)
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_retry_save_uses_one_approval_and_replay_does_not_enqueue_more_writes(self):
         from unittest.mock import patch
@@ -117,7 +119,9 @@ class BulkBillTests(unittest.TestCase):
         self.assertEqual(len(response.json()["tally_writes"]), 3)
         statuses = {r["source_file_id"]: r.get("status") for r in response.json()["result"]["records"]}
         self.assertEqual([statuses[file] for file in files], ["writing"] * 3 + ["held"])
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_bulk_recheck_refreshes_once_and_queues_three_children_in_one_transaction(self):
         from unittest.mock import patch
@@ -153,4 +157,6 @@ class BulkBillTests(unittest.TestCase):
         self.assertEqual(self.client.post(control, headers=self.csrf, json={"action": "resume"}).status_code, 200)
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         self.assertEqual((loaded["state"], len(loaded["tally_writes"])), ("writing", 3))
-        self.client.post(self.base + f"/runs/{run['id']}/cancel-writes", headers=self.csrf)
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
