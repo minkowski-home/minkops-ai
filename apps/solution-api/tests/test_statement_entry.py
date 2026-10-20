@@ -39,20 +39,20 @@ class StatementTests(unittest.TestCase):
 
     TEXT='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,OUT1,11,,989,Test\n02/10/26,IN1,,17,1006,Test\n02/10/26,HOLD,3,,1003,Unknown branch\n'
 
-    def ready(self, *, with_mapping=False, text=None, statuses=('ready','ready','held')):
-        discovery=self.tally_discovery('statement-company',voucher_types=('Purchase','Payment','Receipt'))
+    def ready(self, *, with_mapping=False, text=None, statuses=('ready','ready','held'), proposals=None):
+        discovery=self.tally_discovery('statement-company',voucher_types=('Purchase','Payment','Receipt','Contra'))
         with psycopg.connect(URL,row_factory=dict_row) as c:
             catalog=c.execute('SELECT catalog FROM discovery_runs WHERE id=%s',(discovery,)).fetchone()['catalog']
             records=catalog['sources'][0]['snapshot']['companies'][0]['masters']['records']
             records.extend({'type':'LEDGER','data':{'NAME':name,'GUID':name+'-guid','ALTERID':'1','PARENT':parent}}
-                for name,parent in [('Bank','Bank Accounts'),('Expense','Indirect Expenses')])
+                for name,parent in [('Bank','Bank Accounts'),('Expense','Indirect Expenses'),('ICICI','Bank Accounts')])
             for record in records:
                 if record['type']=='VOUCHERTYPE': record['data'].update(GUID=record['data']['NAME']+'-guid',PARENT=record['data']['NAME'])
             c.execute('UPDATE discovery_runs SET catalog=%s WHERE id=%s',(Jsonb(catalog),discovery))
         summary=self.client.get(f'/api/tenants/mock-tenant/discovery/latest?device_id={self.device["id"]}').json()
         company=summary['catalog']['sources'][0]['snapshot']['companies'][0]
         self.assertNotIn('records',company['masters'])
-        self.assertEqual(company['statement_options']['banks'],[{'name':'Bank','guid':'Bank-guid'}])
+        self.assertEqual(company['statement_options']['banks'],[{'name':'Bank','guid':'Bank-guid'},{'name':'ICICI','guid':'ICICI-guid'}])
         text=text or self.TEXT
         file=self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':'["statement.csv"]'},
             files=[('files',('statement.csv',text.encode('utf-8-sig')))]).json()['files'][0]['id']
@@ -72,6 +72,7 @@ class StatementTests(unittest.TestCase):
             self.assertTrue(any(f['path'].endswith('masters-lookup-v1-0.json') for f in files))
             if mapping:self.assertTrue(any(str(f['id'])==mapping for f in files))
             on_event('agent.session.created','statement-session-'+str(uuid.uuid4()),'turn')
+            if proposals: return {'records':proposals(context['transactions'],file)}
             return {'records':[{'source_file_id':file,'sheet':'','row':r['row'],
                 'company_guid':'statement-company','bank_ledger_guid':'Bank-guid','counter_ledger_guid':'Expense-guid',
                 'voucher_type_guid':('Payment' if r['amount_cents']<0 else 'Receipt')+'-guid',
@@ -99,6 +100,35 @@ class StatementTests(unittest.TestCase):
     def config(self, run):
         with psycopg.connect(URL,row_factory=dict_row) as c:
             return c.execute('SELECT config FROM account_runs WHERE id=%s',(run['id'],)).fetchone()['config']
+
+    def test_a_transfer_between_own_banks_is_written_once_and_settles_both_rows(self):
+        text='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,TO-ICICI,500,,500,Test\n01/10/26,FROM-HDFC,,500,1000,Test\n'
+        def transfer(rows,file):
+            out,into=rows
+            leg=lambda r,bank,other,mate:{'source_file_id':file,'sheet':'','row':r['row'],'company_guid':'statement-company',
+                'bank_ledger_guid':bank,'counter_ledger_guid':other,'voucher_type_guid':'Contra-guid','family':'contra',
+                'pair':{'source_file_id':file,'sheet':'','row':mate['row']},'cost_centre_guid':None,'cost_category_guid':None,
+                'evidence':'Same-day transfer between the two own accounts.','exception':None}
+            return [leg(out,'Bank-guid','ICICI-guid',into),leg(into,'ICICI-guid','Bank-guid',out)]
+        run=self.ready(text=text,statuses=('ready','ready'),proposals=transfer)
+        approved=self.client.post(self.base+f"/runs/{run['id']}/approve",headers=self.csrf,json={'result':{'action':'write_ready'}})
+        self.assertEqual(approved.status_code,200,approved.text)
+        with psycopg.connect(URL) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM account_tally_writes WHERE run_id=%s',(run['id'],)).fetchone()[0],1)
+        job=self.client.post('/api/desktop/worker/claim',headers=self.worker,json={}).json()
+        route=f"/api/desktop/worker/jobs/{job['id']}"
+        plan=self.client.get(route+'/plan?claim_token='+job['claim_token'],headers={**self.worker,'X-Minkops-Plan-Version':'5'}).json()
+        self.assertEqual((plan['family'],[(ln['ledger'],ln['side']) for ln in plan['lines']]),('contra',[('Bank','credit'),('ICICI','debit')]))
+        older=self.client.get(route+'/plan?claim_token='+job['claim_token'],headers={**self.worker,'X-Minkops-Plan-Version':'4'})
+        self.assertEqual(older.status_code,409)
+        current={'guid':'a1b2c3d4-0000-4000-8000-000000000009','master_id':'9','date':'20261001','voucher_type':'Contra',
+            'family':'contra','reference':plan['header']['reference'],'number':'','narration':'','party_ledger':'','tag':plan['remote_id'],
+            'lines':[{'ledger':'Bank','amount_cents':50000},{'ledger':'ICICI','amount_cents':-50000}],'allocations':[],'fingerprint':'v5:'+'d'*64}
+        finished=self.client.post(route+'/finish',headers=self.worker,json={'claim_token':job['claim_token'],
+            'result':{'outcome':'saved','company_guid':'statement-company','current':current}})
+        self.assertEqual(finished.status_code,200,finished.text)
+        rows=self.client.get(self.base+f"/runs/{run['id']}").json()['result']['records']
+        self.assertEqual([r['status'] for r in rows],['saved','duplicate'])
 
     def test_a_known_bank_format_is_read_with_no_layout_session(self):
         first=self.ready()

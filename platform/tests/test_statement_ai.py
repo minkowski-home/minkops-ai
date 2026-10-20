@@ -13,7 +13,9 @@ def companies():
     return [{'company':'Test','company_guid':'company','port':9000,'identity':{'BOOKSFROM':'20260401'},'masters':{'records':[
         master('LEDGER','Bank',PARENT='Bank Accounts'), master('LEDGER','Expense',PARENT='Indirect Expenses'),
         master('LEDGER','Rent',PARENT='Indirect Expenses'),
-        master('VOUCHERTYPE','Payment',PARENT='Payment'), master('VOUCHERTYPE','Receipt',PARENT='Receipt')]}}]
+        master('VOUCHERTYPE','Payment',PARENT='Payment'), master('VOUCHERTYPE','Receipt',PARENT='Receipt'),
+        master('LEDGER','ICICI',PARENT='Bank Accounts'), master('LEDGER','Input GST',PARENT='Duties & Taxes'),
+        master('VOUCHERTYPE','Contra',PARENT='Contra')]}}]
 
 
 def choice(**overrides):
@@ -109,3 +111,45 @@ def test_statement_uses_a_hosted_skill_without_legacy_routing_settings():
     assert not getattr(StatementHandler(),'deterministic',False)
     assert 'other_side_ledger' not in definition.tenant_schema['properties']
     assert 'bank_ledgers' not in definition.run_schema['properties']
+
+
+def lines_of(plan):
+    return [(line['ledger'], line['side'], line['amount_cents']) for line in plan['lines']]
+
+
+def test_bank_charges_with_gst_split_into_native_lines_that_add_up_exactly():
+    rows=[row(amount_cents=-1770,narration='NEFT charges incl GST')]
+    split=[{'role':'charge','ledger_guid':'Expense-guid','amount':15.0,'cost_centre_guid':None,'cost_category_guid':None},
+           {'role':'tax','ledger_guid':'Input GST-guid','amount':2.7,'cost_centre_guid':None,'cost_category_guid':None}]
+    [record]=validate(rows,[choice(counter_ledger_guid='Expense-guid',lines=split)])
+    plan=record['plan']
+    assert (plan['format_version'],plan['family'],plan['duplicate']['strategy'])==(5,'payment','tag')
+    assert lines_of(plan)==[('Bank','credit',1770),('Expense','debit',1500),('Input GST','debit',270)]
+    assert record['counter_ledger']=='Expense + Input GST'
+    off=[{**split[0],'amount':16.0},split[1]]
+    [held]=validate([row(amount_cents=-1770)],[choice(counter_ledger_guid='Expense-guid',lines=off)])
+    assert (held['status'],held['code'])==('held','statement_interpretation')
+
+
+def contra(row_number, bank, other, pair):
+    return choice(row=row_number,bank_ledger_guid=bank+'-guid',counter_ledger_guid=other+'-guid',voucher_type_guid='Contra-guid',
+                  family='contra',pair={'source_file_id':'file','sheet':'','row':pair} if pair else None)
+
+
+def test_both_legs_of_a_transfer_become_one_contra_written_by_the_paying_leg():
+    rows=[row(row=3,amount_cents=-500000,identity='leg-out'),row(row=4,amount_cents=500000,date='2026-10-02',identity='leg-in')]
+    out,into=validate(rows,[contra(3,'Bank','ICICI',4),contra(4,'ICICI','Bank',3)])
+    assert lines_of(out['plan'])==[('Bank','credit',500000),('ICICI','debit',500000)]
+    assert out['plan']['identity']['legs']==['leg-in','leg-out'] and out['plan']['destination_key']=='statement:company:contra'
+    assert (into.get('plan'),into['duplicate_of'],into['covered_by_transfer'])==(None,0,True)
+
+
+def test_mismatched_or_one_sided_transfers_never_write_two_vouchers():
+    rows=[row(row=3,amount_cents=-500000,identity='leg-out'),row(row=4,amount_cents=400000,identity='leg-in')]
+    out,into=validate(rows,[contra(3,'Bank','ICICI',4),contra(4,'ICICI','Bank',3)])
+    assert {out['code'],into['code']}=={'statement_transfer_unpaired'}
+    [lone]=validate([row(amount_cents=-500000)],[contra(3,'Bank','ICICI',None)])
+    assert lone['plan']['duplicate']['strategy']=='counterpart'
+    assert lone['plan']['duplicate']['window']=={'from':'2026-09-28','to':'2026-10-04'}
+    [expense]=validate([row(amount_cents=-500000)],[contra(3,'Bank','Rent',None)])
+    assert expense['code']=='statement_interpretation'

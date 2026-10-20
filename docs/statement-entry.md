@@ -80,9 +80,20 @@ Every approved voucher intent is persisted before the first import. The companio
 
 Native date collections use calendar components because Tally can coerce typed
 date variables or numeric date conversions differently. Returned dates are
-independently checked. Contra, split postings, unsupported statutory/billwise
-allocations, master creation, undo and silent source correction remain outside
-the write contract; the skill must hold them rather than flatten their accounting.
+independently checked.
+
+From statement-entry 0.4 one bank line may post to several ledgers (`lines`,
+for example bank charges and the GST on them, or TDS), adding up exactly to the
+bank amount; such rows, and transfers, are stored as native v5 vouchers
+(companion 0.9.0+). A transfer between the client's own bank or cash accounts is
+a **Contra**. When both legs are in the run (opposite signs, equal amount, each
+naming the other's bank, within three days) the leg where money leaves writes
+one Contra and the other leg is covered by it; mismatched legs hold as
+`statement_transfer_unpaired`. A lone leg first looks for the transfer its other
+leg may already have entered: one Minkops Contra with both lines settles it, an
+untagged match holds as possibly existing. Bill-wise allocations, split cost
+allocations, undo and master creation remain outside the write contract; the
+skill holds them rather than flattening their accounting.
 
 Apply migration `0010_statement_ai_settings.sql` before reinstalling workflows.
 It retires only the old Statement Entry ledger/strategy settings and preserves
