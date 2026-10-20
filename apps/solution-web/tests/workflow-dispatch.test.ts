@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { presentationFor } from "../src/starter/workflows/presentation.ts";
+import { defaultableValues, presentationFor } from "../src/starter/workflows/presentation.ts";
 
 test("installed presentation selects existing screens independently of the workflow key", () => {
   assert.equal(presentationFor({ key: "another-client-discovery", presentation: "accounts-discovery" }), "accounts-discovery");
@@ -12,4 +12,8 @@ test("legacy metadata resolves current screens and unknown presentations fail cl
   assert.equal(presentationFor({ key: "bill-entry" }), "accounts-bill");
   assert.equal(presentationFor({ key: "planned-demo" }), null);
   assert.equal(presentationFor({ key: "unknown", presentation: "remote-import" }), null);
+});
+
+test("save defaults excludes run resources and unsupported fields", () => {
+  assert.deepEqual(defaultableValues({review_mode:'only_exceptions', device_id:'pc', discovery_id:'run', checks:['totals']}, {review_mode:{type:'string'}}), {review_mode:'only_exceptions'});
 });

@@ -1,3 +1,5 @@
+/** How the console presents a workflow and which of its run options it may save. */
+
 /** Installed presentation selects a product adapter, independently of identity. */
 export type WorkflowPresentation = "accounts-discovery" | "accounts-bill" | "accounts-statement" | "proposal";
 
@@ -9,4 +11,9 @@ export function presentationFor(workflow: { key: string; presentation?: string |
   if (workflow.key === "source-discovery") return "accounts-discovery";
   if (workflow.key === "bill-entry") return "accounts-bill";
   return null;
+}
+
+/** Only schema-declared defaults are persisted; resource grants remain run-specific. */
+export function defaultableValues(values: Record<string, unknown>, properties: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(values).filter(([key]) => key in properties));
 }

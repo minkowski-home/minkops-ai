@@ -1,4 +1,3 @@
-import { billOutcome } from "../workflows/runSettings";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
@@ -8,7 +7,7 @@ import { CatalogReview } from "./CatalogReview";
 import { BillDetailsButton } from "./BillDetails";
 import { DiscoveryReview } from "./Discovery";
 import { applyLocalPlan, applyTallyPlan } from "./localFiles";
-import { billActions, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
+import { billActions, billOutcome, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
 import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";

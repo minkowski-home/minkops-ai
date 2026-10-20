@@ -95,3 +95,14 @@ export function billDetails(record: BillRecord, config: Record<string, unknown>)
     ],
   };
 }
+
+/** A completed write and outstanding human attention are independent outcomes. */
+export function billOutcome(status: string | undefined, attention: boolean): string {
+  const suffix = attention ? " · check Attention" : "";
+  if (status === "saved") return "Saved and verified" + suffix;
+  if (status === "duplicate") return "Duplicate skipped" + suffix;
+  if (status === "writing") return "Saving and checking";
+  if (status === "rejected") return "Not written";
+  if (status === "held" || attention) return "Needs attention";
+  return "Ready to write";
+}

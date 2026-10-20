@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { billActions, inputsWithoutProposal } from "../src/starter/accounts/billView.ts";
+import { billActions, billOutcome, inputsWithoutProposal } from "../src/starter/accounts/billView.ts";
 import type { BillRecord, BillResult } from "../src/starter/accounts/types.ts";
 
 const record = (source_file_id: string, extra: Partial<BillRecord> = {}): BillRecord => ({
@@ -90,4 +90,12 @@ test("voucher previews list every proposed line with its side, whatever the vouc
     ["Purchase Returns 18%", "1,000.00 Cr"], ["Input IGST 18%", "180.00 Cr"], ["Round Off", "0.40 Cr"],
     ["Total", "1,180.40"],
   ]);
+});
+
+test("write outcomes take precedence over findings and retain attention", () => {
+  assert.equal(billOutcome('saved', true), 'Saved and verified · check Attention');
+  assert.equal(billOutcome('saved', false), 'Saved and verified');
+  assert.equal(billOutcome('duplicate', true), 'Duplicate skipped · check Attention');
+  assert.equal(billOutcome('writing', true), 'Saving and checking');
+  assert.equal(billOutcome('held', true), 'Needs attention');
 });
