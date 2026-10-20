@@ -205,6 +205,9 @@ def proposed(connection, run, payload):
 def decide(connection, tenant, user, item_id, action):
     """Confirm or decline a proposed pattern from its attention card."""
     item = attention.get(connection, tenant["id"], item_id)
+    if item["kind"] == "layout" and item["status"] == "pending":
+        from .statement_layouts import decide as decide_layout
+        return decide_layout(connection, tenant, user, item, action)
     if item["kind"] != "profile" or item["status"] != "pending":
         raise ServiceError("conflict", "This posting pattern is no longer awaiting a decision.")
     profile = profiles.get(connection, tenant["id"], item["target"]["profile_id"], lock=True)

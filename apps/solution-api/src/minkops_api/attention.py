@@ -41,7 +41,7 @@ def refresh_one(slug: str, item_id: UUID, request: Request, user: User, connecti
 
 
 class ProfileDecision(BaseModel):
-    action: Literal["confirm", "nothing"]
+    action: Literal["confirm", "nothing", "dmy", "mdy"]
 
 
 @router.post("/{item_id}/profile")

@@ -14,6 +14,8 @@ interface Item {
   kind?: string;
   /** A company's derived posting pattern awaiting one confirmation. */
   profile?: { company: string; summary: string[]; waiting: number };
+  /** A new statement format: one date-order answer, or sample rows to confirm. */
+  layout?: { prompt: string; actions: string[]; samples: { date: string; amount_cents: number; account: string; narration: string }[] };
   workflow: string;
   employee: string;
   updated_at: string;
@@ -158,7 +160,24 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                     <ul>{i.profile.summary.map((line) => <li key={line}>{line}</li>)}</ul>
                   </div>
                 )}
-                {i.status === "pending" && i.profile ? (
+                {i.layout && (
+                  <div>
+                    <p>{i.layout.prompt}</p>
+                    <ul>{i.layout.samples.map((row, n) => (
+                      <li key={n}>{row.date} · {(row.amount_cents / 100).toFixed(2)}{row.account ? ` · ${row.account}` : ""}{row.narration ? ` · ${row.narration}` : ""}</li>
+                    ))}</ul>
+                  </div>
+                )}
+                {i.status === "pending" && i.layout ? (
+                  <div className="accounts-toolbar">
+                    {i.layout.actions.map((answer) => (
+                      <button key={answer} className={answer === "nothing" ? "button button-ghost" : "button"} disabled={busy}
+                        onClick={() => void action(`/${i.id}/profile`, { action: answer })}>
+                        {{ dmy: "Day first", mdy: "Month first", confirm: "Confirm", nothing: "Do nothing" }[answer] ?? answer}
+                      </button>
+                    ))}
+                  </div>
+                ) : i.status === "pending" && i.profile ? (
                   <div className="accounts-toolbar">
                     <button className="button" disabled={busy}
                       onClick={() => void action(`/${i.id}/profile`, { action: "confirm" })}>Confirm</button>

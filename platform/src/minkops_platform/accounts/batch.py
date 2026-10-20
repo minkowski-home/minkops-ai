@@ -239,9 +239,11 @@ def recheck_many(connection, tenant, user, run, file_ids):
 def reconcile_once(url):
     with psycopg.connect(url, row_factory=dict_row) as connection:
         from .posting_profiles import sweep
+        from .statement_layouts import sweep as sweep_layouts
 
         with connection.transaction():
             sweep(connection)
+            sweep_layouts(connection)
         # NO KEY UPDATE still serializes aggregators and business mutations, but
         # lets the separate diagnostics transaction check its run foreign key.
         parents = connection.execute("""SELECT * FROM account_runs WHERE

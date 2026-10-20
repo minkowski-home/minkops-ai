@@ -109,6 +109,9 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     for row in rows:
         target = row.pop("target")
         row["reason"] = target.get("reason") or reason_sentence({}, title=row["label"])
+        if row["kind"] == "layout":
+            row["layout"] = {"prompt": target.get("prompt"), "actions": target.get("actions", []),
+                             "samples": target.get("samples", [])[:3]}
         if row["kind"] == "profile":
             # Only what the member confirms: never identities or internal targets.
             row["profile"] = {"company": target.get("company"), "summary": target.get("summary", [])[:8],

@@ -11,7 +11,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
-from minkops_connectors.statement import parse_statement
 from minkops_platform import attention, desktop
 from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.launch import LaunchInputs
@@ -27,19 +26,18 @@ def companies(context):
     return [c for s in context['sources'] if s['tool']=='tally' for c in s.get('snapshot',{}).get('companies',[])]
 
 
-def prepared_inputs(files, ids, config):
+def prepared_inputs(connection, tenant_id, files, ids, config, *, today):
     """Reuse discovery's full indexed evidence and parse source money once.
 
-    Original files remain available for statement/account headers and the optional
-    mapping. The agent classifies the canonical JSON rows, never rekeys amounts.
+    Statements are read through layouts learned per bank format and proven by
+    their balances (statement_layouts). Original files remain available for
+    account headers and the optional mapping. The agent classifies the canonical
+    rows, never rekeys amounts.
     """
-    rows=[]
-    for file in files:
-        if str(file['id']) not in ids: continue
-        for row in parse_statement(bytes(file['content']),Path(file['path']).suffix,config):
-            row.update(source_file_id=str(file['id']),source_file=file['path'],status='held' if row.get('code') else 'ready')
-            rows.append(row)
-    if len(rows)>10000: raise ValueError('Select at most 10,000 transaction rows in one run.')
+    from .statement_layouts import parse, resolve
+
+    statements=[f for f in files if str(f['id']) in ids]
+    rows=parse(resolve(connection,tenant_id,statements),today=today)
     assets,manifest=context_assets(config['statement_context'])
     files=[*files,*assets]
     if len(files)>45 or sum(len(f['content']) for f in files)+len(json.dumps(rows).encode())>8_000_000:
@@ -69,6 +67,43 @@ def sync_attention(connection, run, result):
         else:
             connection.execute("UPDATE attention_items SET status='done',done_at=now(),done_by=%s WHERE tenant_id=%s AND event_key=%s AND status='pending'",
                 (run['actor_id'],run['tenant_id'],key))
+
+
+def chain_ends(rows):
+    """Each bank ledger's opening and closing balance, found by the chain itself.
+
+    The start is the row whose implied opening is no other row's balance; the end
+    is the row whose balance opens no other row. File order never matters.
+    """
+    by_key={}
+    for row in rows:
+        if row.get('status') in ('ready','saved','duplicate','writing') and row.get('bank_ledger') and row.get('balance_cents') is not None:
+            by_key.setdefault(f"{row['company_guid']}:{row['bank_ledger']}",[]).append(row)
+    ends={}
+    for key,group in by_key.items():
+        balances={r['balance_cents'] for r in group}; openings={r['balance_cents']-r['amount_cents'] for r in group}
+        start=[r for r in group if r['balance_cents']-r['amount_cents'] not in balances]
+        end=[r for r in group if r['balance_cents'] not in openings]
+        if len(start)==1 and len(end)==1:
+            ends[key]={'opening_cents':start[0]['balance_cents']-start[0]['amount_cents'],'from':start[0]['date'],
+                       'closing_cents':end[0]['balance_cents'],'to':end[0]['date']}
+    return ends
+
+
+def check_continuity(connection, run, result):
+    """A gap between consecutive statements of one account is one attention item; no row is held."""
+    result['chain_ends']=chain_ends(result['records'])
+    for key,ends in result['chain_ends'].items():
+        previous=connection.execute("""SELECT result->'chain_ends'->%s AS ends FROM account_runs
+            WHERE tenant_id=%s AND workflow_key='statement-entry' AND id<>%s AND result->'chain_ends' ? %s
+            AND (result->'chain_ends'->%s->>'to') < %s ORDER BY result->'chain_ends'->%s->>'to' DESC, updated_at DESC LIMIT 1""",
+            (key,run['tenant_id'],run['id'],key,key,ends['from'],key)).fetchone()
+        if previous and previous['ends']['closing_cents']!=ends['opening_cents']:
+            bank=key.split(':',1)[1]
+            attention.record(connection,run,f"statement:{run['id']}:{key}:gap",bank,'Transactions missing',target={
+                'reason':f"{bank} closed at {previous['ends']['closing_cents']/100:.2f} on {previous['ends']['to']} in an earlier "
+                         f"statement, but this one opens at {ends['opening_cents']/100:.2f} on {ends['from']}. "
+                         "Select the statement that covers the gap; rows here are not held."},actor=run['actor_id'])
 
 
 def complete(connection, run, result):
@@ -120,19 +155,44 @@ class StatementHandler(AccountsHandler):
         selection={**body['config'],'source_ids':list({str(f['source_id']) for f in files})}
         config=resolve_run_config(definition,workflow['config_values'],selection,
             allowed_source_ids=set(selection['source_ids']),allowed_destination_ids=set())
-        files,_,_=prepared_inputs(files,ids,{**config,'statement_context':context})
+        from datetime import date
+        files,_,_=prepared_inputs(connection,tenant['id'],files,ids,{**config,'statement_context':context},today=date.today())
         return LaunchInputs(files,ids,None,config,{'statement_context':context,'statement_device_id':str(device['id'])})
+
+    def launched(self, connection, run):
+        """Sheets in a format not seen before are read by one layout session first."""
+        from .batch import create_child
+        from .statement_layouts import resolve
+        unknown=[str(e['file']['id']) for e in resolve(connection,run['tenant_id'],files_for(connection,run['tenant_id'],run['file_ids']))
+                 if 'table' in e and 'profile' not in e]
+        if unknown:
+            child=create_child(connection,run,None,file_ids=sorted(set(unknown)),stage='layout')
+            connection.execute("UPDATE workflow_runs SET config=config || %s WHERE id=%s",
+                (Jsonb({'awaits':{'layout_run':str(child['id'])}}),run['id']))
 
     def prepare(self, connection, run):
         if not run['config'].get('execution_snapshot'):
             raise ValueError('This older statement run has no AI interpretation bundle. Start a new statement run.')
+        from .statement_layouts import preview_sheets, today_for
+        if run['config'].get('stage')=='layout':
+            files=files_for(connection,run['tenant_id'],run['file_ids'])
+            context={'config':{k:v for k,v in run['config'].items() if k not in ('statement_context','agent_output_schema')},
+                'definition_version':run['definition_version'],'today':today_for(run).isoformat(),
+                'sheets':preview_sheets(connection,run['tenant_id'],files),'files':[{'id':str(f['id']),'path':f['path']} for f in files]}
+            return files,context,{}
         mapping_id=run['config'].get('branch_mapping_file_id')
         files=files_for(connection,run['tenant_id'],[*run['file_ids'],*([mapping_id] if mapping_id else [])])
-        files,context,domain=prepared_inputs(files,run['file_ids'],run['config'])
+        files,context,domain=prepared_inputs(connection,run['tenant_id'],files,run['file_ids'],run['config'],today=today_for(run))
         context['definition_version']=run['definition_version']
         return files,context,domain
 
     def validate(self, run, files, context, domain, result):
+        if run['config'].get('stage')=='layout':
+            asked={(s['source_file_id'],s['sheet']) for s in context['sheets']}
+            answered=[(x['source_file_id'],x['sheet']) for x in [*result['layouts'],*result['exceptions']]]
+            if set(answered)!=asked or len(answered)!=len(asked):
+                raise ValueError('Declare one layout or exception for each new statement sheet.')
+            return result
         rows=copy.deepcopy(domain['rows'])
         identity=lambda r:(r['source_file_id'],r['sheet'],r['row'])
         expected={identity(r) for r in rows}
@@ -178,6 +238,12 @@ class StatementHandler(AccountsHandler):
         return result
 
     def finish(self, connection, store, run, context, domain, result):
+        if run['config'].get('stage')=='layout':
+            from .statement_layouts import learn, today_for
+            learn(connection,run,result,files_for(connection,run['tenant_id'],run['file_ids']),today=today_for(run))
+            store.observe(connection,run,'review','Statement layouts learned.',70)
+            return
+        check_continuity(connection,run,result)
         complete(connection,run,result)
         if run['config']['review_mode']=='only_exceptions' and not result.get('requires_review'):
             self.approve(connection,{'id':run['tenant_id']},{'id':run['actor_id']},run,{'action':'write_ready'},result=result)
