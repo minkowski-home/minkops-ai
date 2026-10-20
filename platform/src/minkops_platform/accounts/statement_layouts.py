@@ -150,7 +150,10 @@ def learn(connection, run, result, files, *, today):
             continue  # The balances refute this reading; the sheet holds instead.
         if profiles.current(connection, run["tenant_id"], KIND, payload["signature"]):
             continue  # Another run already learned (or is confirming) this format.
-        ambiguous = [r["date"] for r in rows if not r.get("code")][:1]
+        # Ask about the printed date, before our proposed interpretation. An ISO
+        # date here would hide the very ambiguity the member is deciding.
+        ambiguous = [str(entry["table"][r["row"] - 1][payload["columns"]["date"]["column"] - 1])
+                     for r in rows if not r.get("code")][:1]
         question = None if proof["date_order"] else "date_order"
         if not proof["amounts"]:
             question = "sample"

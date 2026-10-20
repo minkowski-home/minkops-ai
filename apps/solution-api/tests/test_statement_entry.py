@@ -180,6 +180,8 @@ class StatementTests(unittest.TestCase):
                           config={'discovery_id':first['config']['discovery_id'],'branch_mapping_file_id':None})
         item=self.learn_layout(run,str(self.layout_children(run)[0]['file_ids'][0]),answer=None)
         self.assertEqual((item['label'],item['target']['actions']),('Choose date order',['dmy','mdy']))
+        self.assertIn('01/10/26', item['target']['prompt'])
+        self.assertNotIn('2026-10-01', item['target']['prompt'])
         self.assertIn('awaits',self.config(run))
         listed=next(i for i in self.client.get('/api/tenants/mock-tenant/attention').json() if i['id']==str(item['id']))
         self.assertEqual(listed['layout']['actions'],['dmy','mdy'])
