@@ -356,6 +356,24 @@ def _vouchers_within(company, records, budget, supplier_gstins):
     return kept, (dates[0] if dates else "none")
 
 
+def _record_chunks(records, compact, limit=3_500_000):
+    """JSON-array chunks under the hosted per-file limit, in order; at least one.
+
+    File names and bytes must stay stable: earlier runs pinned their hashes.
+    """
+    chunk, size = [], 2
+    for record in records:
+        if compact:
+            record = compact_record(record)
+        length = len(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()) + 2
+        if chunk and size + length > limit:
+            yield chunk
+            chunk, size = [], 2
+        chunk.append(record)
+        size += length
+    yield chunk
+
+
 def context_assets(catalog, *, companies=None, voucher_budget=None, supplier_gstins=()):
     """Full records live in lookup files; the manifest is small enough to read first.
 
@@ -420,31 +438,17 @@ def context_assets(catalog, *, companies=None, voucher_budget=None, supplier_gst
             lookup = master_lookup(company) if catalog.get("master_lookup_version") == "1" else None
             locations = []
             for kind in ("masters", "vouchers"):
-                chunk, size, number = [], 2, 0
-                records = lookup["records"] if kind == "masters" and lookup else company.get(kind, {}).get("records", [])
+                indexed = kind == "masters" and lookup is not None
+                records = lookup["records"] if indexed else company.get(kind, {}).get("records", [])
                 if kind == "vouchers" and voucher_budget is not None:
                     records, cut = _vouchers_within(company, records, voucher_budget, supplier_gstins)
                     if cut:
                         manifest["companies"][-1]["vouchers_from"] = cut
-
-                def flush():
-                    label = "masters-lookup-v1" if kind == "masters" and lookup else kind
+                label = "masters-lookup-v1" if indexed else kind
+                for number, chunk in enumerate(_record_chunks(records, compact)):
                     path = add(f"company-{index}-{label}-{number}", chunk)
-                    if kind == "masters" and lookup:
+                    if indexed:
                         locations.extend({"path": path, "offset": offset} for offset in range(len(chunk)))
-
-                for record in records:
-                    if compact:
-                        record = compact_record(record)
-                    length = (
-                        len(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()) + 2
-                    )
-                    if chunk and size + length > 3_500_000:
-                        flush()
-                        chunk, size, number = [], 2, number + 1
-                    chunk.append(record)
-                    size += length
-                flush()
             if lookup is None:
                 continue
             lookup_index = {
