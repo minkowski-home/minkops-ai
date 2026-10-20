@@ -16,8 +16,6 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@minkops/brand": ["../../packages/brand/index"],
-      "@minkops/brand/*": ["../../packages/brand/*"],
       "@minkops/solution-contracts": ["../../packages/solution-contracts/src"],
       "react": ["node_modules/@types/react"],
       "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"],
@@ -26,5 +24,5 @@
       "react-router-dom": ["node_modules/react-router-dom"]
     }
   },
-  "include": ["src", "../../packages/brand", "../../packages/solution-contracts", "../../solutions"]
+  "include": ["src", "../../packages/solution-contracts", "../../solutions"]
 }

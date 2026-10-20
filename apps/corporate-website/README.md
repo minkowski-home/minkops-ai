@@ -11,10 +11,9 @@ Rust as action). Read `design/readme.md` before changing anything visual or any 
 
 ```
 frontend/
-  index.html              Default meta tags, webfont loading, favicon
-  public/favicon.svg      The Ember dot (the brand has no logo artwork)
+  index.html              Default meta tags, webfont loading, favicon (from design/assets/logos)
   src/
-    styles/tokens.css     Design tokens, vendored from design/tokens/*.css
+    main.tsx              Imports design/tokens/*.css, then the site's own styles
     styles/base.css       Element defaults and site-wide utilities
     ui/                   Design-system primitives, form controls and icons + ui.css
     layout/               Nav, footer, SiteLayout (scroll + hash handling), Section,
@@ -50,8 +49,9 @@ api/                      FastAPI service (health and discovery form delivery)
 - **Fonts load from Google Fonts.** No licensed font binaries exist in the repo. If
   woff2 files are supplied, self-host them and drop the Google Fonts link from
   `index.html`.
-- **Design tokens are a copy.** `src/styles/tokens.css` is vendored from `design/tokens/`.
-  If a token changes there, copy it across.
+- **Tokens come from `design/`.** `src/main.tsx` imports the design system's token files
+  through the `@minkops/design` alias, so a token change there reaches the site directly.
+  The site uses the default palette; it does not load the console's selectable themes.
 
 ## Getting started locally
 
