@@ -16,17 +16,22 @@ class StatementMigrationTests(unittest.TestCase):
         bill=register_workflow(self.connection,self.tenant,self.definition)
         definition=load_definition(REPOSITORY_ROOT/'employees/accounts-desk/workflows/statement-entry')
         statement=register_workflow(self.connection,self.tenant,definition)
-        legacy={**definition.metadata['tenant_defaults'],'other_side_ledger':'Old fallback','counter_mode':'single','review_mode':'only_exceptions','opening_balance':'123.45'}
+        legacy={**definition.metadata['tenant_defaults'],'other_side_ledger':'Old fallback','counter_mode':'single',
+            'review_mode':'only_exceptions','date_format':'mdy','opening_balance':'123.45'}
         schema={**definition.tenant_schema,'properties':{**definition.tenant_schema['properties'],
-            'other_side_ledger':{'type':'string'},'counter_mode':{'enum':['single']}},
-            'required':[*definition.tenant_schema['required'],'other_side_ledger','counter_mode']}
+            'other_side_ledger':{'type':'string'},'counter_mode':{'enum':['single']},
+            'date_format':{'enum':['dmy','mdy','iso']},'opening_balance':{'type':'string'}},
+            'required':[*definition.tenant_schema['required'],'other_side_ledger','counter_mode','date_format','opening_balance']}
         self.connection.execute('UPDATE workflows SET config_values=%s,config_schema=%s WHERE id=%s',(Jsonb(legacy),Jsonb(schema),statement))
         before=self.connection.execute('SELECT config_values,config_schema,config_version FROM workflows WHERE id=%s',(bill,)).fetchone()
-        sql=(REPOSITORY_ROOT/'db/migrations/0010_statement_ai_settings.sql').read_text()
+        # 0010 retired the classifier settings; 0013 the date order and opening balance,
+        # now learned per bank format and proven by running balances.
+        sql=''.join((REPOSITORY_ROOT/'db/migrations'/name).read_text()
+                    for name in ('0010_statement_ai_settings.sql','0013_statement_layout_settings.sql'))
         self.connection.execute(sql)
         register_workflow(self.connection,self.tenant,definition)
         values,version=self.connection.execute('SELECT config_values,config_version FROM workflows WHERE id=%s',(statement,)).fetchone()
-        self.assertEqual(values,{'review_mode':'only_exceptions','date_format':'dmy','opening_balance':'123.45'})
+        self.assertEqual(values,{'review_mode':'only_exceptions'})
         self.connection.execute(sql)
         self.assertEqual(self.connection.execute('SELECT config_version FROM workflows WHERE id=%s',(statement,)).fetchone()[0],version)
         self.assertEqual(self.connection.execute('SELECT config_values,config_schema,config_version FROM workflows WHERE id=%s',(bill,)).fetchone(),before)

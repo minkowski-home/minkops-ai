@@ -38,9 +38,29 @@ scope or voucher period when exceeded. Discovery itself still collects only
 unlocked companies already open in the running Tally instance, identified by
 GUID regardless of installation location or data directories/drives.
 
-CSV accepts UTF-8 BOM and Windows-1252, including comma, semicolon or tab delimiters. XLSX uses native dates or explicit DMY/MDY/ISO text ordering and holds uncached formulas. Header synonyms identify Date, Branch, Balance, optional Reference/Narration, and either signed Amount or separate Debit/Credit columns. Unknown/duplicate columns hold the file for correction in the original tool. Legacy XLS requires conversion in Excel. Limits are 10,000 rows, 100 columns and the existing bounded upload/workbook sizes.
+CSV (UTF-8 BOM or Windows-1252; comma, semicolon or tab) and XLSX are read
+through a **layout** learned once per bank format: header row, date column and
+order, amount as signed, debit/credit or amount plus a Dr/Cr-style indicator,
+running balance, reference, narration, an account column when one sheet mixes
+banks, a client routing hint such as Branch, row order and opening, closing,
+total or footer rows. A new format's sheets go to one layout session (bounded
+previews of the first 60 and last 15 rows); the AI declares the reading, never
+values. Code applies it to the real file and proves it per account: every
+running balance must equal the previous one plus the signed transaction (single
+rows use an implied opening), closing rows must match, and date order must be
+forced by the dates themselves (a day above 12, or the other reading falling
+after the upload). A proven layout is saved and reused by its header signature
+after any preamble, with no AI call. Otherwise one Attention card asks which date
+order, or to confirm sample rows when there is no balance to check; the run
+waits for that answer. A layout the balances refute is never saved, and its
+sheet holds. Tenant date-order and opening-balance settings are retired
+(migration `0013`). Uncached formulas hold; legacy XLS requires conversion in
+Excel. Limits are 10,000 rows and 100 columns.
 
-An opening-balance row or explicit opening balance establishes the chain. Each row must satisfy previous balance + signed transaction = printed balance. Missing or unverifiable balances hold affected rows; dates and amounts are never guessed. Existing source bytes and hashes remain pinned for the run. Recheck a corrected source by refreshing and starting a new run.
+Each account's opening and closing balance are found from the chain itself. When
+a new statement for a bank ledger opens at a different balance from the
+previous statement's close, one **Transactions missing** item names both; no row
+is held.
 
 ## Preview, writes and recovery
 

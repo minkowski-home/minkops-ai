@@ -17,7 +17,29 @@ class StatementTests(unittest.TestCase):
     execute_discovery=bills.BillEntryTests.execute_discovery
     tally_discovery=bills.BillEntryTests.tally_discovery
 
-    def ready(self, *, with_mapping=False):
+    LAYOUT={'columns':{'date':{'column':1,'order':'dmy'},'amount':{'mode':'debit_credit','debit':3,'credit':4},
+        'balance':{'column':5},'reference':{'column':2},'narration':{'columns':[]},'account':None,
+        'routing_hint':{'column':6,'label':'Branch'}},'row_order':'oldest_first',
+        'rows':{'opening':[{'column':1,'starts_with':'Opening balance'}]},'evidence':'Headings on row 1; balances reconcile.'}
+
+    def learn_layout(self, run, file, *, answer='dmy'):
+        """Answer the layout session for a new bank format, then its one date-order question."""
+        from minkops_platform.accounts.worker import process
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            child=c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND config->>'stage'='layout'",(run['id'],)).fetchone()
+            if child is None: return None
+            self.assertEqual(c.execute('SELECT config FROM account_runs WHERE id=%s',(run['id'],)).fetchone()['config']['awaits'],
+                             {'layout_run':str(child['id'])})
+            process(c,child,executor=lambda *a,**k:{'layouts':[{'source_file_id':file,'sheet':'','header_row':1,**self.LAYOUT}],'exceptions':[]})
+            item=c.execute("SELECT * FROM attention_items WHERE task_id=%s AND kind='layout' AND status='pending'",(run['task_id'],)).fetchone()
+        if item and answer:
+            decided=self.client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/profile",headers=self.csrf,json={'action':answer})
+            self.assertEqual(decided.status_code,200,decided.text)
+        return item
+
+    TEXT='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,OUT1,11,,989,Test\n02/10/26,IN1,,17,1006,Test\n02/10/26,HOLD,3,,1003,Unknown branch\n'
+
+    def ready(self, *, with_mapping=False, text=None, statuses=('ready','ready','held')):
         discovery=self.tally_discovery('statement-company',voucher_types=('Purchase','Payment','Receipt'))
         with psycopg.connect(URL,row_factory=dict_row) as c:
             catalog=c.execute('SELECT catalog FROM discovery_runs WHERE id=%s',(discovery,)).fetchone()['catalog']
@@ -31,7 +53,7 @@ class StatementTests(unittest.TestCase):
         company=summary['catalog']['sources'][0]['snapshot']['companies'][0]
         self.assertNotIn('records',company['masters'])
         self.assertEqual(company['statement_options']['banks'],[{'name':'Bank','guid':'Bank-guid'}])
-        text='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,OUT1,11,,989,Test\n02/10/26,IN1,,17,1006,Test\n02/10/26,HOLD,3,,1003,Unknown branch\n'
+        text=text or self.TEXT
         file=self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':'["statement.csv"]'},
             files=[('files',('statement.csv',text.encode('utf-8-sig')))]).json()['files'][0]['id']
         mapping=None
@@ -40,10 +62,11 @@ class StatementTests(unittest.TestCase):
                 files=[('files',('branch-mapping.csv',b'Client code,Meaning\n17,Test company\n'))]).json()['files'][0]['id']
         run,_=self.launch('statement-entry',file_ids=[file],config={'discovery_id':discovery,'branch_mapping_file_id':mapping})
         from minkops_platform.accounts.worker import process
+        self.learn_layout(run,file)
         def interpret(key,files,context,on_event,**kwargs):
             self.assertEqual(key,'statement-entry')
             self.assertEqual(context['branch_mapping_file_id'],mapping)
-            self.assertEqual(len(context['transactions']),3)
+            self.assertEqual(len(context['transactions']),len(statuses))
             self.assertEqual({r['source_file_id'] for r in context['transactions']},{file})
             self.assertTrue(context['source_catalog']['companies'][0]['master_lookup_path'])
             self.assertTrue(any(f['path'].endswith('masters-lookup-v1-0.json') for f in files))
@@ -62,8 +85,75 @@ class StatementTests(unittest.TestCase):
         loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
         self.assertTrue(loaded['session_id'])
         self.assertEqual(loaded['config']['execution_snapshot']['execution']['model'],'gpt-6-luna')
-        self.assertEqual([r['status'] for r in loaded['result']['records']],['ready','ready','held'])
+        self.assertEqual([r['status'] for r in loaded['result']['records']],list(statuses))
         return loaded
+
+    def statement(self, name, text):
+        return self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':f'["{name}"]'},
+            files=[('files',(name,text.encode('utf-8-sig')))]).json()['files'][0]['id']
+
+    def layout_children(self, run):
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            return c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s AND config->>'stage'='layout'",(run['id'],)).fetchall()
+
+    def config(self, run):
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            return c.execute('SELECT config FROM account_runs WHERE id=%s',(run['id'],)).fetchone()['config']
+
+    def test_a_known_bank_format_is_read_with_no_layout_session(self):
+        first=self.ready()
+        file=self.statement('next-week.csv','Date,Reference,Debit,Credit,Balance,Branch\n03/10/26,OUT2,6,,1000,Test\n')
+        run,_=self.launch('statement-entry',file_ids=[file],config={'discovery_id':first['config']['discovery_id'],'branch_mapping_file_id':None})
+        self.assertEqual(self.layout_children(run),[])
+        self.assertNotIn('awaits',self.config(run))
+
+    def test_an_unanswered_date_question_keeps_the_run_waiting(self):
+        first=self.ready()
+        text='Txn Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,500,\n01/10/26,A,1,,499,X\n02/10/26,B,1,,498,X\n'
+        run,_=self.launch('statement-entry',file_ids=[self.statement('question.csv',text)],
+                          config={'discovery_id':first['config']['discovery_id'],'branch_mapping_file_id':None})
+        item=self.learn_layout(run,str(self.layout_children(run)[0]['file_ids'][0]),answer=None)
+        self.assertEqual((item['label'],item['target']['actions']),('Choose date order',['dmy','mdy']))
+        self.assertIn('awaits',self.config(run))
+        listed=next(i for i in self.client.get('/api/tenants/mock-tenant/attention').json() if i['id']==str(item['id']))
+        self.assertEqual(listed['layout']['actions'],['dmy','mdy'])
+        answered=self.client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/profile",headers=self.csrf,json={'action':'mdy'})
+        self.assertEqual(answered.status_code,200,answered.text)
+        self.assertNotIn('awaits',self.config(run))
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            learned=c.execute("SELECT payload FROM client_profiles WHERE kind='statement_layout' AND provenance->>'file'='question.csv' AND status='active'").fetchone()
+        self.assertEqual(learned['payload']['columns']['date']['order'],'mdy')
+
+    def test_balances_that_refute_a_layout_never_store_it_and_the_sheet_holds(self):
+        from minkops_platform.accounts.worker import process
+        first=self.ready()
+        text='Posting Date,Reference,Debit,Credit,Balance,Branch\n01/10/26,A,10,,90,X\n15/10/26,B,10,,80,X\n'
+        file=self.statement('refuted.csv',text)
+        run,_=self.launch('statement-entry',file_ids=[file],config={'discovery_id':first['config']['discovery_id'],'branch_mapping_file_id':None})
+        swapped={**self.LAYOUT,'columns':{**self.LAYOUT['columns'],'amount':{'mode':'debit_credit','debit':4,'credit':3}}}
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            child=self.layout_children(run)[0]
+            process(c,child,executor=lambda *a,**k:{'layouts':[{'source_file_id':file,'sheet':'','header_row':1,**swapped}],'exceptions':[]})
+            self.assertIsNone(c.execute("SELECT 1 FROM client_profiles WHERE kind='statement_layout' AND provenance->>'file'='refuted.csv'").fetchone())
+        config=self.config(run)
+        self.assertNotIn('awaits',config)
+        self.assertTrue(config['layouts_attempted'])
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            process(c,c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone(),executor=lambda *a,**k:{'records':[]})
+        held=self.client.get(self.base+f"/runs/{run['id']}").json()['result']['records']
+        self.assertEqual([(r['code'],r['status']) for r in held],[('statement_layout_unknown','held')])
+
+    def test_a_gap_between_consecutive_statements_raises_one_attention_item(self):
+        first=self.ready()
+        self.assertEqual(first['result']['chain_ends']['statement-company:Bank'],
+                         {'opening_cents':100000,'from':'2026-10-01','closing_cents':100600,'to':'2026-10-02'})
+        second=self.ready(text='Date,Reference,Debit,Credit,Balance,Branch\n05/10/26,OUT9,10,,1090,Test\n',statuses=('ready',))
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            item=c.execute("SELECT label,target FROM attention_items WHERE event_key=%s",
+                           (f"statement:{second['id']}:statement-company:Bank:gap",)).fetchone()
+        self.assertEqual(item['label'],'Transactions missing')
+        self.assertIn('closed at 1006.00 on 2026-10-02',item['target']['reason'])
+        self.assertEqual([r['status'] for r in second['result']['records']],['ready'])
 
     def test_device_poll_does_not_block_approved_statement_intents(self):
         from minkops_platform import desktop
