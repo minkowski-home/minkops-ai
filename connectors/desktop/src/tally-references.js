@@ -112,7 +112,7 @@ export async function readTallyReferences(
           Object.entries(r)
             .filter(([key]) =>
               // RESERVEDNAME and ISACTIVE classify voucher types (see tally.js).
-              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE"].includes(key),
+              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE", "ISCOSTCENTRESON", "CATEGORY"].includes(key),
             )
             .map(([key, value]) => [key, tallyReferenceScalar(value)]),
         ),
