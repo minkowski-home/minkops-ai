@@ -117,4 +117,3 @@ def validated_plan(row, companies, selection):
         'data':{**row,'bank_ledger':name(bank),'counter_ledger':name(counter)},'allocation':allocation,
         'voucher_type':{'NAME':name(voucher),**identities(voucher)},
         'references':{'company_guid':company['company_guid'],'ledgers':{name(m):identities(m) for m in (bank,counter)}}}
-

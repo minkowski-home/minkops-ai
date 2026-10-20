@@ -277,4 +277,3 @@ def _order_forced(values, alternative, today):
         if today and other > today:
             return True
     return False
-

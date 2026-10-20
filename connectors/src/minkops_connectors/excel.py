@@ -306,4 +306,3 @@ def apply_records(content, mapping, records, *, validate_record):
             if actual.data_type != "f" and actual.value != (None if value == "" else value):
                 raise ValueError("Workbook verification failed.")
     return output.getvalue(), changes
-
