@@ -42,7 +42,7 @@ The theme selection is a personal preference stored by the browser. Each option 
 | `tokens/typography.css`, `tokens/fonts.css` | Type roles and font loading |
 | `tokens/spacing.css`, `tokens/surfaces.css`, `tokens/motion.css`, `tokens/layout.css`, `tokens/base.css` | Shared foundations |
 | `styles.css`, `console.css`, `login.css` | App style entry points |
-| `assets/logos/` | Supplied orange and slate artwork, and the website (`favicon-website.svg`) and console (`favicon-console.svg`) favicons |
+| `assets/logos/` | Supplied orange and slate artwork, and the website (`favicon-website.svg`) and console (`favicon-console.svg`) favicons, which each app's Vite config serves and emits at `/favicon.svg` |
 | `assets/icons/` | Existing product icons |
 | `guidelines/` | Brand and theme specimens |
 | `ui_kits/console/` | Current shared-console static preview |
