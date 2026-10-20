@@ -25,5 +25,5 @@ Keep secrets out of repository configuration, instructions, and plugin archives.
 `mock-client` selects Source discovery, Bill entry and Statement entry for the
 mock tenant. `pr-infra` selects Source discovery and Statement entry. Both reuse
 Accounts desk definitions; actual execution and native saves require authorized
-resources. See [the release verification](../docs/verification-accounts-release-20261019.md)
-for deployed evidence and remaining client setup.
+resources. PR Infra's bank destinations and Other-side ledger stay unconfigured
+until real client data is available.

@@ -239,8 +239,7 @@ dispatcher. Historical runs without handler bindings use the narrowly bounded
 legacy Accounts mapping; legacy unpinned queued runs still require relaunch.
 
 Apply every pending migration with `db/migrate.py` before starting a new
-revision. See [database upgrades](../db/README.md) and
-[branch convergence](branch-convergence.md). Stop workers while changing
+revision. See [database upgrades](../db/README.md). Stop workers while changing
 application revisions, preserve session/write records,
 and reconcile outstanding writes. An application rollback can use the retained
 Accounts view, but never run an older Accounts-only worker against new non-Accounts

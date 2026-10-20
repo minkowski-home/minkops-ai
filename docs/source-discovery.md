@@ -77,10 +77,9 @@ fields, custom master types, identifiers and leading zeroes remain intact.
 Collection never samples records. Date filters apply only to vouchers. The collection
 identifiers follow [Tally’s XML samples](https://help.tallysolutions.com/sample-xml/);
 **All Masters** alone is an import report.
-Installation-specific customisations and counts require native export comparison.
-The released Windows/Tally checks, including live UDF and batch preservation,
-inclusive periods and empty exports, are recorded in
-[MIN-124 verification](verification-min-124.md).
+Installation-specific customisations and counts require native export comparison;
+live checks have covered UDF and batch preservation, inclusive periods and empty
+exports.
 
 The hosted discovery skill inspects those saved records and proposes only obscure
 conventions or exceptions as subjective notes. Each note identifies its company,

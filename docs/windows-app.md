@@ -5,12 +5,12 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-Companion 0.8.1 is the current release: it works only with the companies open in
-the user's Tally, reports typed session states, sends diagnostics and updates
-itself. Core Tally discovery uses HTTP/XML exports and needs no ODBC driver.
-Installed-RC evidence below is historical. Current production, installed-upgrade
-and live Tally/Excel evidence is in [MIN-124 verification](verification-min-124.md).
-Windows 10 device testing was deferred by the owner; compatibility is retained.
+This revision builds companion 0.9.0 (plan protocol 5; see its contracts below);
+0.8.1 is the latest published release. The companion works only with the
+companies open in the user's Tally, reports typed session states, sends
+diagnostics and updates itself. Core Tally discovery uses HTTP/XML exports and
+needs no ODBC driver. Windows 10 device testing was deferred by the owner;
+compatibility is retained.
 
 ## Local capabilities
 
@@ -129,14 +129,10 @@ Versioned discovery packages are saved locally as described in
 
 ## Build and run
 
-The consolidated branch retains Windows baseline `c3b050c`, the shared workflow
-architecture, and Bill Entry's financial-write work through `3dc6552`. Its API/UI
-uses installed bindings and shared dispatch, including independent bill sessions,
-native Tally reconciliation, and verified Excel/Tally writes. Run `db/migrate.py`
-before starting this revision. It installs the final baseline or adopts archived
-upgrade history. Either predecessor can upgrade without resetting run history.
-See [branch convergence](branch-convergence.md) for the tested paths.
-See [workflow authoring](workflow-authoring.md) for installation and recovery.
+Run `db/migrate.py` before starting a new revision; it installs the baseline or
+adopts archived upgrade history without resetting run history (see
+[database upgrades](../db/README.md)). See [workflow authoring](workflow-authoring.md)
+for installation and recovery.
 
 Use Node 24 and the existing Python/uv workspace. From the repository root:
 

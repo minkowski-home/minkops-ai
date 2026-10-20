@@ -42,12 +42,6 @@ real integration or correctness requirements.
 
 Typically, we want to use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred and best-guess outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are currently internal; independent AI steps should use bounded parallelism without weakening correctness.
 
-`main` contains the consolidated workflow and Windows companion architecture;
-the earlier `platform-ai/bill-entry-architecture` branch was merged and removed.
-See [branch convergence and upgrade](docs/branch-convergence.md) for the
-retained source revisions, migration paths, verification, and recovery.
-
-
 ### Workflow methods and current scope
 
 Execution method and environment hosting are separate choices. Minkops uses
@@ -75,8 +69,7 @@ Accounts Source Discovery now collects reusable full Tally masters, period-scope
 vouchers and reviewed client notes, with Excel confined to headers and formula
 structure. Bill Entry pins this context, scans all selected bills, and saves
 approved native entries by company. Tally retains bookkeeping; Minkops controls
-entry, review and recovery. See [Source Discovery](docs/source-discovery.md) and
-[production release verification](docs/verification-min-124.md).
+entry, review and recovery. See [Source Discovery](docs/source-discovery.md).
 
 ### Where development belongs
 
@@ -131,8 +124,8 @@ and workflow settings, task observations, and four selectable brand themes.
 executable workflows. Agent results, reviews and verified local
 writes appear in task progress and timelines. The outbox has no production
 publisher yet; the app polls durable state. Production uses Firebase Hosting,
-Cloud Run and an isolated PostgreSQL database. See [deployment and MIN-123 gates](docs/deployment-min-123.md)
-for verified hosting, cost controls and remaining device/demo checks.
+Cloud Run and an isolated PostgreSQL database. See [production operations](infra/README.md#production)
+for hosting, cost controls, deployment and rollback.
 Customer manifests in `solutions/` describe composition.
 
 `apps/windows-app` supplies the Windows 10/11 x64 shell for that shared UI,
