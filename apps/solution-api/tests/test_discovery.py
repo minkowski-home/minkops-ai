@@ -594,14 +594,14 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual((reviewed["state"], reviewed["ready"]), ("review", False))
 
     def test_failed_optional_analysis_leaves_a_complete_tally_collection_confirmable(self):
-        from minkops_platform.accounts.run_store import AccountsRunStore
+        from minkops_platform.runtime.store import WorkflowRunStore
 
         run, _ = self.start()
         current = self.collect(run, analyze=False)
         with psycopg.connect(URL, row_factory=dict_row) as c:
             mapping = c.execute("SELECT * FROM account_runs WHERE id=%s",
                                 (current["mapping_run"]["id"],)).fetchone()
-            AccountsRunStore().fail(c, mapping, "Hosted workflow failed (APIError).")
+            WorkflowRunStore().fail(c, mapping, "Hosted workflow failed (APIError).")
         failed = self.client.get(self.discovery + f"/runs/{run['id']}").json()
         self.assertEqual((failed["state"], failed["analysis_failed"]), ("review", True))
         confirmed = self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={})

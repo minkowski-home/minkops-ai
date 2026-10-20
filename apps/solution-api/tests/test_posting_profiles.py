@@ -97,9 +97,9 @@ class PostingProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "undiscovered voucher type"):
             self.process(derivation, payload("broken-co", voucher_type="not-a-type"))
         # As the worker does for any processing error.
-        from minkops_platform.accounts.run_store import AccountsRunStore
+        from minkops_platform.runtime.store import WorkflowRunStore
         with psycopg.connect(URL, row_factory=dict_row) as c:
-            AccountsRunStore().fail(c, self.run_row(derivation["id"]), "The posting pattern names an undiscovered voucher type.")
+            WorkflowRunStore().fail(c, self.run_row(derivation["id"]), "The posting pattern names an undiscovered voucher type.")
         reconcile_once(URL)
         self.assertEqual(self.run_row(run["id"])["state"], "failed")
         retry, _ = self.launch_bill(did, "retry.pdf")

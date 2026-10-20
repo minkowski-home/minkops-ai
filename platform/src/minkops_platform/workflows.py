@@ -151,49 +151,6 @@ def resolve_run_config(
     return resolved
 
 
-def validate_output(
-    definition: WorkflowDefinition,
-    result: dict,
-    *,
-    run_config: dict,
-    confirmed_schema: dict,
-) -> None:
-    """Validate bill-entry's envelope and each record's discovered business data.
-
-    The caller loads confirmed_schema from authorized catalog storage, never
-    from agent output. It contains catalog_version, schema_id, schema_version,
-    and the confirmed JSON Schema under `schema`. Its snapshot must be pinned
-    to the run. This validates structure, not reconciliation or write approval.
-    """
-    if definition.metadata["key"] != "bill-entry":
-        raise ValueError("Record schema validation applies to bill-entry")
-    validate(definition.run_schema, run_config)
-    validate(definition.output_schema, result)
-    for key in ("catalog_version", "schema_id", "schema_version"):
-        if confirmed_schema.get(key) != run_config[key] or result[key] != run_config[key]:
-            raise ValueError(f"Result and confirmed schema must match the run's {key}")
-    schema = confirmed_schema["schema"]
-    if not isinstance(schema, dict) or schema.get("type") != "object":
-        raise ValueError("Confirmed business schema must describe an object")
-
-    def check_references(value):
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key in {"$ref", "$dynamicRef", "$recursiveRef"} and (
-                    not isinstance(child, str) or not child.startswith("#")
-                ):
-                    raise ValueError("Business schemas cannot load external references")
-                check_references(child)
-        elif isinstance(value, list):
-            for child in value:
-                check_references(child)
-
-    check_references(schema)
-    Draft202012Validator.check_schema(schema)
-    for record in result["records"]:
-        validate(schema, record["data"])
-
-
 def register_workflow(
     connection, tenant_id, definition: WorkflowDefinition, initial_defaults: dict | None = None
 ):

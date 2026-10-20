@@ -6,8 +6,8 @@ confirmed; they are not encoded in this workflow's source.
 
 `workflow.json` references editable tenant defaults, run configuration,
 instructions and `agent-output.schema.json`. The latter validates hosted agent
-proposals before review. `output.schema.json` remains the separate final-report
-contract supported by the platform validator; it is not the agent proposal.
+proposals before review. `output.schema.json` is the descriptor's generic result
+contract; Accounts does not validate against it.
 
 Source discovery proposes actual workbook/sheet/table mappings with header
 positions and semantic concepts. Bill entry recognizes the appropriate confirmed

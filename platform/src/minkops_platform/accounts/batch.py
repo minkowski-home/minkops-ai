@@ -266,7 +266,7 @@ def _aggregation_failed(connection, parent, error):
     """Retry a bounded number of ticks for transient faults, then fail visibly."""
     from minkops_platform.runtime.diagnostics import error_details, record
 
-    from .run_store import AccountsRunStore
+    from minkops_platform.runtime.store import WorkflowRunStore
 
     attempt = int(parent["config"].get("aggregation_failures", 0)) + 1
     record(connection, parent, "batch.aggregation_failed",
@@ -278,7 +278,7 @@ def _aggregation_failed(connection, parent, error):
         (attempt, parent["id"]),
     )
     if attempt >= AGGREGATION_ATTEMPTS:
-        AccountsRunStore().fail(
+        WorkflowRunStore().fail(
             connection,
             parent,
             "Bill results could not be combined. Any verified saves remain; start a new run for the other bills.",

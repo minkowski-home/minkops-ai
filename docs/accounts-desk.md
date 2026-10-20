@@ -52,9 +52,9 @@ vouchers, duplicate alerts, correction handoff and exact destination readback.
 Each run pins definition version, instructions, `agent-output.schema.json`,
 configuration, input hashes and confirmed mappings. The agent's JSON artifact
 is accepted only from the completed turn and exact output path. Agent schemas
-describe structure, not business field names. The older `output.schema.json`
-and platform `validate_output` describe a separate final-report envelope; they
-are not substituted for the agent proposal contract used by this runtime.
+describe structure, not business field names. Each definition still declares
+the descriptor's `output.schema.json`, but Accounts validates only the pinned
+agent proposal schema and its business checks.
 
 New runs additionally pin the complete hosted execution bundle: SKILL.md,
 execution-instructions.md, workflow/configuration/output contracts, declared

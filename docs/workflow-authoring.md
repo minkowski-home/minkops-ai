@@ -254,13 +254,13 @@ tenant defaults, then per-run selections; it validates the run schema and
 caller-supplied resource scope. Configuration versions track tenant-schema
 changes, independently of workflow definition versions.
 
-The final-report `output.schema.json` and optional agent proposal schema have
-separate roles. Accounts validates proposals against the pinned agent schema
-and its business checks; see [run contracts](accounts-desk.md#run-contracts-and-recovery).
-The final-report `validate_output` helper checks the envelope and record data
-against a trusted confirmed schema, including pinned catalog/schema versions
-and rejection of external schema references. Structural validation does not
-prove arithmetic, evidence, approval or a successful destination write.
+`output.schema.json` and the optional agent proposal schema have separate
+roles. The generic `skill.proposal` handler validates a result against
+`output.schema.json` before review. Accounts handlers validate proposals against
+the pinned agent schema and their business checks instead; see
+[run contracts](accounts-desk.md#run-contracts-and-recovery). Structural
+validation does not prove arithmetic, evidence, approval or a successful
+destination write.
 
 Write expected outcomes outside skill bundles, then test registration, launch,
 schema/business checks, review, and recovery. Test cross-tenant resources,

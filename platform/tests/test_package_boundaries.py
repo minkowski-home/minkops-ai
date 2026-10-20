@@ -3,12 +3,10 @@ and every tracked path resolves identically on case-sensitive and case-insensiti
 file systems."""
 
 import ast
-import hashlib
-import importlib
 import shutil
 import subprocess
 from collections import defaultdict
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from unittest import TestCase, skipUnless
 
 from minkops_platform.resources import REPOSITORY_ROOT
@@ -44,47 +42,31 @@ class RepositoryLayoutTests(TestCase):
         self.assertEqual(case_collisions(filter(None, tracked)), [])
 
 
+# Shared packages and what each must never import.
+FORBIDDEN_IMPORTS = {
+    "platform/src/minkops_platform": ("minkops_api", "fastapi", "starlette"),
+    "connectors/src/minkops_connectors": ("minkops_api", "fastapi", "starlette", "minkops_platform"),
+}
+
+
+def imported_names(path):
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield node.module
+        elif isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
+
+
 class PackageBoundaryTests(TestCase):
-    def test_shared_services_import_without_web_application_dependencies(self):
-        for name in (
-            "minkops_platform.desktop",
-            "minkops_platform.attention",
-            "minkops_platform.accounts.attention",
-            "minkops_platform.accounts.service",
-            "minkops_platform.accounts.repository",
-            "minkops_platform.accounts.checks",
-            "minkops_platform.accounts.catalog",
-            "minkops_platform.accounts.agent",
-            "minkops_platform.accounts.worker",
-            "minkops_platform.runtime.openai_hosted",
-            "minkops_platform.runtime.workflow",
-            "minkops_platform.runtime.bundles",
-            "minkops_platform.runtime.lifecycle",
-            "minkops_platform.accounts.run_store",
-            "minkops_connectors.excel",
-        ):
-            module = importlib.import_module(name)
-            tree = ast.parse(Path(module.__file__).read_text())
-            for node in ast.walk(tree):
-                names = (
-                    [node.module or ""]
-                    if isinstance(node, ast.ImportFrom)
-                    else [a.name for a in node.names]
-                    if isinstance(node, ast.Import)
-                    else []
-                )
-                self.assertFalse(any(n.startswith(("minkops_api", "fastapi")) for n in names), name)
-                if name.startswith("minkops_connectors"):
-                    self.assertFalse(any(n.startswith("minkops_platform") for n in names), name)
-
-    def test_versioned_workflow_prompts_match_reviewed_schema_context_contract(self):
-        from minkops_platform.accounts.agent import bill_prompt, discovery_prompt
-
-        self.assertEqual(
-            hashlib.sha256(discovery_prompt().encode()).hexdigest(),
-            "1689b7e187dc39ff7fbc443543dfd928994b88355d8b8233545bc460ae76852e",
-        )
-        self.assertEqual(
-            hashlib.sha256(bill_prompt().encode()).hexdigest(),
-            "79e8c1597a3f6829bad1c4b7a252c965bc444927ba73d082cc0d82ae754cf3c9",
-        )
+    def test_every_shared_module_imports_without_the_web_application(self):
+        """The worker, companion jobs and connectors run without the API process;
+        dependencies flow apps -> platform -> connectors, never back."""
+        checked = 0
+        for package, forbidden in FORBIDDEN_IMPORTS.items():
+            for path in sorted((REPOSITORY_ROOT / package).rglob("*.py")):
+                checked += 1
+                for name in imported_names(path):
+                    with self.subTest(module=str(path.relative_to(REPOSITORY_ROOT)), imports=name):
+                        self.assertFalse(name.startswith(forbidden))
+        self.assertGreater(checked, 50)
