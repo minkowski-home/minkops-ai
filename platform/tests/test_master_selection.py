@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from minkops_platform.accounts.bills import target_from_references, business_identity
+from minkops_platform.accounts.bills import business_identity, target_from_references
 from minkops_platform.accounts.master_selection import resolve_masters
 
 
@@ -99,6 +99,7 @@ def test_unresolved_match_is_not_a_new_supplier_and_resolution_is_atomic():
 
 def test_only_exceptions_queues_clean_siblings_but_preserves_review_gates():
     from unittest.mock import patch
+
     from minkops_platform.accounts.tally_writes import prepare_automatic
 
     run = {"tenant_id": "tenant", "task_id": "task", "config": {

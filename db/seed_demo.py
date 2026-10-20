@@ -6,10 +6,11 @@ from pathlib import Path
 
 import psycopg
 from jsonschema import ValidationError
-from minkops_platform.installation import install, load_solution, register_employee
-from minkops_platform.solution_policy import validate_option
 from psycopg.types.json import Jsonb
 from pwdlib import PasswordHash
+
+from minkops_platform.installation import install, load_solution, register_employee
+from minkops_platform.solution_policy import validate_option
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -14,6 +14,7 @@ URL = accounts_tests.URL
 def confirm_patterns(discovery_id):
     """Seed each company's confirmed posting pattern from its own discovered masters."""
     from psycopg.types.json import Jsonb
+
     from minkops_platform.accounts.posting_profiles import validate
     from minkops_platform.accounts.vouchers import Masters
 
@@ -142,7 +143,9 @@ class BillEntryTests(unittest.TestCase):
 
     def test_batch_aggregation_never_decodes_child_execution_contexts(self):
         import json
+
         from psycopg.types.json import set_json_loads
+
         from minkops_platform.accounts.batch import _reconcile
 
         root, inputs, children = self.exception_only_batch()
@@ -543,10 +546,11 @@ class BillEntryTests(unittest.TestCase):
         self.assertIn("combined verified write contract", response.text)
 
     def test_mock_policy_rejects_excel_both_and_preference_override(self):
+        from psycopg.types.json import Jsonb
+
         from minkops_platform.resources import REPOSITORY_ROOT
         from minkops_platform.solution_policy import bind_definition
         from minkops_platform.workflows import load_definition
-        from psycopg.types.json import Jsonb
 
         definition = bind_definition(
             load_definition(REPOSITORY_ROOT / "employees/accounts-desk/workflows/bill-entry"),
@@ -1263,6 +1267,7 @@ class BillEntryTests(unittest.TestCase):
 
     def test_twenty_open_companies_launch_because_each_bill_gets_one_company(self):
         import json
+
         from minkops_platform.accounts.client_context import context_assets
 
         did = self.tally_discovery("alpha-guid", multiple=19, vouchers=("Purchase",) * 30, voucher_padding=16_000)

@@ -5,7 +5,13 @@ from datetime import date
 import pytest
 from openpyxl import Workbook
 
-from minkops_connectors.statement import apply_layout, header_signature, preview, read_tables, signatures
+from minkops_connectors.statement import (
+    apply_layout,
+    header_signature,
+    preview,
+    read_tables,
+    signatures,
+)
 
 
 def table(text):
@@ -129,10 +135,12 @@ def test_header_signatures_find_a_known_layout_after_any_preamble():
 
 
 def test_uncached_formulas_and_legacy_files_fail_closed():
-    book = Workbook(); sheet = book.active
+    book = Workbook()
+    sheet = book.active
     sheet.append(['Date', 'Reference', 'Amount', 'Balance'])
     sheet.append(['01/10/26', 'A', -10, '=A1'])
-    buffer = io.BytesIO(); book.save(buffer)
+    buffer = io.BytesIO()
+    book.save(buffer)
     [(name, rows, formulas)] = read_tables(buffer.getvalue(), '.xlsx')
     parsed, _ = apply_layout(rows, layout({'mode': 'signed', 'column': 3}, balance=4), 0, sheet=name, formulas=formulas,
                              occurrences=Counter())

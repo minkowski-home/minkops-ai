@@ -8,13 +8,14 @@ Generated credentials are written only to the operator's private state folder.
 import argparse
 import json
 import os
-from pathlib import Path
 import secrets
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import psycopg
 from psycopg.conninfo import make_conninfo
+
 from minkops_platform.installation import install, load_solution
 
 ORIGIN = "https://minkops-ai-console.web.app"

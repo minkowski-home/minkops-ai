@@ -4,9 +4,9 @@ import json
 import math
 
 from jsonschema import Draft202012Validator, FormatChecker
+
 from minkops_connectors.excel import apply_records as write_records
 from minkops_connectors.excel import mapping_bounds, open_workbook
-
 from minkops_platform.resources import REPOSITORY_ROOT
 
 CATALOG_SCHEMA = json.loads(

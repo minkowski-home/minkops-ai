@@ -11,11 +11,12 @@ from unittest.mock import patch
 import psycopg
 import test_accounts_api as accounts
 import test_bill_entry as bills
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
 from minkops_platform.accounts.worker import process
 from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.workflows import load_definition, register_workflow
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
 URL = os.getenv("TEST_DATABASE_URL")
 

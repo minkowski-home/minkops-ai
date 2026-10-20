@@ -1,6 +1,7 @@
 """Purchase voucher types come from discovered masters, never a hard-coded name."""
 
 import pytest
+
 from minkops_platform.accounts.voucher_types import (
     apply_choices,
     base_types,

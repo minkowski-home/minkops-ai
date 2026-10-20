@@ -41,6 +41,7 @@ class StageTest(unittest.TestCase):
 
     def test_a_stage_changes_only_the_execution_instructions(self):
         from unittest import mock
+
         from minkops_platform.runtime import workflow
 
         snapshot = load_definition(REPOSITORY_ROOT / "employees/accounts-desk/workflows/bill-entry").execution_snapshot

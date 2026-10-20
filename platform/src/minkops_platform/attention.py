@@ -5,7 +5,9 @@ unchanged destination never establishes human review. Domain adapters attach
 exact identifiers and resolution evidence, not free-form automation commands.
 """
 from uuid import uuid4
+
 from psycopg.types.json import Jsonb
+
 from .errors import ServiceError
 
 
@@ -177,6 +179,7 @@ def native_target(target, plan_version):
             or (baseline is not None and not str(baseline).startswith("v5:"))):
         return target
     from datetime import date
+
     from .accounts.vouchers import BILL_FAMILIES, invoice_window
     return {**target, "document": {"window": invoice_window(date.fromisoformat(target["date"])),
                                    "number_fields": ["REFERENCE"], "families": BILL_FAMILIES}}

@@ -126,9 +126,9 @@ def replay_output(bill, file_id, target):
 
 def replay(run_id, expected):
     from minkops_platform.accounts.batch import reconcile_once
-    from minkops_platform.runtime.store import WorkflowRunStore
     from minkops_platform.accounts.worker import process
     from minkops_platform.runtime import lifecycle
+    from minkops_platform.runtime.store import WorkflowRunStore
 
     class RunOnly(WorkflowRunStore):
         """Claims only this run and its children."""

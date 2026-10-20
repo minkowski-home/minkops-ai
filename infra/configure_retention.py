@@ -1,8 +1,8 @@
 """Bound retained deployment artifacts without touching application rows."""
 
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from google_api import GoogleApi
 

@@ -1,8 +1,8 @@
 """Production relay greeting and certificate validation are explicit."""
 
-from email.message import EmailMessage
 import os
 import unittest
+from email.message import EmailMessage
 from unittest.mock import patch
 
 from minkops_connectors.email import send_email

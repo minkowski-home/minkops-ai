@@ -3,9 +3,9 @@ import uuid
 from unittest.mock import Mock
 
 import psycopg
+import test_bill_entry as bills
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-import test_bill_entry as bills
 
 URL=bills.URL
 
@@ -105,10 +105,11 @@ class StatementTests(unittest.TestCase):
         text='Date,Reference,Debit,Credit,Balance,Branch\nOpening balance,,,,1000,\n01/10/26,TO-ICICI,500,,500,Test\n01/10/26,FROM-HDFC,,500,1000,Test\n'
         def transfer(rows,file):
             out,into=rows
-            leg=lambda r,bank,other,mate:{'source_file_id':file,'sheet':'','row':r['row'],'company_guid':'statement-company',
-                'bank_ledger_guid':bank,'counter_ledger_guid':other,'voucher_type_guid':'Contra-guid','family':'contra',
-                'pair':{'source_file_id':file,'sheet':'','row':mate['row']},'cost_centre_guid':None,'cost_category_guid':None,
-                'evidence':'Same-day transfer between the two own accounts.','exception':None}
+            def leg(r, bank, other, mate):
+                return {'source_file_id':file,'sheet':'','row':r['row'],'company_guid':'statement-company',
+                            'bank_ledger_guid':bank,'counter_ledger_guid':other,'voucher_type_guid':'Contra-guid','family':'contra',
+                            'pair':{'source_file_id':file,'sheet':'','row':mate['row']},'cost_centre_guid':None,'cost_category_guid':None,
+                            'evidence':'Same-day transfer between the two own accounts.','exception':None}
             return [leg(out,'Bank-guid','ICICI-guid',into),leg(into,'ICICI-guid','Bank-guid',out)]
         run=self.ready(text=text,statuses=('ready','ready'),proposals=transfer)
         approved=self.client.post(self.base+f"/runs/{run['id']}/approve",headers=self.csrf,json={'result':{'action':'write_ready'}})

@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 
 from jsonschema import ValidationError
+
 from minkops_platform.workflows import (
     load_definition,
     resolve_run_config,
-    validate,
 )
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -2,9 +2,8 @@
 import unittest
 
 import psycopg
-from psycopg.rows import dict_row
-
 import test_bill_entry as bills
+from psycopg.rows import dict_row
 
 URL = bills.URL
 

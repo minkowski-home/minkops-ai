@@ -1,13 +1,16 @@
 """Accounts evidence and one-click decisions over shared attention state."""
-import copy
 import base64
+import copy
 import hashlib
 import json
 from decimal import Decimal, InvalidOperation
+
 from psycopg.types.json import Jsonb
+
 from minkops_platform import attention
 from minkops_platform.errors import ServiceError
-from .repository import run_for, public_run
+
+from .repository import public_run, run_for
 
 
 def target_for(connection, run, record):
@@ -112,8 +115,8 @@ def _proposal(run, file_id, proposal):
 
 
 def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
-    from .service import approve_run
     from .batch import resolve_bill
+    from .service import approve_run
     run = run_for(connection, tenant["id"], run_id, True)
     from minkops_platform.run_controls import require_active
     require_active(connection, tenant["id"], run["task_id"])
@@ -154,8 +157,8 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
     if not original:
         raise ServiceError("invalid", "No supported proposal. Handle this bill in the original system.")
     scope = run["config"].get("tally_target")
-    from .client_context import select_target
     from .bill_decisions import supported_write
+    from .client_context import select_target
     from .vouchers import resolve
     try:
         selected = select_target(record, scope) if scope else None
@@ -223,7 +226,8 @@ def _retry_save(connection, tenant, user, run, index):
 def check_observation(item, observation):
     target = item["target"]
     if target.get("tool") == "excel":
-        from minkops_connectors.excel import sheet_records, open_workbook, mapped_columns
+        from minkops_connectors.excel import mapped_columns, open_workbook, sheet_records
+
         from .catalog import validate_data
         try:
             content = base64.b64decode(observation["content"], validate=True)
@@ -272,7 +276,7 @@ def check_observation(item, observation):
     names = [m.get("@_NAME", m.get("NAME")) for m in masters]
     supplier_valid = target.get("vendor") in names
     if item["kind"] == "supplier" and target.get("gst_supplier"):
-        from .supplier_gst import verified_supplier, scalar
+        from .supplier_gst import scalar, verified_supplier
         supplier = observation.get("supplier")
         reference = next((m for m in masters if m.get("@_NAME", m.get("NAME")) == target["vendor"]), None)
         supplier_valid = (supplier_valid and verified_supplier(supplier, target["gst_supplier"])
@@ -331,10 +335,10 @@ def supplier_created(connection, item, job, observation):
     if run["state"] not in ("review", "writing"):
         return
     from .client_context import select_target
-    from .tally_writes import prepare, complete_run
+    from .tally_writes import complete_run, prepare
     result = copy.deepcopy(run["result"])
-    from .tally_writes import SETTLED
     from .bulk_decisions import proposal_identity
+    from .tally_writes import SETTLED
     consent = target.get("authorized_proposals")
     eligible = []
     for index, record in enumerate(result["records"]):

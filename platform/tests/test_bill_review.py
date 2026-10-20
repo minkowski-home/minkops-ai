@@ -6,7 +6,13 @@ import io
 
 import pytest
 
-from minkops_platform.accounts.bill_review import REASONS, TITLE_CODES, reason_sentence, review, export_csv
+from minkops_platform.accounts.bill_review import (
+    REASONS,
+    TITLE_CODES,
+    export_csv,
+    reason_sentence,
+    review,
+)
 from minkops_platform.accounts.checks import EXCEPTION_LABELS
 from minkops_platform.accounts.tally_writes import HOLD_TITLES, defer_input
 from minkops_platform.errors import ServiceError
@@ -63,14 +69,16 @@ def test_review_and_csv_are_exception_only_per_bill_with_shared_file_attention_i
 
 @pytest.mark.parametrize("state", ["queued", "executing", "collecting", "writing"])
 def test_export_refuses_an_unstable_snapshot(state):
-    run = mixed_run(); run["state"] = state
+    run = mixed_run()
+    run["state"] = state
     with pytest.raises(ServiceError, match="ready"):
         export_csv(run)
 
 
 @pytest.mark.parametrize("state", ["review", "completed", "failed", "stopped"])
 def test_stable_snapshot_exports(state):
-    run = mixed_run(); run["state"] = state
+    run = mixed_run()
+    run["state"] = state
     assert export_csv(run).startswith(codecs.BOM_UTF8)
 
 

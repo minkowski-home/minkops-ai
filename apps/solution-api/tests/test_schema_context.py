@@ -2,14 +2,14 @@
 
 import json
 import os
-import uuid
 import unittest
+import uuid
 from unittest.mock import patch
 
 import psycopg
-from psycopg.rows import dict_row
-import test_bill_entry as bills
 import test_accounts_api as accounts
+import test_bill_entry as bills
+from psycopg.rows import dict_row
 
 URL = accounts.URL
 

@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("AUTH_DEV_MODE", "1")
 from minkops_api.main import app
 
-
 ROOT = Path(__file__).resolve().parents[3]
 URL = os.environ.get("TEST_DATABASE_URL")
 PASSWORD = "long test password 123!"

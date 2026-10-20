@@ -5,8 +5,8 @@ from pathlib import Path
 
 from jsonschema import ValidationError
 from psycopg.types.json import Jsonb
-from minkops_connectors.excel import inspect_workbook
 
+from minkops_connectors.excel import inspect_workbook
 from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.environments import (
     SESSION_BYTE_LIMIT,
@@ -361,8 +361,8 @@ class BillHandler(AccountsHandler):
         resume_suppliers(connection, run, user)
 
     def public_fields(self, connection, run):
-        from .bill_review import attention_items, review
         from .bill_decisions import public_result
+        from .bill_review import attention_items, review
         return {**super().public_fields(connection, run), "review": review(run, attention_items(connection, run)),
                 "result": public_result(run)}
 
@@ -491,8 +491,9 @@ class BillHandler(AccountsHandler):
         return result
 
     def finish(self, connection, store, run, context, domain, result):
-        from .service import prepare_writes
         from minkops_platform.run_controls import control_state
+
+        from .service import prepare_writes
         if run["config"].get("stage") == "triage":
             store.observe(connection, run, "review", "Bills routed to their companies.", 70)
             return

@@ -63,8 +63,8 @@ def enforce(url, *, cancel=True):
         if cancel:
             pending = connection.execute("SELECT * FROM workflow_runs WHERE config @> '{\"timeout_cancel_pending\":true}' AND session_id IS NOT NULL ORDER BY updated_at LIMIT 4").fetchall()
             connection.commit()
-            from .runtime.openai_hosted import cancel_turn
             from .runtime.diagnostics import record
+            from .runtime.openai_hosted import cancel_turn
             for run in pending:
                 try:
                     cancel_turn(run['session_id'],run['turn_id'])

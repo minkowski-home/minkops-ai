@@ -8,6 +8,7 @@ previous balance plus the signed transaction, and date order must be fixed by
 the dates themselves. Values are never transcribed by the model, and one
 immutable row identity is shared by preview, overlapping files and writes.
 """
+import contextlib
 import csv
 import hashlib
 import io
@@ -16,6 +17,7 @@ import re
 from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+
 from openpyxl import load_workbook
 
 from .excel import open_workbook
@@ -182,11 +184,10 @@ def apply_layout(table, layout, header_index, *, sheet='', formulas=frozenset(),
         account = cell_text(get(cells, columns.get('account')))
         if _matches(cells, rules.get('opening')) or _matches(cells, rules.get('closing')):
             kind = 'opening' if _matches(cells, rules.get('opening')) else 'closing'
-            try:
+            # A balance row without a readable amount is skipped, not guessed.
+            with contextlib.suppress(ValueError, TypeError):
                 (rows if kind == 'opening' else closings).append({'row': number, 'sheet': sheet, 'account': account,
                     'kind': kind, 'balance_cents': money(get(cells, columns.get('balance')))})
-            except (ValueError, TypeError):
-                pass
             continue
         if len(rows) >= MAX_ROWS:
             raise ValueError('Select at most 10,000 transaction rows.')

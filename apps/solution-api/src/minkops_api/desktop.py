@@ -5,9 +5,10 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
+
 from minkops_platform import desktop
 from minkops_platform.errors import ServiceError
-from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import Db, User, require_csrf, tenant_access
 

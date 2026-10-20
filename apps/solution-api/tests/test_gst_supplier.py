@@ -2,9 +2,9 @@
 import unittest
 
 import psycopg
+import test_bill_entry as bills
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-import test_bill_entry as bills
 
 URL = bills.URL
 

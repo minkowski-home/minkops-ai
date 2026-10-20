@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import psycopg
 from fastapi.testclient import TestClient
-from minkops_api.main import app
 from psycopg.rows import dict_row
 from test_accounts_excel import catalog, workbook
+
+from minkops_api.main import app
 
 URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -76,6 +77,7 @@ class AccountsTests(unittest.TestCase):
 
     def test_invalid_agent_proposal_remains_durable_for_diagnostics(self):
         from jsonschema import ValidationError
+
         from minkops_platform.accounts.worker import process
 
         run, _ = self.launch()
@@ -210,9 +212,10 @@ class AccountsTests(unittest.TestCase):
         with psycopg.connect(URL) as c:
             # Excel adapter regression cases intentionally use a generic tenant
             # binding. Client-specific policy has separate rejection tests.
+            from psycopg.types.json import Jsonb
+
             from minkops_platform.resources import REPOSITORY_ROOT
             from minkops_platform.workflows import load_definition
-            from psycopg.types.json import Jsonb
 
             definition = load_definition(REPOSITORY_ROOT / 'employees/accounts-desk/workflows/bill-entry')
             # This fixture exercises the unrestricted core variant with explicit

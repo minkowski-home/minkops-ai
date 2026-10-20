@@ -798,8 +798,8 @@ def finish(connection, device, job_id, receipt):
         (state, Jsonb(result), error, fingerprint, job_id),
     ).fetchone()
     if job["operation"] == "tally.statement":
-        from .accounts.statements import dispatch_next
         from .accounts.repository import run_for
+        from .accounts.statements import dispatch_next
         dispatch_next(connection, run_for(connection, device["tenant_id"], job["input"]["run_id"]))
     summary = (
         error

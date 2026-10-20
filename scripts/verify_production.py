@@ -8,8 +8,8 @@ are never submitted as agent correction text.
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 import httpx
 

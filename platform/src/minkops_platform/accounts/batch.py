@@ -185,8 +185,8 @@ def resolve_bill(connection, tenant, user, run_id, file_id, reject):
                 (Jsonb(child["config"]), child["id"]),
             )
         if child and child["config"].get("tally_target", {}).get("schema_only"):
-            from .bills import queue_tally_context
             from ..discovery import workflow_context
+            from .bills import queue_tally_context
 
             # A continuation pins the refreshed catalog independently of siblings.
             child["config"]["source_catalog_snapshot"] = workflow_context(
@@ -265,7 +265,6 @@ def reconcile_once(url):
 def _aggregation_failed(connection, parent, error):
     """Retry a bounded number of ticks for transient faults, then fail visibly."""
     from minkops_platform.runtime.diagnostics import error_details, record
-
     from minkops_platform.runtime.store import WorkflowRunStore
 
     attempt = int(parent["config"].get("aggregation_failures", 0)) + 1

@@ -12,16 +12,18 @@ from uuid import NAMESPACE_URL, uuid5
 
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
+
 from minkops_platform import attention, desktop
 from minkops_platform.errors import ServiceError
+from minkops_platform.run_controls import control_state, require_active
 from minkops_platform.runtime.environments import exceeds_session
 from minkops_platform.runtime.launch import LaunchInputs
-from minkops_platform.run_controls import require_active, control_state
 from minkops_platform.workflows import resolve_run_config
+
+from .client_context import context_assets
 from .handlers import AccountsHandler
 from .repository import files_for, observe
 from .statement_routing import validated_plan
-from .client_context import context_assets
 
 
 def companies(context):
@@ -57,10 +59,12 @@ def native_plans(run, rows, decisions):
     A leg whose partner is not in this run looks for that transfer in Tally first.
     """
     from datetime import date
+
     from minkops_platform.accounts.vouchers import statement_voucher
     position={(r['source_file_id'],r['sheet'],r['row']):i for i,r in enumerate(rows)}
     def held(row, reason):
-        row.pop('_resolved',None); row.update(status='held',code='statement_transfer_unpaired',reason=reason)
+        row.pop('_resolved',None)
+        row.update(status='held',code='statement_transfer_unpaired',reason=reason)
     for row in rows:
         resolved=row.get('_resolved')
         if not resolved or row.get('plan') or row.get('duplicate_of') is not None: continue
@@ -85,7 +89,8 @@ def native_plans(run, rows, decisions):
             key=f"statement:{resolved['company_guid']}:contra"
             token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{identity}"))
             debit['plan']={**statement_voucher(debit['_resolved'],remote_id=token,identity=identity,legs=legs),'destination_key':key}
-            credit['duplicate_of']=rows.index(debit); credit['covered_by_transfer']=True
+            credit['duplicate_of']=rows.index(debit)
+            credit['covered_by_transfer']=True
             continue
         key=f"statement:{resolved['company_guid']}:{resolved['data']['bank_ledger']}"
         token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
@@ -130,7 +135,8 @@ def chain_ends(rows):
             by_key.setdefault(f"{row['company_guid']}:{row['bank_ledger']}",[]).append(row)
     ends={}
     for key,group in by_key.items():
-        balances={r['balance_cents'] for r in group}; openings={r['balance_cents']-r['amount_cents'] for r in group}
+        balances={r['balance_cents'] for r in group}
+        openings={r['balance_cents']-r['amount_cents'] for r in group}
         start=[r for r in group if r['balance_cents']-r['amount_cents'] not in balances]
         end=[r for r in group if r['balance_cents'] not in openings]
         if len(start)==1 and len(end)==1:
@@ -188,7 +194,7 @@ class StatementHandler(AccountsHandler):
         if any(Path(f['path']).suffix.lower() not in ('.csv','.xlsx') for f in files):
             raise ValueError('Statements and branch mappings accept CSV and XLSX. Convert legacy XLS files in Excel.')
         if sum(len(f['content']) for f in files)>30_000_000: raise ValueError('Select at most 30 MB of statements.')
-        from minkops_platform.discovery import workflow_context, get_run, latest_run
+        from minkops_platform.discovery import get_run, latest_run, workflow_context
         discovery_id=body['config'].get('discovery_id')
         if not discovery_id: raise ValueError('Confirm complete Source Discovery first.')
         found=get_run(connection,tenant['id'],discovery_id)
@@ -243,7 +249,8 @@ class StatementHandler(AccountsHandler):
                 raise ValueError('Declare one layout or exception for each new statement sheet.')
             return result
         rows=copy.deepcopy(domain['rows'])
-        identity=lambda r:(r['source_file_id'],r['sheet'],r['row'])
+        def identity(r):
+            return (r['source_file_id'],r['sheet'],r['row'])
         expected={identity(r) for r in rows}
         decisions={}
         for proposal in result['records']:
@@ -308,14 +315,16 @@ class StatementHandler(AccountsHandler):
             self.approve(connection,{'id':run['tenant_id']},{'id':run['actor_id']},run,{'action':'write_ready'},result=result)
 
     def approve(self, connection, tenant, user, run, body, *, result=None):
-        operator(run,user); require_active(connection,tenant['id'],run['task_id'])
+        operator(run,user)
+        require_active(connection,tenant['id'],run['task_id'])
         action=body.get('result',{}).get('action',body.get('action','write_ready'))
         if action not in ('write_ready','retry_saves','nothing'): raise ValueError('Choose an offered statement action.')
         result=copy.deepcopy(result if result is not None else run['result'])
         if action=='nothing':
             for row in result['records']:
                 if row['status'] not in ('saved','duplicate','writing'): row['status']='rejected'
-            complete(connection,run,result); return
+            complete(connection,run,result)
+            return
         for index,row in enumerate(result['records']):
             if row.get('duplicate_of') is not None: continue
             eligible=row['status']=='ready' or (action=='retry_saves' and row.get('save_hold'))
@@ -326,7 +335,10 @@ class StatementHandler(AccountsHandler):
                     connection.execute('''INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)''',(run['tenant_id'],run['id'],run['config']['statement_device_id'],
                         plan['company'],(plan.get('identity') or {}).get('hash',row['identity']),index,Jsonb(plan),plan['destination_key']))
-                row['status']='writing'; row.pop('save_hold',None); row.pop('code',None); row.pop('reason',None)
+                row['status']='writing'
+                row.pop('save_hold',None)
+                row.pop('code',None)
+                row.pop('reason',None)
             except UniqueViolation:
                 row.update(status='held',code='statement_save_waiting',reason='Another approved run is reconciling this transaction. Finish it before retrying.',save_hold=True)
         for row in result['records']:
@@ -358,7 +370,10 @@ def accept(connection, device, payload, receipt):
     if run['workflow_key']!='statement-entry': raise ServiceError('invalid','Not a statement write.')
     if not isinstance(receipt,dict) or receipt.get('outcome') not in ('saved','duplicate','attention'):
         raise ServiceError('invalid','Invalid statement receipt.')
-    outcome=receipt['outcome']; plan=write['plan']; data=plan.get('data'); raw=receipt
+    outcome=receipt['outcome']
+    plan=write['plan']
+    data=plan.get('data')
+    raw=receipt
     verified=outcome in ('saved','duplicate')
     if verified and isinstance(receipt.get('current'),dict) and 'lines' in receipt['current']:
         # Protocol 5: verify against the upgraded plan, store the row's usual observation.
@@ -381,10 +396,13 @@ def accept(connection, device, payload, receipt):
             or not isinstance(current.get('guid'),str) or not current['guid'] or not current.get('fingerprint')
             or current.get('allocation')!=plan.get('allocation') or current.get('entries')!=expected):
             raise ServiceError('invalid','Native statement readback differs from the approved manifest.')
-    result=copy.deepcopy(run['result']); row=result['records'][write['record_index']]
+    result=copy.deepcopy(run['result'])
+    row=result['records'][write['record_index']]
     row['status']=outcome if verified else 'held'
     if verified:
-        row.pop('code',None); row.pop('reason',None); row['current']=receipt['current']
+        row.pop('code',None)
+        row.pop('reason',None)
+        row['current']=receipt['current']
     else:
         code=receipt.get('hold','statement_save_held')
         if code not in ('possible_existing','uncertain_import','destination_changed','company_not_open','no_company','duplicate_company','not_running','port_closed','busy','too_many','invalid_response'):
@@ -397,7 +415,9 @@ def accept(connection, device, payload, receipt):
             sibling['status']='duplicate' if verified else 'held'
             if not verified: sibling.update(code=row['code'],reason=row['reason'],save_hold=True)
             else:
-                sibling.pop('code',None); sibling.pop('reason',None); sibling.pop('save_hold',None)
+                sibling.pop('code',None)
+                sibling.pop('reason',None)
+                sibling.pop('save_hold',None)
     connection.execute('UPDATE account_tally_writes SET outcome=%s,receipt=%s,finished_at=now(),verified_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s',
         (outcome,Jsonb(raw),verified,write['id']))
     complete(connection,run,result)

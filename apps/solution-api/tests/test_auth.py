@@ -1,6 +1,6 @@
 import os
-import uuid
 import unittest
+import uuid
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("AUTH_DEV_MODE", "1")
 
 from minkops_api.main import app
-
 
 URL = os.environ.get("TEST_DATABASE_URL")
 

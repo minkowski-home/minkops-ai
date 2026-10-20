@@ -98,7 +98,7 @@ def client_variant(definition, directory, filename, solution_id):
     enforcement stays in the installed handler and deterministic policy layer.
     Both versions and the exact composed bytes travel with each durable run.
     """
-    from .runtime.bundles import read_resource, digest, validate_snapshot
+    from .runtime.bundles import digest, read_resource, validate_snapshot
 
     variant = json.loads(read_resource(directory, filename))
     validate(

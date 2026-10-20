@@ -2,9 +2,12 @@
 
 import unittest
 
-from minkops_platform.accounts.bills import business_identity, classify_excel
+from minkops_platform.accounts.bills import (
+    business_identity,
+    capture_tally_findings,
+    classify_excel,
+)
 from minkops_platform.accounts.checks import populate_entry_ids
-from minkops_platform.accounts.bills import capture_tally_findings
 
 
 class BillIdentityTests(unittest.TestCase):

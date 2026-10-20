@@ -78,6 +78,7 @@ class WorkerWakeupTests(unittest.TestCase):
     def test_runner_publishes_lease_before_submitting_any_lane(self):
         from concurrent.futures import ThreadPoolExecutor
         from unittest.mock import patch
+
         from minkops_platform.worker_hosting import drain
 
         testcase = self
@@ -166,6 +167,7 @@ class WorkerWakeupTests(unittest.TestCase):
     def test_monitor_runs_while_every_lane_is_waiting_for_a_silent_provider(self):
         from concurrent.futures import wait as real_wait
         from unittest.mock import patch
+
         from minkops_platform.worker_hosting import drain
         started, cancelled = threading.Event(), threading.Event()
         def work(url):

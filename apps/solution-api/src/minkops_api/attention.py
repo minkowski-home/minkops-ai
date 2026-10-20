@@ -1,12 +1,15 @@
 """Authenticated transport for shared attention; membership does not grant new PC resources."""
-from uuid import UUID
 from typing import Literal
-from fastapi import APIRouter, Request, Query
+from uuid import UUID
+
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
+
 from minkops_platform import attention
 from minkops_platform.accounts.attention import decide
-from .auth import Db, User, require_csrf, tenant_access
+
 from .accounts import _call
+from .auth import Db, User, require_csrf, tenant_access
 
 router = APIRouter(prefix="/api/tenants/{slug}/attention")
 

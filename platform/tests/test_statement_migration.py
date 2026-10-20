@@ -1,8 +1,10 @@
 """The classification-setting retirement preserves unrelated operator settings."""
 import os
 import unittest
+
 import test_workflow_registration as registration
 from psycopg.types.json import Jsonb
+
 from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.workflows import load_definition, register_workflow
 

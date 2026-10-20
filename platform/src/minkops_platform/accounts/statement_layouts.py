@@ -12,9 +12,15 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from minkops_connectors.statement import apply_layout, header_signature, preview, read_tables, signatures
 from psycopg.types.json import Jsonb
 
+from minkops_connectors.statement import (
+    apply_layout,
+    header_signature,
+    preview,
+    read_tables,
+    signatures,
+)
 from minkops_platform import attention, profiles
 from minkops_platform.errors import ServiceError
 

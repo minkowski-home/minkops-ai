@@ -12,7 +12,6 @@ from minkops_platform.errors import ServiceError
 from .checks import EXCEPTION_LABELS
 from .tally_writes import HOLD_TITLES
 
-
 REASONS = {
     "source_unreadable": "The bill could not be read reliably.",
     "not_a_bill": "This source does not contain a bill that can be entered.",

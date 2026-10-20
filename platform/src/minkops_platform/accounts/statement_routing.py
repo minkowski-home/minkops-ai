@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from minkops_connectors.statement import normalized
+
 from .client_context import books_beginning, master_lookup
 from .supplier_gst import scalar
 from .voucher_types import base_types
@@ -84,7 +85,8 @@ def validated_plan(row, companies, selection):
     voucher=selected('VOUCHERTYPE','voucher_type_guid')
     if normalized(bases.get(name(voucher).casefold()))!=base or scalar(voucher.get('ISACTIVE')).casefold()=='no':
         raise ValueError(f'The selected voucher type must be an active {base.title()} type.')
-    identities=lambda master:{key:scalar(master.get(key)) for key in ('GUID','PARENT','ALTERID')}
+    def identities(master):
+        return {key:scalar(master.get(key)) for key in ('GUID','PARENT','ALTERID')}
     lines=None
     if selection.get('lines'):
         # Several counter lines (charges with GST, TDS) split the one bank amount exactly.
@@ -96,7 +98,8 @@ def validated_plan(row, companies, selection):
             cents=int(Decimal(str(line['amount']))*100) if isinstance(line.get('amount'),(int,float)) else 0
             if cents<=0 or Decimal(str(line['amount']))*100!=cents or name(ledger) in names:
                 raise ValueError('Each line needs a positive exact amount and a distinct ledger.')
-            names.add(name(ledger)); total+=cents
+            names.add(name(ledger))
+            total+=cents
             allocation=None
             if line.get('cost_centre_guid') or line.get('cost_category_guid'):
                 centre=one([r['data'] for r in records if r['type']=='COSTCENTRE' and scalar(r['data'].get('GUID'))==line.get('cost_centre_guid')],'Select one discovered cost centre.')

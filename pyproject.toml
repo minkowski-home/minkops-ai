@@ -6,3 +6,8 @@ members = [
     "platform",
     "connectors",
 ]
+
+# Development tools shared by every workspace project; production images sync
+# with --no-dev and never install them.
+[dependency-groups]
+dev = ["ruff==0.17.1"]

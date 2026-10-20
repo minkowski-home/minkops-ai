@@ -1,6 +1,8 @@
 from io import BytesIO
+
 import pytest
 from openpyxl import Workbook, load_workbook
+
 from minkops_connectors.excel import schema_projection
 
 

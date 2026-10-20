@@ -8,10 +8,10 @@ import json
 from pathlib import Path
 
 from jsonschema import ValidationError
-from minkops_connectors.excel import open_workbook
 from psycopg import errors
 from psycopg.types.json import Jsonb
 
+from minkops_connectors.excel import open_workbook
 from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
 from minkops_platform.workflows import load_definition as load_definition

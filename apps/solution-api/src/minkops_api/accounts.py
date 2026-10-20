@@ -7,13 +7,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
+
+from minkops_api.auth import Db, User, require_csrf, tenant_access
 from minkops_platform.accounts import repository, service
 from minkops_platform.accounts.repository import public_run
 from minkops_platform.accounts.service import prepare_writes as prepare_writes
 from minkops_platform.errors import ServiceError
-from pydantic import BaseModel, Field
-
-from minkops_api.auth import Db, User, require_csrf, tenant_access
 
 router = APIRouter(prefix="/api/tenants/{slug}/accounts")
 

@@ -36,12 +36,14 @@ def test_matrix_is_exhaustive_and_documented():
     "source_values_conflict", "unsupported_structure", "date_before_books", "destination_changed", "voucher_type_unresolved",
     "identity_rule_unknown"])
 def test_identity_or_structure_blockers_never_offer_best_guess(code):
-    run, record = example(); record["exception_codes"] = [code]
+    run, record = example()
+    record["exception_codes"] = [code]
     assert "guess" not in allowed_actions(run, record)
 
 
 def test_supported_guess_and_save_retry_do_not_share_policy():
-    run, record = example(); record["exception_codes"] = ["classification_uncertain"]
+    run, record = example()
+    record["exception_codes"] = ["classification_uncertain"]
     assert allowed_actions(run, record) == ["guess", "nothing"]
     record.update(status="held", save_hold="Diagnostic")
     assert allowed_actions(run, record) == ["retry_save", "nothing"]
@@ -50,7 +52,8 @@ def test_supported_guess_and_save_retry_do_not_share_policy():
 
 
 def test_mandatory_values_are_checked_before_offering_a_write_without_mutating_proposal():
-    run, record = example(); record["exception_codes"] = ["source_unreadable"]
+    run, record = example()
+    record["exception_codes"] = ["source_unreadable"]
     before = copy.deepcopy(run)
     assert "guess" in allowed_actions(run, record)
     assert run == before
@@ -59,7 +62,8 @@ def test_mandatory_values_are_checked_before_offering_a_write_without_mutating_p
 
 
 def test_recheck_only_applies_to_unresolved_inputs_and_supplier_needs_positive_identity():
-    run, record = example(); record["exception_codes"] = ["supplier_missing"]
+    run, record = example()
+    record["exception_codes"] = ["supplier_missing"]
     record["data"].update(vendor="New supplier", tax=0, tax_ledger=None, total=100)
     assert allowed_actions(run, record) == ["supplier", "nothing"]
     run["result"]["unresolved"] = [{"source_file_id": "file", "code": "supplier_missing"}]

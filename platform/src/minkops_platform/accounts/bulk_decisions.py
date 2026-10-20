@@ -125,8 +125,8 @@ def preview(connection, tenant, user, run_id, file_id, action, proposal=None):
 
 def apply(connection, tenant, user, run_id, file_id, action, proposal, preview_token):
     from .attention import decide, flag
-    from .tally_writes import complete_run, defer_input
     from .service import approve_run
+    from .tally_writes import complete_run, defer_input
 
     run = _owned(connection, tenant, user, run_id)
     # The audit and application commit atomically. An existing token is a

@@ -1,6 +1,8 @@
 """Model classification cannot change source money or escape pinned discovery."""
 import copy
+
 import pytest
+
 from minkops_platform.accounts.statement_routing import validated_plan
 from minkops_platform.accounts.statements import StatementHandler
 from minkops_platform.resources import REPOSITORY_ROOT
@@ -53,9 +55,12 @@ def test_invalid_model_destinations_never_become_native_writes(changes):
 
 
 def test_identity_is_company_scoped_and_duplicate_native_guids_hold():
-    context=companies();other=copy.deepcopy(context[0]);other.update(company='Other',company_guid='other')
+    context=companies()
+    other=copy.deepcopy(context[0])
+    other.update(company='Other',company_guid='other')
     assert validated_plan(row(),[*context,other],choice())['company_guid']=='company'
-    collision=copy.deepcopy(context[0]['masters']['records'][2]);collision['data']['PARENT']='Different group'
+    collision=copy.deepcopy(context[0]['masters']['records'][2])
+    collision['data']['PARENT']='Different group'
     context[0]['masters']['records'].append(collision)
     with pytest.raises(ValueError):validated_plan(row(),context,choice())
 
@@ -63,10 +68,12 @@ def test_identity_is_company_scoped_and_duplicate_native_guids_hold():
 def test_books_date_active_type_and_cost_relationships_are_native_constraints():
     with pytest.raises(ValueError,match='books'):
         validated_plan(row(date='2026-03-31'),companies(),choice())
-    context=companies();records=context[0]['masters']['records']
+    context=companies()
+    records=context[0]['masters']['records']
     records[3]['data']['ISACTIVE']='No'
     with pytest.raises(ValueError,match='active'):validated_plan(row(),context,choice())
-    context=companies();records=context[0]['masters']['records']
+    context=companies()
+    records=context[0]['masters']['records']
     records.extend([{'type':'COSTCATEGORY','data':{'NAME':'Projects','GUID':'category'}},
         {'type':'COSTCENTRE','data':{'NAME':'Site One','GUID':'centre','CATEGORY':'Projects'}}])
     selected=choice(cost_centre_guid='centre',cost_category_guid='category')

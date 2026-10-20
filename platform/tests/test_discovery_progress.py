@@ -1,5 +1,6 @@
 """Bounded display measurements cannot alter catalog completion or grow task logs."""
 import pytest
+
 from minkops_platform import discovery
 from minkops_platform.errors import ServiceError
 

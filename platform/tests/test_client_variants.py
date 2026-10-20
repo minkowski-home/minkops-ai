@@ -2,9 +2,10 @@
 
 import json
 import shutil
-from tempfile import TemporaryDirectory
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
+
 from jsonschema import ValidationError
 
 from minkops_platform.installation import load_solution

@@ -80,8 +80,9 @@ class DiscoveryTests(unittest.TestCase):
                                          headers=self.csrf, json={}).status_code, 409)
 
     def test_excel_without_ai_saves_structure_without_creating_entry_mappings(self):
-        from minkops_connectors.excel import schema_projection
         from openpyxl import Workbook, load_workbook
+
+        from minkops_connectors.excel import schema_projection
 
         initial, _ = self.start()
         self.client.post(f"/api/tenants/{self.slug}/tasks/{initial['task_id']}/control",
@@ -140,10 +141,11 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertEqual(rejected.status_code, 422, rejected.text)
 
     def test_paused_excel_tool_is_rejected_server_side(self):
+        from psycopg.types.json import Jsonb
+
         from minkops_platform.resources import REPOSITORY_ROOT
         from minkops_platform.solution_policy import bind_definition
         from minkops_platform.workflows import load_definition
-        from psycopg.types.json import Jsonb
 
         _, body = self.start()
         bound = bind_definition(load_definition(
@@ -191,10 +193,11 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 422, rejected.text)
 
     def test_excel_and_tally_collection_review_reuse_and_layout_change(self):
+        from openpyxl import load_workbook
+
         from minkops_platform.accounts.worker import process
         from minkops_platform.resources import REPOSITORY_ROOT
         from minkops_platform.workflows import load_definition, register_workflow
-        from openpyxl import load_workbook
 
         self.pair()
         self.discovery = f"/api/tenants/{self.slug}/discovery"

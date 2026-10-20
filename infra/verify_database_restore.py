@@ -2,22 +2,21 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
-from psycopg import sql
-
 from google_api import GoogleApi
+from psycopg import sql
 
 STATE_DIR = Path.home() / ".local/state/minkops-deployment"
 
 
 def main():
     state = json.loads((STATE_DIR / "database.json").read_text())
-    admin = dict(host="127.0.0.1", port=5433, dbname="postgres",
-                 user=state["bootstrap"], password=state["bootstrap_password"])
+    admin = {"host": "127.0.0.1", "port": 5433, "dbname": "postgres",
+             "user": state["bootstrap"], "password": state["bootstrap_password"]}
     restored = "minkops_restore_" + uuid4().hex[:12]
     dump = STATE_DIR / "minkops-before-launch.dump"
     # Credentials are child environment only, never command arguments/output.

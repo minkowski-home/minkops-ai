@@ -4,10 +4,9 @@ import copy
 from .bill_review import REASONS
 from .client_context import select_target
 
-
 # The matrix is a ceiling. Complete values, positive supplier evidence and the
 # pinned company/master identities can further restrict these actions.
-HANDLERS = {code: ("nothing", "retry") for code in REASONS}
+HANDLERS = dict.fromkeys(REASONS, ("nothing", "retry"))
 for _code in ("source_unreadable", "classification_uncertain", "manual_review", "posting_profile_miss"):
     HANDLERS[_code] = ("guess", "nothing", "retry")
 HANDLERS["supplier_missing"] = ("supplier", "nothing", "retry")

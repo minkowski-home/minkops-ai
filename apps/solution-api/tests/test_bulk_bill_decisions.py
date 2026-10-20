@@ -2,10 +2,9 @@
 import unittest
 
 import psycopg
+import test_bill_entry as fixtures
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-
-import test_bill_entry as fixtures
 
 URL = fixtures.URL
 
@@ -99,6 +98,7 @@ class BulkBillTests(unittest.TestCase):
 
     def test_retry_save_uses_one_approval_and_replay_does_not_enqueue_more_writes(self):
         from unittest.mock import patch
+
         from minkops_platform.accounts.service import approve_run
         run, files, route = self.group()
         with psycopg.connect(URL, row_factory=dict_row) as c:
@@ -125,6 +125,7 @@ class BulkBillTests(unittest.TestCase):
 
     def test_bulk_recheck_refreshes_once_and_queues_three_children_in_one_transaction(self):
         from unittest.mock import patch
+
         from minkops_platform.accounts.bills import refreshed_tally_target
         run, files, route = self.group()
         preview = self.preview(route, "retry")
