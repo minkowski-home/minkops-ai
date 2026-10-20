@@ -8,9 +8,8 @@
  * the server holds them as named connector limitations before a plan exists. */
 import {createHash} from 'node:crypto';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
-import {boundedText} from './index.js';
 import {readTallyReferences} from './tally-references.js';
-import {requireOpenCompany, TallyUnavailable} from './tally-session.js';
+import {boundedText, requireOpenCompany, TallyUnavailable} from './tally-session.js';
 
 /** Plan family -> Tally's predefined base voucher type. */
 export const FAMILIES = Object.freeze({

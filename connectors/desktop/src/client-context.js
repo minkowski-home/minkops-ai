@@ -13,8 +13,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { boundedText } from "./index.js";
-import { openCompanyScope, readOpenCompanies } from "./tally-session.js";
+import { boundedText, openCompanyScope, readOpenCompanies } from "./tally-session.js";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const escape = (s) =>
   s.replace(

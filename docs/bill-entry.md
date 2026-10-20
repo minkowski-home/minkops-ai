@@ -361,78 +361,19 @@ Journal voucher holds. Choosing "Use one company for this run" suits practices t
 keep one Tally company per financial year. **Show details** on each proposal lists
 the company, voucher type, date, ledgers and amounts it will enter.
 
-The following generator and live scripts describe the earlier development proof.
-Do not run them against this preserved Test Company: their fixed fixture IDs
-belong to that earlier disposable environment.
-
-Generate a fresh set with the existing Python stack plus development-only PDF
-libraries:
-
-```sh
-uv run --all-packages --with reportlab --with pymupdf python scripts/prepare_bill_entry_demo.py
-```
-
-The script refuses to overwrite an existing demo folder. `--refresh-scans`
-rerenders only generated PDFs, preserving an already tested workbook.
-Files appear in `apps/solution-api/data/min119-hard-demo`; ground truth is outside
-the synchronized input folder. Each readable bill includes two pages, dense
-small text, skew, stamps, competing PO/GRN/date identifiers, trading and registered
-names, gross/discount/base amounts, split tax, excluded prior balances, repeated
-totals and an allocation memo. Scan PDFs contain raster pages with no text layer.
-The set includes new bills, a backfill, a correction and a valid blank image.
-The register uses obscure headers such as `Party.External`, `Txn.Base` and
-`Settlement.Due`, requiring discovery and extraction to infer business meaning.
-
-Only the explicitly selected test company should be used. Seed mock supplier,
-purchase and tax ledgers there before the live proof; do not overwrite existing
-masters. Run `db/migrate.py` against the isolated demo database to install or adopt
-the final baseline, then seed its demo composition.
-
 ## Verification
 
 Offline tests replace the paid proposal boundary and exercise real PostgreSQL,
 authenticated API transport and immutable financial plans. They cover
 117/118/119 wiring, parallel sessions, isolated failures, duplicate uploads,
 backfills, corrections, stale review, cross-PC reservations, receipt replay,
-lease expiry, cancellation and late receipts. Native tests run on Windows and
+lease expiry, stopped tasks and late receipts. Native tests run on Windows and
 Linux and include the Tally alteration selector regression. Shared UI build,
-lint and existing web tests are run. The 6 October RC additionally verifies the
-installed Windows 0.3.1 app, folder picker, catalog Save As, four desktop themes,
-shared web review at the minimum desktop width, source previews, and tray/reopen
-execution. See `docs/windows-app.md` for distribution limitations.
-That historical RC showed expandable evidence and findings. The current review
-shows concise identifiers and one-click decisions; detailed evidence and logs
-remain internal. See [attention](attention.md) and [current verification](verification-min-124.md).
-
-The 6 October proof used `minkops_mock_rc20261006`, with an independently migrated
-`minkops_min119_tests` database for regression tests. Initial extraction saves
-four unique bills and skips the steel copy. A complete second run skips all five
-inputs after an ambiguous steel reference is clarified independently; it creates
-no additional vouchers. Worker restart retains existing paid session IDs. Live
-correction verification holds a changed RC history voucher before import, then
-checks approved Alter and restoration with the same GUID/MASTER ID and count.
-Original company vouchers remain unchanged; master comparison allows only Tally's
-automatic Purchase `PREVNARRATION` bookkeeping, not configured accounting fields.
-
-Opt-in live proofs use the dedicated `minkops_min119_live` database. From WSL,
-set `DATABASE_URL`, `MINKOPS_TALLY_TEST_COMPANY` and `MINKOPS_WINDOWS_NODE` to the
-Windows Node executable. `MINKOPS_WINDOWS_ROOT` is optional; otherwise `wslpath`
-resolves this checkout. Model credentials are loaded only in the server process
-and removed from the Windows adapter environment.
-
-```sh
-uv run --all-packages python scripts/verify_bill_entry_live.py
-uv run --all-packages python scripts/verify_bill_entry_excel_live.py
-```
-
-The Tally script prints the batch ID and supports `--resume ID` after an
-interruption. The Excel proof saves checkpoint IDs beside the generated fixtures.
-Both reconcile persisted sessions; they do not resend completed input. The live
-proofs verified all three readable hard scans against independent expected
-values, Tally writes/readback, schema discovery, extraction into exact complex
-Excel headers, a native workbook save and repeated receipts. A provider rate
-limit interrupted the blank-image turn; explicit retry isolated that image and
-retained three verified sibling saves.
+lint and web tests are run. The review shows concise identifiers and one-click
+decisions; detailed evidence and logs remain internal (see [attention](attention.md)).
+Live checks against real Tally companies use the
+[five-company rehearsal](tally-rehearsal.md) and the labelled fixture scoring
+below; see [the Windows companion](windows-app.md) for distribution limitations.
 
 ### Scoring and replaying labelled fixture packages
 

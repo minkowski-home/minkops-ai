@@ -1,7 +1,6 @@
 /** Fixed, bounded identity reads for destination verification and legacy pinned writes. */
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { boundedText } from "./index.js";
-import { readOpenCompanies, TallyUnavailable } from "./tally-session.js";
+import { boundedText, readOpenCompanies, TallyUnavailable } from "./tally-session.js";
 
 export const TALLY_COLLECTIONS = Object.freeze({
   company: ["Company", "COMPANY"],

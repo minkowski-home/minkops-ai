@@ -11,12 +11,13 @@ import {
   unlink,
 } from "node:fs/promises";
 import { join, dirname, basename, sep, extname } from "node:path";
-import { XMLParser, XMLValidator } from "fast-xml-parser";
 export { inspectExcel, excelSchemaBytes } from './discovery.js';
+// The Windows companion's native surface. Tests import implementation modules
+// directly; only what the companion and its operator scripts call is exported.
 export { readTallyReferences } from './tally-references.js';
-export { checkTally, requireOpenCompany, readOpenCompanies, openCompanyScope, classifyTallyFailure, tallyTransport, TallyUnavailable, tallyCompanyNumber, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
+export { checkTally, requireOpenCompany, readOpenCompanies, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
 export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
-export { commitTallyBill, readTallyBills, saveTallyBill, classifyRejection, purchaseVoucherTypes } from './tally.js';
+export { saveTallyBill } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;
@@ -69,27 +70,6 @@ async function workbookBytes(path) {
   if (!bytes.length || bytes.length > 5_000_000)
     throw new Error("The local workbook is invalid or too large.");
   return bytes;
-}
-
-export async function boundedText(response, limit = 1_000_000) {
-  if (!response.ok || !response.body)
-    throw new Error("Tally did not accept the connection check.");
-  const reader = response.body.getReader();
-  const parts = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit)
-        throw new Error("Tally returned too much data for a connection check.");
-      parts.push(Buffer.from(value));
-    }
-    return Buffer.concat(parts).toString("utf8");
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
 }
 
 function relativeParts(path) {
@@ -231,4 +211,4 @@ export async function replaceApproved(root, spec, approved, backup) {
   }
 }
 export { inspectTallyAttention } from "./tally.js";
-export { saveVoucher, readVouchers, voucherFamilies } from "./voucher.js";
+export { saveVoucher } from "./voucher.js";
