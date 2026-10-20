@@ -44,10 +44,10 @@ const types = [
   {NAME: 'Payment', '@_RESERVEDNAME': 'Payment', GUID: 'vt-payment'}, {NAME: 'Contra', '@_RESERVEDNAME': 'Contra', GUID: 'vt-contra'},
 ];
 const snapshot = ({ledgerRecords, typeRecords = types, centres = [{NAME: 'Site 4', GUID: 'cc'}]} = {}) => ({collections: [
-  {category: 'company', status: 'ready', records: [{GUID: 'company'}]},
-  {category: 'ledgers', status: 'ready', records: ledgerRecords ?? ledgers.map(NAME => ({NAME, GUID: `${NAME}-guid`, PARENT: 'Group', ALTERID: ' 12 '}))},
+  {category: 'company', status: 'ready', records: [{GUID: 'company', ISCOSTCENTRESON: 'Yes'}]},
+  {category: 'ledgers', status: 'ready', records: ledgerRecords ?? ledgers.map(NAME => ({NAME, GUID: `${NAME}-guid`, PARENT: 'Group', ALTERID: ' 12 ', ISCOSTCENTRESON: 'Yes'}))},
   {category: 'voucher_types', status: 'ready', records: typeRecords},
-  {category: 'cost_centres', status: 'ready', records: centres},
+  {category: 'cost_centres', status: 'ready', records: centres.map(c => ({CATEGORY: 'Sites', ...c}))},
   {category: 'cost_categories', status: 'ready', records: [{NAME: 'Sites', GUID: 'cat'}]},
 ]});
 const signed = line => line.side === 'credit' ? line.amount_cents : -line.amount_cents;
@@ -132,6 +132,19 @@ test('one import carries every line with native signs, allocations and the pinne
   const replay = harness([[observed(purchase)]]);
   assert.equal((await saveVoucher(purchase, replay.options)).outcome, 'duplicate');
   assert.equal(replay.imports.length, 0);
+});
+
+test('disabled or regrouped cost allocations hold before importing a voucher', async () => {
+  for (const change of ['company disabled', 'ledger disabled', 'centre regrouped']) {
+    const refs = snapshot();
+    if (change === 'company disabled') refs.collections[0].records[0].ISCOSTCENTRESON = 'No';
+    if (change === 'ledger disabled') refs.collections[1].records.find(r => r.NAME === 'Purchase 18%').ISCOSTCENTRESON = 'No';
+    if (change === 'centre regrouped') refs.collections[3].records[0].CATEGORY = 'Another category';
+    const io = harness([[], [observed(purchase)]], {references: refs});
+    const result = await saveVoucher(purchase, io.options);
+    assert.equal(result.hold, 'destination_changed', change);
+    assert.equal(io.imports.length, 0, change);
+  }
 });
 
 test('a supplier credit note is a Debit Note with the party debited', async () => {

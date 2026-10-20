@@ -221,16 +221,19 @@ async function recheck(plan, {request, readReferences}) {
   const records = category => snapshot.collections.find(c => c.category === category)?.records ?? [];
   const companies = records('company');
   if (companies.length !== 1 || scalar(companies[0].GUID) !== plan.company_guid) return null;
+  if (allocations.length && norm(companies[0].ISCOSTCENTRESON) !== 'yes') return null;
   // Detailed XML pads numeric ALTERID text; every other identity field is exact.
   const same = (field, live, pinned) => field === 'ALTERID' ? scalar(live) === scalar(pinned) : raw(live) === raw(pinned);
   for (const line of plan.lines) {
     const found = records('ledgers').filter(r => nameOf(r) === line.ledger), pinned = plan.references.ledgers[line.ledger];
     if (found.length !== 1 || ['GUID', 'PARENT', 'ALTERID'].some(k => pinned[k] != null && !same(k, found[0][k], pinned[k]))) return null;
+    if (line.allocation && norm(found[0].ISCOSTCENTRESON) !== 'yes') return null;
   }
   for (const allocation of allocations)
     for (const [category, name, guid] of [['cost_centres', 'centre', 'centre_guid'], ['cost_categories', 'category', 'category_guid']]) {
       const found = records(category).filter(r => nameOf(r) === allocation[name]);
       if (found.length !== 1 || scalar(found[0].GUID) !== allocation[guid]) return null;
+      if (category === 'cost_centres' && scalar(found[0].CATEGORY) !== allocation.category) return null;
     }
   const typeRecords = records('voucher_types'), types = voucherFamilies(typeRecords);
   const key = plan.voucher_type.NAME.toLowerCase(), live = typeRecords.filter(r => nameOf(r).toLowerCase() === key);

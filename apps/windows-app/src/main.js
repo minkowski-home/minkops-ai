@@ -443,7 +443,7 @@ async function collectDiagnostics() {
   }
   return {
     collected_at: new Date().toISOString(),
-    companion: { version: app.getVersion(), plan_version: 4, connected: Boolean(state.device) },
+    companion: { version: app.getVersion(), plan_version: 5, connected: Boolean(state.device) },
     windows: { hostname: pc, release: release(), remote_session: remoteSession() },
     tally: {
       session,
