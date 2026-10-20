@@ -110,7 +110,9 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     from .accounts.bill_review import reason_sentence
     for row in rows:
         target = row.pop("target")
-        row["reason"] = target.get("reason") or reason_sentence({}, title=row["label"])
+        confirmation = {"profile": "Confirm this company's posting pattern to continue.",
+                        "layout": "Confirm how to read this statement."}
+        row["reason"] = target.get("reason") or confirmation.get(row["kind"]) or reason_sentence({}, title=row["label"])
         if row["kind"] == "layout":
             row["layout"] = {"prompt": target.get("prompt"), "actions": target.get("actions", []),
                              "samples": target.get("samples", [])[:3]}

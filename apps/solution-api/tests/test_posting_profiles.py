@@ -54,6 +54,7 @@ class PostingProfileTests(unittest.TestCase):
         self.assertIn("Purchases: Purchase", card["target"]["summary"])
         listed = next(i for i in self.client.get("/api/tenants/mock-tenant/attention").json() if i["id"] == str(card["id"]))
         self.assertEqual(listed["profile"], {"company": "Test", "summary": card["target"]["summary"], "waiting": 1})
+        self.assertEqual(listed['reason'], "Confirm this company's posting pattern to continue.")
         self.assertNotIn("target", listed)
         decided = self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile", headers=self.csrf,
                                    json={"action": "confirm"})
