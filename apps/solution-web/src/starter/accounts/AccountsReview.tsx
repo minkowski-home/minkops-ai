@@ -247,7 +247,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
                 {" "}
                 {supplierMissing && pending ? "Missing supplier" : billOutcome(r.status, attention)}
               </span>
-              <p>{reason(r.source_file_id, index)}</p>
+              {(attention || r.save_hold || r.status === "rejected") && <p>{reason(r.source_file_id, index)}</p>}
               {pending && run.state === "review" && ownsRun && (
                 decisionButtons(r.source_file_id, index, billActions(r), r.bulk_actions ?? {}, attention)
               )}
