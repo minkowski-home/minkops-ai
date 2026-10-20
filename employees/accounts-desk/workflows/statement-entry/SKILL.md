@@ -9,6 +9,10 @@ every transaction without a source `code`. Return one interpretation per source
 file ID, sheet and row; never omit an uncertain row. Source amounts, dates,
 balances and identities are immutable and cannot be returned as replacements.
 
+Each transaction was read through a layout Minkops proved against the running
+balances. `account` names the bank account when one sheet mixes several; all
+rows of one account belong to one bank ledger unless the source shows otherwise.
+`branch` carries a client-added routing hint column when the statement has one.
 The Branch column is a client business label. Its business meaning is not
 predefined; **it is not a bank branch**. Never equate it to a company, ledger,
 group or cost centre by a fixed rule or require its text to match a master name.

@@ -1,12 +1,39 @@
 {
-  "key":"statement-entry", "version":"0.2.0", "name":"Statement entry",
-  "description":"Interpret statement transactions using Source Discovery and enter reviewed, verified Payment and Receipt vouchers.",
-  "owner":"accounts-desk", "handler":"accounts.statement", "presentation":"accounts-statement",
-  "capabilities":["files.snapshot"], "tenant_config_schema":"tenant-config.schema.json",
-  "run_config_schema":"run-config.schema.json", "output_schema":"output.schema.json", "instructions":"SKILL.md",
-  "tenant_defaults":{"review_mode":"all_outputs","date_format":"dmy","opening_balance":""},
-  "run_defaults":{"branch_mapping_file_id":null},
-  "agent_output_schema":"agent-output.schema.json",
-  "execution":{"environment":"openai_hosted","model":"gpt-6-luna","python_packages":["openpyxl"],
-    "instructions":"execution-instructions.md","resources":[],"result_path":"/workspace/outputs/result.json"}
+  "key": "statement-entry",
+  "version": "0.3.0",
+  "name": "Statement entry",
+  "description": "Interpret statement transactions using Source Discovery and enter reviewed, verified Payment and Receipt vouchers.",
+  "owner": "accounts-desk",
+  "handler": "accounts.statement",
+  "presentation": "accounts-statement",
+  "capabilities": [
+    "files.snapshot"
+  ],
+  "tenant_config_schema": "tenant-config.schema.json",
+  "run_config_schema": "run-config.schema.json",
+  "output_schema": "output.schema.json",
+  "instructions": "SKILL.md",
+  "tenant_defaults": {
+    "review_mode": "all_outputs"
+  },
+  "run_defaults": {
+    "branch_mapping_file_id": null
+  },
+  "agent_output_schema": "agent-output.schema.json",
+  "execution": {
+    "environment": "openai_hosted",
+    "model": "gpt-6-luna",
+    "python_packages": [
+      "openpyxl"
+    ],
+    "instructions": "execution-instructions.md",
+    "resources": [],
+    "result_path": "/workspace/outputs/result.json"
+  },
+  "stages": {
+    "layout": {
+      "instructions": "stages/layout.md",
+      "agent_output_schema": "stages/layout.schema.json"
+    }
+  }
 }
