@@ -66,8 +66,8 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
       setNotice(
         result.queued !== undefined
           ? `${result.queued} check${result.queued === 1 ? "" : "s"} queued`
-          : result.status === "active" ? "Pattern confirmed; waiting bills continue"
-          : result.status ? "Bills left for entry in Tally" : "Marked done"
+          : result.status === "active" ? "Confirmed; waiting work continues"
+          : result.status ? "Left for manual handling" : "Marked done"
       );
       setItems(await api<Item[]>(base + query));
     } catch {
