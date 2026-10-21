@@ -40,8 +40,7 @@ class WorkspaceTests(unittest.TestCase):
         from psycopg.types.json import Jsonb
 
         with psycopg.connect(URL) as c:
-            for key, name, value in (("bill-entry", "output_mode", "excel_in_place"),
-                                     ("source-discovery", "destination_mode", "both")):
+            for key, name, value in (("source-discovery", "destination_mode", "both"),):
                 c.execute("""UPDATE workflows SET config_values=jsonb_set(config_values,%s,%s)
                     WHERE key=%s AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
                           ([name], Jsonb(value), key))
@@ -55,7 +54,7 @@ class WorkspaceTests(unittest.TestCase):
                 ('bill-entry','source-discovery') AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""").fetchall())
             schema = c.execute("""SELECT config_schema FROM workflows WHERE key='source-discovery'
                 AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""").fetchone()[0]
-        self.assertEqual(rows["bill-entry"]["output_mode"], "tally_in_place")
+        self.assertNotIn("output_mode", rows["bill-entry"])
         self.assertEqual(rows["source-discovery"]["destination_mode"], "tally")
         self.assertEqual(schema["properties"]["destination_mode"]["x-enabled-options"], ["tally"])
 

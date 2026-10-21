@@ -63,7 +63,7 @@ class AttentionTests(unittest.TestCase):
         from minkops_platform.accounts.checks import adopt_exceptions
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("attention.pdf")
-        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"discovery_id":did})
         result=self.tally_result(run,bill)
         result["records"][0]["exceptions"]=exceptions or []
         self.process(run,result)
@@ -130,7 +130,7 @@ class AttentionTests(unittest.TestCase):
     def test_best_guess_on_unresolved_bill_completes_run_once_saved(self):
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("attention.pdf")
-        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"discovery_id":did})
         result=self.tally_result(run,bill)
         result["records"][0]["exceptions"]=[{"code":"classification_uncertain","detail":"Expense ledger is a best guess."}]
         result["unresolved"]=[{"source_file_id":bill,"code":"classification_uncertain","reason":"Expense ledger is a best guess."}]
@@ -196,7 +196,7 @@ class AttentionTests(unittest.TestCase):
         from minkops_platform.accounts.batch import reconcile_once
         did=self.tally_discovery("company-attention")
         quote,bill=self.upload_bill("quotation.pdf"),self.upload_bill("bill.pdf")
-        root,_=self.launch("bill-entry",file_ids=[quote,bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        root,_=self.launch("bill-entry",file_ids=[quote,bill],config={"discovery_id":did})
         with psycopg.connect(URL,row_factory=dict_row) as c:
             children={r["file_ids"][0]:r for r in c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s",(root["id"],))}
         self.process(children[quote],{"records":[],"exceptions":[],"unresolved":[
@@ -214,7 +214,7 @@ class AttentionTests(unittest.TestCase):
     def test_two_undecided_bills_in_one_file_need_an_explicit_choice(self):
         did=self.tally_discovery("company-attention")
         bill=self.upload_bill("two-bills.pdf")
-        run,_=self.launch("bill-entry",file_ids=[bill],config={"output_mode":"tally_in_place","discovery_id":did})
+        run,_=self.launch("bill-entry",file_ids=[bill],config={"discovery_id":did})
         result=self.tally_result(run,bill)
         second=copy.deepcopy(result["records"][0])
         second["document"]["number"]="MOCK-2"
@@ -275,34 +275,6 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual(response.status_code,422,response.text)
         with psycopg.connect(URL) as c:
             self.assertEqual(c.execute('SELECT status FROM attention_items WHERE id=%s',(item['id'],)).fetchone()[0],'pending')
-
-    def test_excel_refresh_uses_business_keys_and_requires_a_valid_external_edit(self):
-        import base64
-        from io import BytesIO
-
-        from openpyxl import load_workbook
-        from test_accounts_excel import catalog, workbook
-
-        from minkops_platform.accounts.attention import check_observation
-        from minkops_platform.attention import resolved
-        item={'kind':'review','target':{'tool':'excel','mapping':catalog()['sheets'][0],
-            'keys':{'Invoice':'A-1','Vendor':'Acme'},'baseline':None}}
-        def observe(content):
-            return check_observation(item,{'content':base64.b64encode(content).decode()})
-        baseline=observe(workbook())
-        self.assertTrue(baseline['valid'])
-        item['target']['baseline']=baseline['current']
-        self.assertFalse(resolved(item,observe(workbook())))
-        book=load_workbook(BytesIO(workbook()))
-        book['Bills']['C3']=42
-        content=BytesIO()
-        book.save(content)
-        self.assertTrue(resolved(item,observe(content.getvalue())))
-        book['Bills']['A3']='different-bill'
-        content=BytesIO()
-        book.save(content)
-        self.assertFalse(resolved(item,observe(content.getvalue())))
-        self.assertFalse(observe(b'broken workbook')['valid'])
 
     def test_native_save_failure_retains_attention_without_replaying_a_write(self):
         run,bill,_=self.ready()
@@ -413,7 +385,7 @@ class AttentionTests(unittest.TestCase):
         did = self.tally_discovery()
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         self.process(run, self.tally_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         claim, route, _ = self.tally_job(loaded)

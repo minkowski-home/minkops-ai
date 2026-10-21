@@ -99,10 +99,7 @@ def seed_demo(url: str, password: str | None = None) -> str:
         # Explicit demo composition retains mock-client's enabled tools without
         # discarding other preferences. The production installer still rejects
         # saved settings that a newly paused tool would invalidate.
-        for key, name, fallback in (
-            ("bill-entry", "output_mode", "tally_in_place"),
-            ("source-discovery", "destination_mode", "tally"),
-        ):
+        for key, name, fallback in (("source-discovery", "destination_mode", "tally"),):
             existing = connection.execute(
                 "SELECT config_values FROM workflows WHERE tenant_id=%s AND key=%s FOR UPDATE",
                 (mock, key),

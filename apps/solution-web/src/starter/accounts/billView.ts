@@ -13,12 +13,9 @@ const isUnresolved = (record: BillRecord, result: BillResult | null) =>
 export const needsAttention = (record: BillRecord, result: BillResult | null) =>
   record.findings.length > 0 || isUnresolved(record, result);
 
-/** A positively new supplier; older runs without codes are recognised by their message. */
+/** A positively new supplier, as the proposal and its coded hold establish. */
 export const missingSupplier = (record: BillRecord) =>
-  (record.voucher ? record.voucher.party.new_supplier === true
-    : !record.master_refs || record.master_refs.vendor?.new_supplier === true) &&
-  (Boolean(record.exception_codes?.includes("supplier_missing")) ||
-    record.findings.some((f) => f.includes("missing from the confirmed Tally ledgers")));
+  record.voucher?.party.new_supplier === true && Boolean(record.exception_codes?.includes("supplier_missing"));
 
 export function billActions(record: BillRecord): BillAction[] {
   if (!isPending(record)) return [];
@@ -37,8 +34,8 @@ export function inputsWithoutProposal(result: BillResult | null) {
   };
 }
 
-interface TallyCompanyTarget { company: string; references?: { company_guid?: string | null }; voucher_type?: { NAME: string }; voucher_type_error?: string }
-interface TallyTarget { company?: string; company_mode?: string; locked_company_guid?: string | null; companies?: TallyCompanyTarget[]; voucher_type_version?: number }
+interface TallyCompanyTarget { company: string; references?: { company_guid?: string | null } }
+interface TallyTarget { company?: string; company_mode?: string; locked_company_guid?: string | null; companies?: TallyCompanyTarget[] }
 export interface BillDetails { title: string; rows: [string, string][] }
 
 const money = (value: unknown) => typeof value === "number"
@@ -75,22 +72,16 @@ export function billDetails(record: BillRecord, config: Record<string, unknown>)
   }
   if (!target) return { title: record.status === "saved" ? "Saved" : "Will be entered",
     rows: Object.entries(data).filter(([, value]) => value != null).map(([key, value]) => [key, String(value)]) };
+  // A held proposal has no bound voucher yet: show the document it summarizes.
   const guid = target.company_mode === "locked" ? target.locked_company_guid : record.company_guid;
   const company = target.companies?.find((c) => c.references?.company_guid === guid);
-  const taxes = record.tax_allocations?.length
-    ? record.tax_allocations.map((line): [string, string] => [line.ledger ?? "Pending ledger", money(line.amount)])
-    : data.tax ? [[String(data.tax_ledger ?? "Tax"), money(data.tax)] as [string, string]] : [];
   return {
     title,
     rows: [
       ["Company", company?.company ?? record.company_name ?? target.company ?? "—"],
-      // Runs started before voucher types were chosen always wrote Purchase.
-      ["Voucher type", company?.voucher_type?.NAME ?? (company?.voucher_type_error ? "Not chosen" : "Purchase")],
       ["Date", calendar(data.date)],
-      ["Supplier ledger", String(data.vendor ?? "—")],
+      ["Supplier", String(data.vendor ?? "—")],
       ["Invoice number", String(data.invoice_number ?? "—")],
-      [String(data.purchase_ledger ?? "Purchase ledger"), money(data.subtotal)],
-      ...taxes,
       ["Total", money(data.total)],
     ],
   };

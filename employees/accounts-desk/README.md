@@ -1,7 +1,7 @@
 # Accounts desk
 
 Shared employee definition for entering evidenced accounting records in the
-client's own Tally (and Excel, where a composition enables it).
+client's own Tally.
 
 - `source-discovery`: collect the client's Tally masters, period vouchers and
   workbook structure, and propose reviewed context for the other workflows.

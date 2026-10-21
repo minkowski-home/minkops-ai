@@ -9,14 +9,7 @@
     "records": {
       "type": "array",
       "items": {
-        "oneOf": [
-          {
-            "$ref": "#/$defs/excel_record"
-          },
-          {
-            "$ref": "#/$defs/tally_record"
-          }
-        ]
+        "$ref": "#/$defs/tally_record"
       }
     },
     "exceptions": {
@@ -188,86 +181,6 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 500
-      }
-    },
-    "excel_record": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source_file_id",
-        "destination_file_id",
-        "sheet",
-        "operation",
-        "data",
-        "evidence",
-        "exceptions"
-      ],
-      "properties": {
-        "source_file_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "destination_file_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "sheet": {
-          "type": "string",
-          "minLength": 1
-        },
-        "table": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "minLength": 1
-        },
-        "operation": {
-          "enum": [
-            "append"
-          ]
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": {
-            "type": [
-              "string",
-              "number",
-              "boolean",
-              "null"
-            ]
-          }
-        },
-        "evidence": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "field",
-              "page",
-              "quote"
-            ],
-            "properties": {
-              "field": {
-                "type": "string"
-              },
-              "page": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "quote": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "exceptions": {
-          "$ref": "#/$defs/exceptions"
-        },
-        "notes": {
-          "$ref": "#/$defs/notes"
-        }
       }
     },
     "tally_record": {

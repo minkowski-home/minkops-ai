@@ -18,7 +18,7 @@ class BulkBillTests(unittest.TestCase):
         from minkops_platform.accounts.batch import reconcile_once
         did = self.tally_discovery("bulk-company")
         files = [self.upload_bill(f"bulk-{i}.pdf") for i in range(4)]
-        run, _ = self.launch("bill-entry", file_ids=files, config={"output_mode": "tally_in_place", "discovery_id": did})
+        run, _ = self.launch("bill-entry", file_ids=files, config={"discovery_id": did})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = {r["file_ids"][0]: r for r in c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s", (run["id"],))}
         for index, file in enumerate(files):

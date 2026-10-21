@@ -19,15 +19,7 @@ class SolutionDefinitionTests(unittest.TestCase):
         self.assertEqual([e.metadata["key"] for e in installation.employees], ["accounts-desk"])
         self.assertEqual(set(installation.workflows), {"source-discovery", "bill-entry", "statement-entry"})
         self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "accounts.bill")
-        self.assertEqual(
-            installation.workflows["bill-entry"].tenant_schema["properties"]["output_mode"][
-                "x-enabled-options"
-            ],
-            ["tally_in_place"],
-        )
-        self.assertEqual(
-            installation.bindings["bill-entry"]["defaults"]["output_mode"], "tally_in_place"
-        )
+        self.assertNotIn("output_mode", installation.workflows["bill-entry"].tenant_schema["properties"])
         # The demo workspace grants standing exception-only authorization; the
         # reusable definition keeps explicit review of every output by default.
         self.assertEqual(
@@ -46,7 +38,6 @@ class SolutionDefinitionTests(unittest.TestCase):
         installation = load_solution(REPOSITORY_ROOT, "pr-infra")
         self.assertEqual([e.metadata['key'] for e in installation.employees], ['accounts-desk'])
         self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry', 'bill-entry'})
-        self.assertEqual(installation.bindings['bill-entry']['defaults']['output_mode'], 'tally_in_place')
         self.assertEqual(installation.bindings['bill-entry']['defaults']['review_mode'], 'all_outputs')
         self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
         self.assertEqual(installation.workflows['statement-entry'].execution_snapshot['execution']['model'],'gpt-6-luna')

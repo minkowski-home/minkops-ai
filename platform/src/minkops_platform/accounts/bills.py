@@ -1,11 +1,8 @@
-"""Bill identity and destination reconciliation independent of model decisions.
+"""Bill holds and notes, and the Tally destination each bill run pins.
 
-Identity is business-derived, never a run UUID or upload filename. Destination
-keys remain authoritative for backfills and externally created records.
+Every proposal is bound to one confirmed Source Discovery company; nothing a
+model proposes becomes writable without the voucher gate in vouchers.check.
 """
-
-from datetime import date
-from decimal import Decimal
 
 from minkops_platform.errors import ServiceError
 
@@ -28,103 +25,6 @@ def note_hold(record, error):
 def add_note(record, text):
     """An internal observation about a bill; notes never hold it or ask for attention."""
     record["notes"] = list(dict.fromkeys([*record.get("notes", []), text]))
-
-
-def normalized(value):
-    return str(value).strip().casefold()
-
-
-def business_identity(data):
-    vendor, invoice = data.get("vendor"), data.get("invoice_number")
-    if (
-        not isinstance(vendor, str)
-        or not vendor.strip()
-        or not isinstance(invoice, str)
-        or not invoice.strip()
-    ):
-        raise ValueError("Supplier and invoice number are required for bill identity.")
-    from .vouchers import document_identity
-
-    return document_identity(vendor, invoice, date.fromisoformat(str(data.get("date"))))
-
-
-def excel_matches(data, mapping, rows):
-    keys = mapping["key_columns"]
-    if not keys or any(data.get(k) in (None, "") for k in keys):
-        raise ValueError("Complete confirmed business keys are required.")
-    concepts = {c.get("concept"): c["name"] for c in mapping["columns"] if c.get("concept")}
-    identity_fields = ("vendor", "invoice_number", "date")
-    if all(k in concepts for k in identity_fields):
-        identity = business_identity({k: data.get(concepts[k]) for k in identity_fields})
-        matches = []
-        for row in rows:
-            candidate = row["data"]
-            try:
-                existing = {k: candidate.get(concepts[k]) for k in identity_fields}
-                existing["date"] = str(existing["date"]).split("T")[0]
-                if business_identity(existing) == identity:
-                    matches.append(candidate)
-            except ValueError:
-                if all(
-                    normalized(candidate.get(concepts[k])) == normalized(data.get(concepts[k]))
-                    for k in ("vendor", "invoice_number")
-                ):
-                    raise ValueError(
-                        "Existing bill has incomplete identity. Review the destination first."
-                    ) from None
-    else:
-        matches = [
-            r["data"]
-            for r in rows
-            if all(normalized(r["data"].get(k)) == normalized(data[k]) for k in keys)
-        ]
-    return matches
-
-
-def classify_excel(data, mapping, rows):
-    matches = excel_matches(data, mapping, rows)
-    if len(matches) > 1:
-        return "ambiguous"
-    if not matches:
-        return "new"
-    # App IDs are provenance, not user-observed invoice values. Formula columns
-    # without a business concept are excluded from business equality.
-    names = [
-        c["name"]
-        for c in mapping["columns"]
-        if c.get("concept") != "entry_id" and data.get(c["name"]) is not None
-    ]
-    return (
-        "duplicate"
-        if all(same_value(matches[0].get(k), data.get(k)) for k in names)
-        else "correction"
-    )
-
-
-def same_value(left, right):
-    if type(left) in (int, float) and type(right) in (int, float):
-        return Decimal(str(left)) == Decimal(str(right))
-    return normalized(left) == normalized(right)
-
-
-def capture_excel_state(result, catalog, contents):
-    from minkops_connectors.excel import sheet_records
-
-    mappings = {
-        (s["file_id"], s["sheet"], s.get("table")): s
-        for s in catalog["sheets"]
-        if s["role"] == "destination"
-    }
-    for record in result["records"]:
-        mapping = mappings[(record["destination_file_id"], record["sheet"], record.get("table"))]
-        try:
-            matches = excel_matches(
-                record["data"], mapping, sheet_records(contents[mapping["file_id"]], mapping)
-            )
-            record["expected_excel"] = matches[0] if len(matches) == 1 else None
-        except ValueError:
-            record["expected_excel"] = None
-    return result
 
 
 COMPANY_CONTEXT_REQUIRED = "Refresh Source Discovery to collect complete company context before a new bill run."

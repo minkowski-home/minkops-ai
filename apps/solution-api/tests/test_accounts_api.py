@@ -122,91 +122,6 @@ class AccountsTests(unittest.TestCase):
         self.assertEqual(row["state"], "failed")
         self.assertIn("execution bundle", row["error"])
 
-    def test_two_destinations_can_share_a_relative_filename(self):
-        second = self.client.post(
-            self.base + "/sources",
-            headers=self.csrf,
-            data={"label": "Second folder", "writable": "true", "paths": '["records.xlsx"]'},
-            files=[("files", ("records.xlsx", workbook()))],
-        ).json()
-        second_id = second["files"][0]["id"]
-        discovery, _ = self.launch(file_ids=[self.file_id, second_id])
-        proposals = []
-        for file_id in [self.file_id, second_id]:
-            mapping = catalog()["sheets"][0]
-            mapping["file_id"] = file_id
-            proposals.append(mapping)
-            proposals.append(
-                {
-                    "file_id": file_id,
-                    "sheet": "Other",
-                    "header_row": 1,
-                    "role": "ignore",
-                    "key_columns": [],
-                    "columns": [],
-                }
-            )
-        expected = {"sheets": proposals}
-        from minkops_api.accounts_worker import process
-
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            process(
-                c,
-                c.execute("SELECT * FROM account_runs WHERE id=%s", (discovery["id"],)).fetchone(),
-                executor=lambda *a, **k: expected,
-            )
-        approved = self.client.post(
-            self.base + f"/runs/{discovery['id']}/approve",
-            headers=self.csrf,
-            json={"result": expected},
-        )
-        self.assertEqual(approved.status_code, 200, approved.text)
-        bill = self.client.post(
-            self.base + "/sources",
-            headers=self.csrf,
-            data={"paths": '["bill.pdf"]'},
-            files=[("files", ("bill.pdf", b"%PDF-1.4 test"))],
-        ).json()["files"][0]["id"]
-        run, _ = self.launch(
-            "bill-entry", file_ids=[bill], catalog_id=approved.json()["catalog_id"]
-        )
-        data = {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24}
-        result = {
-            "exceptions": [],
-            "records": [
-                {
-                    "source_file_id": bill,
-                    "destination_file_id": file_id,
-                    "sheet": "Bills",
-                    "operation": "append",
-                    "data": dict(data),
-                    "evidence": [
-                        {"field": key, "page": 1, "quote": str(value)}
-                        for key, value in data.items()
-                    ],
-                    "exceptions": [],
-                }
-                for file_id in [self.file_id, second_id]
-            ],
-        }
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            process(
-                c,
-                c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone(),
-                executor=lambda *a, **k: result,
-            )
-        approved = self.client.post(
-            self.base + f"/runs/{run['id']}/approve",
-            headers=self.csrf,
-            json={"result": result, "acknowledge_findings": True},
-        )
-        self.assertEqual(approved.status_code, 200, approved.text)
-        self.assertEqual(len(approved.json()["writes"]), 2)
-        self.assertEqual(len({w["source_id"] for w in approved.json()["writes"]}), 2)
-        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
-                                   headers=self.csrf, json={"action": "stop"})
-        self.assertEqual(stopped.status_code, 200, stopped.text)
-
     def setUp(self):
         os.environ["DATABASE_URL"] = URL
         self.client = TestClient(app)
@@ -218,8 +133,8 @@ class AccountsTests(unittest.TestCase):
         self.csrf = {"x-csrf-token": self.client.get("/api/auth/me").json()["csrf_token"]}
         self.base = "/api/tenants/mock-tenant/accounts"
         with psycopg.connect(URL) as c:
-            # Excel adapter regression cases intentionally use a generic tenant
-            # binding. Client-specific policy has separate rejection tests.
+            # Regression cases use the generic tenant binding; client-specific
+            # policy has separate tests.
             from psycopg.types.json import Jsonb
 
             from minkops_platform.resources import REPOSITORY_ROOT
@@ -230,7 +145,7 @@ class AccountsTests(unittest.TestCase):
             # review; tests opt into only_exceptions. Dedicated client-composition
             # tests retain the installed mock-client policy and defaults.
             c.execute("""UPDATE workflows SET config_schema=%s,execution_binding=execution_binding-'solution',
-                config_values=config_values || '{"output_mode":"excel_in_place","review_mode":"all_outputs"}'::jsonb
+                config_values=(config_values - 'output_mode') || '{"review_mode":"all_outputs"}'::jsonb
                 WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')""",
                 (Jsonb(definition.tenant_schema),))
             c.execute(
@@ -323,21 +238,6 @@ class AccountsTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_full_review_write_receipt_and_repeat_bill(self):
-        self.verify_flow()
-
-    def test_stopped_save_accepts_late_receipt_without_claiming_completion(self):
-        self.verify_flow(stop=True)
-
-    def test_desktop_save_uses_domain_approval_and_verifies_actual_bytes(self):
-        self.verify_flow(desktop=True)
-
-    def test_desktop_stop_blocks_new_save_but_accepts_late_verified_receipt(self):
-        self.verify_flow(desktop=True, stop=True)
-
-    def test_pause_resume_and_stop_fence_excel_approval_but_accept_late_saved_bytes(self):
-        self.verify_flow(desktop=True, control=True)
-
     def test_stop_during_hosted_work_keeps_raw_output_without_starting_review(self):
         from minkops_platform.accounts.worker import process
         run, _ = self.launch()
@@ -355,165 +255,4 @@ class AccountsTests(unittest.TestCase):
         stopped = self.client.get(self.base + f"/runs/{run['id']}").json()
         self.assertEqual(stopped["state"], "stopped")
         self.assertEqual(stopped["result"], raw)
-        self.assertEqual(stopped["writes"], [])
-
-    def verify_flow(self, stop=False, desktop=False, control=False):
-        cat_id = self.execute_discovery()
-        bill = self.client.post(
-            self.base + "/sources",
-            headers=self.csrf,
-            data={"paths": '["bill.pdf"]'},
-            files=[("files", ("bill.pdf", b"%PDF-1.4 fake boundary test"))],
-        ).json()["files"][0]["id"]
-        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat_id)
-        result = {
-            "records": [
-                {
-                    "source_file_id": bill,
-                    "destination_file_id": self.file_id,
-                    "sheet": "Bills",
-                    "operation": "append",
-                    "data": {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24},
-                    "evidence": [
-                        {"field": k, "page": 1, "quote": str(v)}
-                        for k, v in {"Invoice": "A-2", "Vendor": "Acme", "Amount": 24}.items()
-                    ],
-                    "exceptions": [],
-                }
-            ],
-            "exceptions": [],
-        }
-
-        def fake(*args, **kwargs):
-            return result
-
-        from minkops_api.accounts_worker import process
-
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            process(
-                c,
-                c.execute("SELECT * FROM account_runs WHERE id=%s", (run["id"],)).fetchone(),
-                executor=fake,
-            )
-        control_url = f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control"
-        if control:
-            self.assertEqual(self.client.post(control_url, headers=self.csrf, json={"action": "pause"}).status_code, 200)
-            denied = self.client.post(self.base + f"/runs/{run['id']}/approve", headers=self.csrf,
-                                      json={"result": result, "acknowledge_findings": True})
-            self.assertEqual(denied.status_code, 409)
-            self.assertEqual(self.client.post(control_url, headers=self.csrf, json={"action": "resume"}).status_code, 200)
-        response = self.client.post(
-            self.base + f"/runs/{run['id']}/approve",
-            headers=self.csrf,
-            json={"result": result, "acknowledge_findings": True},
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["state"], "writing")
-        write = response.json()["writes"][0]
-        path = self.base + f"/runs/{run['id']}/writes/{write['id']}"
-        content = self.client.get(path + "/content").content
-        if desktop:
-            import base64
-
-            native_base = "/api/tenants/mock-tenant/desktop"
-            device = self.client.post(
-                native_base + "/devices",
-                headers=self.csrf,
-                json={"name": "Accounts PC", "installation_id": str(uuid.uuid4())},
-            ).json()
-            worker_headers = {"Authorization": "Bearer " + device["credential"], "X-Minkops-Companion-Version": "0.9.0"}
-            bound = self.client.post(
-                native_base + f"/devices/{device['id']}/sources/{self.source['id']}",
-                headers=self.csrf,
-            )
-            self.assertEqual(bound.status_code, 200, bound.text)
-            if control:
-                # Exercise Pause/Stop receipts with the merged destination guard,
-                # not just the legacy unscoped save contract.
-                with psycopg.connect(URL) as connection:
-                    connection.execute("UPDATE workflow_runs SET config=config || jsonb_build_object('destination_device_id',%s::text) WHERE id=%s",
-                                       (device["id"], run["id"]))
-            payload = {
-                "device_id": device["id"],
-                "request_key": str(uuid.uuid4()),
-                "operation": "accounts.save",
-                "input": {"run_id": run["id"], "write_id": write["id"]},
-            }
-            job_response = self.client.post(native_base + "/jobs", headers=self.csrf, json=payload)
-            self.assertEqual(job_response.status_code, 202, job_response.text)
-            job = job_response.json()
-            claim = self.client.post(
-                "/api/desktop/worker/claim", headers=worker_headers, json={}
-            ).json()
-            progress = self.client.get("/api/tenants/mock-tenant/tasks/" + job["task_id"]).json()
-            self.assertEqual(progress["events"][-1]["event_type"], "local_saving")
-            self.assertEqual(progress["status"], "handoff")
-            route = f"/api/desktop/worker/jobs/{job['id']}"
-            plan_url = route + "/plan?claim_token=" + claim["claim_token"]
-            plan = self.client.get(plan_url, headers=worker_headers)
-            self.assertEqual(plan.status_code, 200, plan.text)
-            self.assertEqual(base64.b64decode(plan.json()["content"]), content)
-            # Expiring a financial save cannot silently dispatch it twice.
-            with psycopg.connect(URL) as c:
-                c.execute(
-                    "UPDATE desktop_jobs SET lease_until=now()-interval '1 second' WHERE id=%s",
-                    (job["id"],),
-                )
-            self.assertIsNone(
-                self.client.post(
-                    "/api/desktop/worker/claim", headers=worker_headers, json={}
-                ).json()
-            )
-        # Stopping releases the pending reservation and keeps a late
-        # receipt honest if the browser saved before losing its connection.
-        if control:
-            self.assertEqual(self.client.post(control_url, headers=self.csrf, json={"action": "pause"}).status_code, 200)
-            self.assertEqual(self.client.get(path + "/content").status_code, 409)
-            # The existing claim is an underway operation; pause lets it finish.
-            self.assertEqual(self.client.get(plan_url, headers=worker_headers).status_code, 200)
-            self.assertEqual(self.client.post(control_url, headers=self.csrf, json={"action": "resume"}).status_code, 200)
-        if stop or control:
-            stopped = self.client.post(control_url, headers=self.csrf, json={"action": "stop"})
-            self.assertEqual(stopped.status_code, 200, stopped.text)
-            self.assertEqual(stopped.json()["status"], "stopped")
-            self.assertEqual(self.client.get(path + "/content").status_code, 409)
-            if desktop:
-                self.assertEqual(self.client.get(plan_url, headers=worker_headers).status_code, 409)
-        if desktop:
-            receipt = {
-                "claim_token": claim["claim_token"],
-                "result": {"content": base64.b64encode(content).decode()},
-            }
-            invalid = {**receipt, "result": {"content": base64.b64encode(b"wrong").decode()}}
-            self.assertEqual(
-                self.client.post(
-                    route + "/finish", headers=worker_headers, json=invalid
-                ).status_code,
-                409,
-            )
-            for _ in range(2):
-                done = self.client.post(route + "/finish", headers=worker_headers, json=receipt)
-                self.assertEqual(done.status_code, 200, done.text)
-        invalid = self.client.post(
-            path + "/verify", headers=self.csrf, files={"file": ("records.xlsx", b"wrong")}
-        )
-        self.assertEqual(invalid.status_code, 409)
-        verified = self.client.post(
-            path + "/verify", headers=self.csrf, files={"file": ("records.xlsx", content)}
-        )
-        self.assertEqual(verified.status_code, 200, verified.text)
-        self.assertEqual(verified.json()["state"], "stopped" if stop or control else "completed")
-        self.assertIsNotNone(verified.json()["writes"][0]["verified_at"])
-        again = self.client.post(
-            path + "/verify", headers=self.csrf, files={"file": ("records.xlsx", content)}
-        )
-        self.assertEqual(again.status_code, 200)
-        # Own verified appends advance the catalog snapshot without rediscovery.
-        next_run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat_id)
-        self.assertNotIn("catalog_snapshot", next_run["config"])
-        from minkops_platform.runtime.store import run_for
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            next_run = run_for(c, next_run["tenant_id"], next_run["id"])
-        self.assertNotEqual(
-            next_run["config"]["catalog_snapshot"]["sheets"][0]["file_id"], self.file_id
-        )
+        self.assertEqual(stopped["tally_writes"], [])

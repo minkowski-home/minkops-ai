@@ -10,16 +10,6 @@
       ],
       "title": "Default review mode"
     },
-    "output_mode": {
-      "type": "string",
-      "enum": [
-        "excel_in_place",
-        "tally_in_place",
-        "both_in_place",
-        "draft_excel"
-      ],
-      "title": "Output platform and write mode"
-    },
     "discovery_id": {
       "type": "string",
       "format": "uuid"
@@ -59,20 +49,6 @@
       ],
       "title": "Bill inputs"
     },
-    "checks": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "vendor_match",
-          "duplicate",
-          "totals",
-          "cost_codes"
-        ]
-      },
-      "minItems": 1,
-      "uniqueItems": true
-    },
     "schema_id": {
       "type": "string",
       "minLength": 1
@@ -95,16 +71,6 @@
         "null"
       ],
       "minLength": 1
-    },
-    "purchase_voucher_types": {
-      "type": "object",
-      "title": "Purchase voucher type per company",
-      "maxProperties": 50,
-      "additionalProperties": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 200
-      }
     }
   },
   "required": [
@@ -113,9 +79,7 @@
     "catalog_version",
     "destination_id",
     "input_format",
-    "checks",
     "review_mode",
-    "output_mode",
     "schema_id",
     "schema_version"
   ],

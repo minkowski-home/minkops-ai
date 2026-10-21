@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
 from minkops_platform.accounts import repository, service
-from minkops_platform.accounts.service import prepare_writes as prepare_writes
 from minkops_platform.errors import ServiceError
 
 router = APIRouter(prefix="/api/tenants/{slug}/accounts")
@@ -157,28 +156,3 @@ def approve(slug: str, run_id: UUID, body: Review, request: Request, user: User,
     require_csrf(request)
     tenant, _ = tenant_access(slug, user, connection)
     return _call(service.approve_run, connection, tenant, user, run_id, body.model_dump())
-
-
-@router.get("/runs/{run_id}/writes/{write_id}/content")
-def write_content(slug: str, run_id: UUID, write_id: UUID, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
-    content = _call(service.write_content, connection, tenant, run_id, write_id)
-    return Response(
-        content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-
-@router.post("/runs/{run_id}/writes/{write_id}/verify")
-async def verify_write(
-    slug: str,
-    run_id: UUID,
-    write_id: UUID,
-    request: Request,
-    user: User,
-    connection: Db,
-    file: Annotated[UploadFile, File()],
-):
-    require_csrf(request)
-    tenant, _ = tenant_access(slug, user, connection)
-    content = await file.read(5_000_001)
-    return _call(service.verify_write, connection, tenant, run_id, write_id, content)

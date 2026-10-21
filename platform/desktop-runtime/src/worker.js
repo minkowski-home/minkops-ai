@@ -70,8 +70,6 @@ export class CompanionWorker {
               ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
               : ["tally.save", "tally.statement"].includes(job.operation)
                 ? "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing."
-                : job.operation === "accounts.save"
-                ? "The workbook could not be saved. Close Excel, check the original folder, and select Resume saves."
                 : "The connected folder could not be read. Reconnect it and try again.",
         };
       }

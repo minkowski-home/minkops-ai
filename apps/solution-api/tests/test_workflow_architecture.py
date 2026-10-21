@@ -197,78 +197,6 @@ class WorkflowArchitectureTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 422, response.text)
 
-    def test_client_guardrail_blocks_auto_write_then_allows_explicit_review(self):
-        catalog_id = self.execute_discovery()
-        bill_id = self.client.post(
-            self.base + "/sources",
-            headers=self.csrf,
-            data={"paths": '["bill.pdf"]'},
-            files=[("files", ("bill.pdf", b"%PDF-1.4 test"))],
-        ).json()["files"][0]["id"]
-        with psycopg.connect(URL) as connection:
-            connection.execute(
-                """UPDATE workflows SET execution_binding=jsonb_set(execution_binding,'{policies}',%s)
-                WHERE tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant') AND key='bill-entry'""",
-                (
-                    Jsonb(
-                        [
-                            {
-                                "key": "review-threshold",
-                                "config": {"field": "Amount", "amount": 50000},
-                            }
-                        ]
-                    ),
-                ),
-            )
-        self.addCleanup(self.clear_policy)
-        run, _ = self.launch(
-            "bill-entry",
-            file_ids=[bill_id],
-            catalog_id=catalog_id,
-            config={"review_mode": "only_exceptions", "checks": ["duplicate"]},
-        )
-        result = {
-            "records": [
-                {
-                    "source_file_id": bill_id,
-                    "destination_file_id": self.file_id,
-                    "sheet": "Bills",
-                    "operation": "append",
-                    "data": {"Invoice": "POLICY-1", "Vendor": "Acme", "Amount": 50001},
-                    "evidence": [
-                        {"field": k, "page": 1, "quote": str(v)}
-                        for k, v in {
-                            "Invoice": "POLICY-1",
-                            "Vendor": "Acme",
-                            "Amount": 50001,
-                        }.items()
-                    ],
-                    "exceptions": [],
-                }
-            ],
-            "exceptions": [],
-        }
-        with psycopg.connect(URL, row_factory=dict_row) as connection:
-            row = connection.execute(
-                "SELECT * FROM workflow_runs WHERE id=%s", (run["id"],)
-            ).fetchone()
-            process(connection, row, executor=lambda *a, **k: result)
-        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
-        self.assertEqual(loaded["state"], "review")
-        self.assertEqual(loaded["writes"], [])
-        self.assertTrue(loaded["result"]["requires_review"])
-        self.clear_policy()  # Existing run retains its pinned policy after reinstall/change.
-        approved = self.client.post(
-            self.base + f"/runs/{run['id']}/approve",
-            headers=self.csrf,
-            json={"result": loaded["result"], "acknowledge_findings": True},
-        )
-        self.assertEqual(approved.status_code, 200, approved.text)
-        self.assertEqual(approved.json()["state"], "writing")
-        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
-                                   headers=self.csrf, json={"action": "stop"})
-        self.assertEqual(stopped.status_code, 200, stopped.text)
-
     def clear_policy(self):
         with psycopg.connect(URL) as connection:
             connection.execute("""UPDATE workflows SET execution_binding=jsonb_set(execution_binding,'{policies}','[]')
@@ -285,6 +213,31 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
     approve = bills.BillEntryTests.approve
     process = bills.BillEntryTests.process
     clear_policy = WorkflowArchitectureTests.clear_policy
+
+    def test_client_guardrail_blocks_auto_write_then_allows_explicit_review(self):
+        discovery = self.tally_discovery()
+        bill = self.upload_bill("policy.pdf")
+        with psycopg.connect(URL) as connection:
+            connection.execute(
+                """UPDATE workflows SET execution_binding=jsonb_set(execution_binding,'{policies}',%s)
+                WHERE tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant') AND key='bill-entry'""",
+                (Jsonb([{"key": "review-threshold", "config": {"field": "total", "amount": 100}}]),),
+            )
+        self.addCleanup(self.clear_policy)
+        run, _ = self.launch("bill-entry", file_ids=[bill],
+                             config={"discovery_id": discovery, "review_mode": "only_exceptions"})
+        self.process(run, self.tally_result(run, bill))
+        loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
+        self.assertEqual((loaded["state"], loaded["tally_writes"]), ("review", []))
+        self.assertTrue(loaded["result"]["requires_review"])
+        self.clear_policy()  # The run keeps the policy it pinned at launch.
+        approved = self.client.post(self.base + f"/runs/{run['id']}/approve", headers=self.csrf,
+                                    json={"result": loaded["result"], "acknowledge_findings": True})
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(approved.json()["state"], "writing")
+        stopped = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
+                                   headers=self.csrf, json={"action": "stop"})
+        self.assertEqual(stopped.status_code, 200, stopped.text)
 
     def test_batch_keeps_installed_binding_policy_and_single_parent_observation(self):
         from minkops_platform.accounts.batch import reconcile_once
@@ -305,7 +258,7 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
         parent, _ = self.launch(
             "bill-entry",
             file_ids=inputs,
-            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+            config={"discovery_id": discovery},
         )
         self.assertNotIn('batch',parent['config'])
         with psycopg.connect(URL, row_factory=dict_row) as connection:
@@ -366,7 +319,7 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
         parent, _ = self.launch(
             "bill-entry",
             file_ids=inputs,
-            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+            config={"discovery_id": discovery},
         )
         executor = MagicMock()
         with psycopg.connect(URL, row_factory=dict_row) as connection:

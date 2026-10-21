@@ -256,9 +256,9 @@ def _observe(connection, job, state, summary, progress):
             if row["state"] != "failed":
                 discovery.fail(connection, {"tenant_id": job["tenant_id"]}, job, summary)
         return
-    # Accounts owns its run's lifecycle. A single workbook receipt must not
-    # complete a multi-workbook run or turn a cancellation back into success.
-    if job["operation"] in ("accounts.save", "tally.save"):
+    # Accounts owns its run's lifecycle. A single receipt must not complete a
+    # multi-bill run or turn a cancellation back into success.
+    if job["operation"] == "tally.save":
         run = connection.execute(
             "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
             (job["tenant_id"], job["input"]["run_id"]),
@@ -270,12 +270,9 @@ def _observe(connection, job, state, summary, progress):
         if state == "failed":
             from .accounts.attention import flag
             from .attention import audit
-            records = run['result']['records']
-            if job['operation'] == 'tally.save':
-                index = connection.execute('SELECT record_index FROM account_tally_writes WHERE tenant_id=%s AND id=%s',
-                    (job['tenant_id'],job['input']['write_id'])).fetchone()['record_index']
-                records = [records[index]]
-            for record in records:
+            index = connection.execute('SELECT record_index FROM account_tally_writes WHERE tenant_id=%s AND id=%s',
+                (job['tenant_id'],job['input']['write_id'])).fetchone()['record_index']
+            for record in [run['result']['records'][index]]:
                 if record.get('status') == 'writing':
                     item = flag(connection,run,record,title='Save interrupted',reopen=True)
                     audit(connection,item,job['actor_id'],'failed',summary)
@@ -285,9 +282,8 @@ def _observe(connection, job, state, summary, progress):
             "completed": "local_verified",
             "failed": "local_failed",
         }[state]
-        table = "account_tally_writes" if job["operation"] == "tally.save" else "account_writes"
         count = connection.execute(
-            f"SELECT count(*) AS total,count(verified_at) AS saved FROM {table} WHERE tenant_id=%s AND run_id=%s",
+            "SELECT count(*) AS total,count(verified_at) AS saved FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s",
             (job["tenant_id"], job["input"]["run_id"]),
         ).fetchone()
         summary = {
@@ -364,38 +360,10 @@ def _bound_source(connection, device, source_id):
     return source
 
 
-def _save_spec(connection, device, payload, *, pending=True, underway=False):
-    run = connection.execute(
-        "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
-        (device["tenant_id"], payload["run_id"]),
-    ).fetchone()
-    if not run or run["actor_id"] != device["owner_id"]:
-        raise ServiceError("not_found", "Approved run not found for this account.")
-    from .runtime.assets import hydrate
-    hydrate(connection, run)
-    if pending and not underway:
-        from .run_controls import require_active
-        require_active(connection, device["tenant_id"], run["task_id"])
-    selected = run["config"].get("destination_device_id")
-    if selected and selected != str(device["id"]):
-        raise ServiceError("conflict", "This approved save belongs to a different destination PC.")
-    spec = connection.execute(
-        "SELECT * FROM account_writes WHERE tenant_id=%s AND run_id=%s AND id=%s FOR UPDATE",
-        (device["tenant_id"], payload["run_id"], payload["write_id"]),
-    ).fetchone()
-    if not spec:
-        raise ServiceError("not_found", "Approved save not found.")
-    _bound_source(connection, device, spec["source_id"])
-    if pending and (run["state"] != "writing" or spec["cancelled_at"] or spec["verified_at"]):
-        raise ServiceError("conflict", "This save is no longer pending approval.")
-    return run, spec
-
-
 def _validate_input(operation, payload):
     keys = {
         "tally.probe": set(),
         "files.refresh": {"source_id"},
-        "accounts.save": {"run_id", "write_id"},
         "tally.save": {"run_id", "write_id"},
         "tally.statement": {"run_id", "write_id"},
     }
@@ -426,8 +394,6 @@ def launch(connection, tenant, user, body):
     run = None
     if operation == "files.refresh":
         _bound_source(connection, device, payload["source_id"])
-    elif operation == "accounts.save":
-        run, _ = _save_spec(connection, device, payload)
     elif operation in ("tally.save", "tally.statement"):
         from .accounts.tally_writes import spec
 
@@ -442,7 +408,7 @@ def launch(connection, tenant, user, body):
         ).fetchone()
         if existing:
             if (
-                operation not in ("accounts.save", "tally.save", "tally.statement")
+                operation not in ("tally.save", "tally.statement")
                 or existing["state"] == "queued"
                 or existing["lease_until"] > connection.execute("SELECT now() AS t").fetchone()["t"]
             ):
@@ -530,7 +496,7 @@ def claim(connection, device, report=None):
     )
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('accounts.save','tally.save','tally.statement','attention.supplier') AND lease_until<now()))
+           (state='executing' AND operation NOT IN ('tally.save','tally.statement','attention.supplier') AND lease_until<now()))
            AND (operation='attention.refresh' OR EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id AND t.control_state='active'))
            ORDER BY CASE WHEN operation='tally.save' THEN
              (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
@@ -636,16 +602,7 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
             run["config"]["tally_target"],
         )
         return _native_plan(run, write, plan_version)
-    if job["state"] != "executing" or job["operation"] != "accounts.save":
-        raise ServiceError("conflict", "This save is no longer running.")
-    _, spec = _save_spec(connection, device, job["input"], underway=True)
-    return {
-        "source_id": spec["source_id"],
-        "path": spec["path"],
-        "before_sha256": spec["before_sha256"],
-        "after_sha256": spec["after_sha256"],
-        "content": base64.b64encode(bytes(spec["content"])).decode(),
-    }
+    raise ServiceError("conflict", "This save is no longer running.")
 
 
 def _bytes(value):
@@ -691,7 +648,7 @@ def finish(connection, device, job_id, receipt):
             diagnostic = {"truncated": True}
         _store_diagnostic(connection, device, diagnostic, kind="job", job_id=job["id"])
     if job["state"] != "executing" and not (
-        job["operation"] in ("accounts.save", "tally.save", "tally.statement")
+        job["operation"] in ("tally.save", "tally.statement")
         and job["error"] == "Save interrupted; retry requested."
     ):
         raise ServiceError("conflict", "This local task is no longer running.")
@@ -733,19 +690,6 @@ def finish(connection, device, job_id, receipt):
         )
         result = {"source_id": str(source["id"]), "file_count": len(contents)}
         summary = f"Folder refreshed. {len(contents)} files ready."
-    elif result is not None and job["operation"] == "accounts.save":
-        if set(result) != {"content"}:
-            raise ServiceError("invalid", "Return the actual saved workbook.")
-        _save_spec(connection, device, job["input"], pending=False)
-        verified = accounts.verify_write(
-            connection,
-            {"id": device["tenant_id"]},
-            job["input"]["run_id"],
-            job["input"]["write_id"],
-            _bytes(result["content"]),
-        )
-        result = {"verified": True, "run_state": verified["state"]}
-        summary = "Workbook saved and checked."
     elif job["operation"] == "tally.statement":
         from .accounts.statements import accept
         result = accept(connection, device, job["input"], result if result is not None else {"outcome": "attention"})

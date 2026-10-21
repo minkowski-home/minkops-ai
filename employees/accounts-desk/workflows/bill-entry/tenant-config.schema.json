@@ -11,31 +11,6 @@
       "title": "Default review mode",
       "x-step": "Review and save"
     },
-    "output_mode": {
-      "type": "string",
-      "enum": [
-        "excel_in_place",
-        "tally_in_place",
-        "both_in_place",
-        "draft_excel"
-      ],
-      "title": "Output platform and write mode",
-      "x-option-tools": {
-        "excel_in_place": [
-          "excel"
-        ],
-        "tally_in_place": [
-          "tally"
-        ],
-        "both_in_place": [
-          "excel",
-          "tally"
-        ],
-        "draft_excel": [
-          "excel"
-        ]
-      }
-    },
     "input_format": {
       "type": "string",
       "enum": [
@@ -63,8 +38,7 @@
     }
   },
   "required": [
-    "review_mode",
-    "output_mode"
+    "review_mode"
   ],
   "additionalProperties": false
 }

@@ -1,5 +1,5 @@
 /** Native adapters only. Business approvals and task authority remain server-side. */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   lstat,
@@ -18,14 +18,12 @@ export { readTallyReferences } from './tally-references.js';
 export { checkTally, requireOpenCompany, readOpenCompanies, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
 export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
 
-const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;
 const EXCLUDED = new Set([
   "ground_truth",
   "ground-truth",
   "pr-infra-sample-bills",
 ]);
-const runningWrites = new Map();
 
 /** Export only to the path chosen by the native Save As dialog. No web-supplied
  * paths or folder traversal are accepted by the desktop bridge. */
@@ -58,17 +56,6 @@ export async function saveCatalogSnapshot(path, snapshot) {
       if (error.code !== "ENOENT") throw error;
     });
   }
-}
-
-async function workbookBytes(path) {
-  if ((await lstat(path)).size > 5_000_000)
-    throw new Error("The local workbook is too large.");
-  const bytes = await readFile(path, {
-    flag: constants.O_RDONLY | (constants.O_NOFOLLOW || 0),
-  });
-  if (!bytes.length || bytes.length > 5_000_000)
-    throw new Error("The local workbook is invalid or too large.");
-  return bytes;
 }
 
 function relativeParts(path) {
@@ -162,52 +149,5 @@ export async function inventory(root) {
   return files;
 }
 
-/** Save only server-approved bytes. A repeated receipt never repeats an append. */
-export async function replaceApproved(root, spec, approved, backup) {
-  if (extname(spec.path).toLowerCase() !== ".xlsx")
-    throw new Error("Only approved Excel workbooks can be saved.");
-  const target = await containedPath(root, spec.path);
-  const previous = runningWrites.get(target) || Promise.resolve();
-  const operation = previous
-    .catch(() => {})
-    .then(async () => {
-      if (approved.length > 5_000_000 || hash(approved) !== spec.after_sha256)
-        throw new Error("Approved workbook failed its integrity check.");
-      const current = await workbookBytes(target);
-      const currentHash = hash(current);
-      if (currentHash === spec.after_sha256) return current;
-      if (currentHash !== spec.before_sha256)
-        throw new Error(
-          "The local workbook changed. Refresh discovery before saving.",
-        );
-      await backup(current);
-      const temporary = join(dirname(target), `.minkops-${randomUUID()}.tmp`);
-      try {
-        const handle = await open(temporary, "wx", 0o600);
-        try {
-          await handle.writeFile(approved);
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        await containedPath(root, spec.path);
-        if (hash(await workbookBytes(target)) !== spec.before_sha256)
-          throw new Error("The local workbook changed before saving.");
-        await rename(temporary, target);
-        const saved = await workbookBytes(target);
-        if (hash(saved) !== spec.after_sha256)
-          throw new Error("The saved workbook could not be verified.");
-        return saved;
-      } finally {
-        await unlink(temporary).catch(() => {});
-      }
-    });
-  runningWrites.set(target, operation);
-  try {
-    return await operation;
-  } finally {
-    if (runningWrites.get(target) === operation) runningWrites.delete(target);
-  }
-}
 export { inspectTallyAttention } from "./tally.js";
 export { saveVoucher } from "./voucher.js";

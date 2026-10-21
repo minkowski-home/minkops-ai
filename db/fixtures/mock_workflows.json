@@ -5,7 +5,6 @@
   },
   "bill-entry": {
     "review_mode": "all_outputs",
-    "output_mode": "tally_in_place",
     "input_format": "mixed"
   }
 }

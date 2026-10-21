@@ -51,7 +51,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         proposal = self.tally_result(run, bill)
         proposal["records"][0]["document"]["supplier_name"] = "sup plier"
         self.process(run, proposal)
@@ -69,7 +69,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         inputs = [self.upload_bill("clean.pdf"), self.upload_bill("uncertain.pdf")]
         root, _ = self.launch("bill-entry", file_ids=inputs, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()
         for child in children:
@@ -92,7 +92,7 @@ class BillEntryTests(unittest.TestCase):
     def test_run_list_is_a_bounded_summary_without_pinned_snapshots(self):
         did = self.tally_discovery()
         bill = self.upload_bill("listed.pdf")
-        run, _ = self.launch("bill-entry", file_ids=[bill], config={"output_mode": "tally_in_place", "discovery_id": did})
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={"discovery_id": did})
         self.process(run, self.tally_result(run, bill))
         listed = self.client.get(self.base + "/runs")
         self.assertEqual(listed.status_code, 200, listed.text)
@@ -107,7 +107,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         inputs = [self.upload_bill(f"stop-{i}.pdf") for i in range(3)]
         root, _ = self.launch("bill-entry", file_ids=inputs, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "all_outputs"})
+            "discovery_id": did, "review_mode": "all_outputs"})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = {c_["file_ids"][0]: c_ for c_ in c.execute(
                 "SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],))}
@@ -130,7 +130,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         bill = self.upload_bill("raw-stop.pdf")
         root, _ = self.launch("bill-entry", file_ids=[bill, self.upload_bill("unread-stop.pdf")], config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "all_outputs"})
+            "discovery_id": did, "review_mode": "all_outputs"})
         # Provider output is persisted before normalization. A concurrent Stop
         # must preserve the input even though no trusted display data exists yet.
         raw = self.tally_result(root, bill)
@@ -154,7 +154,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         inputs = [self.upload_bill(f"bill-{i}.pdf") for i in range(count)]
         root, _ = self.launch("bill-entry", file_ids=inputs, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()
         return root, inputs, children
@@ -212,7 +212,7 @@ class BillEntryTests(unittest.TestCase):
 
         did = self.tally_discovery()
         bill = self.upload_bill("native-refusal.pdf")
-        run, _ = self.launch("bill-entry", file_ids=[bill], config={"output_mode": "tally_in_place", "discovery_id": did})
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={"discovery_id": did})
         proposal = self.tally_result(run, bill)
         self.process(run, proposal)
         approved = self.approve(run, proposal)
@@ -228,7 +228,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         self.client.delete(f"{self.native}/devices/{self.device['id']}", headers=self.csrf)
         self.process(run, self.tally_result(run, bill))
         held = self.client.get(self.base + f"/runs/{run['id']}").json()
@@ -300,7 +300,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         guessed, failed = self.upload_bill("guess.pdf"), self.upload_bill("failed.pdf")
         root, _ = self.launch("bill-entry", file_ids=[guessed, failed], config={
-            "output_mode": "tally_in_place", "discovery_id": did})
+            "discovery_id": did})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = {r["file_ids"][0]: r for r in c.execute(
                 "SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()}
@@ -380,7 +380,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         bill = self.upload_bill("statement.pdf")
         run, _ = self.launch("bill-entry", file_ids=[bill], config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         proposal = self.numbered_result(run, bill, "MULTI-1")
         second = copy.deepcopy(self.numbered_result(run, bill, "MULTI-2")["records"][0])
         second["exceptions"] = [{"code": "classification_uncertain", "detail": "Two ledgers fit."}]
@@ -410,7 +410,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery(books_from="20261005")
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         self.assertEqual(run["config"]["tally_target"]["companies"][0]["books_from"], "2026-10-05")
         self.process(run, self.tally_result(run, bill))  # Bill dated 2026-10-01.
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
@@ -439,7 +439,7 @@ class BillEntryTests(unittest.TestCase):
     def test_split_tax_native_plan_and_receipt_cannot_collapse_components(self):
         did = self.tally_discovery(extra_ledgers=("SGST",))
         bill = self.upload_bill()
-        run, _ = self.launch("bill-entry", file_ids=[bill], config={"output_mode": "tally_in_place", "discovery_id": did,
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={"discovery_id": did,
                                                                     "review_mode": "only_exceptions"})
         self.process(run, self.split_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
@@ -465,7 +465,7 @@ class BillEntryTests(unittest.TestCase):
         from minkops_platform.accounts.batch import reconcile_once
         did = self.tally_discovery(extra_ledgers=("SGST",))
         bills = [self.upload_bill("one.pdf"), self.upload_bill("two.pdf")]
-        root, _ = self.launch("bill-entry", file_ids=bills, config={"output_mode": "tally_in_place", "discovery_id": did,
+        root, _ = self.launch("bill-entry", file_ids=bills, config={"discovery_id": did,
                                                                     "review_mode": "only_exceptions"})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s ORDER BY file_ids->>0", (root["id"],)).fetchall()
@@ -481,7 +481,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery()
         inputs = [self.upload_bill("clean.pdf"), self.upload_bill("uncertain.pdf")]
         root, _ = self.launch("bill-entry", file_ids=inputs, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute("SELECT * FROM account_runs WHERE parent_run_id=%s", (root["id"],)).fetchall()
         for child in children:
@@ -512,7 +512,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(response.json()["id"], first)
         run, _ = self.launch(
             "bill-entry", file_ids=[self.upload_bill()], destination_device_id=first_pc,
-            config={"output_mode": "tally_in_place", "discovery_id": first},
+            config={"discovery_id": first},
         )
         self.assertEqual(run["config"]["destination_device_id"], first_pc)
         self.assertEqual(run["config"]["tally_target"]["device_id"], first_pc)
@@ -528,7 +528,7 @@ class BillEntryTests(unittest.TestCase):
         rejected = self.client.post(self.base + "/runs", headers=self.csrf, json={
             "key": "bill-entry", "request_key": str(uuid.uuid4()),
             "file_ids": [self.upload_bill()], "destination_device_id": second_pc,
-            "config": {"output_mode": "tally_in_place", "discovery_id": first},
+            "config": {"discovery_id": first},
         })
         self.assertEqual(rejected.status_code, 422, rejected.text)
         self.assertIn("selected destination PC", rejected.text)
@@ -546,95 +546,13 @@ class BillEntryTests(unittest.TestCase):
         response = self.client.get(endpoint, params={"device_id": selected_pc})
         self.assertEqual(response.status_code, 409, response.text)
 
-    def test_excel_destination_cannot_cross_pc_folder_bindings(self):
-        catalog = self.execute_discovery()
-        pc = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
-            json={"name": "Excel PC", "installation_id": str(uuid.uuid4())}).json()["id"]
-        other = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
-            json={"name": "Other PC", "installation_id": str(uuid.uuid4())}).json()["id"]
-        bound = self.client.post(f"/api/tenants/mock-tenant/desktop/devices/{pc}/sources/{self.source['id']}", headers=self.csrf)
-        self.assertEqual(bound.status_code, 200, bound.text)
-        run, _ = self.launch("bill-entry", file_ids=[self.upload_bill()], catalog_id=catalog,
-            destination_device_id=pc, config={"output_mode": "excel_in_place"})
-        self.assertEqual(run["config"]["destination_device_id"], pc)
-        rejected = self.client.post(self.base + "/runs", headers=self.csrf, json={
-            "key": "bill-entry", "request_key": str(uuid.uuid4()), "file_ids": [self.upload_bill()],
-            "catalog_id": catalog, "destination_device_id": other, "config": {"output_mode": "excel_in_place"},
-        })
-        self.assertEqual(rejected.status_code, 404, rejected.text)
-        self.assertIn("original folder", rejected.text)
-        bill = run["file_ids"][0]
-        result = self.excel_result(bill, 24, invoice="A-2")
-        self.process(run, result)
-        moved = self.client.post(f"/api/tenants/mock-tenant/desktop/devices/{other}/sources/{self.source['id']}", headers=self.csrf)
-        self.assertEqual(moved.status_code, 200, moved.text)
-        rejected = self.client.post(self.base + f"/runs/{run['id']}/approve", headers=self.csrf,
-            json={"result": result, "acknowledge_findings": True})
-        self.assertEqual(rejected.status_code, 404, rejected.text)
-        with psycopg.connect(URL) as connection:
-            self.assertEqual(connection.execute("SELECT count(*) FROM account_writes WHERE run_id=%s", (run["id"],)).fetchone()[0], 0)
-
-
-    def test_both_mode_cannot_silently_fall_through_to_excel(self):
-        response = self.client.post(
-            self.base + "/runs",
-            headers=self.csrf,
-            json={
-                "key": "bill-entry",
-                "request_key": str(uuid.uuid4()),
-                "file_ids": [self.upload_bill()],
-                "config": {"output_mode": "both_in_place"},
-            },
-        )
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("combined verified write contract", response.text)
-
-    def test_mock_policy_rejects_excel_both_and_preference_override(self):
-        from psycopg.types.json import Jsonb
-
-        from minkops_platform.resources import REPOSITORY_ROOT
-        from minkops_platform.solution_policy import bind_definition
-        from minkops_platform.workflows import load_definition
-
-        definition = bind_definition(
-            load_definition(REPOSITORY_ROOT / "employees/accounts-desk/workflows/bill-entry"),
-            "mock-client",
-        )
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            row = c.execute(
-                """UPDATE workflows SET config_schema=%s,
-                config_values=jsonb_set(config_values,'{output_mode}','"tally_in_place"')
-                WHERE key='bill-entry' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant') RETURNING id,config_values""",
-                (Jsonb(definition.tenant_schema),),
-            ).fetchone()
-        bill = self.upload_bill()
-        for mode in ("excel_in_place", "both_in_place", "draft_excel"):
-            with self.subTest(mode=mode):
-                response = self.client.post(
-                    self.base + "/runs",
-                    headers=self.csrf,
-                    json={
-                        "key": "bill-entry",
-                        "request_key": str(uuid.uuid4()),
-                        "file_ids": [bill],
-                        "config": {"output_mode": mode},
-                    },
-                )
-                self.assertEqual(response.status_code, 422, response.text)
-                response = self.client.patch(
-                    f"/api/tenants/mock-tenant/workflows/{row['id']}",
-                    headers=self.csrf,
-                    json={"config_values": {**row["config_values"], "output_mode": mode}},
-                )
-                self.assertEqual(response.status_code, 422, response.text)
-
     def test_missing_vendor_holds_then_resumes_with_confirmed_new_master(self):
         discovery = self.tally_discovery("same-company")
         bill = self.upload_bill()
         run, _ = self.launch(
             "bill-entry",
             file_ids=[bill],
-            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+            config={"discovery_id": discovery},
         )
         proposal = self.tally_result(run, bill)
         proposal["records"][0]["document"]["supplier_name"] = "New supplier"
@@ -676,7 +594,7 @@ class BillEntryTests(unittest.TestCase):
         run, _ = self.launch(
             "bill-entry",
             file_ids=[bill],
-            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+            config={"discovery_id": discovery},
         )
         self.process(
             run,
@@ -702,22 +620,6 @@ class BillEntryTests(unittest.TestCase):
             data={"paths": f'["{name}"]'},
             files=[("files", (name, b"%PDF-1.4 test"))],
         ).json()["files"][0]["id"]
-
-    def excel_result(self, bill, amount, invoice="A-1", operation="append"):
-        return {
-            "records": [
-                {
-                    "source_file_id": bill,
-                    "destination_file_id": self.file_id,
-                    "sheet": "Bills",
-                    "operation": operation,
-                    "data": {"Invoice": invoice, "Vendor": "Acme", "Amount": amount},
-                    "evidence": [],
-                    "exceptions": [],
-                }
-            ],
-            "exceptions": [],
-        }
 
     def process(self, run, result):
         from minkops_platform.accounts.worker import process
@@ -902,8 +804,7 @@ class BillEntryTests(unittest.TestCase):
         with psycopg.connect(URL, row_factory=dict_row) as c:
             pattern = c.execute("""SELECT payload FROM client_profiles WHERE kind='posting_profile' AND scope_key=%s
                 AND status='active' ORDER BY version DESC LIMIT 1""", (guid,)).fetchone()
-        voucher_type = (pattern["payload"]["families"]["invoice"]["voucher_type_guid"] if pattern
-                        else (company.get("voucher_type") or {}).get("GUID") or "Purchase-guid")
+        voucher_type = pattern["payload"]["families"]["invoice"]["voucher_type_guid"] if pattern else "Purchase-guid"
         return {
             "records": [
                 {
@@ -998,7 +899,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": discovery_id},
+            config={"discovery_id": discovery_id},
         )
         self.process(run, self.tally_result(run, bill))
         run = self.approve(run, self.tally_result(run, bill))
@@ -1024,7 +925,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": discovery_id},
+            config={"discovery_id": discovery_id},
         )
         self.process(repeat, self.tally_result(repeat, bill))
         repeat = self.approve(repeat, self.tally_result(repeat, bill))
@@ -1035,7 +936,7 @@ class BillEntryTests(unittest.TestCase):
         discovery_id = self.tally_discovery(native_ids=True)
         bill = self.upload_bill("native.pdf")
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
-                             config={"output_mode": "tally_in_place", "discovery_id": discovery_id})
+                             config={"discovery_id": discovery_id})
         self.process(run, self.tally_result(run, bill))
         run = self.approve(run, self.tally_result(run, bill))
         claim, route, plan = self.tally_job(run, version="5")
@@ -1067,7 +968,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         self.process(run, self.tally_result(run, bill))
         run = self.approve(run, self.tally_result(run, bill))
@@ -1111,7 +1012,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[good, bad],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute(
@@ -1134,42 +1035,6 @@ class BillEntryTests(unittest.TestCase):
         self.assertEqual(approved["state"], "writing")
         self.assertEqual(len(approved["result"]["unresolved"]), 1)
 
-    def test_excel_exact_repeat_skips_and_correction_can_resume_same_run(self):
-        cat = self.execute_discovery()
-        bill = self.upload_bill()
-        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
-        record = {
-            "source_file_id": bill,
-            "destination_file_id": self.file_id,
-            "sheet": "Bills",
-            "operation": "append",
-            "data": {"Invoice": "A-1", "Vendor": "Acme", "Amount": 12},
-            "evidence": [],
-            "exceptions": [],
-        }
-        result = {"records": [record], "exceptions": []}
-        self.process(run, result)
-        done = self.approve(run, result)
-        self.assertEqual(done["state"], "completed")
-        self.assertEqual(done["writes"], [])
-        self.assertEqual(done["result"]["records"][0]["status"], "duplicate")
-        self.assertFalse(any("Exact duplicate" in f for f in done["result"]["records"][0]["findings"]))
-        self.assertIn("Exact duplicate", done["result"]["records"][0]["notes"][0])
-        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
-        result["records"][0]["data"]["Amount"] = 24
-        self.process(run, result)
-        held = self.approve(run, result)
-        self.assertEqual(held["state"], "review")
-        edited = held["result"]
-        edited["records"][0]["operation"] = "update"
-        response = self.client.post(
-            f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
-            headers=self.csrf,
-            json={"action": "guess"},
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["state"], "writing")
-
     def test_parallel_workers_keep_independent_bill_sessions_and_single_parent_task(self):
         from concurrent.futures import ThreadPoolExecutor
         from threading import Barrier
@@ -1183,7 +1048,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=ids,
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute(
@@ -1215,7 +1080,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=inputs,
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         routes = dict(zip(inputs, ("beta-guid", "alpha-guid", "beta-guid"), strict=True))
         children = self.route_bills(root, routes)
@@ -1297,7 +1162,7 @@ class BillEntryTests(unittest.TestCase):
         did = self.tally_discovery("alpha-guid", multiple=True, siblings=True)
         bills = [self.upload_bill("this-year.pdf"), self.upload_bill("last-year.pdf"), self.upload_bill("future.pdf")]
         root, _ = self.launch("bill-entry", file_ids=bills, catalog_id=None,
-                              config={"output_mode": "tally_in_place", "discovery_id": did})
+                              config={"discovery_id": did})
         companies = {c["references"]["company_guid"]: c for c in root["config"]["tally_target"]["companies"]}
         self.assertEqual((companies["alpha-guid"]["period_to"], companies["beta-guid"]["period_to"]), ("2026-03-31", None))
         # Triage names the older company for all three; the dates decide.
@@ -1321,7 +1186,7 @@ class BillEntryTests(unittest.TestCase):
         self.assertGreater(everything, 8_000_000, "Sending every company's discovery to a bill no longer fits.")
         bill = self.upload_bill("twenty.pdf")
         root, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
-                              config={"output_mode": "tally_in_place", "discovery_id": did})
+                              config={"discovery_id": did})
         children = self.route_bills(root, {bill: "company-7-guid"})
         child = children[bill]
         bound = [b for b in child["config"]["authorized_bindings"] if b["resource_id"].startswith("discovery-")]
@@ -1345,7 +1210,7 @@ class BillEntryTests(unittest.TestCase):
         ))
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions"})
+            "discovery_id": did, "review_mode": "only_exceptions"})
         self.process(run, self.tally_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
         claim, route, plan = self.tally_job(loaded)
@@ -1373,7 +1238,7 @@ class BillEntryTests(unittest.TestCase):
             {"name": "Purchase", "guid": "vt-p", "used": 1}, {"name": "Purchase GST", "guid": "vt-gst", "used": 2}]})
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
-            "output_mode": "tally_in_place", "discovery_id": did, "review_mode": "only_exceptions",
+            "discovery_id": did, "review_mode": "only_exceptions",
             "company_mode": "locked", "locked_company_guid": "alpha-guid"})
         self.process(run, self.tally_result(run, bill))
         loaded = self.client.get(self.base + f"/runs/{run['id']}").json()
@@ -1386,7 +1251,7 @@ class BillEntryTests(unittest.TestCase):
             {"NAME": "Purchase", "GUID": "vt-p", "ISACTIVE": "No"},))
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
-            "output_mode": "tally_in_place", "discovery_id": did,
+            "discovery_id": did,
             "company_mode": "locked", "locked_company_guid": "inactive-guid"})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             config = c.execute("SELECT config FROM account_runs WHERE id=%s", (run["id"],)).fetchone()["config"]
@@ -1400,7 +1265,6 @@ class BillEntryTests(unittest.TestCase):
             file_ids=[bill],
             catalog_id=None,
             config={
-                "output_mode": "tally_in_place",
                 "discovery_id": did,
                 "company_mode": "locked",
                 "locked_company_guid": "alpha-guid",
@@ -1422,7 +1286,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=ids,
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute(
@@ -1470,7 +1334,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         self.process(run, self.tally_result(run, bill))
         approved = self.approve(run, self.tally_result(run, bill))
@@ -1514,7 +1378,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[good, bad],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         with psycopg.connect(URL, row_factory=dict_row) as c:
             children = c.execute(
@@ -1579,7 +1443,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         self.process(first, self.tally_result(first, bill))
         self.approve(first, self.tally_result(first, bill))
@@ -1587,95 +1451,13 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         self.process(second, self.tally_result(second, bill))
         held = self.approve(second, self.tally_result(second, bill))
         self.assertEqual(held["state"], "review")
         self.assertEqual(held["tally_writes"], [])
         self.assertEqual(held["result"]["records"][0]["status"], "held")
-
-    def test_excel_correction_rechecks_values_changed_by_another_verified_run(self):
-        cat = self.execute_discovery()
-        bill = self.upload_bill()
-        first, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
-        self.process(first, self.excel_result(bill, 24))
-        second, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
-        self.process(second, self.excel_result(bill, 13))
-        self.approve(second, self.excel_result(bill, 13))
-        corrected = self.client.post(
-            f"/api/tenants/mock-tenant/attention/bills/{second['id']}/{bill}",
-            headers=self.csrf,
-            json={"action": "guess"},
-        )
-        self.assertEqual(corrected.status_code, 200, corrected.text)
-        updated = corrected.json()
-        write = updated["writes"][0]
-        route = self.base + f"/runs/{second['id']}/writes/{write['id']}"
-        saved = self.client.get(route + "/content").content
-        response = self.client.post(
-            route + "/verify", headers=self.csrf, files={"file": ("records.xlsx", saved)}
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        corrected = self.client.post(
-            f"/api/tenants/mock-tenant/attention/bills/{first['id']}/{bill}",
-            headers=self.csrf,
-            json={"action": "guess"},
-        )
-        self.assertEqual(corrected.status_code, 200, corrected.text)
-        held = corrected.json()
-        self.assertEqual(held["state"], "review")
-        self.assertEqual(held["writes"], [])
-        self.assertEqual(held["result"]["records"][0]["current_excel"]["Amount"], 13)
-        resumed = self.client.post(
-            f"/api/tenants/mock-tenant/attention/bills/{held['id']}/{bill}",
-            headers=self.csrf,
-            json={"action": "guess"},
-        )
-        self.assertEqual(resumed.status_code, 200, resumed.text)
-        self.assertEqual(resumed.json()["state"], "writing")
-
-    def test_late_excel_receipt_after_stop_retains_newer_observed_source_bytes(self):
-        from io import BytesIO
-
-        from openpyxl import load_workbook
-
-        cat = self.execute_discovery()
-        bill = self.upload_bill()
-        run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat)
-        result = self.excel_result(bill, 24, invoice="A-2")
-        self.process(run, result)
-        approved = self.approve(run, result)
-        write = approved["writes"][0]
-        route = self.base + f"/runs/{run['id']}/writes/{write['id']}"
-        saved = self.client.get(route + "/content").content
-        response = self.client.post(f"/api/tenants/mock-tenant/tasks/{run['task_id']}/control",
-                                    headers=self.csrf, json={"action": "stop"})
-        self.assertEqual(response.status_code, 200, response.text)
-        book = load_workbook(BytesIO(saved))
-        book["Bills"]["C2"] = 33
-        current = BytesIO()
-        book.save(current)
-        refresh = self.client.post(
-            self.base + "/sources",
-            headers=self.csrf,
-            data={"source_id": self.source["id"], "writable": "true", "paths": '["records.xlsx"]'},
-            files=[("files", ("records.xlsx", current.getvalue()))],
-        )
-        self.assertEqual(refresh.status_code, 200, refresh.text)
-        for _ in range(2):
-            receipt = self.client.post(
-                route + "/verify", headers=self.csrf, files={"file": ("records.xlsx", saved)}
-            )
-            self.assertEqual(receipt.status_code, 200, receipt.text)
-            self.assertEqual(receipt.json()["state"], "stopped")
-        with psycopg.connect(URL, row_factory=dict_row) as c:
-            actual = c.execute(
-                "SELECT id,content FROM account_files WHERE source_id=%s AND current",
-                (self.source["id"],),
-            ).fetchone()
-        self.assertEqual(str(actual["id"]), refresh.json()["files"][0]["id"])
-        self.assertEqual(bytes(actual["content"]), current.getvalue())
 
     def test_rejected_failed_input_does_not_reappear_when_another_bill_is_clarified(self):
         from minkops_platform.accounts.batch import reconcile_once
@@ -1686,7 +1468,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=ids,
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         with psycopg.connect(URL) as c:
             c.execute(
@@ -1719,7 +1501,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         self.process(first, self.tally_result(first, bill))
         first = self.approve(first, self.tally_result(first, bill))
@@ -1729,7 +1511,7 @@ class BillEntryTests(unittest.TestCase):
             "bill-entry",
             file_ids=[bill],
             catalog_id=None,
-            config={"output_mode": "tally_in_place", "discovery_id": did},
+            config={"discovery_id": did},
         )
         self.process(second, self.tally_result(second, bill))
         held = self.approve(second, self.tally_result(second, bill))

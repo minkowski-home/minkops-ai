@@ -14,8 +14,14 @@ SCHEMA = json.loads((REPOSITORY_ROOT / "employees/accounts-desk/workflows/bill-e
 
 
 def proposal(**record):
-    return {"records": [{"source_file_id": "bill", "destination_file_id": "destination",
-                         "sheet": "Purchase", "table": None, "operation": "append", "data": {},
+    line = {"role": "expense", "ledger_guid": "purchases", "side": "debit", "amount": 118.0,
+            "cost_centre_guid": None, "cost_category_guid": None, "tax": None, "evidence": "Printed total."}
+    voucher = {"family": "purchase", "voucher_type_guid": "vt", "lines": [line],
+               "party": {"ledger_guid": "supplier", "new_supplier": False, "evidence": "GSTIN matches."}}
+    document = {"kind": "invoice", "number": "MOCK-1", "date": "2026-10-01", "total": 118.0,
+                "supplier_name": "Supplier", "supplier_gstin": None, "origin": "domestic"}
+    return {"records": [{"source_file_id": "bill", "operation": "append", "company_guid": "company",
+                         "company_evidence": "Buyer GSTIN matches.", "document": document, "voucher": voucher,
                          "evidence": [], "exceptions": [], **record}],
             "exceptions": [], "unresolved": []}
 

@@ -868,7 +868,6 @@ def confirm(connection, tenant, user, run_id, body):
             user,
             row["mapping_run_id"],
             {"result": mappings, "acknowledge_findings": False},
-            require_destination=False,
         )
         catalog["excel_catalog_id"] = str(approved["catalog_id"])
         catalog["excel_mappings"] = mappings

@@ -23,7 +23,7 @@ class GSTSupplierTests(unittest.TestCase):
         discovery = self.tally_discovery("company-gst")
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], config={
-            "output_mode": "tally_in_place", "discovery_id": discovery})
+            "discovery_id": discovery})
         template = {"type": "LEDGER", "data": {"NAME": "Registered supplier", "GUID": "template",
             "ALTERID": "1", "PARENT": "Sundry Creditors", "PARTYGSTIN": "27AAPFU0939F1ZV", "GSTREGISTRATIONTYPE": "Regular"}}
         with psycopg.connect(URL, row_factory=dict_row) as c:

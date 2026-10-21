@@ -51,7 +51,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("same supplier, invoice reference and financial year", procedure)
         self.assertEqual(snapshot["execution"], {
             "environment": "openai_hosted", "model": "gpt-6-luna",
-            "python_packages": ["openpyxl", "pymupdf"], "instructions": "execution-instructions.md",
+            "python_packages": ["pymupdf"], "instructions": "execution-instructions.md",
             "resources": [], "result_path": "/workspace/outputs/result.json"})
 
     def test_run_override_does_not_change_defaults_or_other_runs(self):

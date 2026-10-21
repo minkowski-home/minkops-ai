@@ -38,7 +38,7 @@ class PostingProfileTests(unittest.TestCase):
     def launch_bill(self, did, name="bill.pdf", **config):
         bill = self.upload_bill(name)
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None,
-                             config={"output_mode": "tally_in_place", "discovery_id": did, **config})
+                             config={"discovery_id": did, **config})
         return run, bill
 
     def test_the_first_bill_waits_for_one_confirmation_and_later_bills_reuse_it(self):
@@ -98,7 +98,7 @@ class PostingProfileTests(unittest.TestCase):
         did = self.tally_discovery("waiting-co", confirmed_patterns=False)
         files = [self.upload_bill(name) for name in ("one.pdf", "two.pdf")]
         run, _ = self.launch("bill-entry", file_ids=files, catalog_id=None,
-                             config={"output_mode": "tally_in_place", "discovery_id": did})
+                             config={"discovery_id": did})
         reconcile_once(URL)
         self.process(self.derivations(run["id"])[0], payload("waiting-co"))
         reconcile_once(URL)
@@ -150,7 +150,7 @@ class PostingProfileTests(unittest.TestCase):
         did = self.tally_discovery("status-co")
         files = [self.upload_bill(name) for name in ("ready.pdf", "waiting.pdf")]
         run, _ = self.launch("bill-entry", file_ids=files, catalog_id=None,
-                             config={"output_mode": "tally_in_place", "discovery_id": did})
+                             config={"discovery_id": did})
         with psycopg.connect(URL, row_factory=dict_row) as c:
             child = c.execute("SELECT * FROM workflow_runs WHERE parent_run_id=%s AND file_ids @> %s::jsonb",
                               (run["id"], '["' + files[0] + '"]')).fetchone()

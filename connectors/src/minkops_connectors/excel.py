@@ -1,13 +1,10 @@
-"""Excel byte inspection and safe edits; business validation belongs to the caller."""
+"""Read-only Excel inspection: validated workbooks, header projections and mapped bounds."""
 
-from copy import copy
 from datetime import date, datetime
 from io import BytesIO
 from zipfile import BadZipFile, ZipFile
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.formula.translate import Translator
-from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.worksheet.table import Table, TableColumn
 
@@ -188,121 +185,3 @@ def mapping_bounds(sheet, mapping):
     if sheet.tables and mapping["role"] != "ignore":
         raise ValueError("Choose the named Excel table explicitly for sheets containing tables.")
     return 1, mapping["header_row"], sheet.max_column, sheet.max_row
-
-
-def mapped_columns(sheet, mapping):
-    a, b, c, _ = mapping_bounds(sheet, mapping)
-    return {
-        str(sheet.cell(b, i).value).strip(): i
-        for i in range(a, c + 1)
-        if sheet.cell(b, i).value is not None
-    }
-
-
-def sheet_records(content, mapping):
-    s = open_workbook(content)[mapping["sheet"]]
-    columns = mapped_columns(s, mapping)
-    _, b, _, d = mapping_bounds(s, mapping)
-    return [
-        {
-            "row": row,
-            "data": {
-                c["name"]: value_json(s.cell(row, columns[c["name"]]).value)
-                for c in mapping["columns"]
-            },
-        }
-        for row in range(b + 1, d + 1)
-        if any(s.cell(row, columns[c["name"]]).value is not None for c in mapping["columns"])
-    ]
-
-
-def apply_records(content, mapping, records, *, validate_record):
-    """Apply a reviewed plan to one sheet; preserve unrelated cells and formulas.
-
-    Append refuses duplicate keys. Update requires exactly one existing key match.
-    Writes happen to an in-memory copy; the browser owns the actual local commit.
-    """
-    w = open_workbook(content)
-    s = w[mapping["sheet"]]
-    if s.protection.sheet or (w.security and w.security.lockStructure):
-        raise ValueError("Protected workbooks cannot be edited.")
-    columns = mapped_columns(s, mapping)
-    changes = []
-    for record in records:
-        data = record["data"]
-        validate_record(mapping, data)
-        keys = mapping["key_columns"]
-        if any(data.get(k) is None or data.get(k) == "" for k in keys):
-            raise ValueError("Record keys must be complete.")
-        a, b, c, d = mapping_bounds(s, mapping)
-        match_data = record.get("match_data", data) if record.get("operation") == "update" else data
-        if any(match_data.get(k) in (None, "") for k in keys):
-            raise ValueError("Correction keys must be complete.")
-        matches = [
-            r
-            for r in range(b + 1, d + 1)
-            if all(
-                str(value_json(s.cell(r, columns[k]).value)).strip().casefold()
-                == str(match_data[k]).strip().casefold()
-                for k in keys
-            )
-        ]
-        operation = record.get("operation", "append")
-        if operation == "append":
-            if matches:
-                raise ValueError("Duplicate record: choose an explicit edit after review.")
-            row = d + 1
-            if mapping.get("table"):
-                if any(s.cell(row, i).value is not None for i in range(a, c + 1)):
-                    raise ValueError(
-                        "Table expansion would overwrite existing cells. Review the destination layout."
-                    )
-                for other in s.tables.values():
-                    x, y, z, last = range_boundaries(other.ref)
-                    if other.name != mapping["table"] and y <= row <= last and a <= z and c >= x:
-                        raise ValueError("Table expansion would overlap another table.")
-            previous = row - 1
-            for i in range(a, c + 1):
-                src, target = s.cell(previous, i), s.cell(row, i)
-                target._style = copy(src._style)
-                if src.data_type == "f":
-                    target.value = Translator(src.value, origin=src.coordinate).translate_formula(
-                        target.coordinate
-                    )
-        elif operation == "update":
-            if len(matches) != 1:
-                raise ValueError("Editing requires exactly one existing record with matching keys.")
-            row = matches[0]
-        else:
-            raise ValueError("Unsupported record operation.")
-        for name, value in data.items():
-            cell = s.cell(row, columns[name])
-            if cell.data_type == "f":
-                if value is not None:
-                    raise ValueError(f"Cannot overwrite computed column {name}.")
-                continue
-            cell.value = value
-        if mapping.get("table") and operation == "append":
-            table = s.tables[mapping["table"]]
-            table.ref = f"{get_column_letter(a)}{b}:{get_column_letter(c)}{row}"
-            if table.autoFilter:
-                table.autoFilter.ref = table.ref
-        changes.append(
-            {
-                "sheet": s.title,
-                "table": mapping.get("table"),
-                "row": row,
-                "operation": operation,
-                "data": data,
-            }
-        )
-    output = BytesIO()
-    w.save(output)
-    # Reopen and inspect each written value before publishing a write plan.
-    saved = open_workbook(output.getvalue())[s.title]
-    for change in changes:
-        for key, value in change["data"].items():
-            actual = saved.cell(change["row"], columns[key])
-            if actual.data_type != "f" and actual.value != (None if value == "" else value):
-                raise ValueError("Workbook verification failed.")
-    return output.getvalue(), changes

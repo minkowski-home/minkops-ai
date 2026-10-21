@@ -56,7 +56,3 @@ def bind_definition(definition, solution_id, *, repository_root=REPOSITORY_ROOT)
 def validate_option(registered_schema, name, value):
     """Validate against trusted registration, not preferences from the request."""
     validate(registered_schema["properties"][name], value)
-
-
-def validate_destination(registered_schema, output_mode):
-    validate_option(registered_schema, "output_mode", output_mode)

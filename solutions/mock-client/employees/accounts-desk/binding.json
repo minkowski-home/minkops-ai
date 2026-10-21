@@ -2,6 +2,6 @@
   "workflows": [
     {"key": "source-discovery", "status": "active", "defaults": {"max_files": 100}},
     {"key": "statement-entry", "status": "active"},
-    {"key": "bill-entry", "status": "active", "variant": "variant.json", "defaults": {"review_mode": "only_exceptions", "output_mode": "tally_in_place", "input_format": "mixed", "company_mode": "locked"}}
+    {"key": "bill-entry", "status": "active", "variant": "variant.json", "defaults": {"review_mode": "only_exceptions", "input_format": "mixed", "company_mode": "locked"}}
   ]
 }

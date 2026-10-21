@@ -7,8 +7,7 @@ let member=false, failDefaults=false, failUpload=false, failRun=false, failLoad=
 let sources=[{id:'upload',label:'Synthetic uploads',writable:false,files:[{id:'a',path:'invoice-a.PDF',sha256:'a'},{id:'b',path:'nested/receipt-b.jpg',sha256:'b'},{id:'unsupported',path:'notes.txt',sha256:'x'}]},{id:'folder',label:'Synthetic PC folder',writable:true,files:[{id:'c',path:'invoice-c.pdf',sha256:'c'},{id:'d',path:'long/nested/path/'+ 'long-name-'.repeat(15)+'.webp',sha256:'d'}]}];
 
 const schema=JSON.parse(fs.readFileSync(new URL('../../../../employees/accounts-desk/workflows/bill-entry/tenant-config.schema.json', import.meta.url)));
-schema.properties.output_mode['x-enabled-options']=['tally_in_place'];
-let defaults={input_format:'mixed',output_mode:'tally_in_place',review_mode:'only_exceptions',company_mode:'infer'};
+let defaults={input_format:'mixed',review_mode:'only_exceptions',company_mode:'infer'};
 const workflows=()=>[{id:'bill',key:'bill-entry',name:'Bill entry',description:'Enter synthetic bills with approved writes.',status:'active',employee_ids:[],config_schema:schema,config_values:defaults,config_version:1,presentation:'accounts-bill'}];
 const catalog={id:'discovery',ready:true,device_id:'pc',config:{tally:{}},catalog:{sources:[{tool:'tally',snapshot:{companies:[{company:'Synthetic Company',company_guid:'company'}]}}]}};
 const jobs=[], runs=[], patches=[], errors=[];
@@ -24,7 +23,6 @@ await context.route('**/api/**',async r=>{
   if(failUpload){status=400;body={detail:'Synthetic upload failed'};}
   else {sources=[...sources,{id:'added',label:'New upload',writable:false,files:[{id:'new',path:'new.pdf',sha256:'new'}]}];body=sources.at(-1);}
  }
- else if(path.endsWith('/accounts/catalogs'))body=[{id:'excel',confirmed_at:'2026-10-12',catalog:{sheets:[{role:'destination'}]}}];
  else if(path.endsWith('/discovery/latest')||path.endsWith('/discovery/runs/discovery'))body=catalog;
  else if(path.endsWith('/workflows/bill')&&method==='PATCH'){assert.equal(req.headers()['x-csrf-token'],'synthetic-csrf');patches.push(req.postDataJSON());if(failDefaults){status=400;body={detail:'Synthetic default save failed'};}else{defaults=req.postDataJSON().config_values;body={};}}
  else if(path.endsWith('/accounts/runs')&&method==='POST'){runs.push(req.postDataJSON());assert.equal(req.headers()['x-csrf-token'],'synthetic-csrf');if(failRun){status=400;body={detail:'Synthetic run failed'};}else body={task_id:'run-task'};}

@@ -6,7 +6,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { CatalogReview } from "./CatalogReview";
 import { BillDetailsButton } from "./BillDetails";
 import { DiscoveryReview } from "./Discovery";
-import { applyLocalPlan, applyTallyPlan } from "./localFiles";
+import { applyTallyPlan } from "./localFiles";
 import { billActions, billOutcome, inputsWithoutProposal, isPending, missingSupplier, needsAttention, type BillAction } from "./billView";
 import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
@@ -77,12 +77,6 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
     setBusy(true);
     setError("");
     try {
-      for (const write of value.writes.filter(w => !w.verified_at && !w.cancelled_at)) {
-        const current = await api<Run>(`${base}/runs/${value.id}`);
-        if (current.state !== "writing") break;
-        try { await applyLocalPlan(tenant, value.id, write, user.csrf_token, typeof value.config.destination_device_id === "string" ? value.config.destination_device_id : undefined); }
-        catch { setError("Save needs attention"); }
-      }
       for (const w of (value.tally_writes ?? []).filter(
         (w) => !w.finished_at && !w.cancelled_at
       )) {
@@ -104,12 +98,7 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
     // Resume is an explicit operator request to retry remaining immutable plans.
     if (controlState !== "active") attempted.current = "";
     const key = run
-      ? [
-          ...run.writes.filter((w) => !w.verified_at && !w.cancelled_at).map((w) => w.id),
-          ...(run.tally_writes ?? [])
-            .filter((w) => !w.finished_at && !w.cancelled_at)
-            .map((w) => w.id)
-        ].join(":")
+      ? (run.tally_writes ?? []).filter((w) => !w.finished_at && !w.cancelled_at).map((w) => w.id).join(":")
       : "";
     if (
       run?.state === "writing" &&
@@ -251,9 +240,9 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
             <article className="accounts-bill" key={`${r.source_file_id}:${index}`}>
               <h4>{name(r.source_file_id)}</h4>
               <p>
-                {r.company_name ?? r.sheet} ·{" "}
-                {String(r.data.invoice_number ?? r.data["Invoice Number"] ?? "")} ·{" "}
-                {String(r.data.total ?? r.data.Total ?? "")}
+                {r.company_name ?? "Company pending"} ·{" "}
+                {String(r.data.invoice_number ?? "")} ·{" "}
+                {String(r.data.total ?? "")}
               </p>
               <a
                 href={`${base}/files/${r.source_file_id}/content`}
@@ -263,8 +252,6 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
                 View bill
               </a>
               <BillDetailsButton record={r} config={run.config} name={name(r.source_file_id)} />
-              {Boolean(r.tax_allocations?.length) && <p className="muted">Tax: {r.tax_allocations!.map(line =>
-                `${line.ledger ?? "Pending ledger"} · ${new Intl.NumberFormat("en-IN").format(line.amount)}`).join(" · ")}</p>}
               <span role="status">
                 {" "}
                 {supplierMissing && pending ? "Missing supplier" : billOutcome(r.status, attention)}

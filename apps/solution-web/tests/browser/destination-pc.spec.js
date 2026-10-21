@@ -19,12 +19,11 @@ test('web destination selection scopes catalogs, persists routing and never fall
     let body=null,status=200;
     if(path==='/api/auth/session') body={id:'user',name:'Synthetic User',email:'qa@example.test',memberships:[{slug:'mock-tenant',name:'Mock',role:'admin'}],csrf_token:'csrf'};
     else if(path.endsWith('/workspace')) body={tenant:{slug:'mock-tenant',name:'Synthetic multi-PC workspace'},can_edit:true,employees:[],tasks:[],workflows:[
-      {id:'bill',key:'bill-entry',presentation:'accounts-bill',name:'Bill entry',status:'active',employee_ids:[],config_values:{output_mode:'tally_in_place',input_format:'mixed',review_mode:'all_outputs'},config_schema:{properties:{output_mode:{type:'string',title:'Save bills to',enum:['tally_in_place','excel_in_place']}}}},
+      {id:'bill',key:'bill-entry',presentation:'accounts-bill',name:'Bill entry',status:'active',employee_ids:[],config_values:{input_format:'mixed',review_mode:'all_outputs'},config_schema:{properties:{review_mode:{type:'string',title:'Review mode',enum:['all_outputs','only_exceptions']}}}},
       {id:'future',key:'future-example',presentation:'proposal',name:'Future workflow',status:'active',employee_ids:[],config_values:{},config_schema:{properties:{}},run_schema:{properties:{}}},
     ]};
     else if(path.endsWith('/desktop/devices')){body=devices;if(failPCs){status=503;body={detail:'Synthetic PCs unavailable'};}}
     else if(path.endsWith('/accounts/sources'))body=[{id:'upload',label:'Synthetic bills',writable:false,files:[{id:'bill-file',path:'bill.pdf',sha256:'synthetic'}]}];
-    else if(path.endsWith('/accounts/catalogs'))body=['a','b'].map(device=>({id:`excel-${device}`,confirmed_at:'2026-10-12',catalog:{sheets:[{role:'destination',file_id:`sheet-${device}`} ]}}));
     else if(path.endsWith('/discovery/latest')){
       const id=url.searchParams.get('device_id');requested.push(id);
       if(id==='a'&&holdA)await delayedA;
@@ -71,7 +70,7 @@ test('web destination selection scopes catalogs, persists routing and never fall
   await expect(page.getByLabel('Save bills to',{exact:true})).toHaveCount(0);
   await expect(page.getByLabel('Confirmed sources',{exact:true})).toHaveCount(0);
   await run.click();await page.waitForURL('**/tasks/task');expect(runs.at(-1).destination_device_id).toBe('a');
-  expect(runs.at(-1).config.output_mode).toBe('tally_in_place');expect(runs.at(-1).config.discovery_id).toBe('catalog-a');
+  expect(runs.at(-1).config).not.toHaveProperty('output_mode');expect(runs.at(-1).config.discovery_id).toBe('catalog-a');
   // A persisted PC that disappears must remain an unavailable choice, even with one PC left.
   devices=[activePC('b','PC B')];await page.goto(`${route}/workflows/bill`);await expect(picker).toHaveValue('a');await expect(run).toBeDisabled();await expect(page.getByText('The selected PC is unavailable. Reconnect it or explicitly choose another PC.')).toBeVisible();
   await picker.selectOption('b');await expect(run).toBeEnabled();

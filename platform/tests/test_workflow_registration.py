@@ -56,7 +56,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
 
     def test_repeat_registration_preserves_settings_status_and_links(self):
         first = register_workflow(self.connection, self.tenant, self.definition)
-        settings = {"review_mode": "only_exceptions", "output_mode": "draft_excel"}
+        settings = {"review_mode": "only_exceptions", "input_format": "pdf"}
         self.connection.execute(
             "UPDATE workflows SET config_values = %s, status = 'paused' WHERE id = %s",
             (Jsonb(settings), first),
@@ -94,7 +94,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
                 self.connection,
                 self.tenant,
                 replace(self.definition, tenant_schema=restricted),
-                {"review_mode": "only_exceptions", "output_mode": "draft_excel"},
+                {"review_mode": "only_exceptions", "input_format": "pdf"},
             )
         self.assertEqual(
             self.connection.execute(

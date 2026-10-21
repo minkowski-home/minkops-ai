@@ -1,11 +1,9 @@
-"""Accounts catalog and business record validation against confirmed mappings."""
+"""Source Discovery's Excel mappings, validated against the real workbook headers."""
 
 import json
-import math
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator
 
-from minkops_connectors.excel import apply_records as write_records
 from minkops_connectors.excel import mapping_bounds, open_workbook
 from minkops_platform.resources import REPOSITORY_ROOT
 
@@ -48,35 +46,3 @@ def validate_catalog(catalog, contents, *, review_proposal=False):
         concepts = [c["concept"] for c in mapping["columns"] if c["concept"]]
         if not review_proposal and len(concepts) != len(set(concepts)):
             raise ValueError("Business concepts must map to unique columns within a sheet.")
-
-
-def business_schema(mapping):
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {c["name"]: {"type": [c["type"], "null"]} for c in mapping["columns"]},
-        "required": [c["name"] for c in mapping["columns"] if c["required"]],
-    }
-
-
-def validate_data(mapping, data):
-    errors = list(
-        Draft202012Validator(business_schema(mapping), format_checker=FormatChecker()).iter_errors(
-            data
-        )
-    )
-    if errors:
-        raise ValueError(errors[0].message)
-    for c in mapping["columns"]:
-        v = data.get(c["name"])
-        if c["required"] and (v is None or (isinstance(v, str) and not v.strip())):
-            raise ValueError(f"{c['name']} requires a value.")
-        if isinstance(v, float) and not math.isfinite(v):
-            raise ValueError(f"{c['name']} requires a finite number.")
-        if isinstance(v, str) and v.lstrip().startswith(("=", "+", "-", "@")):
-            raise ValueError(f"{c['name']} contains unsafe formula-like text.")
-
-
-def apply_records(content, mapping, records):
-    """Apply an Accounts plan using the generic Excel adapter and confirmed rules."""
-    return write_records(content, mapping, records, validate_record=validate_data)

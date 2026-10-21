@@ -16,9 +16,8 @@ export interface RunSettingsProps {
   settings?: RunSettingsActions;
 }
 const labels: Record<string, string> = {
-  excel_in_place: "Excel", tally_in_place: "Tally", both_in_place: "Both",
-  draft_excel: "Excel draft", all_outputs: "Approve every output",
-  only_exceptions: "Only exceptions", pdf: "PDFs", image: "Images", mixed: "PDFs and images",
+  all_outputs: "Approve every output", only_exceptions: "Only exceptions",
+  pdf: "PDFs", image: "Images", mixed: "PDFs and images",
 };
 export function RunSettings({ tenant, workflow, onConfigChange, settings, exclude = [], busy = false, onReset, description }: RunSettingsProps & {
   exclude?: string[]; busy?: boolean; onReset?: () => void; description?: string;
@@ -28,7 +27,7 @@ export function RunSettings({ tenant, workflow, onConfigChange, settings, exclud
   const properties = workflow.config_schema.properties;
   const isBill = presentationFor(workflow) === "accounts-bill";
   const fields = Object.entries(properties).filter(([key]) => !exclude.includes(key) &&
-    (!isBill || !["output_mode", "checks", "schema_id", "schema_version"].includes(key)));
+    (!isBill || !["schema_id", "schema_version"].includes(key)));
   const groups = [...new Set(fields.map(([, spec]) => spec["x-step"] ?? "Run options"))];
   const disabled = busy || saving;
   async function save() {
@@ -36,22 +35,21 @@ export function RunSettings({ tenant, workflow, onConfigChange, settings, exclud
     setSaving(true); setMessage("");
     try {
       await api(`/api/tenants/${encodeURIComponent(tenant)}/workflows/${workflow.id}`, {
-        method: "PATCH", body: JSON.stringify({config_values: defaultableValues(
-          isBill ? {...workflow.config_values, output_mode: "tally_in_place"} : workflow.config_values, properties)}),
+        method: "PATCH", body: JSON.stringify({config_values: defaultableValues(workflow.config_values, properties)}),
       }, user.csrf_token);
       await settings.onSaved(); setMessage("Defaults saved. This run keeps your selected options.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save defaults."); }
     finally { setSaving(false); }
   }
   function update(key: string, value: string | number | boolean) {
-    setMessage(""); onConfigChange?.({...workflow.config_values, ...(isBill ? {output_mode: "tally_in_place"} : {}), [key]: value});
+    setMessage(""); onConfigChange?.({...workflow.config_values, [key]: value});
   }
   return <section className="run-settings" aria-label="Run options">
     {fields.length > 0 && <h4>Run options</h4>}
     <p className="quiet-state">{description ?? "Changes apply to the next run. Save as defaults to reuse supported options."}</p>
     {isBill && <p className="quiet-state">Destination: Tally</p>}
     {groups.map(group => <fieldset key={group}><legend>{group}</legend><div className="accounts-field-grid">{fields.filter(([, spec]) => (spec["x-step"] ?? "Run options") === group).map(([key, spec]) => {
-      const title = key === "review_mode" ? "Review mode" : key === "output_mode" && presentationFor(workflow) === "accounts-bill" ? "Save bills to" : spec.title ?? key;
+      const title = key === "review_mode" ? "Review mode" : spec.title ?? key;
       return <label className="config-field" key={key}><span>{title}</span>{spec.description && <small>{spec.description}</small>}
         {spec.enum ? <select aria-label={title} value={String(workflow.config_values[key] ?? "")} disabled={disabled}
           onChange={event => update(key, event.target.value)}>

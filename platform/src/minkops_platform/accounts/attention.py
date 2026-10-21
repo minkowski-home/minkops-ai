@@ -1,8 +1,5 @@
 """Accounts evidence and one-click decisions over shared attention state."""
-import base64
 import copy
-import hashlib
-import json
 from decimal import Decimal, InvalidOperation
 
 from psycopg.types.json import Jsonb
@@ -20,20 +17,7 @@ def target_for(connection, run, record):
     data = record.get("data") or {}
     scope = run["config"].get("tally_target")
     if not scope:
-        mapping = next((s for s in run["config"]["catalog_snapshot"]["sheets"]
-                        if s["file_id"] == record.get("destination_file_id") and s["sheet"] == record.get("sheet")
-                        and s.get("table") == record.get("table")), None)
-        if not mapping:
-            return {}
-        file = connection.execute("""SELECT f.path,f.source_id,b.device_id FROM account_files f
-            JOIN desktop_source_bindings b ON b.source_id=f.source_id AND b.tenant_id=f.tenant_id
-            WHERE f.tenant_id=%s AND f.id=%s""", (run["tenant_id"], mapping["file_id"])).fetchone()
-        if not file:
-            return {}
-        return {"tool": "excel", "device_id": str(file["device_id"]), "source_id": str(file["source_id"]),
-                "path": file["path"], "mapping": mapping,
-                "keys": {k: data.get(k) for k in mapping["key_columns"]},
-                "run_id": str(run["id"]), "file_id": record["source_file_id"], "baseline": None}
+        return {}
     from .client_context import select_target
     try:
         selected = select_target(record, scope)
@@ -189,10 +173,8 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
             flag(connection, run, record, title="Review written bill", kind="review", actor=user["id"])
         # One click authorizes the observed correction; no operation or values
         # are editable by the renderer. Native compare-and-readback still applies.
-        if record.get("current") or record.get("current_excel"):
+        if record.get("current"):
             record["operation"] = "update"
-            if record.get("current_excel"):
-                record["expected_excel"] = record["current_excel"]
             connection.execute("UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(run["result"]), run["id"]))
         result = copy.deepcopy(run["result"])
         for position, row in enumerate(result["records"]):
@@ -225,38 +207,13 @@ def _retry_save(connection, tenant, user, run, index):
 
 def check_observation(item, observation):
     target = item["target"]
-    if target.get("tool") == "excel":
-        from minkops_connectors.excel import mapped_columns, open_workbook, sheet_records
-
-        from .catalog import validate_data
-        try:
-            content = base64.b64decode(observation["content"], validate=True)
-            if len(content) > 4_000_000:
-                raise ValueError("Workbook too large.")
-            rows = [r for r in sheet_records(content, target["mapping"])
-                    if all(str(r["data"].get(k)).strip().casefold() == str(v).strip().casefold() for k,v in target["keys"].items())]
-            if len(rows) != 1:
-                return {"valid": False}
-            sheet = open_workbook(content)[target['mapping']['sheet']]
-            columns = mapped_columns(sheet,target['mapping'])
-            # Formula text is not a numeric readback. Optional calculated cells
-            # are excluded; required business values must still be observable.
-            for column in target['mapping']['columns']:
-                if not column['required'] and sheet.cell(rows[0]['row'],columns[column['name']]).data_type == 'f':
-                    rows[0]['data'][column['name']] = None
-            validate_data(target["mapping"], rows[0]["data"])
-            return {"valid": True, "current": {"guid": json.dumps(target["keys"], sort_keys=True),
-                "fingerprint": hashlib.sha256(json.dumps(rows[0]["data"], sort_keys=True, default=str).encode()).hexdigest()}}
-        except (ValueError, KeyError, TypeError):
-            return {"valid": False}
     if not isinstance(observation, dict) or observation.get("company_guid") != target.get("company_guid"):
         raise ServiceError("invalid", "Destination identity changed.")
     # Native observations are data. The server independently validates the
     # business identity and balanced accounting entries before completion.
+    from .vouchers import observed_document
     current = observation.get("current")
-    if isinstance(current, dict) and "lines" in current:
-        from .vouchers import observed_document
-        current = observed_document(current, target)
+    current = observed_document(current, target) if isinstance(current, dict) else None
     valid = False
     if current:
         try:
@@ -287,16 +244,6 @@ def check_observation(item, observation):
             masters = [supplier if m is reference else m for m in masters]
     return {"valid": valid if item["kind"] != "supplier" else supplier_valid,
             "ledgers": names, "masters": masters, "current": current}
-
-
-def excel_baseline(connection, run, record, content):
-    item = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s AND status='pending' FOR UPDATE",
-        (run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:review")).fetchone()
-    if item and item["target"]:
-        observation = check_observation(item, {"content": base64.b64encode(content).decode()})
-        if observation["valid"]:
-            connection.execute("UPDATE attention_items SET target=jsonb_set(target,'{baseline}',%s) WHERE id=%s",
-                               (Jsonb(observation["current"]), item["id"]))
 
 
 def written(connection, run, record, result):

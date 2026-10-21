@@ -1,7 +1,5 @@
 import { api } from '../api';
-import { commitLocalWrite } from './localWrites';
-import type { LocalFile } from './localWrites';
-import type { Source, WritePlan, TallyWrite } from './types';
+import type { Source, TallyWrite } from './types';
 import { desktopBridge, nativeFilesForm } from '../desktop/bridge';
 
 export interface Directory {
@@ -12,7 +10,7 @@ export interface Directory {
   queryPermission(options: { mode: 'readwrite' }): Promise<string>;
   requestPermission(options: { mode: 'readwrite' }): Promise<string>;
 }
-interface FileHandle extends LocalFile { kind: 'file'; name: string; getFile(): Promise<File> }
+interface FileHandle { kind: 'file'; name: string; getFile(): Promise<File> }
 type PickerWindow = Window & { showDirectoryPicker?: (options: { mode: 'readwrite' }) => Promise<Directory> };
 
 function database(): Promise<IDBDatabase> {
@@ -134,40 +132,6 @@ export async function refreshFolder(tenant: string, source: Source, csrf: string
   if (!folder) throw new Error('Reconnect the original local folder on this browser.');
   if (await folder.queryPermission({ mode: 'readwrite' }) !== 'granted' && await folder.requestPermission({ mode: 'readwrite' }) !== 'granted') throw new Error('Folder permission is required.');
   return syncFolder(tenant, csrf, folder, source.id);
-}
-
-export async function applyLocalPlan(tenant: string, runId: string, write: WritePlan, csrf: string, destinationDeviceId?: string): Promise<void> {
-  const remote = await connectedSource(tenant, write.source_id);
-  if (destinationDeviceId && remote?.device_id !== destinationDeviceId) {
-    throw new Error('Reconnect this folder on the selected destination PC before saving.');
-  }
-  if (remote) {
-    await onConnectedPC(tenant, remote.device_id, 'accounts.save', { run_id: runId, write_id: write.id }, csrf);
-    return;
-  }
-  const native = desktopBridge();
-  if (native) throw new Error('Reconnect the original folder on this PC before resuming saves.');
-  const folder = await localValue<Directory>(bindingKey(tenant, write.source_id));
-  if (!folder) throw new Error('Reconnect the original local folder to finish the approved entries.');
-  if (await folder.queryPermission({ mode: 'readwrite' }) !== 'granted' && await folder.requestPermission({ mode: 'readwrite' }) !== 'granted') throw new Error('Local write permission is required. Select Resume local writes.');
-  const parts = write.path.split('/');
-  if (parts.some((p) => !p || p === '.' || p === '..' || p.includes('\\'))) throw new Error('Invalid local write path.');
-  let directory = folder;
-  for (const name of parts.slice(0, -1)) directory = await directory.getDirectoryHandle(name);
-  const file = await directory.getFileHandle(parts[parts.length - 1]);
-  const base = `/api/tenants/${tenant}/accounts/runs/${runId}/writes/${write.id}`;
-  const response = await fetch(base + '/content', { credentials: 'same-origin' });
-  if (!response.ok) throw new Error('Could not retrieve the approved Excel changes.');
-  const approved = await response.blob();
-  const execute = async () => {
-    const saved = await commitLocalWrite(file, approved, write.before_sha256, write.after_sha256,
-      (blob) => saveLocal(`${tenant}:backup:${write.id}`, blob));
-    const form = new FormData(); form.append('file', saved, parts[parts.length - 1]);
-    await api(base + '/verify', { method: 'POST', body: form }, csrf);
-    await saveLocal(`${tenant}:backup:${write.id}`, undefined);
-  };
-  if (navigator.locks) await navigator.locks.request(`${tenant}:write:${write.source_id}:${write.path}`, execute);
-  else await execute();
 }
 
 export async function applyTallyPlan(tenant:string,runId:string,write:TallyWrite,csrf:string):Promise<void> {

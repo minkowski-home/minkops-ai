@@ -20,7 +20,6 @@ import {
   writeFile,
   rename,
   realpath,
-  unlink,
   mkdir,
   readdir,
   stat,
@@ -29,7 +28,6 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import {
   inventory,
-  replaceApproved,
   checkTally,
   inspectExcel,
   excelSchemaBytes,
@@ -276,17 +274,11 @@ function startWorker() {
         return { files: await inventory(grantFor(job.input.source_id).root) };
       if (job.operation === "attention.refresh" || job.operation === "attention.supplier") {
         const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
-        if (plan.tool === "excel") {
-          const files = await inventory(grantFor(plan.source_id).root);
-          const file = files.find(f => f.path === plan.path);
-          if (!file) throw new Error("Original workbook unavailable.");
-          return {content: file.content};
-        }
         return inspectTallyAttention(plan, {request: tallyRequest, createSupplier: job.operation === "attention.supplier"});
       }
       // An encrypted, fsynced intent per remote ID: once written, no later
-      // attempt may import that voucher again. Upgraded statement plans keep
-      // their remote ID, so this directory must stay the one they used.
+      // attempt may import that voucher again. Statement plans keep their
+      // remote ID across retries, so this directory must stay the one they used.
       const durableIntent = async intent => {
         if (state.device !== identity || !safeStorage.isEncryptionAvailable()) throw new Error("PC connection changed.");
         const directory = join(app.getPath("userData"), "statement-manifests");
@@ -307,31 +299,7 @@ function startWorker() {
         return saveVoucher(plan, {request: tallyRequest, beforeImport: durableIntent, pc,
           diagnose: (record) => jobDiagnostics.set(job.id, record)});
       }
-      if (job.operation !== "accounts.save")
-        throw new Error("Unsupported local operation.");
-      const spec = await request(
-        `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
-      );
-      const grant = grantFor(spec.source_id);
-      const backups = join(app.getPath("userData"), "backups");
-      await mkdir(backups, { recursive: true });
-      const saved = await replaceApproved(
-        grant.root,
-        spec,
-        Buffer.from(spec.content, "base64"),
-        async (bytes) => {
-          if (state.device !== identity || !safeStorage.isEncryptionAvailable())
-            throw new Error("PC connection changed.");
-          await writeFile(
-            join(backups, `${job.id}.bin`),
-            safeStorage.encryptString(bytes.toString("base64")),
-            { mode: 0o600 },
-          );
-          if (state.device !== identity)
-            throw new Error("PC connection changed.");
-        },
-      );
-      return { content: saved.toString("base64") };
+      throw new Error("Unsupported local operation.");
     },
     diagnosticFor: (job, receipt) => {
       recentJobs.unshift({
@@ -352,11 +320,6 @@ function startWorker() {
         state.pending = pending;
         await persist();
       }
-    },
-    acknowledge: async (jobId) => {
-      await unlink(
-        join(app.getPath("userData"), "backups", `${jobId}.bin`),
-      ).catch(() => {});
     },
     afterTick: async () => {
       if (state.device !== identity) return;

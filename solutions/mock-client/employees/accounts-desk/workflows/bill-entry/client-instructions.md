@@ -2,14 +2,13 @@ This client uses Tally Purchase vouchers under the run's selected review mode.
 Only unresolved exceptions require decisions in only_exceptions mode. Use the
 selected company and the current references supplied by
 the platform; never substitute a company from an example or another client.
-Keep distinct evidenced tax components in their separate discovered tax ledgers.
-Use the run's versioned allocation capability; unsupported or ambiguous allocations
-need clarification. The platform's monetary checks and native readback remain
-mandatory regardless of these client instructions.
+Keep distinct evidenced tax components in their separate discovered tax ledgers;
+unsupported or ambiguous allocations need clarification. The platform's monetary
+checks and native readback remain mandatory regardless of these client instructions.
 
 This mock client uses synthetic release documents solely in its isolated demo
 company. Their synthetic/non-commercial label describes the test fixture, not a
-missing field. For these fixtures the printed billing Ref is the invoice_number;
+missing field. For these fixtures the printed billing Ref is the document number;
 a separately labelled weighbridge or delivery identifier must not replace it.
 Keep missing or conflicting references unresolved, and never apply this demo
 convention to another client's documents or relax approval/write safeguards.

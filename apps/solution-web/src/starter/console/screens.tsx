@@ -88,7 +88,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = fa
         : spec.enum
           ? <select aria-label={spec.title ?? key} value={String(values[key] ?? "")} disabled={!canEdit}
             onChange={(event) => update({ ...values, [key]: event.target.value })}>
-              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft',all_outputs:'Approve every output',only_exceptions:'Only exceptions',pdf:'PDFs',image:'Images',mixed:'PDFs and images'} as Record<string,string>)[String(option)] ?? option}</option>)}
+              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({all_outputs:'Approve every output',only_exceptions:'Only exceptions',pdf:'PDFs',image:'Images',mixed:'PDFs and images'} as Record<string,string>)[String(option)] ?? option}</option>)}
             </select>
           : <input aria-label={spec.title ?? key} type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
             disabled={!canEdit} onChange={(event) => update({

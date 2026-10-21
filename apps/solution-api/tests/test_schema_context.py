@@ -33,7 +33,7 @@ class SchemaContextTests(unittest.TestCase):
                 SELECT tenant_id,source_id,'scale-'||n||'.pdf',sha256,content
                 FROM account_files CROSS JOIN generate_series(1,119) n WHERE id=%s RETURNING id""",(original,)).fetchall()
         inputs = [original,*[str(row[0]) for row in copies]]
-        run,_ = self.launch('bill-entry',file_ids=inputs,config={'output_mode':'tally_in_place','discovery_id':discovery})
+        run,_ = self.launch('bill-entry',file_ids=inputs,config={'discovery_id':discovery})
         with psycopg.connect(URL,row_factory=dict_row) as c:
             children=c.execute('SELECT * FROM workflow_runs WHERE parent_run_id=%s',(run['id'],)).fetchall()
             self.assertEqual(len(children),120)
@@ -60,7 +60,7 @@ class SchemaContextTests(unittest.TestCase):
                 "key": "bill-entry",
                 "request_key": uuid.uuid4().hex,
                 "file_ids": [self.upload_bill()],
-                "config": {"output_mode": "tally_in_place", "discovery_id": discovery},
+                "config": {"discovery_id": discovery},
             },
         )
         self.assertEqual(response.status_code, 409, response.text)
@@ -91,7 +91,7 @@ class SchemaContextTests(unittest.TestCase):
             run, _ = self.launch(
                 "bill-entry",
                 file_ids=[self.upload_bill()],
-                config={"output_mode": "tally_in_place", "discovery_id": discovery},
+                config={"discovery_id": discovery},
             )
         self.assertEqual(calls, [1])
         self.assertNotIn("tally_context_job_id", run["config"])
@@ -106,7 +106,7 @@ class SchemaContextTests(unittest.TestCase):
         run, _ = self.launch(
             "bill-entry",
             file_ids=[self.upload_bill()],
-            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+            config={"discovery_id": discovery},
         )
         with psycopg.connect(URL, row_factory=dict_row) as c:
             saved = c.execute("SELECT * FROM workflow_runs WHERE id=%s", (run["id"],)).fetchone()
@@ -128,7 +128,7 @@ class SchemaContextTests(unittest.TestCase):
         run, _ = self.launch(
             "bill-entry",
             file_ids=[bill],
-            config={"output_mode": "tally_in_place", "discovery_id": discovery},
+            config={"discovery_id": discovery},
         )
         self.process(
             run,

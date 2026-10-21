@@ -20,8 +20,7 @@ def write_blocker(run, record, *, supplier=False):
     """Explain ineligibility through the same gate used to accept the decision."""
     scope = run["config"].get("tally_target")
     if not scope:
-        return ({"code": "decision_unavailable", "message": "Create this ledger requires a Tally destination."}
-                if supplier else None)  # Pinned Excel runs retain existing validation.
+        return {"code": "decision_unavailable", "message": "Excel bill destinations are retired. Start a new Tally bill run."}
     candidate = copy.deepcopy(record)
     try:
         from .vouchers import resolve

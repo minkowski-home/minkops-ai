@@ -260,10 +260,6 @@ def complete_run(connection, run, result):
     for record in result["records"]:
         if record.get("status") == "held":
             flag(connection, run, record)
-    pending_excel = connection.execute(
-        "SELECT count(*) AS n FROM account_writes WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL AND cancelled_at IS NULL",
-        (run["tenant_id"], run["id"]),
-    ).fetchone()["n"]
     pending_tally = connection.execute(
         "SELECT count(*) AS n FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL AND cancelled_at IS NULL",
         (run["tenant_id"], run["id"]),
@@ -277,7 +273,7 @@ def complete_run(connection, run, result):
     # that object synchronized so later writes cannot restore stale controls.
     result.clear()
     result.update(pinned)
-    state = "writing" if pending_excel or pending_tally else "review" if held else "completed"
+    state = "writing" if pending_tally else "review" if held else "completed"
     connection.execute(
         "UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s",
         (Jsonb(result), run["tenant_id"], run["id"]),

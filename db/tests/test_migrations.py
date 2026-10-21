@@ -80,6 +80,34 @@ class MigrationTests(unittest.TestCase):
                     self.assertEqual(schema["required"], ["max_files"])
                     self.assertEqual(version, 2)
 
+    def test_retired_bill_output_mode_is_removed_without_changing_other_settings(self):
+        from psycopg.types.json import Jsonb
+
+        with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
+            tenant = connection.execute(
+                "INSERT INTO tenants(slug,name) VALUES (%s,'Migration test') RETURNING id",
+                ("bill-migration-" + uuid4().hex,),
+            ).fetchone()[0]
+            schema = {"properties": {"review_mode": {"type": "string"},
+                                     "output_mode": {"enum": ["excel_in_place", "tally_in_place"],
+                                                     "x-enabled-options": ["tally_in_place"]}},
+                      "required": ["review_mode", "output_mode"]}
+            for key in ("bill-entry", "another-workflow"):
+                connection.execute(
+                    "INSERT INTO workflows(tenant_id,key,name,description,config_schema,config_values,execution_binding) VALUES (%s,%s,'Test','Test',%s,%s,%s)",
+                    (tenant, key, Jsonb(schema), Jsonb({"review_mode": "all_outputs", "output_mode": "excel_in_place"}),
+                     Jsonb({"presentation": "accounts-bill"})),
+                )
+            migration = (ROOT / "db/migrations/0018_retire_excel_bill_destination.sql").read_text()
+            for _ in range(2):
+                connection.execute(migration)
+            rows = {key: (values, migrated, version) for key, values, migrated, version in connection.execute(
+                "SELECT key,config_values,config_schema,config_version FROM workflows WHERE tenant_id=%s", (tenant,))}
+            values, migrated, version = rows["bill-entry"]
+            self.assertEqual(values, {"review_mode": "all_outputs"})
+            self.assertEqual((list(migrated["properties"]), migrated["required"], version), (["review_mode"], ["review_mode"], 2))
+            self.assertEqual((rows["another-workflow"][0]["output_mode"], rows["another-workflow"][2]), ("excel_in_place", 1))
+
     def test_desktop_binding_and_dispatch_foreign_keys_prevent_cross_tenant_links(self):
         with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
             prefix = "desktop-migration-" + uuid4().hex

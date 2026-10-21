@@ -1,12 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inventory, replaceApproved, readOpenCompanies } from "../src/index.js";
-import { createHash } from "node:crypto";
-
-const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+import { inventory, readOpenCompanies } from "../src/index.js";
 
 test("open-company read sends only a fixed company export and parses names", async () => {
   let sent;
@@ -81,70 +78,4 @@ test("native folder inventory skips hidden files and refuses symlink escape", as
     process.platform === "win32" ? "junction" : "dir",
   );
   await assert.rejects(inventory(root), /link/i);
-});
-
-test("approved native replacement verifies before/after, replay, backup and conflicts", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "minkops-write-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const before = Buffer.from("original workbook");
-  const after = Buffer.from("approved workbook");
-  await writeFile(join(root, "register.xlsx"), before);
-  const backups = [];
-  const spec = {
-    path: "register.xlsx",
-    before_sha256: hash(before),
-    after_sha256: hash(after),
-  };
-  assert.deepEqual(
-    await replaceApproved(root, spec, after, async (b) => backups.push(b)),
-    after,
-  );
-  assert.deepEqual(backups, [before]);
-  await replaceApproved(root, spec, after, async () =>
-    assert.fail("replay backed up again"),
-  );
-  await writeFile(join(root, "register.xlsx"), "external edit");
-  await assert.rejects(
-    replaceApproved(root, spec, after, async () => {}),
-    /changed/,
-  );
-  assert.equal(
-    await readFile(join(root, "register.xlsx"), "utf8"),
-    "external edit",
-  );
-  await assert.rejects(
-    replaceApproved(
-      root,
-      { ...spec, path: "../escape.xlsx" },
-      after,
-      async () => {},
-    ),
-  );
-  await assert.rejects(
-    replaceApproved(root, spec, Buffer.from("corrupt"), async () => {}),
-    /integrity/,
-  );
-});
-
-test("native write never follows a symlink destination", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "minkops-link-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await writeFile(join(root, "original.xlsx"), "original");
-  let path = "alias.xlsx";
-  if (process.platform === "win32") {
-    // Directory junctions need no elevated privilege and exercise the Windows
-    // reparse-point boundary. Linux additionally covers a direct file symlink.
-    await symlink(root, join(root, "alias"), "junction");
-    path = "alias/original.xlsx";
-  } else await symlink(join(root, "original.xlsx"), join(root, path));
-  await assert.rejects(
-    replaceApproved(
-      root,
-      { path, before_sha256: hash("original"), after_sha256: hash("after") },
-      Buffer.from("after"),
-      async () => {},
-    ),
-    /link/i,
-  );
-  assert.equal(await readFile(join(root, "original.xlsx"), "utf8"), "original");
 });

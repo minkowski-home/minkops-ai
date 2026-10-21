@@ -87,7 +87,6 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
                                (error, tenant_id, run["id"]))
             if run['state'] not in ('completed','failed'):
                 connection.execute("UPDATE workflow_runs SET config=config || '{\"timeout_cancel_pending\":true}'::jsonb WHERE id=%s", (run['id'],))
-            connection.execute("UPDATE account_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND verified_at IS NULL", (tenant_id, run["id"]))
             connection.execute("UPDATE account_tally_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL", (tenant_id, run["id"]))
             binding = run["config"].get("runtime_binding", {})
             # A batch parent owns its bills' attention; its children would

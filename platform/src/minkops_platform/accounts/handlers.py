@@ -14,17 +14,16 @@ from minkops_platform.runtime.environments import (
     exceeds_session,
 )
 from minkops_platform.runtime.launch import LaunchInputs
-from minkops_platform.solution_policy import validate_destination
 from minkops_platform.workflows import resolve_run_config
 
 from .bills import tally_target
 from .catalog import validate_catalog
-from .checks import check_records, populate_entry_ids
-from .repository import catalog_contents, files_for, resolve_catalog
+from .repository import files_for
 
 
 def prepare_launch(connection, tenant, user, body, workflow, definition):
-    catalog_snapshot, target, source_context = None, None, None
+    target, source_context = None, None
+    is_bill = definition.metadata["handler"] == "accounts.bill"
     ids = list(map(str, body["file_ids"]))
     if len(ids) != len(set(ids)):
         raise ServiceError("invalid", "Select each file only once.")
@@ -33,23 +32,6 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         raise ServiceError("conflict", "Refresh changed source files before launching.")
     source_ids = list({str(f["source_id"]) for f in files})
     selections = {**body["config"], "source_ids": source_ids}
-    if definition.metadata["handler"] == "accounts.bill":
-        selections.setdefault(
-            "output_mode", workflow["config_values"].get("output_mode", "excel_in_place")
-        )
-        try:
-            validate_destination(workflow["config_schema"], selections["output_mode"])
-        except ValidationError as error:
-            raise ServiceError(
-                "invalid", "Choose a destination enabled for this workspace."
-            ) from error
-        if selections["output_mode"] == "both_in_place":
-            # Retain the configuration choice for future client composition,
-            # but never report a dual save through the single Excel/Tally path.
-            raise ServiceError(
-                "invalid",
-                "Both destinations require a combined verified write contract. Choose Excel or Tally.",
-            )
     catalog_id = body["catalog_id"]
     if definition.metadata["handler"] == "accounts.discovery" and selections.get(
         "discovery_run_id"
@@ -67,88 +49,46 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         if any(Path(f["path"]).suffix.lower() != ".xlsx" for f in files):
             raise ServiceError("invalid", "Discovery currently accepts Excel workbooks only.")
     else:
-        if (
-            selections.get("output_mode", workflow["config_values"].get("output_mode"))
-            == "tally_in_place"
-        ):
-            discovery_id = selections.get("discovery_id")
-            if not discovery_id:
-                raise ServiceError("invalid", "Confirm Tally source discovery first.")
-            # The agent proposes the client's own voucher (bill-entry 0.14+).
-            if tuple(map(int, definition.metadata["version"].split("."))) < (0, 14, 0):
-                raise ServiceError("conflict", "This Bill Entry version is retired. Reinstall the workflow, then launch again.")
-            target = tally_target(connection, tenant, user, discovery_id)
-            from minkops_platform import desktop
+        # Bill Entry writes the client's own voucher to Tally (bill-entry 0.14+).
+        discovery_id = selections.get("discovery_id")
+        if not discovery_id:
+            raise ServiceError("invalid", "Confirm Tally source discovery first.")
+        if tuple(map(int, definition.metadata["version"].split("."))) < (0, 14, 0):
+            raise ServiceError("conflict", "This Bill Entry version is retired. Reinstall the workflow, then launch again.")
+        target = tally_target(connection, tenant, user, discovery_id)
+        from minkops_platform import desktop
 
-            desktop.require_companion(
-                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]))
-            from minkops_platform.discovery import workflow_context
+        desktop.require_companion(
+            desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]))
+        from minkops_platform.discovery import workflow_context
 
-            source_context = workflow_context(
-                connection,
-                tenant["id"],
-                discovery_id,
-                ["tally"],
-            )
-            catalog_snapshot = {"sheets": []}
-            target["company_mode"] = selections.get("company_mode", "infer")
-            target["locked_company_guid"] = selections.get("locked_company_guid")
-            if target["company_mode"] == "locked":
-                from .client_context import select_target
+        source_context = workflow_context(connection, tenant["id"], discovery_id, ["tally"])
+        target["company_mode"] = selections.get("company_mode", "infer")
+        target["locked_company_guid"] = selections.get("locked_company_guid")
+        if target["company_mode"] == "locked":
+            from .client_context import select_target
 
-                try:
-                    select_target({}, target)
-                except ValueError as error:
-                    raise ServiceError("invalid", str(error)) from error
-            elif target["locked_company_guid"] is not None:
-                raise ServiceError("invalid", "Automatic company selection cannot lock a company.")
-            references = []
-            selections.update(
-                {
-                    "file_ids": ids,
-                    "catalog_version": str(discovery_id),
-                    "schema_id": str(discovery_id),
-                    "schema_version": "1",
-                    "destination_id": str(discovery_id),
-                }
-            )
-            catalog_id = None
-        elif not catalog_id:
-            raise ServiceError("invalid", "Confirm a source-discovery catalog first.")
-        if (
-            selections.get("output_mode", workflow["config_values"].get("output_mode"))
-            != "tally_in_place"
-        ):
-            catalog_snapshot, references, source_context = _excel_launch_catalog(
-                connection, tenant, catalog_id
-            )
-            selections.update(
-                {
-                    "file_ids": ids,
-                    "catalog_version": str(catalog_id),
-                    "schema_id": str(catalog_id),
-                    "schema_version": "1",
-                    "destination_id": str(catalog_id),
-                }
-            )
+            try:
+                select_target({}, target)
+            except ValueError as error:
+                raise ServiceError("invalid", str(error)) from error
+        elif target["locked_company_guid"] is not None:
+            raise ServiceError("invalid", "Automatic company selection cannot lock a company.")
+        selections.update(
+            {
+                "file_ids": ids,
+                "catalog_version": str(discovery_id),
+                "schema_id": str(discovery_id),
+                "schema_version": "1",
+                "destination_id": str(discovery_id),
+            }
+        )
+        catalog_id = None
         if any(Path(f["path"]).suffix.lower() == ".xlsx" for f in files):
             raise ServiceError("invalid", "Bill entry accepts PDFs and images.")
-        if body.get("destination_device_id"):
-            from minkops_platform import desktop
-
-            device_id = str(body["destination_device_id"])
-            if target and target["device_id"] != device_id:
-                raise ServiceError("invalid", "Discovery does not belong to the selected destination PC.")
-            if not target:
-                device = desktop.owned_device(connection, tenant["id"], user["id"], device_id)
-                destinations = {sheet["file_id"] for sheet in catalog_snapshot["sheets"] if sheet["role"] == "destination"}
-                for file in references:
-                    if str(file["id"]) in destinations:
-                        desktop._bound_source(connection, device, file["source_id"])
-        files += references
-    is_bill = definition.metadata["handler"] == "accounts.bill"
-    reference_files = files[len(ids):] if is_bill else []
-    sessions = [[f, *reference_files] for f in files[:len(ids)]] if is_bill else [files]
+        if body.get("destination_device_id") and str(body["destination_device_id"]) != target["device_id"]:
+            raise ServiceError("invalid", "Discovery does not belong to the selected destination PC.")
+    sessions = [[f] for f in files] if is_bill else [files]
     if any(exceeds_session(session) for session in sessions):
         raise ServiceError(
             "invalid",
@@ -178,10 +118,7 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                     "invalid",
                     "A selected file is outside the configured discovery scope or is excluded.",
                 )
-    if definition.metadata["handler"] == "accounts.bill":
-        config["catalog_snapshot"] = catalog_snapshot
-        if target:
-            config["tally_target"] = target
+    if is_bill:
         fmt = config["input_format"]
         if fmt != "mixed" and any(
             (Path(f["path"]).suffix.lower() == ".pdf") != (fmt == "pdf") for f in files[: len(ids)]
@@ -189,46 +126,41 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             raise ServiceError(
                 "invalid", "Selected bills do not match the configured input format."
             )
-        if config["output_mode"] not in ("excel_in_place", "tally_in_place"):
-            raise ServiceError("invalid", "Choose in-place Excel or Tally output.")
     if (
         definition.execution_snapshot is None
         or definition.execution_snapshot["execution"]["model"] != "gpt-6-luna"
     ):
         raise ServiceError("invalid", "Accounts workflows must use the approved gpt-6-luna model.")
-    snapshots = {
-        key: config.pop(key) for key in ("catalog_snapshot", "tally_target") if key in config
-    }
+    snapshots = {"tally_target": target} if is_bill else {}
     if source_context:
         snapshots[
             "local_discovery_snapshot"
             if definition.metadata["handler"] == "accounts.discovery"
             else "source_catalog_snapshot"
         ] = source_context
+    if is_bill:
+        # Sessions receive one routed company's evidence, never every company's.
+        from .company_scope import annotate, assets_for, fixed_scope
+
+        annotate(target, source_context)
+        probe = {"tally_target": target, "source_catalog_snapshot": source_context}
+        scope = fixed_scope(probe)
+        largest = max(len(f["content"]) for f in files[:len(ids)])
+        try:
+            for company in scope or [c["references"]["company_guid"] for c in target["companies"]]:
+                assets, _ = assets_for({**probe, "company_scope": [company]}, largest)
+        except ValueError as error:
+            raise ServiceError("invalid", f"{error} Reduce the discovery scope or hand off.") from error
+        if scope:
+            snapshots["company_scope"] = scope
+            files += assets
+        return LaunchInputs(files, ids, catalog_id, config, snapshots)
+    if source_context:
         from .client_context import context_assets
 
-        target = snapshots.get("tally_target")
-        if is_bill and target:
-            # Sessions receive one routed company's evidence, never every company's.
-            from .company_scope import annotate, assets_for, fixed_scope
-
-            annotate(target, source_context)
-            probe = {"tally_target": target, "source_catalog_snapshot": source_context}
-            scope = fixed_scope(probe)
-            largest = max(len(f["content"]) for f in files[:len(ids)])
-            try:
-                for company in scope or [c["references"]["company_guid"] for c in target["companies"]]:
-                    assets, _ = assets_for({**probe, "company_scope": [company]}, largest)
-            except ValueError as error:
-                raise ServiceError("invalid", f"{error} Reduce the discovery scope or hand off.") from error
-            if scope:
-                snapshots["company_scope"] = scope
-                files += assets
-            return LaunchInputs(files, ids, catalog_id, config, snapshots)
         assets, _ = context_assets(source_context)
         files += assets
-        sessions = [[f, *reference_files, *assets] for f in files[:len(ids)]] if is_bill else [files]
-        if any(exceeds_session(session) for session in sessions):
+        if exceeds_session(files):
             raise ServiceError(
                 "invalid",
                 "Complete discovery context exceeds hosted input limits. Reduce the voucher period or hand off; master records cannot be sampled.",
@@ -236,48 +168,14 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
     return LaunchInputs(files, ids, catalog_id, config, snapshots)
 
 
-def _excel_launch_catalog(connection, tenant, catalog_id):
-    catalog_row = connection.execute(
-        "SELECT * FROM account_catalogs WHERE tenant_id=%s AND id=%s",
-        (tenant["id"], catalog_id),
-    ).fetchone()
-    if not catalog_row:
-        raise ServiceError("not_found", "Catalog not found.")
-    if not any(s["role"] == "destination" for s in catalog_row["catalog"]["sheets"]):
-        raise ServiceError(
-            "conflict", "Confirm a Bill Entry destination in source discovery first."
-        )
-    discovered = connection.execute(
-        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND catalog->>'excel_catalog_id'=%s",
-        (tenant["id"], str(catalog_id)),
-    ).fetchone()
-    source_context = None
-    if discovered:
-        from minkops_platform.discovery import workflow_context
-
-        source_context = workflow_context(connection, tenant["id"], discovered["id"], ["excel"])
-    try:
-        catalog_snapshot, references, _ = resolve_catalog(
-            connection, tenant["id"], catalog_row["catalog"]
-        )
-    except ValueError as error:
-        raise ServiceError("conflict", str(error)) from error
-    return catalog_snapshot, references, source_context
-
-
 class AccountsHandler:
     def public_fields(self, connection, run):
-        writes = connection.execute(
-            """SELECT id,source_id,path,before_sha256,after_sha256,changes,verified_at,cancelled_at
-            FROM account_writes WHERE tenant_id=%s AND run_id=%s ORDER BY path""",
-            (run["tenant_id"], run["id"]),
-        ).fetchall()
         tally_writes = connection.execute(
             """SELECT id,device_id,company,record_index,outcome,verified_at,finished_at,cancelled_at
             FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s ORDER BY created_at""",
             (run["tenant_id"], run["id"]),
         ).fetchall()
-        return {"writes": writes, "tally_writes": tally_writes}
+        return {"tally_writes": tally_writes}
 
     queued_summary = "Queued for Accounts desk."
     executing_summary = "Accounts desk is inspecting the selected files."
@@ -397,15 +295,8 @@ class BillHandler(AccountsHandler):
             context["config"] = {
                 k: v for k, v in run["config"].items() if k != "source_catalog_snapshot"
             }
-        context["catalog"] = run["config"]["catalog_snapshot"]
-        refs, contents = (
-            ([], {})
-            if run["config"].get("tally_target")
-            else catalog_contents(connection, run["tenant_id"], context["catalog"])
-        )
-        files += [f for f in refs if f["id"] not in {i["id"] for i in files}]
         context["files"] = [{"id": str(f["id"]), "path": f["path"]} for f in files]
-        return files, context, {"refs": refs, "contents": contents}
+        return files, context, {}
 
     def validate(self, run, files, context, domain, result):
         from .checks import adopt_exceptions
@@ -422,36 +313,22 @@ class BillHandler(AccountsHandler):
                     b["company_guid"] not in known and b["company_guid"] is not None for b in result["bills"]):
                 raise ValueError("Routing must name each selected bill once and only discovered companies.")
             return result
-        contents = domain["contents"]
         result = adopt_exceptions(result)
         if any(r.get("operation") != "append" for r in result.get("records", [])):
             raise ValueError(
                 "Agent proposals must append by default; edits require explicit review."
             )
-        if run["config"].get("tally_target"):
-            from .bills import capture_tally_findings
-            from .checks import check_voucher_records
+        if not run["config"].get("tally_target"):
+            raise ValueError("Excel bill destinations are retired. Start a new Tally bill run.")
+        from .bills import capture_tally_findings
+        from .checks import check_voucher_records
 
-            if any("voucher" not in r for r in result.get("records", [])):
-                raise ValueError("Tally proposals must state the document and its voucher.")
-            check_voucher_records(result, run["file_ids"])
-            return capture_tally_findings(result, run["config"])
-        result = populate_entry_ids(result, context["catalog"], run["id"])
-        result = check_records(
-            result,
-            context["catalog"],
-            run["file_ids"],
-            contents,
-            run["config"]["checks"],
-        )
-        from .bills import capture_excel_state
-
-        return capture_excel_state(result, context["catalog"], contents)
+        if any("voucher" not in r for r in result.get("records", [])):
+            raise ValueError("Tally proposals must state the document and its voucher.")
+        check_voucher_records(result, run["file_ids"])
+        return capture_tally_findings(result, run["config"])
 
     def finish(self, connection, store, run, context, domain, result):
-        from minkops_platform.run_controls import control_state
-
-        from .service import prepare_writes
         if run["config"].get("stage") == "triage":
             store.observe(connection, run, "review", "Bills routed to their companies.", 70)
             return
@@ -480,22 +357,7 @@ class BillHandler(AccountsHandler):
             "Review bill values, source evidence and proposed destination entries.",
             70,
         )
-        if run["config"].get("tally_target") and not run.get("parent_run_id"):
+        if not run.get("parent_run_id"):
             from .tally_writes import prepare_automatic
 
             prepare_automatic(connection, run, result)
-        if (
-            control_state(connection, run["tenant_id"], run["task_id"]) == "active"
-            and not run["config"].get("tally_target")
-            and run["config"]["review_mode"] == "only_exceptions"
-            and not result.get("requires_review")
-            and not result.get("unresolved")
-            and not result["findings"]
-            and not any(r["findings"] for r in result["records"])
-        ):
-            prepare_writes(
-                connection, run, result, context["catalog"], domain["refs"], domain["contents"]
-            )
-            from .tally_writes import complete_run
-
-            complete_run(connection, run, result)
