@@ -712,13 +712,17 @@ def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_n
     companion(desk)
     learnt = db.execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking'",
                         (desk["company"]["id"],)).fetchone()
-    assert (learnt["subject"], learnt["status"], learnt["uses"]) == ("g-sunrise", "confirmed", 1)
-    assert learnt["value"] == {"voucher_type": "Purchase", "ledgers": ["Input CGST 9%", "Input SGST 9%",
-                                                                       "Repairs and Maintenance"]}
+    # A booking is the treatment: the voucher type and expense ledgers, not the taxes the bill printed.
+    assert (learnt["guids"][0], learnt["status"], learnt["uses"]) == ("g-sunrise", "confirmed", 1)
+    assert learnt["value"] == {"supplier": "Sunrise Office Systems", "voucher_type": "Purchase",
+                               "ledgers": ["Repairs and Maintenance"]}
     # One approval confirms the booking: under standing approval the next such bill is written unreviewed.
     second = bill("SOS/26/0502", review_mode="only_exceptions")
     assert (second["status"], second["review_reasons"]) == ("writing", [])
     companion(desk)
+    # The same booking again is one entry, used twice.
+    assert [row["uses"] for row in db.execute("SELECT uses FROM memory_entries WHERE company_id=%s AND kind='booking'",
+                                               (desk["company"]["id"],))] == [2]
     # Someone rebooked the first bill to cabins in Tally: the next sync demotes what Minkops learnt.
     saved = {**PRIOR, "GUID": "tally-1", "ALTERID": "9", "REFERENCE": "SOS/26/0501", "DATE": "20260902",
              "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": "Sunrise Office Systems", "AMOUNT": "11800.00"},

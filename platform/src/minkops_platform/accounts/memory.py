@@ -19,12 +19,16 @@ Only workspace admins change memory; every change records its actor in
 memory_events. Callers own transactions.
 """
 
+import hashlib
+import json
+
 from psycopg.types.json import Jsonb
 
 from minkops_platform import clients
 from minkops_platform.errors import ServiceError
 
 from . import mirror
+from .vouchers import TAXABLE_ROLES
 
 EMPLOYEE = "accounts-desk"
 EVIDENCE_LIMIT = 20
@@ -109,22 +113,28 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
 
 
 def learn_booking(connection, run, record_row, plan, voucher_guid, *, actor_id, guessed):
-    """A verified save a person approved becomes how this supplier's bills are booked.
+    """A verified save a person approved becomes one way this supplier's bills are booked.
 
-    A best guess is kept unconfirmed: it stays under review until a person
-    approves a bill booked the same way.
+    A booking is the treatment: the voucher type and the expense ledgers, not
+    the taxes or round-off a bill happened to print. Each distinct booking of a
+    supplier is its own entry, its GUIDs the supplier's, the voucher type's and
+    the ledgers'. A best guess is kept unconfirmed: it stays under review until
+    a person approves a bill booked the same way.
     """
     references, party = plan["references"]["ledgers"], plan["header"]["party_ledger"]
-    lines = sorted({line["ledger"] for line in plan["lines"]} - {party})
+    roles = [line["role"] for line in record_row["proposal"]["bill"]["voucher"]["lines"]]
+    expense = sorted({line["ledger"] for line, role in zip(plan["lines"][1:], roles, strict=True)
+                      if role in TAXABLE_ROLES})
     guid = (references.get(party) or {}).get("GUID")
-    if not guid:
+    if not guid or not expense:
         return None
+    treatment = [plan["voucher_type"]["GUID"], *sorted(references[name]["GUID"] for name in expense)]
     return record(connection, tenant_id=run["tenant_id"], client_id=run["client_id"],
-                  company_id=record_row["company_id"], kind="booking", subject=guid,
-                  value={"voucher_type": plan["voucher_type"]["NAME"], "ledgers": lines},
-                  guids=[guid, plan["voucher_type"]["GUID"], *(references[name]["GUID"] for name in lines)],
-                  evidence={"kind": "outcome", "voucher": voucher_guid, "run": str(run["id"]),
-                            "record": str(record_row["id"])},
+                  company_id=record_row["company_id"], kind="booking",
+                  subject=f"{guid}:{hashlib.sha256(json.dumps(treatment).encode()).hexdigest()[:16]}",
+                  value={"supplier": party, "voucher_type": plan["voucher_type"]["NAME"], "ledgers": expense},
+                  guids=[guid, *treatment], evidence={"kind": "outcome", "voucher": voucher_guid,
+                                                      "run": str(run["id"]), "record": str(record_row["id"])},
                   status="unconfirmed" if guessed else "confirmed", actor_id=actor_id, use=True)
 
 
@@ -285,12 +295,12 @@ def page(connection, tenant, user, member, slug, employee=EMPLOYEE):
 
 
 def _labels(connection, rows):
-    """A booking's subject is its supplier's GUID: shown by the ledger's name in the company's latest books."""
+    """A booking names its supplier by GUID first: shown by the ledger's name in the company's latest books."""
     labels = {}
     for row in rows:
-        if row["kind"] == "booking" and row["company_id"]:
+        if row["kind"] == "booking" and row["company_id"] and row["guids"]:
             latest = mirror.latest(connection, row["company_id"])
-            found = latest and mirror.masters(connection, row["company_id"], latest["version"], guids=[row["subject"]])
+            found = latest and mirror.masters(connection, row["company_id"], latest["version"], guids=row["guids"][:1])
             if found:
                 labels[row["id"]] = found[0]["name"]
     return labels

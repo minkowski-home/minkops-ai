@@ -48,9 +48,10 @@ def booking(books):
     """What Minkops learnt when Sunrise's bill was approved and verified."""
     company = books["company"]
     return memory.record(books["db"], tenant_id=company["tenant_id"], client_id=company["client_id"],
-                         company_id=company["id"], kind="booking", subject="g-sunrise",
-                         value={"voucher_type": "Purchase", "ledgers": ["Input CGST 9%", "Office Cabins"]},
-                         guids=["g-sunrise", "vt-purchase", "g-cabins", "g-cgst"],
+                         company_id=company["id"], kind="booking", subject="g-sunrise:cabins",
+                         value={"supplier": "Sunrise Office Systems", "voucher_type": "Purchase",
+                                "ledgers": ["Office Cabins"]},
+                         guids=["g-sunrise", "vt-purchase", "g-cabins"],
                          evidence={"kind": "outcome", "voucher": "v-1"}, status="confirmed",
                          actor_id=books["admin"][0]["id"])
 
@@ -61,7 +62,7 @@ def sync(books, records, vouchers):
     version = factory.books(books["db"], books["company"], records, vouchers)
     memory.revalidate(books["db"], books["company"], version)
     return memory.live(books["db"], books["company"]["tenant_id"], books["company"]["client_id"],
-                       company_id=books["company"]["id"], kind="booking", subject="g-sunrise") or books["db"].execute(
+                       company_id=books["company"]["id"], kind="booking", subject="g-sunrise:cabins") or books["db"].execute(
         "SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking'", (books["company"]["id"],)).fetchone()
 
 
