@@ -128,3 +128,8 @@ def task_run(connection, tenant, task_id):
         (tenant["id"], task_id),
     ).fetchone()
     return public_run(connection, row) if row else None
+
+
+def public_run_for(connection, tenant_id, run_id):
+    """A status read does not hydrate private immutable execution evidence."""
+    return public_run(connection, run_for(connection, tenant_id, run_id, hydrate_assets=False))

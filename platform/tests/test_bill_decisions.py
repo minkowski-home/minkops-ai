@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from minkops_platform.accounts.bill_decisions import HANDLERS, allowed_actions
+from minkops_platform.accounts.bill_decisions import HANDLERS, allowed_actions, public_result
 from minkops_platform.accounts.bill_review import REASONS
 from minkops_platform.accounts.checks import EXCEPTION_LABELS
 from minkops_platform.accounts.tally_writes import HOLD_TITLES
@@ -70,3 +70,15 @@ def test_recheck_only_applies_to_unresolved_inputs_and_supplier_needs_positive_i
     assert allowed_actions(run, record) == ["supplier", "nothing", "retry"]
     record["master_refs"] = {"vendor": {"new_supplier": False}}
     assert "supplier" not in allowed_actions(run, record)
+
+
+def test_public_result_explains_a_blocked_creation_without_mutating_the_proposal():
+    run, record = example()
+    record["exception_codes"] = ["supplier_missing"]
+    record["data"].update(vendor="New supplier")
+    before = copy.deepcopy(run)
+    public = public_result(run)["records"][0]
+    assert "supplier" not in public["allowed_actions"]
+    assert public["unavailable_actions"]["supplier"] == {
+        "code": "decision_unavailable", "message": "GST supplier details are missing."}
+    assert run == before

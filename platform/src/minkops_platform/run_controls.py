@@ -81,6 +81,8 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
             UPDATE desktop_jobs j SET state='failed',error=%s,updated_at=now()
             FROM queued WHERE j.id=queued.id""", (tenant_id, task_id, error))
         for run in runs:
+            from .runtime.assets import hydrate
+            hydrate(connection, run)
             connection.execute("UPDATE workflow_runs SET state='failed',error=%s,updated_at=now() WHERE tenant_id=%s AND id=%s AND state NOT IN ('completed','failed')",
                                (error, tenant_id, run["id"]))
             if run['state'] not in ('completed','failed'):
@@ -105,6 +107,8 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
         from .runtime.application import binding_for, get_handler
         for run in runs:
             if run.get("parent_run_id") is None:
+                from .runtime.assets import hydrate
+                hydrate(connection, run)
                 resume = getattr(get_handler(binding_for(run).handler), "on_resume", None)
                 if resume:
                     resume(connection, run, user)

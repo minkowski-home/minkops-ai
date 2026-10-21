@@ -47,6 +47,13 @@ class ProfileDecision(BaseModel):
     action: Literal["confirm", "nothing", "dmy", "mdy"]
 
 
+@router.get("/{item_id}/decision")
+def decision_receipt(slug: str, item_id: UUID, user: User, connection: Db):
+    from minkops_platform.accounts.posting_profiles import decision_receipt as receipt
+    tenant, _ = tenant_access(slug, user, connection)
+    return _call(receipt, connection, tenant["id"], user["id"], item_id)
+
+
 @router.post("/{item_id}/profile")
 def profile_decision(slug: str, item_id: UUID, body: ProfileDecision, request: Request, user: User, connection: Db):
     """Confirm, or decline, a company's derived posting pattern."""

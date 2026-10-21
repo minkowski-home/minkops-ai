@@ -49,14 +49,38 @@ def _normal(value):
     return " ".join(str(value or "").split()).casefold()
 
 
+def jurisdiction(value):
+    """Resolve known printed jurisdiction names and optional matching GST codes.
+
+    Never use fuzzy substrings: `Andhra Pradesh (37)` is valid evidence while
+    the same name paired with another code cannot authorize a permanent master.
+    """
+    text = _normal(value).replace("&", "and")
+    aliases = {"orissa": "odisha", "pondicherry": "puducherry", "uttaranchal": "uttarakhand",
+               "nct delhi": "delhi", "new delhi": "delhi"}
+    code = None
+    match = re.fullmatch(r"(.+?)\s*(?:\((\d{1,2})\)|\s*-\s*(\d{1,2}))", text)
+    leading = re.fullmatch(r"(\d{1,2})\s*-\s*(.+)", text)
+    if match:
+        text, code = match[1].strip(), (match[2] or match[3]).zfill(2)
+    elif leading:
+        code, text = leading[1].zfill(2), leading[2].strip()
+    text = aliases.get(text, text)
+    names = {_normal(state_name(k)): k for k in STATES if k not in ("25", "28")}
+    found = names.get(text)
+    if found is None or (code is not None and found != code):
+        raise ValueError("GST jurisdiction name and code must identify one supported state.")
+    return state_name(found)
+
+
 def validate_details(details, *, company_state, tax):
     if not isinstance(details, dict):
         raise ValueError("Printed GST details are required.")
     number = gstin(details.get("gstin"))
     state = state_name(number[:2])
-    if details.get("state_code") != number[:2] or _normal(details.get("state")) != _normal(state):
+    if details.get("state_code") != number[:2] or jurisdiction(details.get("state")) != state:
         raise ValueError("Supplier state differs from its GSTIN.")
-    if _normal(company_state) != _normal(state) or _normal(details.get("place_of_supply")) != _normal(state):
+    if jurisdiction(company_state) != state or jurisdiction(details.get("place_of_supply")) != state:
         raise ValueError("Cross-state or unconfirmed place of supply needs manual review in v1.")
     registration = details.get("registration_type")
     if registration not in ("Regular", "Composition") or (registration == "Composition" and tax):
@@ -84,7 +108,13 @@ def validate_details(details, *, company_state, tax):
     for field, values in (("registration_type", [registration]), ("state", [state]),
                           ("place_of_supply", [state]), ("address", [*address, pin])):
         printed = _normal(" ".join(by_field[field]))
-        if any(_normal(value) not in printed for value in values):
+        # A recognized printed alias remains valid source evidence even though
+        # the permanent master uses the canonical jurisdiction name.
+        if field in ("state", "place_of_supply"):
+            present = any(_normal(value) in printed for value in (state, details[field]))
+        else:
+            present = all(_normal(value) in printed for value in values)
+        if not present:
             raise ValueError("Supplier field evidence must contain its approved values.")
     return {"gstin": number, "registration_type": registration, "state_code": number[:2], "state": state,
             "place_of_supply": state, "address": address, "pincode": pin}

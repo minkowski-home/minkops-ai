@@ -507,6 +507,9 @@ class BillHandler(AccountsHandler):
             from .posting_profiles import misses
 
             misses(connection, run, result)
+        from .bill_decisions import pin_decisions
+        result = pin_decisions(run, result)
+        store.save_result(connection, run, result)
         if not run.get("parent_run_id"):
             from .attention import flag, issue_record
             for issue in result.get("unresolved", []):

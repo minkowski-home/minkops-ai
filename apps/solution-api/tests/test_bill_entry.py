@@ -205,6 +205,24 @@ class BillEntryTests(unittest.TestCase):
         for record in loaded["result"]["records"]:
             self.assertEqual(record["status"], "held")
             self.assertIn("PC is unavailable", record["save_hold"])
+            self.assertEqual(record["allowed_actions"], ["retry_save", "nothing"])
+
+    def test_native_save_refusal_replaces_cached_decisions_with_retry_save(self):
+        from unittest.mock import patch
+
+        did = self.tally_discovery()
+        bill = self.upload_bill("native-refusal.pdf")
+        run, _ = self.launch("bill-entry", file_ids=[bill], config={"output_mode": "tally_in_place", "discovery_id": did})
+        proposal = self.tally_result(run, bill)
+        self.process(run, proposal)
+        approved = self.approve(run, proposal)
+        self.save_receipt(approved, "MOCK-1", "Tally is busy")
+        with patch("minkops_platform.runtime.assets.hydrate", side_effect=AssertionError("Status loaded execution evidence")):
+            response = self.client.get(self.base + f"/runs/{run['id']}")
+        self.assertEqual(response.status_code, 200, response.text)
+        held = response.json()
+        self.assertEqual(held["state"], "review")
+        self.assertEqual(held["result"]["records"][0]["allowed_actions"], ["retry_save", "nothing"])
 
     def test_retry_save_after_reconnecting_an_unavailable_pc(self):
         did = self.tally_discovery()
@@ -1552,7 +1570,7 @@ class BillEntryTests(unittest.TestCase):
             summary = c.execute(
                 "SELECT summary FROM tasks WHERE id=%s", (root["task_id"],)
             ).fetchone()["summary"]
-        self.assertEqual(summary, "1 bill entries ready; 0 bills need attention.")
+        self.assertEqual(summary, "2 bill entries read; 1 ready to write; 0 bills need attention.")
 
     def test_pending_bill_reservation_holds_only_conflicting_intent(self):
         did = self.tally_discovery()

@@ -227,10 +227,14 @@ class BranchUpgradeTests(unittest.TestCase):
             LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
             WHERE n.nspname=%s AND c.relkind IN ('r','v') AND c.relname<>'schema_migrations'
             ORDER BY c.relname,a.attnum""",
-            """SELECT c.relname,k.conname,pg_get_constraintdef(k.oid)
+            # PostgreSQL 18 gives NOT NULL constraints generated table-prefixed
+            # names. A renamed legacy table retains its old prefix; the column
+            # constraint is still identical (attnotnull is compared above too).
+            """SELECT c.relname,CASE WHEN k.contype='n' THEN pg_get_constraintdef(k.oid) ELSE k.conname END,
+            pg_get_constraintdef(k.oid)
             FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
             JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname=%s AND c.relname<>'schema_migrations' ORDER BY c.relname,k.conname""",
+            WHERE n.nspname=%s AND c.relname<>'schema_migrations' ORDER BY c.relname,2""",
             "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname=%s AND tablename<>'schema_migrations' ORDER BY indexname",
             """SELECT c.relname,format_type(s.seqtypid,NULL),s.seqstart,s.seqincrement,
             s.seqmax,s.seqmin,s.seqcache,s.seqcycle FROM pg_sequence s

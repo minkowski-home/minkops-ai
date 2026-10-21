@@ -1,7 +1,7 @@
 """GST identity must be deterministic before a permanent master is offered."""
 import pytest
 
-from minkops_platform.accounts.supplier_gst import gstin, state_name, validate_details
+from minkops_platform.accounts.supplier_gst import gstin, jurisdiction, state_name, validate_details
 
 
 @pytest.mark.parametrize("value", ["27AAPFU0939F1ZV"])
@@ -31,6 +31,30 @@ def test_valid_printed_details_are_canonical_and_do_not_invent_address_or_regist
     assert value["gstin"] == "27AAPFU0939F1ZV"
     assert value["state"] == state_name("27")
     assert value["address"] == ["Synthetic industrial road", "Pune"]
+
+
+@pytest.mark.parametrize("printed", ["Maharashtra (27)", "27 - Maharashtra", "Maharashtra - 27", "  Maharashtra  "])
+def test_printed_jurisdiction_name_and_code_resolve_without_losing_evidence(printed):
+    source = details()
+    source["place_of_supply"] = printed
+    source["evidence"][3]["quote"] = f"Place of supply: {printed}"
+    assert validate_details(source, company_state="Maharashtra", tax=18)["place_of_supply"] == "Maharashtra"
+    assert source["place_of_supply"] == printed
+
+
+@pytest.mark.parametrize("printed", ["Maharashtra (08)", "27 - Rajasthan", "Maharashtra / Rajasthan", "28", "unknown"])
+def test_conflicting_unknown_or_obsolete_jurisdictions_do_not_authorize_creation(printed):
+    source = details()
+    source["place_of_supply"] = printed
+    source["evidence"][3]["quote"] = f"Place of supply: {printed}"
+    with pytest.raises(ValueError):
+        validate_details(source, company_state="Maharashtra", tax=18)
+
+
+@pytest.mark.parametrize("printed,canonical", [("Orissa (21)", "Odisha"), ("Pondicherry", "Puducherry"),
+                                               ("Jammu & Kashmir (01)", "Jammu and Kashmir")])
+def test_recognized_aliases_resolve_to_one_current_jurisdiction(printed, canonical):
+    assert jurisdiction(printed) == canonical
 
 
 @pytest.mark.parametrize("change", [

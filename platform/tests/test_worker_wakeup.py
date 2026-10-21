@@ -126,6 +126,23 @@ class WorkerWakeupTests(unittest.TestCase):
             c.execute("SELECT pg_advisory_lock(%s)", (RUNNER_LOCK,))
             self.assertEqual(drain(self.url, work=lambda _: self.fail("overlapping execution")), 0)
 
+    def test_cleanup_does_not_wait_for_a_busy_proposal_lane(self):
+        from minkops_platform.worker_hosting import drain
+
+        started, cleaned = threading.Event(), threading.Event()
+        def work(url):
+            if started.is_set():
+                return False
+            started.set()
+            self.assertTrue(cleaned.wait(5), "Cleanup was blocked behind the paid proposal lane")
+            return True
+        def cleanup(url):
+            if started.is_set() and not cleaned.is_set():
+                cleaned.set()
+                return True
+            return False
+        self.assertEqual(drain(self.url, lanes=1, work=work, cleanup=cleanup), 1)
+
     def test_timeout_leaves_pending_work_for_successor(self):
         from minkops_platform.worker_hosting import drain
 

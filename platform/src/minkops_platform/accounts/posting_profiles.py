@@ -225,7 +225,7 @@ def proposed(connection, run, payload):
     company = next(c["company"] for c in run["config"]["tally_target"]["companies"]
                    if c["references"]["company_guid"] == profile["scope_key"])
     waiting = connection.execute(
-        "SELECT count(*) AS n FROM workflow_runs WHERE tenant_id=%s AND config->'awaits'->>'profile'=%s",
+        "SELECT count(*) AS n FROM workflow_runs WHERE tenant_id=%s AND state='queued' AND awaited_profile_id=%s",
         (run["tenant_id"], str(profile["id"]))).fetchone()["n"]
     attention.record(connection, run, f"profile:{profile['id']}", company, "Confirm posting pattern", kind="profile",
                      target={"profile_id": str(profile["id"]), "company": company, "company_guid": profile["scope_key"],
@@ -234,10 +234,19 @@ def proposed(connection, run, payload):
 
 def decide(connection, tenant, user, item_id, action):
     """Confirm or decline a proposed pattern from its attention card."""
+    # Serialize exact replays before examining the mutable item/profile status.
+    connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                       (f"attention-decision:{tenant['id']}:{item_id}",))
+    receipt = decision_receipt(connection, tenant["id"], user["id"], item_id)
+    if receipt:
+        if receipt["action"] != action:
+            raise ServiceError("conflict", "This item already has a different decision from you.")
+        return receipt
     item = attention.get(connection, tenant["id"], item_id)
     if item["kind"] == "layout" and item["status"] == "pending":
         from .statement_layouts import decide as decide_layout
-        return decide_layout(connection, tenant, user, item, action)
+        outcome = decide_layout(connection, tenant, user, item, action)
+        return _receipt(connection, tenant["id"], user["id"], item_id, action, outcome["status"])
     if item["kind"] != "profile" or item["status"] != "pending":
         raise ServiceError("conflict", "This posting pattern is no longer awaiting a decision.")
     profile = profiles.get(connection, tenant["id"], item["target"]["profile_id"], lock=True)
@@ -255,29 +264,43 @@ def decide(connection, tenant, user, item_id, action):
         raise ServiceError("invalid", "Choose Confirm or Do nothing.")
     connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
                        (user["id"], item["id"]))
-    return {"status": profile["status"] if action == "confirm" else "superseded"}
+    return _receipt(connection, tenant["id"], user["id"], item_id, action,
+                    profile["status"] if action == "confirm" else "superseded")
+
+
+def decision_receipt(connection, tenant_id, actor_id, item_id):
+    attention.get(connection, tenant_id, item_id)  # Scope even an absent receipt.
+    return connection.execute("""SELECT item_id,actor_id,action,status,applied_at
+        FROM attention_decision_receipts WHERE tenant_id=%s AND actor_id=%s AND item_id=%s""",
+        (tenant_id, actor_id, item_id)).fetchone()
+
+
+def _receipt(connection, tenant_id, actor_id, item_id, action, status):
+    return connection.execute("""INSERT INTO attention_decision_receipts(tenant_id,item_id,actor_id,action,status)
+        VALUES(%s,%s,%s,%s,%s) RETURNING item_id,actor_id,action,status,applied_at""",
+        (tenant_id, item_id, actor_id, action, status)).fetchone()
 
 
 def _release(connection, profile):
     """Waiting sessions (and their batches) receive the active pattern and resume."""
-    pinned = Jsonb({profile["scope_key"]: _pinned(profile)})
-    waiters = connection.execute(
-        """UPDATE workflow_runs SET config=(config-'awaits') || jsonb_build_object('posting_profiles',
-            coalesce(config->'posting_profiles','{}'::jsonb) || %s::jsonb), updated_at=now()
-        WHERE tenant_id=%s AND config->'awaits'->>'profile'=%s RETURNING parent_run_id""",
-        (pinned, profile["tenant_id"], str(profile["id"]))).fetchall()
+    from minkops_platform.runtime.dependencies import release
+    pinned = {profile["scope_key"]: _pinned(profile)}
+    # A posting child is scoped to one company. Its parent merges all company
+    # patterns; completed/failed runs keep their original historical evidence.
+    waiters = release(connection, profile["tenant_id"], "profile", profile["id"],
+                      {"posting_profiles": pinned}, merge_fields=("posting_profiles",))
     parents = {str(w["parent_run_id"]) for w in waiters if w["parent_run_id"]}
     if parents:
         connection.execute(
             """UPDATE workflow_runs SET config=config || jsonb_build_object('posting_profiles',
-                coalesce(config->'posting_profiles','{}'::jsonb) || %s::jsonb) WHERE tenant_id=%s AND id::text = ANY(%s)""",
-            (pinned, profile["tenant_id"], list(parents)))
+                coalesce(config->'posting_profiles','{}'::jsonb) || %s::jsonb) WHERE tenant_id=%s AND id = ANY(%s::uuid[])""",
+            (Jsonb(pinned), profile["tenant_id"], list(parents)))
 
 
 def fail_waiters(connection, profile, reason):
     connection.execute(
         """UPDATE workflow_runs SET state='failed',error=%s,config=config-'awaits',updated_at=now()
-        WHERE tenant_id=%s AND config->'awaits'->>'profile'=%s AND state='queued'""",
+        WHERE tenant_id=%s AND awaited_profile_id=%s AND state='queued'""",
         (reason, profile["tenant_id"], str(profile["id"])))
 
 

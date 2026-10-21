@@ -84,10 +84,16 @@ class StatementTests(unittest.TestCase):
             process(c,c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone(),executor=executor)
         executor.assert_called_once()
         loaded=self.client.get(self.base+f"/runs/{run['id']}").json()
-        self.assertTrue(loaded['session_id'])
-        self.assertEqual(loaded['config']['execution_snapshot']['execution']['model'],'gpt-6-luna')
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            from minkops_platform.accounts.repository import run_for
+            internal=run_for(c,run['tenant_id'],run['id'])
+        self.assertTrue(internal['session_id'])
+        self.assertNotIn('execution_snapshot',loaded['config'])
+        self.assertEqual(internal['config']['execution_snapshot']['execution']['model'],'gpt-6-luna')
         self.assertEqual([r['status'] for r in loaded['result']['records']],list(statuses))
-        return loaded
+        # Test setup needs pinned identities for subsequent launches, not a
+        # public status response containing the private execution evidence.
+        return {**loaded,'config':internal['config']}
 
     def statement(self, name, text):
         return self.client.post(self.base+'/sources',headers=self.csrf,data={'paths':f'["{name}"]'},
@@ -195,9 +201,22 @@ class StatementTests(unittest.TestCase):
         self.assertIn('awaits',self.config(run))
         listed=next(i for i in self.client.get('/api/tenants/mock-tenant/attention').json() if i['id']==str(item['id']))
         self.assertEqual(listed['layout']['actions'],['dmy','mdy'])
+        public=self.client.get(self.base+f"/runs/{run['id']}").json()
+        self.assertEqual(public['execution']['stage'],'awaiting_input')
+        self.assertEqual(public['blockers'][0]['attention_item_id'],str(item['id']))
+        with psycopg.connect(URL) as c:
+            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL,dispatch_token=NULL')
         answered=self.client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/profile",headers=self.csrf,json={'action':'mdy'})
         self.assertEqual(answered.status_code,200,answered.text)
         self.assertNotIn('awaits',self.config(run))
+        from minkops_platform.worker_hosting import dispatch
+        calls=[]
+        self.assertTrue(dispatch(URL,lambda:calls.append(True)))
+        self.assertEqual(calls,[True])
+        again=self.client.post(f"/api/tenants/mock-tenant/attention/{item['id']}/profile",headers=self.csrf,json={'action':'mdy'})
+        self.assertEqual(again.status_code,200,again.text)
+        self.assertEqual(again.json(),answered.json())
+        self.assertEqual(self.client.get(f"/api/tenants/mock-tenant/attention/{item['id']}/decision").json(),answered.json())
         with psycopg.connect(URL,row_factory=dict_row) as c:
             learned=c.execute("SELECT payload FROM client_profiles WHERE kind='statement_layout' AND provenance->>'file'='question.csv' AND status='active'").fetchone()
         self.assertEqual(learned['payload']['columns']['date']['order'],'mdy')
@@ -220,6 +239,27 @@ class StatementTests(unittest.TestCase):
             process(c,c.execute('SELECT * FROM account_runs WHERE id=%s',(run['id'],)).fetchone(),executor=lambda *a,**k:{'records':[]})
         held=self.client.get(self.base+f"/runs/{run['id']}").json()['result']['records']
         self.assertEqual([(r['code'],r['status']) for r in held],[('statement_layout_unknown','held')])
+
+    def test_footer_controls_after_the_table_cannot_be_confirmed_over_a_mismatch(self):
+        from minkops_platform.accounts.worker import process
+        first=self.ready()
+        text=('Footer Txn Date,Reference,Debit,Credit,Balance,Branch\n'
+              '01/Sep/2026,A,10,,90,Test\n02/Sep/2026,B,,5,95,Test\n'
+              'Page Total\nOpening Bal:,100\nWithdrawls:,10\nDeposits:,5\nClosing Bal:,96\n')
+        file=self.statement('footer-refuted.csv',text)
+        run,_=self.launch('statement-entry',file_ids=[file],config={
+            'discovery_id':first['config']['discovery_id'],'branch_mapping_file_id':None})
+        spec={**self.LAYOUT,'rows':{'ends_at':[{'column':1,'starts_with':'Page Total'}],
+             'summary':[{'kind':kind,'column':1,'starts_with':label,'value_column':2}
+                        for kind,label in [('opening','Opening Bal:'),('debit','Withdrawls:'),
+                                           ('credit','Deposits:'),('closing','Closing Bal:')]]}}
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            process(c,self.layout_children(run)[0],executor=lambda *a,**k:{
+                'layouts':[{'source_file_id':file,'sheet':'','header_row':1,**spec}],'exceptions':[]})
+            self.assertIsNone(c.execute("SELECT 1 FROM client_profiles WHERE kind='statement_layout' "
+                                        "AND provenance->>'file'='footer-refuted.csv'").fetchone())
+            self.assertIsNone(c.execute("SELECT 1 FROM attention_items WHERE task_id=%s AND kind='layout' "
+                                        "AND status='pending'",(run['task_id'],)).fetchone())
 
     def test_a_gap_between_consecutive_statements_raises_one_attention_item(self):
         first=self.ready()

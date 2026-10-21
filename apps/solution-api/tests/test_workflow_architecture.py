@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.accounts.worker import process
 from minkops_platform.resources import REPOSITORY_ROOT
+from minkops_platform.runtime.store import run_for
 from minkops_platform.workflows import load_definition, register_workflow
 
 URL = os.getenv("TEST_DATABASE_URL")
@@ -88,7 +89,10 @@ class WorkflowArchitectureTests(unittest.TestCase):
         root, key = self.temporary_definition()
         with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
             run, _ = self.launch(key)
-        self.assertEqual(run["config"]["runtime_binding"]["handler"], "accounts.discovery")
+        self.assertNotIn('runtime_binding',run['config'])
+        with psycopg.connect(URL,row_factory=dict_row) as connection:
+            internal=run_for(connection,run['tenant_id'],run['id'])
+        self.assertEqual(internal["config"]["runtime_binding"]["handler"], "accounts.discovery")
         expected = accounts.catalog()
         expected["sheets"][0]["file_id"] = self.file_id
         expected["sheets"].append(
@@ -148,7 +152,10 @@ class WorkflowArchitectureTests(unittest.TestCase):
         with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
             run, body = self.launch(key, destination_device_id=pc["id"])
             self.assertEqual(run["config"]["destination_device_id"], pc["id"])
-            self.assertEqual({grant["capability"] for grant in run["config"]["authorized_bindings"]}, {"files.snapshot"})
+            self.assertNotIn('authorized_bindings',run['config'])
+            with psycopg.connect(URL,row_factory=dict_row) as connection:
+                internal=run_for(connection,run['tenant_id'],run['id'])
+            self.assertEqual({grant["capability"] for grant in internal["config"]["authorized_bindings"]}, {"files.snapshot"})
             retry = self.client.post(self.base + "/runs", headers=self.csrf, json=body)
             self.assertEqual(retry.json()["id"], run["id"])
             changed = {**body, "destination_device_id": str(accounts.uuid.uuid4())}
@@ -300,8 +307,10 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
             file_ids=inputs,
             config={"output_mode": "tally_in_place", "discovery_id": discovery},
         )
-        self.assertTrue(parent["config"]["batch"])
+        self.assertNotIn('batch',parent['config'])
         with psycopg.connect(URL, row_factory=dict_row) as connection:
+            parent=run_for(connection,parent['tenant_id'],parent['id'])
+            self.assertTrue(parent['config']['batch'])
             children = connection.execute(
                 "SELECT * FROM workflow_runs WHERE parent_run_id=%s", (parent["id"],)
             ).fetchall()
@@ -330,15 +339,16 @@ class UnifiedBillArchitectureTests(unittest.TestCase):
         reconcile_once(URL)
         loaded = self.client.get(self.base + f"/runs/{parent['id']}").json()
         self.assertTrue(loaded["result"]["requires_review"])
-        self.assertEqual(loaded["config"]["runtime_binding"]["policies"], policies)
+        self.assertNotIn('runtime_binding',loaded['config'])
+        with psycopg.connect(URL,row_factory=dict_row) as connection:
+            internal=run_for(connection,parent['tenant_id'],parent['id'])
+        self.assertEqual(internal["config"]["runtime_binding"]["policies"], policies)
         self.assertEqual(loaded["tally_writes"], [])
         self.assertEqual(loaded["state"], "review")
         with psycopg.connect(URL, row_factory=dict_row) as connection:
             from minkops_platform.accounts.tally_writes import prepare
 
-            row = connection.execute(
-                "SELECT * FROM workflow_runs WHERE id=%s", (parent["id"],)
-            ).fetchone()
+            row = run_for(connection,parent['tenant_id'],parent['id'])
             with self.assertRaisesRegex(ValueError, "explicit review"):
                 prepare(connection, row, row["result"])
         approved = self.approve(loaded, loaded["result"])

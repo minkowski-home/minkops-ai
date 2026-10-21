@@ -341,7 +341,10 @@ class AttentionTests(unittest.TestCase):
         response=client.post(self.base+'/runs',headers=csrf,json={'key':'source-discovery','request_key':str(uuid.uuid4()),
             'file_ids':[uploaded.json()['files'][0]['id']],'config':{'max_files':8}})
         self.assertEqual(response.status_code,202,response.text)
-        self.assertEqual(response.json()['config']['max_files'],8)
+        self.assertNotIn('max_files',response.json()['config'])
+        with psycopg.connect(URL,row_factory=dict_row) as c:
+            config=c.execute('SELECT config FROM workflow_runs WHERE id=%s',(response.json()['id'],)).fetchone()['config']
+            self.assertEqual(config['max_files'],8)
         for kind,row in [('workflows',workflow),('employees',employee)]:
             rejected=client.patch(f"/api/tenants/mock-tenant/{kind}/{row['id']}",headers=csrf,json={'config_values':row['config_values']})
             self.assertEqual(rejected.status_code,403,rejected.text)
@@ -373,7 +376,8 @@ class AttentionTests(unittest.TestCase):
             from psycopg.types.json import Jsonb
 
             from minkops_platform.accounts.bills import capture_tally_findings
-            capture_tally_findings(result,c.execute("SELECT config FROM account_runs WHERE id=%s",(run["id"],)).fetchone()["config"])
+            from minkops_platform.runtime.store import run_for
+            capture_tally_findings(result,run_for(c,run['tenant_id'],run['id'])['config'])
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s",(Jsonb(result),run["id"]))
         response=self.decision(run,bill,"supplier")
         self.assertEqual(response.status_code,422,response.text)
@@ -384,7 +388,8 @@ class AttentionTests(unittest.TestCase):
         with psycopg.connect(URL,row_factory=dict_row) as c:
             self.untaxed_supplier(result, "New supplier", "No discovered supplier matches.", new=True)
             from minkops_platform.accounts.bills import capture_tally_findings
-            config=c.execute("SELECT config FROM account_runs WHERE id=%s",(run["id"],)).fetchone()["config"]
+            from minkops_platform.runtime.store import run_for
+            config=run_for(c,run['tenant_id'],run['id'])['config']
             capture_tally_findings(result,config)
             from psycopg.types.json import Jsonb
             c.execute("UPDATE account_runs SET result=%s WHERE id=%s",(Jsonb(result),run["id"]))

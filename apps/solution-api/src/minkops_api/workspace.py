@@ -56,8 +56,10 @@ def workflows_for(connection, tenant_id):
 def tasks_for(connection, tenant_id):
     return connection.execute(
         """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
-                  control_state, progress, summary, created_at, updated_at
-           FROM tasks WHERE tenant_id = %s ORDER BY updated_at DESC""",
+                  control_state, progress, summary, created_at, updated_at,
+                  (SELECT e.event_type FROM task_events e WHERE e.tenant_id=tasks.tenant_id AND e.task_id=tasks.id
+                   AND e.event_type IN ('queued','executing','review','approved','writing','completed') ORDER BY e.id DESC LIMIT 1) AS stage
+           FROM tasks WHERE tenant_id = %s ORDER BY updated_at DESC LIMIT 100""",
         (tenant_id,),
     ).fetchall()
 
@@ -204,7 +206,9 @@ def task_detail(slug: str, task_id: str, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
     task = connection.execute(
         """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
-                  control_state, progress, summary, created_at, updated_at
+                  control_state, progress, summary, created_at, updated_at,
+                  (SELECT e.event_type FROM task_events e WHERE e.tenant_id=tasks.tenant_id AND e.task_id=tasks.id
+                   AND e.event_type IN ('queued','executing','review','approved','writing','completed') ORDER BY e.id DESC LIMIT 1) AS stage
            FROM tasks WHERE tenant_id = %s AND id = %s""",
         (tenant["id"], task_id),
     ).fetchone()

@@ -16,6 +16,8 @@ LEGACY_BINDINGS = {
     "bill-entry": {"handler": "accounts.bill", "presentation": "accounts-bill"},
 }
 RESERVED = {
+    "_assets",
+    "_public_projection",
     "destination_device_id",
     "runtime_binding",
     "authorized_bindings",
@@ -104,8 +106,10 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
     from minkops_platform.run_controls import control_state, require_active
 
     from . import lifecycle
+    from .assets import hydrate
     from .diagnostics import stage
 
+    hydrate(connection, run)
     require_active(connection, run["tenant_id"], run["task_id"])
 
     handler = get_handler(binding_for(run).handler)
@@ -145,5 +149,5 @@ def process(connection, store, run, *, executor, close_session, cleanup=True):
     with stage(connection, run, "result", "Persist validated proposal and review outcome"):
         handler.finish(connection, store, run, context, domain, result)
         connection.commit()
-    if cleanup:
-        lifecycle.close_run(connection, store, run, close_session=close_session)
+    # Committed results become available before provider cleanup. The bounded
+    # maintenance path retries closing sessions; slots remain fenced meanwhile.

@@ -230,6 +230,12 @@ def complete_run(connection, run, result):
     held = bool(result.get("unresolved")) or any(
         r.get("status") in (None, "held") for r in result["records"]
     )
+    from .bill_decisions import pin_decisions
+    pinned = pin_decisions(run, result)
+    # Callers may persist the same result again with their approval audit. Keep
+    # that object synchronized so later writes cannot restore stale controls.
+    result.clear()
+    result.update(pinned)
     state = "writing" if pending_excel or pending_tally else "review" if held else "completed"
     connection.execute(
         "UPDATE account_runs SET result=%s WHERE tenant_id=%s AND id=%s",
@@ -411,6 +417,8 @@ def accept(connection, device, payload, receipt):
     if run["state"] == "writing":
         complete_run(connection, run, result)
     else:
+        from .bill_decisions import pin_decisions
+        result = pin_decisions(run, result)
         connection.execute(
             "UPDATE account_runs SET result=%s WHERE id=%s", (Jsonb(result), run["id"])
         )

@@ -27,7 +27,8 @@ class GSTSupplierTests(unittest.TestCase):
         template = {"type": "LEDGER", "data": {"NAME": "Registered supplier", "GUID": "template",
             "ALTERID": "1", "PARENT": "Sundry Creditors", "PARTYGSTIN": "27AAPFU0939F1ZV", "GSTREGISTRATIONTYPE": "Regular"}}
         with psycopg.connect(URL, row_factory=dict_row) as c:
-            config = c.execute("SELECT config FROM account_runs WHERE id=%s", (run["id"],)).fetchone()["config"]
+            from minkops_platform.accounts.repository import run_for
+            config = run_for(c, run["tenant_id"], run["id"])["config"]
             company = config["source_catalog_snapshot"]["sources"][0]["snapshot"]["companies"][0]
             company["identity"]["STATENAME"] = "Maharashtra"
             company["masters"]["records"].append(template)
@@ -43,12 +44,15 @@ class GSTSupplierTests(unittest.TestCase):
         row["document"]["supplier_name"] = "Synthetic GST supplier"
         row["voucher"]["party"] = {"ledger_guid": None, "new_supplier": True, "evidence": "No discovered supplier matches printed identifiers."}
         row["supplier_details"] = {"gstin": "27AABCM1256F1ZR", "registration_type": "Regular", "state_code": "27",
-            "state": "Maharashtra", "place_of_supply": "Maharashtra", "address": ["Synthetic Road", "Pune"], "pincode": "411001",
+            "state": "Maharashtra", "place_of_supply": "Maharashtra (27)", "address": ["Synthetic Road", "Pune"], "pincode": "411001",
             "evidence": [{"field": key, "page": 1, "quote": text} for key, text in {
                 "gstin": "27AABCM1256F1ZR", "registration_type": "Regular", "state": "Maharashtra",
-                "place_of_supply": "Maharashtra", "address": "Synthetic Road, Pune 411001"}.items()]}
+                "place_of_supply": "Maharashtra (27)", "address": "Synthetic Road, Pune 411001"}.items()]}
         row["evidence"] = [e for e in row["evidence"] if e["field"] != "supplier"] + [{"field": "supplier", "page": 1, "quote": "Synthetic GST supplier"}]
         self.process(run, result)
+        offered = self.client.get(self.base + f"/runs/{run['id']}").json()["result"]["records"][0]
+        self.assertIn("supplier", offered["allowed_actions"])
+        self.assertEqual(offered["unavailable_actions"], {})
         route = f"/api/tenants/mock-tenant/attention/bills/{run['id']}/{bill}"
         decision = self.client.post(route, headers=self.csrf, json={"action": "supplier"})
         self.assertEqual(decision.status_code, 200, decision.text)

@@ -218,12 +218,16 @@ class StatementHandler(AccountsHandler):
         """Sheets in a format not seen before are read by one layout session first."""
         from .batch import create_child
         from .statement_layouts import recheck
-        unknown=[str(e['file']['id']) for e in recheck(connection,run,files_for(connection,run['tenant_id'],run['file_ids']))
-                 if 'table' in e and 'profile' not in e]
+        entries=recheck(connection,run,files_for(connection,run['tenant_id'],run['file_ids']))
+        unknown=[str(e['file']['id']) for e in entries if 'table' in e and 'profile' not in e]
+        waiting={str(e['profile']['id']) for e in entries if e.get('profile',{}).get('status')=='proposed'}
+        dependencies={'layouts':sorted(waiting)} if waiting else {}
         if unknown:
             child=create_child(connection,run,None,file_ids=sorted(set(unknown)),stage='layout')
+            dependencies['layout_run']=str(child['id'])
+        if dependencies:
             connection.execute("UPDATE workflow_runs SET config=config || %s WHERE id=%s",
-                (Jsonb({'awaits':{'layout_run':str(child['id'])}}),run['id']))
+                (Jsonb({'awaits':dependencies}),run['id']))
 
     def prepare(self, connection, run):
         if not run['config'].get('execution_snapshot'):

@@ -11,6 +11,8 @@ import test_accounts_api as accounts
 import test_bill_entry as bills
 from psycopg.rows import dict_row
 
+from minkops_platform.runtime.assets import hydrate
+
 URL = accounts.URL
 
 
@@ -38,7 +40,11 @@ class SchemaContextTests(unittest.TestCase):
             self.assertEqual({row['file_ids'][0] for row in children},set(inputs))
             self.assertTrue(all(len(row['file_ids'])==1 for row in children))
             self.assertTrue(all(row['config']['tally_target']['discovery_id']==discovery for row in children))
-            self.assertTrue(all(row['config']['source_catalog_snapshot'] for row in children))
+            self.assertTrue(all('source_catalog_snapshot' not in row['config'] for row in children))
+            references={row['config']['_assets']['source_catalog_snapshot'] for row in children}
+            self.assertEqual(len(references),1)  # Complete evidence is shared, not copied per bill.
+            for child in children:
+                self.assertTrue(hydrate(c,child,fields={'source_catalog_snapshot'})['config']['source_catalog_snapshot'])
             self.assertEqual(len({row['task_id'] for row in children}),1)
 
     def test_metadata_only_catalog_requires_complete_rediscovery(self):
@@ -104,6 +110,7 @@ class SchemaContextTests(unittest.TestCase):
         )
         with psycopg.connect(URL, row_factory=dict_row) as c:
             saved = c.execute("SELECT * FROM workflow_runs WHERE id=%s", (run["id"],)).fetchone()
+            hydrate(c,saved)
             files, context, _ = BillHandler().prepare(c, saved)
         self.assertEqual(context["source_catalog"]["run_id"], discovery)
         self.assertNotIn("records", json.dumps(context["source_catalog"]))

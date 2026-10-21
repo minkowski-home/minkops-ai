@@ -44,15 +44,20 @@ class AccountsTests(unittest.TestCase):
 
     def test_launch_pins_complete_definition_and_replay_keeps_the_original_bundle(self):
         from minkops_platform.runtime.bundles import validate_snapshot
+        from minkops_platform.runtime.store import run_for
 
         run, body = self.launch()
-        snapshot = run["config"]["execution_snapshot"]
+        self.assertNotIn("execution_snapshot", run["config"])
+        self.assertNotIn("instructions_snapshot", run["config"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            pinned = run_for(c, run["tenant_id"], run["id"])
+        snapshot = pinned["config"]["execution_snapshot"]
         validate_snapshot(snapshot)
         self.assertEqual(snapshot["definition_version"], run["definition_version"])
-        self.assertEqual(snapshot["files"]["SKILL.md"], run["config"]["instructions_snapshot"])
+        self.assertEqual(snapshot["files"]["SKILL.md"], pinned["config"]["instructions_snapshot"])
         self.assertEqual(
             json.loads(snapshot["files"]["agent-output.schema.json"]),
-            run["config"]["agent_output_schema"],
+            pinned["config"]["agent_output_schema"],
         )
         with patch(
             "minkops_platform.accounts.service.load_definition",
@@ -60,7 +65,10 @@ class AccountsTests(unittest.TestCase):
         ):
             replay = self.client.post(self.base + "/runs", headers=self.csrf, json=body)
         self.assertEqual(replay.status_code, 202, replay.text)
-        self.assertEqual(replay.json()["config"]["execution_snapshot"], snapshot)
+        self.assertNotIn("execution_snapshot", replay.json()["config"])
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            replayed = run_for(c, run["tenant_id"], replay.json()["id"])
+        self.assertEqual(replayed["config"]["execution_snapshot"], snapshot)
 
     def test_worker_respects_an_existing_database_run_lock(self):
         from minkops_platform.accounts.worker import STORE, work_once
@@ -98,7 +106,7 @@ class AccountsTests(unittest.TestCase):
         run, _ = self.launch()
         with psycopg.connect(URL, row_factory=dict_row) as c:
             c.execute(
-                "UPDATE account_runs SET config=config-'execution_snapshot' WHERE id=%s",
+                "UPDATE account_runs SET config=(config-'execution_snapshot') #- '{_assets,execution_snapshot}' WHERE id=%s",
                 (run["id"],),
             )
             c.commit()
@@ -502,6 +510,10 @@ class AccountsTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200)
         # Own verified appends advance the catalog snapshot without rediscovery.
         next_run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=cat_id)
+        self.assertNotIn("catalog_snapshot", next_run["config"])
+        from minkops_platform.runtime.store import run_for
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            next_run = run_for(c, next_run["tenant_id"], next_run["id"])
         self.assertNotEqual(
             next_run["config"]["catalog_snapshot"]["sheets"][0]["file_id"], self.file_id
         )

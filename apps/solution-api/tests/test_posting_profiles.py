@@ -70,7 +70,17 @@ class PostingProfileTests(unittest.TestCase):
         self.assertEqual(self.derivations(later["id"]), [])
         again = self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile", headers=self.csrf,
                                  json={"action": "confirm"})
-        self.assertEqual(again.status_code, 409)
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json(), decided.json())
+        receipt = self.client.get(f"/api/tenants/mock-tenant/attention/{card['id']}/decision")
+        self.assertEqual(receipt.status_code, 200, receipt.text)
+        self.assertEqual(receipt.json(), decided.json())
+        conflict = self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile", headers=self.csrf,
+                                    json={"action": "nothing"})
+        self.assertEqual(conflict.status_code, 409)
+        with psycopg.connect(URL) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM attention_events WHERE item_id=%s AND action='confirmed'",
+                                       (card["id"],)).fetchone()[0], 1)
 
     def test_do_nothing_leaves_waiting_bills_for_manual_entry(self):
         did = self.tally_discovery("declined-co", confirmed_patterns=False)
@@ -82,12 +92,79 @@ class PostingProfileTests(unittest.TestCase):
         self.assertEqual(held["state"], "failed")
         self.assertIn("not confirmed", held["error"])
 
+    def test_batch_reports_confirmation_wait_and_returns_to_reading_after_confirmation(self):
+        from minkops_platform.accounts.batch import reconcile_once
+
+        did = self.tally_discovery("waiting-co", confirmed_patterns=False)
+        files = [self.upload_bill(name) for name in ("one.pdf", "two.pdf")]
+        run, _ = self.launch("bill-entry", file_ids=files, catalog_id=None,
+                             config={"output_mode": "tally_in_place", "discovery_id": did})
+        reconcile_once(URL)
+        self.process(self.derivations(run["id"])[0], payload("waiting-co"))
+        reconcile_once(URL)
+        def summary():
+            with psycopg.connect(URL) as c:
+                return c.execute("SELECT summary FROM tasks WHERE id=%s", (run["task_id"],)).fetchone()[0]
+        self.assertIn("2 bills waiting", summary())
+        self.assertIn("confirm the posting pattern in Attention", summary())
+        card = self.card(run["task_id"])
+        response = self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile",
+                                   headers=self.csrf, json={"action": "confirm"})
+        self.assertEqual(response.status_code, 200, response.text)
+        reconcile_once(URL)
+        self.assertIn("Reading bills: 0 of 2", summary())
+
     def test_concurrent_runs_share_one_derivation(self):
         did = self.tally_discovery("shared-co", confirmed_patterns=False)
         first, _ = self.launch_bill(did, "one.pdf")
         second, _ = self.launch_bill(did, "two.pdf")
         self.assertEqual(len(self.derivations(first["id"])) + len(self.derivations(second["id"])), 1)
         self.assertEqual(self.run_row(first["id"])["config"]["awaits"], self.run_row(second["id"])["config"]["awaits"])
+
+    def test_confirm_after_worker_drain_dispatches_once_and_replay_does_not_wake_again(self):
+        from minkops_platform.worker_hosting import dispatch
+
+        did = self.tally_discovery("drained-co", confirmed_patterns=False)
+        run, _ = self.launch_bill(did)
+        self.process(self.derivations(run["id"])[0], payload("drained-co"))
+        card = self.card(run["task_id"])
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL,dispatch_token=NULL")
+        response = self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile", headers=self.csrf,
+                                    json={"action": "confirm"})
+        self.assertEqual(response.status_code, 200, response.text)
+        calls = []
+        self.assertTrue(dispatch(URL, lambda: calls.append(True)))
+        self.assertFalse(dispatch(URL, lambda: calls.append(True)))
+        self.assertEqual(calls, [True])
+        with psycopg.connect(URL) as c:
+            c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL,dispatch_token=NULL")
+        repeated = self.client.post(f"/api/tenants/mock-tenant/attention/{card['id']}/profile", headers=self.csrf,
+                                    json={"action": "confirm"})
+        self.assertEqual(repeated.json(), response.json())
+        self.assertFalse(dispatch(URL, lambda: self.fail("Decision replay dispatched paid work")))
+
+    def test_status_is_compact_and_exposes_validated_siblings_without_loading_assets(self):
+        from unittest.mock import patch
+
+        did = self.tally_discovery("status-co")
+        files = [self.upload_bill(name) for name in ("ready.pdf", "waiting.pdf")]
+        run, _ = self.launch("bill-entry", file_ids=files, catalog_id=None,
+                             config={"output_mode": "tally_in_place", "discovery_id": did})
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            child = c.execute("SELECT * FROM workflow_runs WHERE parent_run_id=%s AND file_ids @> %s::jsonb",
+                              (run["id"], '["' + files[0] + '"]')).fetchone()
+        self.process(child, self.tally_result(run, files[0]))
+        with patch("minkops_platform.runtime.assets.hydrate", side_effect=AssertionError("Status loaded execution assets")):
+            response = self.client.get(self.base + f"/runs/{run['id']}")
+        self.assertEqual(response.status_code, 200, response.text)
+        public = response.json()
+        self.assertLess(len(response.content), 50_000)
+        self.assertNotIn("source_catalog_snapshot", public["config"])
+        self.assertNotIn("execution_snapshot", public["config"])
+        self.assertEqual((public["execution"]["ready"], public["execution"]["total"]), (1, 2))
+        self.assertEqual(len(public["result"]["records"]), 1)
+        self.assertEqual(public["result"]["records"][0]["allowed_actions"], [])
 
     def test_changed_company_notes_require_a_new_pattern_but_other_company_notes_do_not(self):
         from psycopg.types.json import Jsonb

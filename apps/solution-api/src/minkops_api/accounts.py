@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
 from minkops_platform.accounts import repository, service
-from minkops_platform.accounts.repository import public_run
 from minkops_platform.accounts.service import prepare_writes as prepare_writes
 from minkops_platform.errors import ServiceError
 
@@ -116,7 +115,7 @@ def launch(slug: str, body: Launch, request: Request, user: User, connection: Db
 @router.get("/runs/{run_id}")
 def run_detail(slug: str, run_id: UUID, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
-    return public_run(connection, _call(repository.run_for, connection, tenant["id"], run_id))
+    return _call(repository.public_run_for, connection, tenant["id"], run_id)
 
 
 @router.get("/runs/{run_id}/unsaved-bills.csv")

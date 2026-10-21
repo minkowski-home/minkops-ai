@@ -142,6 +142,8 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
             catalog_id,
         ),
     ).fetchone()
+    from .assets import hydrate
+    hydrate(connection, run)
     if hasattr(handler, "launched"):
         handler.launched(connection, run)
         run = run_for(connection, tenant["id"], run["id"])

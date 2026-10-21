@@ -8,15 +8,15 @@ from minkops_platform.run_controls import control_state, observe_task
 
 class WorkflowRunStore:
     def candidates(self, connection):
-        return connection.execute("""SELECT * FROM workflow_runs WHERE
-            NOT coalesce((config->>'batch')::boolean,false)
+        return connection.execute("""SELECT id,tenant_id,task_id FROM workflow_runs WHERE
+            NOT is_batch AND NOT superseded
             AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=workflow_runs.tenant_id AND t.id=workflow_runs.task_id AND t.control_state='active')
             AND (state='queued' OR (state='executing' AND updated_at < now()-interval '30 seconds'))
-            AND (NOT config ? 'tally_context_job_id' OR EXISTS
+            AND (context_job_id IS NULL OR EXISTS
                 (SELECT 1 FROM desktop_jobs j WHERE j.tenant_id=workflow_runs.tenant_id
-                 AND j.id::text=config->>'tally_context_job_id' AND j.state IN ('completed','failed')))
+                 AND j.id::text=context_job_id AND j.state IN ('completed','failed')))
             -- A session waiting for a client profile starts once that profile is active.
-            AND NOT config ? 'awaits'
+            AND NOT blocked
             ORDER BY updated_at LIMIT 10""").fetchall()
 
     def get(self, connection, tenant_id, run_id):
@@ -45,9 +45,8 @@ class WorkflowRunStore:
     def claim_cleanup(self, connection):
         run = connection.execute("""SELECT id,tenant_id,session_id FROM workflow_runs
             WHERE state NOT IN ('queued','executing') AND session_id IS NOT NULL
-            AND NOT coalesce((config->>'hosted_session_closed')::boolean,false)
-            AND coalesce((config->>'cleanup_attempt_count')::integer,0) < 10
-            AND coalesce((config->>'cleanup_attempt_at')::timestamptz,'epoch') < now()-interval '1 minute'
+            AND NOT session_closed AND cleanup_attempt_count < 10
+            AND coalesce(cleanup_attempt_at,'epoch') < now()-interval '1 minute'
             ORDER BY updated_at LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED""").fetchone()
         if run:
             connection.execute(
@@ -69,7 +68,7 @@ class WorkflowRunStore:
         observe(connection, run, state, summary, progress)
 
 
-def run_for(connection, tenant_id, run_id, lock=False):
+def run_for(connection, tenant_id, run_id, lock=False, *, hydrate_assets=True):
     row = connection.execute(
         "SELECT * FROM workflow_runs WHERE tenant_id=%s AND id=%s"
         # Run identities never change. This still serializes business mutations
@@ -79,6 +78,9 @@ def run_for(connection, tenant_id, run_id, lock=False):
     ).fetchone()
     if not row:
         raise ServiceError("not_found", "Run not found.")
+    if hydrate_assets:
+        from .assets import hydrate
+        hydrate(connection, row)
     return row
 
 
@@ -112,10 +114,54 @@ def observe(connection, run, state, summary, progress):
 def public_run(connection, run):
     from .application import binding_for, get_handler
 
-    value = {key: data for key, data in run.items() if key != "request_hash"}
+    keys = ("id", "tenant_id", "task_id", "actor_id", "workflow_key", "definition_version",
+            "state", "file_ids", "catalog_id", "parent_run_id", "result", "error", "created_at", "updated_at")
+    value = {key: run.get(key) for key in keys}
+    config = run["config"]
+    value["config"] = {key: config[key] for key in ("file_provenance", "destination_device_id", "output_mode", "review_mode") if key in config}
+    if config.get("tally_target"):
+        target = config["tally_target"]
+        value["config"]["tally_target"] = {key: target[key] for key in ("company", "company_mode", "locked_company_guid", "device_id", "discovery_id") if key in target}
+        value["config"]["tally_target"]["companies"] = [
+            {key: company[key] for key in ("company", "voucher_type_error", "books_from", "period_to") if key in company}
+            | {"references": {"company_guid": company.get("references", {}).get("company_guid")},
+               "voucher_type": {"NAME": company.get("voucher_type", {}).get("NAME")}}
+            for company in target.get("companies", [])]
+    # Legacy proposals have no persisted presentation controls. New validated
+    # results pin those once, so repeated status reads never load their assets.
+    if run["state"] == "review" and (run.get("result") or {}).get("records") \
+            and not run["result"].get("_decision_projection"):
+        from .assets import hydrate
+        hydrate(connection, run)
     handler = get_handler(binding_for(run).handler)
-    value.update(handler.public_fields(connection, run))
-    value["control_state"] = control_state(connection, run["tenant_id"], run["task_id"])
+    control = control_state(connection, run["tenant_id"], run["task_id"])
+    presentation = {**run, "state": control} if control != "active" else run
+    value.update(handler.public_fields(connection, presentation))
+    if config.get("batch") and run["state"] in ("queued", "executing"):
+        # A sibling's validated output is useful before the batch completes.
+        # These records are display-only: decisions remain fenced by run state.
+        children = connection.execute("""SELECT file_ids,state,result,error FROM workflow_runs
+            WHERE tenant_id=%s AND parent_run_id=%s AND execution_stage IS NULL
+              AND NOT superseded AND state IN ('review','failed') ORDER BY file_ids->>0""",
+            (run["tenant_id"], run["id"])).fetchall()
+        partial = {"records": [], "unresolved": [], "findings": [], "partial": True}
+        from copy import deepcopy
+        for child in children:
+            if child["state"] == "failed":
+                partial["unresolved"].append({"source_file_id": child["file_ids"][0], "code": "extraction_failed",
+                                               "reason": "This bill needs an explicit recheck.", "allowed_actions": []})
+            else:
+                proposal = deepcopy(child["result"] or {})
+                for record in proposal.get("records", []):
+                    record.update(allowed_actions=[], bulk_actions={})
+                partial["records"].extend(proposal.get("records", []))
+                partial["unresolved"].extend({**issue, "allowed_actions": []} for issue in proposal.get("unresolved", []))
+        value["result"] = partial
+    value["control_state"] = control
     if value["control_state"] != "active":
         value["state"] = value["control_state"]
+    from .status import execution_status
+    value.update(execution_status(connection, run, value["control_state"]))
+    if isinstance(value.get("result"), dict):
+        value["result"].pop("_decision_projection", None)
     return value

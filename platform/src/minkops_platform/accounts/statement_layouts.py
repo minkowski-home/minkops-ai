@@ -101,7 +101,7 @@ def recheck(connection, run, files):
             continue
         rows, proof = apply_layout(entry["table"], profile["payload"], entry["header_index"],
                                    sheet=entry["sheet"], formulas=entry["formulas"], today=today_for(run))
-        if not proof["amounts"] and any(r.get("code") in ("statement_balance", "statement_closing") for r in rows):
+        if not proof["amounts"] and any(r.get("code") in ("statement_balance", "statement_closing", "statement_summary") for r in rows):
             refuted[str(profile["id"])] = profile
     for profile in refuted.values():
         profiles.invalidate(connection, profile, "A new statement refuted the saved balance-chain reading.")
@@ -122,7 +122,8 @@ def preview_sheets(connection, tenant_id, files):
 def sweep(connection):
     """Resume statement runs whose layout session failed; their sheets then hold."""
     for row in connection.execute(
-            "SELECT DISTINCT tenant_id FROM workflow_runs WHERE state='queued' AND config->'awaits' ? 'layout_run'").fetchall():
+            """SELECT DISTINCT tenant_id FROM workflow_runs WHERE state='queued' AND blocked
+                AND (awaited_layout_run_id IS NOT NULL OR config->'awaits' ? 'layouts')""").fetchall():
         release(connection, row["tenant_id"])
 
 
@@ -145,8 +146,8 @@ def learn(connection, run, result, files, *, today):
                                        formulas=entry["formulas"], today=today)
         except (ValueError, KeyError, TypeError, IndexError):
             continue
-        broken = any(r.get("code") == "statement_balance" for r in rows)
-        if payload["columns"].get("balance") and broken and not proof["amounts"]:
+        broken = any(r.get("code") in ("statement_balance", "statement_closing", "statement_summary") for r in rows)
+        if broken and not proof["amounts"]:
             continue  # The balances refute this reading; the sheet holds instead.
         if profiles.current(connection, run["tenant_id"], KIND, payload["signature"]):
             continue  # Another run already learned (or is confirming) this format.
@@ -208,11 +209,17 @@ def decide(connection, tenant, user, item, action):
 def release(connection, tenant_id, *, finished=None):
     """Statement runs waiting on layouts resume once none of their formats is still being decided."""
     waiting = connection.execute(
-        """SELECT r.id,r.config FROM workflow_runs r WHERE r.tenant_id=%s AND r.state='queued'
-        AND r.config->'awaits' ? 'layout_run'""", (tenant_id,)).fetchall()
+        """SELECT r.id,r.awaited_layout_run_id,r.config#>'{awaits,layouts}' AS layout_profiles
+        FROM workflow_runs r WHERE r.tenant_id=%s AND r.state='queued' AND r.blocked
+        AND (r.awaited_layout_run_id IS NOT NULL OR r.config->'awaits' ? 'layouts')""", (tenant_id,)).fetchall()
     for run in waiting:
-        child = connection.execute("SELECT state,id FROM workflow_runs WHERE tenant_id=%s AND id::text=%s",
-                                   (tenant_id, run["config"]["awaits"]["layout_run"])).fetchone()
+        pending_profiles = run["layout_profiles"] or []
+        if pending_profiles and connection.execute("""SELECT 1 FROM client_profiles WHERE tenant_id=%s
+            AND id=ANY(%s::uuid[]) AND status='proposed' LIMIT 1""", (tenant_id, pending_profiles)).fetchone():
+            continue
+        child = (connection.execute("SELECT state,id FROM workflow_runs WHERE tenant_id=%s AND id=%s::uuid",
+                                    (tenant_id, run["awaited_layout_run_id"])).fetchone()
+                 if run["awaited_layout_run_id"] else None)
         if child and child["state"] not in ("review", "failed") and str(child["id"]) != finished:
             continue
         pending = connection.execute(
@@ -220,8 +227,8 @@ def release(connection, tenant_id, *, finished=None):
             AND provenance->>'run_id'=%s LIMIT 1""", (tenant_id, KIND, str(child["id"]) if child else "")).fetchone()
         if pending:
             continue
-        connection.execute("UPDATE workflow_runs SET config=(config-'awaits') || '{\"layouts_attempted\":true}'::jsonb,"
-                           "updated_at=now() WHERE id=%s", (run["id"],))
+        from minkops_platform.runtime.dependencies import release_run
+        release_run(connection, tenant_id, run["id"], {"layouts_attempted": True})
 
 
 def today_for(run):

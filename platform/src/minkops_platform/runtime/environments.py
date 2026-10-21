@@ -5,8 +5,6 @@ slot's busy run survives worker crashes, and must have confirmed session cleanup
 before reuse. Uncertain sessions are never replaced or replayed by this module.
 """
 
-import hashlib
-import json
 import time
 from contextlib import contextmanager
 
@@ -102,14 +100,13 @@ def acquire(connection, run):
     if not parent_id or run.get("session_id"):
         yield None
         return
-    parent = connection.execute("SELECT * FROM workflow_runs WHERE tenant_id=%s AND id=%s",
+    parent = connection.execute("SELECT actor_id,task_id,workflow_key,definition_version FROM workflow_runs WHERE tenant_id=%s AND id=%s",
                                 (run["tenant_id"], parent_id)).fetchone()
     if not parent or any(parent[key] != run[key] for key in (
         "actor_id", "task_id", "workflow_key", "definition_version")):
         raise ValueError("Hosted environment scope differs from the parent workflow.")
-    profile = hashlib.sha256(json.dumps({key: run["config"].get(key) for key in (
-        "execution_snapshot", "authorized_bindings", "source_catalog_snapshot", "catalog_snapshot")},
-        sort_keys=True, default=str).encode()).hexdigest()
+    from .assets import profile_identity
+    profile = profile_identity(run["config"])
     connection.commit()
     for slot in range(SLOTS):
         lock = f"hosted:{run['tenant_id']}:{parent_id}:{slot}"
@@ -119,12 +116,12 @@ def acquire(connection, run):
         if not held:
             continue
         try:
-            row = connection.execute("""SELECT s.*, r.state, r.config->>'hosted_session_closed' AS closed
+            row = connection.execute("""SELECT s.*, r.state, r.session_closed AS closed
                 FROM hosted_environment_slots s JOIN workflow_runs r
                 ON (r.tenant_id,r.id)=(s.tenant_id,s.busy_run_id)
                 WHERE s.tenant_id=%s AND s.group_run_id=%s AND s.slot=%s""",
                 (run["tenant_id"], parent_id, slot)).fetchone()
-            if row and row["closed"] != "true":
+            if row and not row["closed"]:
                 continue
             # Errors and changed resource grants retire the previous workspace.
             reusable = row and row["state"] != "failed" and row["profile_hash"] == profile and row["attachments"] < ATTACHMENT_LIMIT

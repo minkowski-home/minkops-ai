@@ -41,7 +41,9 @@ def create_children(connection, run, file_ids=None):
 
 def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=None):
     """One hosted child: a posting session for one bill, or a triage stage over several."""
-    config = copy.deepcopy(config or run["config"])
+    from minkops_platform.runtime.assets import hydrate
+    hydrate(connection, run)
+    config = copy.deepcopy(hydrate(connection, {**run, "config": config or run["config"]})["config"])
     config.pop("batch", None)
     config.pop("retry_file_id", None)
     config.pop("retry_file_ids", None)
@@ -223,7 +225,8 @@ def recheck_many(connection, tenant, user, run, file_ids):
     template = connection.execute("""SELECT config FROM account_runs WHERE tenant_id=%s
         AND parent_run_id=%s AND file_ids @> %s AND NOT coalesce((config->>'superseded')::boolean,false)
         ORDER BY updated_at DESC LIMIT 1""", (tenant["id"], run["id"], Jsonb([file_ids[0]]))).fetchone()
-    parent = {**run, "config": template["config"]}
+    from minkops_platform.runtime.assets import hydrate
+    parent = hydrate(connection, {**run, "config": template["config"]})
     for file_id in file_ids[1:]:
         connection.execute("UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run["id"], Jsonb([file_id])))
@@ -246,13 +249,20 @@ def reconcile_once(url):
         with connection.transaction():
             sweep(connection)
             sweep_layouts(connection)
-        # NO KEY UPDATE still serializes aggregators and business mutations, but
-        # lets the separate diagnostics transaction check its run foreign key.
-        parents = connection.execute("""SELECT * FROM account_runs WHERE
-            config->>'batch'='true' AND state IN ('queued','executing')
-            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=account_runs.tenant_id AND t.id=account_runs.task_id AND t.control_state='active')
-            FOR NO KEY UPDATE SKIP LOCKED""").fetchall()
-        for parent in parents:
+        parents = connection.execute("""SELECT id,tenant_id FROM workflow_runs WHERE
+            is_batch AND state IN ('queued','executing')
+            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=workflow_runs.tenant_id AND t.id=workflow_runs.task_id AND t.control_state='active')
+            ORDER BY updated_at LIMIT 100""").fetchall()
+        connection.commit()
+        for identity in parents:
+            parent = connection.execute("""SELECT * FROM workflow_runs WHERE tenant_id=%s AND id=%s
+                AND state IN ('queued','executing') FOR NO KEY UPDATE SKIP LOCKED""",
+                (identity["tenant_id"], identity["id"])).fetchone()
+            if not parent:
+                connection.commit()
+                continue
+            from minkops_platform.runtime.assets import hydrate
+            hydrate(connection, parent)
             # Every parent is a savepoint: one tenant's defect must not roll back
             # or stall other batches, nor crash the shared worker lanes.
             try:
@@ -260,6 +270,7 @@ def reconcile_once(url):
                     _reconcile(connection, parent)
             except Exception as error:
                 _aggregation_failed(connection, parent, error)
+            connection.commit()
 
 
 def _aggregation_failed(connection, parent, error):
@@ -295,6 +306,9 @@ def _reconcile(connection, parent):
     ).fetchall()
     for triage in stages:
         if triage["state"] in ("review", "failed"):
+            from minkops_platform.runtime.assets import hydrate
+            # expand consumes config as well as the validated routing result.
+            triage["config"] = hydrate(connection, {**parent, **triage})["config"]
             expand(connection, parent, triage)
     if any(t["state"] not in ("review", "failed") for t in stages):
         observe(connection, parent, "executing", "Routing bills to their companies.", 15)
@@ -302,26 +316,36 @@ def _reconcile(connection, parent):
     children = connection.execute(
         # Aggregation consumes outcomes, never the repeated multi-megabyte
         # execution catalogs pinned independently to every bill child.
-        "SELECT id,file_ids,state,result,error FROM account_runs WHERE tenant_id=%s AND parent_run_id=%s AND NOT coalesce((config->>'superseded')::boolean,false) AND config->>'stage' IS NULL ORDER BY file_ids->>0",
+        """SELECT r.id,r.file_ids,r.state,r.result,r.error,p.status='proposed' AS awaiting_confirmation
+        FROM account_runs r LEFT JOIN client_profiles p ON p.tenant_id=r.tenant_id
+          AND p.id::text=r.config->'awaits'->>'profile'
+        WHERE r.tenant_id=%s AND r.parent_run_id=%s
+          AND NOT coalesce((r.config->>'superseded')::boolean,false)
+          AND r.config->>'stage' IS NULL ORDER BY r.file_ids->>0""",
         (parent["tenant_id"], parent["id"]),
     ).fetchall()
     done = [c for c in children if c["state"] in ("review", "failed")]
     if len(done) != len(children):
+        waiting = sum(bool(c["awaiting_confirmation"]) for c in children
+                      if c["state"] == "queued")
         # A retry can have the same ready count as the earlier batch.
         # Enter Work again instead of leaving an active child labelled
         # as waiting to start until its extraction finishes.
         if parent["state"] == "queued" or parent["config"].get(
             "batch_finished_count"
-        ) != len(done):
+        ) != len(done) or parent["config"].get("batch_waiting_count", 0) != waiting:
             connection.execute(
-                "UPDATE account_runs SET config=config || jsonb_build_object('batch_finished_count',%s::integer) WHERE id=%s",
-                (len(done), parent["id"]),
+                """UPDATE account_runs SET config=config || jsonb_build_object(
+                    'batch_finished_count',%s::integer,'batch_waiting_count',%s::integer) WHERE id=%s""",
+                (len(done), waiting, parent["id"]),
             )
             observe(
                 connection,
                 parent,
                 "executing",
-                f"Reading bills: {len(done)} of {len(children)} ready. Other bills continue independently.",
+                (f"{waiting} bill{'s' if waiting != 1 else ''} waiting: confirm the posting pattern in Attention. "
+                 f"{len(done)} of {len(children)} ready." if waiting else
+                 f"Reading bills: {len(done)} of {len(children)} ready. Other bills continue independently."),
                 20 + int(45 * len(done) / len(children)),
             )
         return
@@ -378,6 +402,8 @@ def _reconcile(connection, parent):
     # The parent review carries the same immutable client policy as its
     # independent children; aggregation cannot discard a review gate.
     result = enforce_policies(parent["config"], result)
+    from .bill_decisions import pin_decisions
+    result = pin_decisions(parent, result)
     from .attention import flag, issue_record
     for issue in result.get("unresolved", []):
         # Re-aggregation restates carried issues; only a recheck is a new event.
@@ -387,14 +413,15 @@ def _reconcile(connection, parent):
         "UPDATE account_runs SET result=%s,config=config-'aggregation_failures' WHERE id=%s",
         (Jsonb(result), parent["id"]),
     )
-    pending = sum(
-        r.get("status") not in ("saved", "duplicate", "rejected") for r in result["records"]
-    )
+    attention_files = {i["source_file_id"] for i in result["unresolved"]} | {
+        r["source_file_id"] for r in result["records"] if r.get("exception_codes") or r.get("findings") or r.get("save_hold")}
+    ready_count = sum(r.get("status") not in ("saved", "duplicate", "rejected", "writing")
+                      and r["source_file_id"] not in attention_files for r in result["records"])
     observe(
         connection,
         parent,
         "review",
-        f"{pending} bill entries ready; {len(result['unresolved'])} bills need attention.",
+        f"{len(result['records'])} bill entries read; {ready_count} ready to write; {len(attention_files)} bills need attention.",
         70,
     )
     if parent["config"].get("tally_target"):
