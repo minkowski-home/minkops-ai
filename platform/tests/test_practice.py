@@ -114,3 +114,27 @@ def test_a_settled_fact_is_a_confirmed_entry_and_a_persons_answer_is_never_overw
     invoice = memory.live(db, company["tenant_id"], company["client_id"], company_id=company["id"],
                           kind="practice", subject="invoice_number_field")
     assert (invoice["status"], invoice["value"]) == ("confirmed", {"fields": ["REFERENCE"]})
+
+
+def test_an_answer_settles_the_practice_and_no_later_sync_asks_again(books):
+    from minkops_platform import attention
+    from minkops_platform.errors import ServiceError
+    db, company = books["db"], books["company"]
+    _, version = found(books, masters(), [purchase(1)])
+    practice.probe(db, company, version, books["job"])
+    card = db.execute("""SELECT a.* FROM attention_items a JOIN practice_questions q ON q.attention_item_id=a.id
+                         WHERE q.company_id=%s AND q.probe='invoice_number_field'""", (company["id"],)).fetchone()
+    tenant = {"id": company["tenant_id"]}
+    assert practice.settled(db, company, "invoice_number_field") is None
+    # The card offers its answers with their labels; only those settle it.
+    assert practice.question(card["target"])["options"] == [
+        {"action": "REFERENCE", "label": "In Supplier Invoice No. (reference)"},
+        {"action": "NARRATION", "label": "In the narration"}]
+    with pytest.raises(ServiceError, match="offered answers"):
+        attention.decide(db, tenant, books["owner"], card["id"], "BOTH")
+    assert attention.decide(db, tenant, books["owner"], card["id"], "NARRATION")["status"] == "answered"
+    assert practice.settled(db, company, "invoice_number_field") == {"fields": ["NARRATION"]}
+    assert db.execute("SELECT status FROM attention_items WHERE id=%s", (card["id"],)).fetchone()["status"] == "done"
+    practice.probe(db, company, version, books["job"])
+    assert db.execute("""SELECT count(*) AS n FROM practice_questions WHERE company_id=%s
+                         AND probe='invoice_number_field' AND status='open'""", (company["id"],)).fetchone()["n"] == 0

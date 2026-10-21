@@ -385,14 +385,16 @@ class Bill:
     def destination_key(self):
         return f"bill:{self.company['guid']}"
 
-    def native_plan(self, remote_id, *, number_fields=("REFERENCE",)):
+    def native_plan(self, remote_id, *, number_fields=("REFERENCE",), note=None):
+        """The approved voucher; `note` adds what the company's practice records in the narration."""
         label = "credit note" if self.kind == "credit_note" else "bill"
         return {
             "format_version": FORMAT, "family": self.family, "operation": "append",
             "company": self.company["name"], "company_guid": self.company["guid"],
             "port": self.company.get("tally_port") or 9000, "remote_id": remote_id, "voucher_type": self.voucher_type,
             "header": {"date": self.date, "reference": self.number, "party_ledger": self.party,
-                       "narration": f"Minkops reviewed {label} {self.number}", "tag": None},
+                       "narration": f"Minkops reviewed {label} {self.number}" + (f"; {note}" if note else ""),
+                       "tag": None},
             "lines": self.lines,
             "references": {"company_guid": self.company["guid"], "ledgers": self.identities},
             "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice"

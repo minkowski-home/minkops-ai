@@ -31,6 +31,8 @@ SHARED = {
     # Stop is final, and a run's books stay as it read them: neither can be rechecked or retried.
     "run_stopped": ("nothing",), "destination_changed": ("nothing",),
 }
+# A bill waiting on its company's practice is released by the answer, not by a recheck.
+BILL_ONLY = {"practice_question": ("nothing",)}
 STATEMENT_ONLY = {
     "statement_layout_unknown": ("nothing", "retry"), "statement_layout_changed": ("nothing", "retry"),
     "statement_transfer_unpaired": ("nothing", "retry"), "statement_interpretation": ("guess", "nothing", "retry"),
@@ -43,6 +45,7 @@ class HoldMatrixTest(unittest.TestCase):
     def test_every_code_has_exactly_its_golden_actions_and_scope(self):
         expected = {code: (actions, scopes) for actions, (scopes, codes) in GOLDEN.items() for code in codes}
         expected.update({code: (actions, STATEMENT) for code, actions in STATEMENT_ONLY.items()})
+        expected.update({code: (actions, BILL) for code, actions in BILL_ONLY.items()})
         expected.update({code: (actions, BOTH) for code, actions in SHARED.items()})
         actual = {code: (hold.actions, set(hold.scopes)) for code, hold in holds.HOLDS.items()}
         self.assertEqual(actual, expected)

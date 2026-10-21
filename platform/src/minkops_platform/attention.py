@@ -11,9 +11,11 @@ from psycopg.types.json import Jsonb
 
 from .errors import ServiceError
 
-# Question kinds and the module whose `decide(connection, tenant, user, item, action)` applies an answer.
-QUESTIONS = {"layout": "minkops_platform.accounts.statement_layouts"}
-PROMPTS = {"layout": "Confirm how to read this statement."}
+# Question kinds and the module that shows each card (`question(target)`) and applies its answer
+# (`decide(connection, tenant, user, item, action)`).
+QUESTIONS = {"layout": "minkops_platform.accounts.statement_layouts",
+             "practice": "minkops_platform.accounts.practice"}
+PROMPTS = {"layout": "Confirm how to read this statement.", "practice": "Answer how this company keeps its books."}
 
 
 def audit(connection, item, actor, action, summary, *, detail=None):
@@ -83,9 +85,8 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     for row in rows:
         target = row.pop("target")
         row["reason"] = target.get("reason") or PROMPTS.get(row["kind"]) or row["label"]
-        if row["kind"] == "layout":
-            row["layout"] = {"prompt": target.get("prompt"), "actions": target.get("actions", []),
-                             "samples": target.get("samples", [])[:3]}
+        if row["kind"] in QUESTIONS:
+            row["question"] = importlib.import_module(QUESTIONS[row["kind"]]).question(target)
     return rows
 
 

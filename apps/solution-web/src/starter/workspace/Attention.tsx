@@ -14,8 +14,12 @@ interface Item {
   reason: string;
   status: string;
   kind?: string;
-  /** A new statement format: one date-order answer, or sample rows to confirm. */
-  layout?: { prompt: string; actions: string[]; samples: { date: string; amount_cents: number; account: string; narration: string }[] };
+  /** A question card: a statement format's date order, or how a company keeps its books. The server labels each answer. */
+  question?: {
+    prompt: string;
+    options: { action: string; label: string }[];
+    samples?: { date: string; amount_cents: number; account: string; narration: string }[];
+  };
   workflow: string;
   employee: string;
   updated_at: string;
@@ -53,7 +57,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
         { method: "POST", ...(body ? { body: JSON.stringify(body) } : {}) },
         user.csrf_token
       );
-      setNotice(result.status === "active" ? "Confirmed; waiting work continues"
+      setNotice(["active", "answered"].includes(result.status ?? "") ? "Confirmed; waiting work continues"
         : result.status === "done" ? "Marked done" : "Left for manual handling");
       if (itemId) {
         setItems(current => status === "pending" ? (current ?? []).filter(item => item.id !== itemId)
@@ -68,7 +72,8 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
         try { receipt = await api(`${base}/${itemId}/decision`); } catch { /* An unreadable receipt remains uncertain. */ }
       }
       setNotice(receipt && receipt.action === body?.action
-        ? receipt.status === "active" ? "Confirmed; waiting work continues" : "Decision recorded; left for manual handling"
+        ? ["active", "answered"].includes(receipt.status) ? "Confirmed; waiting work continues"
+          : "Decision recorded; left for manual handling"
         : `${caught instanceof Error ? caught.message : "Could not confirm this action."} The outcome is not yet confirmed. Refresh the current item before trying again.`);
       if (receipt && receipt.action === body?.action && itemId && status === "pending") setItems(current => (current ?? []).filter(item => item.id !== itemId));
       reads.invalidate(scope, resource => !resource.endsWith("#notice"));
@@ -146,21 +151,21 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
                 <p>{i.reason || "This item needs attention in the original system."}</p>
-                {i.layout && (
+                {i.question && (
                   <div>
-                    <p>{i.layout.prompt}</p>
-                    <ul>{i.layout.samples.map((row, n) => (
+                    <p>{i.question.prompt}</p>
+                    {!!i.question.samples?.length && <ul>{i.question.samples.map((row, n) => (
                       <li key={n}>{row.date} · {(row.amount_cents / 100).toFixed(2)}{row.account ? ` · ${row.account}` : ""}{row.narration ? ` · ${row.narration}` : ""}</li>
-                    ))}</ul>
+                    ))}</ul>}
                   </div>
                 )}
-                {i.status === "pending" && i.layout ? (
+                {i.status === "pending" && i.question ? (
                   <div className="accounts-toolbar">
-                    {i.layout.actions.map((answer) => (
+                    {i.question.options.map(({ action: answer, label }) => (
                       <button key={answer} className={answer === "nothing" ? "button button-ghost" : "button"} disabled={itemBusy(i.id)}
                         onClick={() => void action(`/${i.id}/decision`, { action: answer }, i.id)}>
                         {pending.has(actionKey(`/${i.id}/decision`, { action: answer })) && <Spinner />}
-                        {pending.has(actionKey(`/${i.id}/decision`, { action: answer })) ? "Confirming…" : ({ dmy: "Day first", mdy: "Month first", confirm: "Confirm", nothing: "Do nothing" }[answer] ?? answer)}
+                        {pending.has(actionKey(`/${i.id}/decision`, { action: answer })) ? "Confirming…" : label}
                       </button>
                     ))}
                   </div>

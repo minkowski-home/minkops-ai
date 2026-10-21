@@ -42,6 +42,9 @@ follows, or `[]`.
   centre or an instruction, is evidence. When a legible note changes how the bill
   is booked, follow it and quote it; when it is unclear, hold the bill with
   `classification_uncertain` and quote what you can read.
+- **Stamps.** A receipt-register stamp (DMR, GRN or MRN) with its number, and its
+  date when it has one, goes in `document.receipt_register` as printed, quoted as
+  evidence. Minkops records it wherever the company's practice says.
 
 ## The document
 

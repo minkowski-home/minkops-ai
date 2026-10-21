@@ -95,6 +95,11 @@ _CATALOG = [
         ("supplier_missing", EXCEPTION, "Missing supplier",
          "The supplier is missing from the company's confirmed Tally ledgers."),
     ]),
+    # Released by the answer in Attention; a recheck could not answer it.
+    *_holds((BILL,), ("nothing",), [
+        ("practice_question", LIFECYCLE, "Practice question",
+         "This bill waits for an answer in Attention about how its company keeps its books."),
+    ]),
     *_holds((BILL, STATEMENT), _DESTINATION, [
         ("company_not_open", NATIVE, "Open company in Tally",
          "The destination company must be open in Tally before this bill can be saved."),

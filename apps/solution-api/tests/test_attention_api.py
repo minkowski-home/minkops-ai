@@ -65,7 +65,9 @@ class AttentionApiTests(unittest.TestCase):
         mine = self.items[self.granted]
         self.assertEqual({item["id"] for item in listed}, {str(mine["gap"]["id"]), str(mine["question"]["id"])})
         question = next(item for item in listed if item["kind"] == "layout")
-        self.assertEqual((question["label"], question["layout"]["actions"]), ("Choose date order", ["dmy", "mdy"]))
+        # The server owns each card's answers and their labels.
+        self.assertEqual((question["label"], question["question"]["options"]), ("Choose date order", [
+            {"action": "dmy", "label": "Day first"}, {"action": "mdy", "label": "Month first"}]))
         self.assertEqual(next(item for item in listed if item["kind"] == "manual")["reason"],
                          "A statement for 1–14 September is missing.")
         admin, _ = self.login(self.admin)

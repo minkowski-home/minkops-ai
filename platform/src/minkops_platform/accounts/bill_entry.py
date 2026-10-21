@@ -36,7 +36,7 @@ from minkops_platform.run_controls import control_state, require_active, resolve
 from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
-from . import desk_tools, memory, mirror, supplier_gst, sync, writes
+from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
 from .desk_tools import Desk, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
@@ -72,6 +72,7 @@ DEMOTED = ("Someone changed a bill booked this way in Tally after Minkops saved 
            "ledgers before approving.")
 GUESSED_BOOKING = ("This supplier's bills were last booked this way as a best guess. Review the voucher type and "
                    "ledgers before approving.")
+BOOKING_REVIEWS = (UNPRECEDENTED, DEMOTED, GUESSED_BOOKING)
 
 
 # --- launch ---------------------------------------------------------------------------
@@ -350,6 +351,10 @@ def _propose_one(connection, desk, record, bill):
                            checks={**checks, "code": refusal.code, "error": str(refusal)[:300]})
         return {"status": "rejected", "reason": str(refusal)}
     review += [note for note in [_precedent(connection, desk, company, bound, bill)] if note]
+    if document.get("receipt_register") and practice.settled(connection, company, "receipt_register") is None:
+        # Where this company records the stamp is a one-click question; its answer releases the bill.
+        return _hold(connection, desk, record, bill, company, "practice_question", hold("practice_question").reason,
+                     facts=facts, checks={**checks, "practice": "receipt_register"}, review=review, rules=cited)
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review, facts=facts,
                        company_id=company["id"], checks=checks, proposal=_proposal(bill, bound, rules=cited))
     # Review notes are for the person approving: told of one, a session would rebook a sound bill to avoid it.
@@ -433,7 +438,7 @@ GUID = {"type": ["string", "null"], "maxLength": 100}
 MONEY = {"type": "number", "exclusiveMinimum": 0}
 PRINTED = {"type": ["number", "null"], "exclusiveMinimum": 0}
 FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "taxable", "tax", "round_off", "note",
-          "other")
+          "receipt_register", "other")
 EVIDENCE = {"type": "array", "maxItems": 40, "items": schema({
     "field": {"enum": list(FIELDS)}, "page": {"type": "integer", "minimum": 1, "maximum": 12},
     "quote": {"type": "string", "minLength": 1, "maxLength": 300}}, ["field", "page", "quote"])}
@@ -442,8 +447,13 @@ DOCUMENT = schema({
     "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}, "total": PRINTED,
     "supplier_name": {"type": ["string", "null"], "maxLength": 200},
     "supplier_gstin": {"type": ["string", "null"], "maxLength": 20}, "origin": {"enum": ["domestic", "foreign", None]},
-    "taxable": PRINTED, "tax": PRINTED}, ["kind", "number", "date", "total", "supplier_name", "supplier_gstin",
-                                          "origin", "taxable", "tax"])
+    "taxable": PRINTED, "tax": PRINTED,
+    "receipt_register": _nullable(schema({
+        "label": {"type": "string", "minLength": 1, "maxLength": 20},
+        "number": {"type": "string", "minLength": 1, "maxLength": 40},
+        "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}}, ["label", "number", "date"]))},
+    ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "taxable", "tax",
+     "receipt_register"])
 LINE = schema({
     "role": {"enum": ["expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"]},
     "ledger_guid": {"type": "string", "minLength": 1, "maxLength": 100}, "side": {"enum": ["debit", "credit"]},
@@ -663,7 +673,11 @@ def _approve(connection, run, record, *, actor):
         work.update_record(connection, record, status="held", hold_codes=[refusal.code],
                            review_reasons=[str(refusal)[:300]])
         return {"status": "held"}
-    plan = {**bound.native_plan(narration_token(run["tenant_id"], bound.destination_key, bound.identity)),
+    # Duplicates are sought where the company types invoice numbers; until that is settled, in both places.
+    fields = (practice.settled(connection, company, "invoice_number_field") or {}).get("fields")
+    plan = {**bound.native_plan(narration_token(run["tenant_id"], bound.destination_key, bound.identity),
+                                number_fields=tuple(fields or ("REFERENCE", "NARRATION")),
+                                note=_register_note(connection, company, record["proposal"]["bill"])),
             "destination_key": bound.destination_key}
     row = connection.execute("SELECT * FROM companies WHERE id=%s", (record["company_id"],)).fetchone()
     if not writes.request(connection, run, record, plan, row, actor=actor):
@@ -676,6 +690,56 @@ def _approve(connection, run, record, *, actor):
             (run["id"], str(record["id"]))).fetchall():
         work.update_record(connection, follower, status="approved")
     return {"status": "writing"}
+
+
+def _register_note(connection, company, bill):
+    """The bill's receipt-register stamp, for a company that records it in the purchase narration."""
+    register = (bill.get("document") or {}).get("receipt_register")
+    if not register or (practice.settled(connection, company, "receipt_register") or {}).get("recorded_in") != (
+            "narration"):
+        return None
+    return f"{register['label']} {register['number']}" + (f" of {register['date']}" if register["date"] else "")
+
+
+def _repropose(connection, run, record, bill, *, review, created=(), precedent=False):
+    """Check a held bill's reading again and propose it; False when it no longer passes.
+
+    `precedent` asks whether the booking needs review again, as after a practice answer.
+    """
+    desk, company = _destination(connection, run, record)
+    try:
+        bound = check(bill, desk.view(connection, company), company, created=created, until=desk.until(company))
+    except HoldReason as refusal:
+        work.update_record(connection, record, status="held", hold_codes=[refusal.code],
+                           review_reasons=[str(refusal)[:300]])
+        return False
+    if precedent:
+        review = [*review, *[note for note in [_precedent(connection, desk, company, bound, bill)] if note]]
+    kept = {key: record["proposal"][key] for key in ("rules",) if record["proposal"].get(key)}
+    work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review,
+                       checks={**(record["checks"] or {}), "offers": []},
+                       proposal=_proposal(bill, bound, **kept, **({"created": list(created)} if created else {})))
+    return True
+
+
+def practice_settled(connection, tenant_id, company_id, probe):
+    """A practice question was answered: the company's bills waiting on it are checked again, in runs still going."""
+    for record in connection.execute(
+            """SELECT r.* FROM run_records r JOIN runs n ON n.tenant_id=r.tenant_id AND n.id=r.run_id
+               JOIN tasks t ON t.tenant_id=n.tenant_id AND t.id=n.task_id
+               WHERE r.tenant_id=%s AND r.company_id=%s AND r.kind=%s AND r.status='held'
+                 AND r.hold_codes='{practice_question}' AND r.checks->>'practice'=%s AND t.control_state<>'stopped'
+               ORDER BY r.id FOR UPDATE OF r""", (tenant_id, company_id, KIND, probe)).fetchall():
+        run = work.get_run(connection, tenant_id, record["run_id"])
+        # The hold's own reason and any earlier booking review are restated by the check.
+        review = [reason for reason in record["review_reasons"][1:] if reason not in BOOKING_REVIEWS]
+        if (_repropose(connection, run, record, record["proposal"]["bill"], review=review, precedent=True)
+                and run["config"].get("review_mode") == "only_exceptions" and not review
+                and control_state(connection, tenant_id, run["task_id"]) == "active"):
+            proposed = work.get_record(connection, tenant_id, record["id"], lock=True)
+            if not proposed["review_reasons"]:
+                _approve(connection, run, proposed, actor=run["actor_id"])
+        work.refresh(connection, tenant_id, run["id"], describe=describe)
 
 
 # --- new suppliers ----------------------------------------------------------------------
@@ -772,17 +836,7 @@ def _with_supplier(connection, run, record, created, *, review):
     bill = {**bill, "voucher": {**bill["voucher"], "party": {
         "ledger_guid": created["data"]["GUID"], "new_supplier": False,
         "evidence": "Created by Minkops on a person's approval and verified in Tally."}}}
-    desk, company = _destination(connection, run, record)
-    try:
-        bound = check(bill, desk.view(connection, company), company, created=[created], until=desk.until(company))
-    except HoldReason as refusal:
-        work.update_record(connection, record, status="held", hold_codes=[refusal.code],
-                           review_reasons=[str(refusal)[:300]])
-        return False
-    work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review,
-                       checks={**(record["checks"] or {}), "offers": []},
-                       proposal=_proposal(bill, bound, created=[created]))
-    return True
+    return _repropose(connection, run, record, bill, review=review, created=[created])
 
 
 # --- receipts and stops -----------------------------------------------------------------

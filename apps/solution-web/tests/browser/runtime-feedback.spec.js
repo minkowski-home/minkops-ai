@@ -5,7 +5,8 @@ const tenant = '/api/tenants/mock-tenant';
 const workflow = {id:'statements',key:'statement-entry',name:'Statement entry',presentation:'desk-review',status:'active',employee_ids:[],config_schema:{properties:{}},config_values:{}};
 const task = {id:'statement',workflow_id:'statements',title:'Statement entry: icici.csv',status:'running',stage:'executing',progress:5,summary:'0 of 2 parts read.',created_at:'2026-10-21T07:30:00Z',updated_at:'2026-10-21T07:31:00Z'};
 const item = {id:'dates',task_id:'statement',identifier:'icici.csv',label:'Choose date order',reason:'Confirm how to read this statement.',status:'pending',workflow:'Statement entry',employee:'Accounts',kind:'layout',updated_at:'2026-10-21T07:31:00Z',
-  layout:{prompt:'Dates such as 01/02/2026 could be day-first or month-first.',actions:['dmy','mdy'],samples:[]}};
+  question:{prompt:'Dates such as 01/02/2026 could be day-first or month-first.',
+    options:[{action:'dmy',label:'Day first'},{action:'mdy',label:'Month first'}],samples:[]}};
 
 async function fixture(context, overrides) {
   await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/, route => route.fulfill({body:'',contentType:'text/css'}));

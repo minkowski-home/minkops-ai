@@ -106,7 +106,7 @@ def proposal(company, n=1, **changes):
         "bill": n, "company_guid": company, "company_evidence": f"Billed to GSTIN {BUYER}.",
         "document": {"kind": "invoice", "number": "SOS/26/0412", "date": "2026-09-01", "total": 188800.0,
                      "supplier_name": "Sunrise Office Systems", "supplier_gstin": SUNRISE, "origin": "domestic",
-                     "taxable": 160000.0, "tax": None},
+                     "taxable": 160000.0, "tax": None, "receipt_register": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "g-purchase",
                     "party": {"ledger_guid": "g-sunrise", "new_supplier": False, "evidence": "GSTIN matches."},
                     "lines": [line("expense", "g-cabins", 160000.0),
@@ -730,6 +730,56 @@ def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_n
     db.commit()
     third = bill("SOS/26/0503", review_mode="only_exceptions")
     assert (third["status"], third["review_reasons"]) == ("proposed", [bill_entry.DEMOTED])
+
+
+def test_a_bill_waits_on_its_companys_open_practice_and_the_answer_releases_it(desk):
+    from minkops_platform import attention
+    from minkops_platform.accounts import mirror, practice
+    company, db = desk["company"]["guid"], desk["db"]
+    # Too little history settles neither where this company types invoice numbers nor its receipt register.
+    task = db.execute("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Sync') RETURNING id",
+                      (desk["tenant"]["id"],)).fetchone()
+    practice.probe(db, desk["company"], mirror.latest(db, desk["company"]["id"]), {"task_id": task["id"]})
+    rule = db.execute(
+        """INSERT INTO memory_instructions(tenant_id,client_id,employee_key,workflow_key,text)
+           VALUES (%s,%s,'accounts-desk','bill-entry','Cabin bills go to Office Cabins.') RETURNING *""",
+        (desk["tenant"]["id"], desk["client"]["id"])).fetchone()
+    db.commit()
+    stamped = proposal(company, **{"document.receipt_register": {"label": "DMR", "number": "1811", "date": "2026-09-02"},
+                                   "rules": [str(rule["id"])]})
+    unknown = proposal(company, rules=["00000000-0000-4000-8000-000000000000"])
+    fake = by_file(**{"stamped.pdf": [
+        [("practice", {"company": company}), ("rules", {}), ("memory", {"company": company, "subjects": ["g-sunrise"]})],
+        [("propose", {"count": 1, "bills": [unknown]})], [("propose", {"count": 1, "bills": [stamped]})]]})
+    run = launch(desk, {"stamped.pdf": B01})
+    read(desk, fake, run)
+    [session] = fake.created
+    [practices] = answers(session, "practice")
+    assert {p["subject"]: p["value"] for p in practices["practices"]}["billwise"] == {"in_use": False, "share": 0.0}
+    assert {q["subject"] for q in practices["open_questions"]} >= {"receipt_register", "invoice_number_field"}
+    assert answers(session, "rules")[0]["rules"] == [{"id": str(rule["id"]), "version": 1,
+                                                      "text": "Cabin bills go to Office Cabins."}]
+    assert answers(session, "memory")[0] == {"entries": []}
+    refused = answers(session, "propose")[0]["bills"][0]
+    assert (refused["status"], refused["reason"]) == ("rejected", (
+        "Rule 00000000-0000-4000-8000-000000000000 is not one of this client's active rules for this workflow. "
+        "Cite only rules the rules lookup returns."))
+    # The stamp's number goes where the company records it, which nobody has said yet: the bill waits.
+    [waiting] = records(desk, run)
+    assert (waiting["status"], waiting["hold_codes"], actions(waiting)) == ("held", ["practice_question"], ["nothing"])
+    assert waiting["proposal"]["rules"] == [{"id": str(rule["id"]), "version": 1,
+                                             "text": "Cabin bills go to Office Cabins."}]
+    card = db.execute("""SELECT a.* FROM attention_items a JOIN practice_questions q ON q.attention_item_id=a.id
+                         WHERE q.company_id=%s AND q.probe='receipt_register'""", (desk["company"]["id"],)).fetchone()
+    assert attention.decide(db, desk["tenant"], desk["operator"], card["id"], "narration")["status"] == "answered"
+    db.commit()
+    released = record(desk, waiting)
+    assert (released["status"], released["hold_codes"]) == ("proposed", [])
+    decide(desk, released, "approve")
+    _, plan = companion(desk)
+    # The narration carries the register number; with the invoice field still open, duplicates are sought in both.
+    assert plan["header"]["narration"] == "Minkops reviewed bill SOS/26/0412; DMR 1811 of 2026-09-02"
+    assert plan["duplicate"]["number_fields"] == ["REFERENCE", "NARRATION"]
 
 
 def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the_rest(desk):

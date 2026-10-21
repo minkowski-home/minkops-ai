@@ -157,6 +157,15 @@ def ask(connection, run, profile, path, question, proof, printed):
         "samples": proof["samples"]})
 
 
+ANSWERS = {"dmy": "Day first", "mdy": "Month first", "confirm": "Confirm", "nothing": "Do nothing"}
+
+
+def question(target):
+    """The card a person answers: its prompt, sample rows and the offered answers."""
+    return {"prompt": target.get("prompt"), "samples": target.get("samples", [])[:3],
+            "options": [{"action": action, "label": ANSWERS[action]} for action in target.get("actions", [])]}
+
+
 def decide(connection, tenant, user, item, action):
     """Answer a layout card, then release every sheet waiting on it."""
     profile = profiles.get(connection, tenant["id"], item["target"]["profile_id"], lock=True)

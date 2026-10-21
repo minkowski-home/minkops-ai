@@ -1,16 +1,24 @@
 /* global URL, document, window */
 import {test, expect} from '@playwright/test';
 
-test('layout questions stay legible and submit only the offered answer; other items are marked done', async ({page, context}, testInfo) => {
+test('question cards stay legible and submit only the offered answer; other items are marked done', async ({page, context}, testInfo) => {
   const errors = [], decisions = [];
   page.on('pageerror', error => errors.push(error.message));
   let items = [
     {id:'dates',task_id:'statement',identifier:'statement.csv',label:'Choose date order',status:'pending',workflow:'Statement entry',employee:'Accounts',kind:'layout',
       reason:'Confirm how to read this statement.',
-      layout:{prompt:'Dates such as 03/04/26 could be day-first or month-first.',actions:['dmy','mdy'],samples:[{date:'2026-04-03',amount_cents:-11770,account:'Current account',narration:'Charges with GST'}]}},
+      question:{prompt:'Dates such as 03/04/26 could be day-first or month-first.',
+        options:[{action:'dmy',label:'Day first'},{action:'mdy',label:'Month first'}],
+        samples:[{date:'2026-04-03',amount_cents:-11770,account:'Current account',narration:'Charges with GST'}]}},
     {id:'sample',task_id:'statement',identifier:'no-balance.csv',label:'Confirm statement layout',status:'pending',workflow:'Statement entry',employee:'Accounts',kind:'layout',
       reason:'Confirm how to read this statement.',
-      layout:{prompt:'Confirm these sample rows; this file has no running balance.',actions:['confirm','nothing'],samples:[{date:'2026-10-02',amount_cents:1700,account:'',narration:'Interest'}]}},
+      question:{prompt:'Confirm these sample rows; this file has no running balance.',
+        options:[{action:'confirm',label:'Confirm'},{action:'nothing',label:'Do nothing'}],
+        samples:[{date:'2026-10-02',amount_cents:1700,account:'',narration:'Interest'}]}},
+    {id:'practice',task_id:'sync',identifier:'Test Company',label:'Practice question',status:'pending',workflow:'',employee:'Accounts',kind:'practice',
+      reason:'Answer how this company keeps its books.',
+      question:{prompt:'Where does this company type the supplier\'s invoice number on purchase vouchers?',
+        options:[{action:'REFERENCE',label:'In Supplier Invoice No. (reference)'},{action:'NARRATION',label:'In the narration'}]}},
     {id:'gap',task_id:'statement',identifier:'ICICI Current A/c',label:'Transactions missing',status:'pending',workflow:'Statement entry',employee:'Accounts',kind:'manual',
       reason:'ICICI Current A/c closed at 97000.00 on 2026-08-31 in an earlier statement, but this one opens at 107000.00 on 2026-09-01.'},
   ].map(item => ({...item, updated_at:'2026-10-20T10:00:00Z'}));
@@ -23,7 +31,7 @@ test('layout questions stay legible and submit only the offered answer; other it
     else if (path.endsWith('/decision') && route.request().method() === 'POST') {
       decisions.push(route.request().postDataJSON());
       items = items.filter(item => !path.includes(`/${item.id}/`));
-      body = {status:decisions.at(-1).action === 'nothing' ? 'superseded' : 'active'};
+      body = {status:decisions.at(-1).action === 'nothing' ? 'superseded' : path.includes('/practice/') ? 'answered' : 'active'};
     } else if (path.endsWith('/done')) {
       items = items.filter(item => !path.includes(`/${item.id}/`));
       body = {status:'done'};
@@ -48,9 +56,12 @@ test('layout questions stay legible and submit only the offered answer; other it
   await expect(page.getByRole('button',{name:'Day first',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Do nothing',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('Left for manual handling');
+  // A practice card is answered with the labels the server gave it.
+  await page.getByRole('button',{name:'In the narration',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('Confirmed; waiting work continues');
   await page.getByRole('button',{name:'Mark as Done',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('Marked done');
-  expect(decisions).toEqual([{action:'dmy'},{action:'nothing'}]);
+  expect(decisions).toEqual([{action:'dmy'},{action:'nothing'},{action:'NARRATION'}]);
   await expect(page.getByText('No items',{exact:true})).toBeVisible();
   expect(errors).toEqual([]);
 });

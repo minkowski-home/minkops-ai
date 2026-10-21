@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from psycopg.types.json import Jsonb
 
 from minkops_platform import attention
+from minkops_platform.errors import ServiceError
 
 from . import memory, mirror
 from .voucher_types import base_types
@@ -52,8 +53,26 @@ def _under(parent, wanted, groups):
     return False
 
 
-def _question(prompt, *options):
-    return {"prompt": prompt, "options": [{"value": value, "label": label} for value, label in options]}
+# Each question a probe may ask: its prompt, and each answer's label and the practice it records.
+QUESTIONS = {
+    "receipt_notes": ("Does this company record goods received as Receipt Notes in Tally before the purchase?", (
+        ("yes", "Yes, Receipt Notes", {"in_use": True}), ("no", "No, purchases only", {"in_use": False}))),
+    "receipt_register": (
+        "Bills carry a receipt-register (DMR) stamp. Where does this company record that number in Tally?", (
+            ("narration", "In the purchase narration", {"recorded_in": "narration"}),
+            ("none", "It is not recorded in Tally", {"recorded_in": None}))),
+    "invoice_number_field": ("Where does this company type the supplier's invoice number on purchase vouchers?", (
+        ("REFERENCE", "In Supplier Invoice No. (reference)", {"fields": ["REFERENCE"]}),
+        ("NARRATION", "In the narration", {"fields": ["NARRATION"]}))),
+    "bank_payments": ("How does this company book payments made from the bank?", (
+        ("party_ledgers", "To each payee's own ledger", {"style": "party_ledgers"}),
+        ("one_ledger_cost_centres", "To one ledger, split by cost centre", {"style": "one_ledger_cost_centres"}))),
+}
+
+
+def _question(probe):
+    prompt, options = QUESTIONS[probe]
+    return {"prompt": prompt, "options": [{"value": value, "label": label} for value, label, _ in options]}
 
 
 def receipt_notes(families, purchases, **_):
@@ -62,9 +81,7 @@ def receipt_notes(families, purchases, **_):
         return Finding("receipt_notes", {"in_use": True}, {"receipt_notes": notes})
     if len(purchases) >= ENOUGH:
         return Finding("receipt_notes", {"in_use": False}, {"receipt_notes": 0, "purchases": len(purchases)})
-    return Finding("receipt_notes", None, {"purchases": len(purchases)}, _question(
-        "Does this company record goods received as Receipt Notes in Tally before the purchase?",
-        ("yes", "Yes, Receipt Notes"), ("no", "No, purchases only")))
+    return Finding("receipt_notes", None, {"purchases": len(purchases)}, _question("receipt_notes"))
 
 
 def receipt_register(purchases, **_):
@@ -75,9 +92,7 @@ def receipt_register(purchases, **_):
         return Finding("receipt_register", {"recorded_in": "narration"}, evidence)
     if len(purchases) >= ENOUGH and share <= 0.05:
         return Finding("receipt_register", {"recorded_in": None}, evidence)
-    return Finding("receipt_register", None, evidence, _question(
-        "Bills carry a receipt-register (DMR) stamp. Where does this company record that number in Tally?",
-        ("narration", "In the purchase narration"), ("none", "It is not recorded in Tally")))
+    return Finding("receipt_register", None, evidence, _question("receipt_register"))
 
 
 def invoice_number_field(purchases, **_):
@@ -88,9 +103,7 @@ def invoice_number_field(purchases, **_):
         return Finding("invoice_number_field", {"fields": ["REFERENCE"]}, evidence)
     if len(purchases) >= ENOUGH and narrated / len(purchases) >= 0.8:
         return Finding("invoice_number_field", {"fields": ["NARRATION"]}, evidence)
-    return Finding("invoice_number_field", None, evidence, _question(
-        "Where does this company type the supplier's invoice number on purchase vouchers?",
-        ("REFERENCE", "In Supplier Invoice No. (reference)"), ("NARRATION", "In the narration")))
+    return Finding("invoice_number_field", None, evidence, _question("invoice_number_field"))
 
 
 def bank_payments(payments, ledgers, groups, **_):
@@ -116,10 +129,7 @@ def bank_payments(payments, ledgers, groups, **_):
         ledger = next(row for row in ledgers if row["name"] == top[0][0])
         return Finding("bank_payments", {"style": "one_ledger_cost_centres", "ledger_guid": ledger["guid"],
                                          "ledger": ledger["name"]}, evidence, guids=(ledger["guid"],))
-    return Finding("bank_payments", None, evidence, _question(
-        "How does this company book payments made from the bank?",
-        ("party_ledgers", "To each payee's own ledger"),
-        ("one_ledger_cost_centres", "To one ledger, split by cost centre")))
+    return Finding("bank_payments", None, evidence, _question("bank_payments"))
 
 
 def billwise(ledgers, groups, purchases, **_):
@@ -182,3 +192,49 @@ def ask(connection, company, job, found):
                                                      "prompt": question["prompt"], "options": question["options"]})
     connection.execute("UPDATE practice_questions SET attention_item_id=%s WHERE id=%s", (item["id"], question["id"]))
     return question
+
+
+def settled(connection, company, probe):
+    """What this company's books, or a person's answer, settled for a probe; None while it is open.
+
+    A year-split sibling's practice holds for the company as a whole.
+    """
+    parts = [row["id"] for row in connection.execute(
+        "SELECT id FROM companies WHERE tenant_id=%s AND client_id=%s AND guid=%s",
+        (company["tenant_id"], company["client_id"], company["guid"]))]
+    rows = memory.entries(connection, company["tenant_id"], company["client_id"], company_ids=parts,
+                          kinds=["practice"], subjects=[probe], statuses=("confirmed",))
+    own = [row for row in rows if row["company_id"] == company["id"]]
+    return (own or rows or [{"value": None}])[0]["value"]
+
+
+def question(target):
+    """The card a person answers: its prompt and the offered answers."""
+    return {"prompt": target["prompt"],
+            "options": [{"action": option["value"], "label": option["label"]} for option in target["options"]]}
+
+
+def decide(connection, tenant, user, item, action):
+    """Answer a practice card: the answer becomes the company's confirmed practice, and the bills that waited on
+    it are checked again."""
+    question_row = connection.execute("SELECT * FROM practice_questions WHERE tenant_id=%s AND id=%s FOR UPDATE",
+                                      (tenant["id"], item["target"]["question_id"])).fetchone()
+    if question_row is None or question_row["status"] != "open":
+        raise ServiceError("conflict", "This question is no longer open.")
+    answers = {value: (label, entry) for value, label, entry in QUESTIONS.get(question_row["probe"], ("", ()))[1]}
+    if action not in answers:
+        raise ServiceError("invalid", "Choose one of the offered answers.")
+    label, entry = answers[action]
+    memory.record(connection, tenant_id=tenant["id"], client_id=question_row["client_id"],
+                  company_id=question_row["company_id"], kind="practice", subject=question_row["probe"], value=entry,
+                  evidence={"kind": "answer", "question": str(question_row["id"]), "answer": action},
+                  status="confirmed", actor_id=user["id"], overrule_answers=True)
+    connection.execute("UPDATE practice_questions SET status='answered',answer=%s,answered_by=%s,answered_at=now() "
+                       "WHERE id=%s", (Jsonb({"value": action}), user["id"], question_row["id"]))
+    attention.audit(connection, item, user["id"], "answered", f"Answered: {label}.")
+    connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
+                       (user["id"], item["id"]))
+    # Bills hold only while their company's practice is open; imported here, as bill entry reads this module.
+    from .bill_entry import practice_settled
+    practice_settled(connection, tenant["id"], question_row["company_id"], question_row["probe"])
+    return {"status": "answered"}
