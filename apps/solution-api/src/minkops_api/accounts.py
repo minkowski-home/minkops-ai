@@ -21,7 +21,10 @@ def _call(action, *args, **kwargs):
         return action(*args, **kwargs)
     except ServiceError as error:
         status = {"invalid": 422, "not_found": 404, "forbidden": 403, "conflict": 409}[error.kind]
-        raise HTTPException(status, str(error)) from error
+        # Structured context (such as the receipt that won a conflict) travels
+        # with the message so the client can show the authoritative outcome.
+        detail = {"message": str(error), **error.payload} if error.payload else str(error)
+        raise HTTPException(status, detail) from error
 
 
 @router.get("/sources")

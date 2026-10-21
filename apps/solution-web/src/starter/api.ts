@@ -98,7 +98,11 @@ export interface Workspace {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  /** Structured context from the server, such as the receipt that won a conflict. */
+  payload: Record<string, unknown> | null;
+  constructor(status: number, message: string, payload: Record<string, unknown> | null = null) {
+    super(message); this.status = status; this.payload = payload;
+  }
 }
 
 export async function api<T>(path: string, options: RequestInit = {}, csrf?: string): Promise<T> {
@@ -108,8 +112,13 @@ export async function api<T>(path: string, options: RequestInit = {}, csrf?: str
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const body = await response.json().catch(() => null) as (T & { detail?: string }) | null;
   if (!response.ok) {
-    const detail = body?.detail;
-    throw new ApiError(response.status, typeof detail === "string" ? detail : `Request failed (${response.status}).`);
+    const detail = body?.detail as unknown;
+    if (typeof detail === "string") throw new ApiError(response.status, detail);
+    if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+      const { message, ...payload } = detail as { message: string } & Record<string, unknown>;
+      throw new ApiError(response.status, message, payload);
+    }
+    throw new ApiError(response.status, `Request failed (${response.status}).`);
   }
   return body as T;
 }

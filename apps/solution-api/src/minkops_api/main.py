@@ -11,8 +11,10 @@ from starlette.background import BackgroundTasks
 from minkops_api.accounts import router as accounts_router
 from minkops_api.attention import router as attention_router
 from minkops_api.auth import router as core_router
+from minkops_api.clients import router as clients_router
 from minkops_api.desktop import router as desktop_router
 from minkops_api.discovery import router as discovery_router
+from minkops_api.runs import router as runs_router
 from minkops_api.workspace import router as workspace_router
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -24,6 +26,8 @@ def wakes_worker(method, path, status):
     """Only transitions that can release hosted work need a dispatch attempt."""
     return method == 'POST' and status < 400 and (
         path.endswith('/accounts/runs')
+        # Launches, decisions and company authorisation can queue run items.
+        or (path.startswith('/api/tenants/') and ('/runs' in path or '/records/' in path or '/companies/' in path))
         or (path.startswith('/api/desktop/worker/jobs/') and path.endswith('/finish'))
         or ('/attention/' in path and path.endswith('/profile'))
         or ('/attention/bills/' in path and not path.endswith('/bulk-preview'))
@@ -56,6 +60,8 @@ app.include_router(accounts_router)
 app.include_router(desktop_router)
 app.include_router(discovery_router)
 app.include_router(attention_router)
+app.include_router(clients_router)
+app.include_router(runs_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
