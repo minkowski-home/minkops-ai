@@ -1,0 +1,17 @@
+# Store and check out text with LF everywhere. Migration checksums
+# (db/migrate.py) and the archived-migration hashes in
+# db/tests/test_branch_upgrade.py are taken over exact bytes, so a CRLF
+# checkout on Windows would make an unchanged migration look edited.
+* text=auto eol=lf
+
+# Binary fixtures and assets are never normalized.
+*.pdf binary
+*.png binary
+*.PNG binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.xlsx binary
+*.woff binary
+*.woff2 binary
