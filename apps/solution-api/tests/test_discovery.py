@@ -548,6 +548,24 @@ class DiscoveryTests(unittest.TestCase):
         second = self.client.get(path).json()
         self.assertEqual(second['catalog']['sources'][0]['snapshot']['companies'][0]['company'], 'Renamed')
 
+    def test_confirmation_and_launch_retries_return_summaries_without_native_records(self):
+        run, body = self.start(ai_context=False)
+        self.collect(run)
+        for response in (
+            self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={}),
+            self.client.post(self.discovery + f"/runs/{run['id']}/confirm", headers=self.csrf, json={}),
+            self.client.post(self.discovery + "/runs", headers=self.csrf, json=body),
+        ):
+            self.assertLess(response.status_code, 300, response.text)
+            self.assertTrue(response.json()['ready'])
+            company = response.json()['catalog']['sources'][0]['snapshot']['companies'][0]
+            self.assertNotIn('records', company['masters'])
+            self.assertNotIn('records', company['vouchers'])
+        download = self.client.get(self.discovery + f"/runs/{run['id']}/catalog.json").json()
+        company = download['sources'][0]['snapshot']['companies'][0]
+        self.assertIn('records', company['masters'])
+        self.assertIn('records', company['vouchers'])
+
     def test_confirmation_and_unchanged_refresh_reuse_review_with_idempotence(self):
         run, body = self.start()
         self.assertEqual(

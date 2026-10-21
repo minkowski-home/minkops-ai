@@ -268,7 +268,7 @@ def launch(connection, tenant, user, body):
         ).fetchone(),
     )
     if previous:
-        return detail(connection, previous)
+        return detail(connection, previous, include_records=False)
     device = desktop.owned_device(connection, tenant["id"], user["id"], body["device_id"])
     if config["tally"]:
         desktop.require_companion(device)
@@ -332,7 +332,7 @@ def launch(connection, tenant, user, body):
         f"Waiting for {device['name']}. Keep Minkops running on that PC.",
         0,
     )
-    return detail(connection, row)
+    return detail(connection, row, include_records=False)
 
 
 def plan(connection, device, job):
@@ -839,7 +839,9 @@ def confirm(connection, tenant, user, run_id, body):
     require_active(connection, tenant["id"], row["task_id"])
     if row["actor_id"] != user["id"]:
         raise ServiceError("forbidden", "Only the operator who ran discovery can confirm it.")
-    current = detail(connection, row)
+    # Commands share the small display contract used by polling. Native records
+    # stay in the stored catalog for downstream workflows and explicit export.
+    current = detail(connection, row, include_records=False)
     if current["state"] == "completed":
         return current
     if current["state"] != "review" or not current["catalog"] or current["catalog"]["partial"]:
@@ -893,7 +895,7 @@ def confirm(connection, tenant, user, run_id, body):
         "Source catalog confirmed and available for your workflows.",
         100,
     )
-    return detail(connection, updated)
+    return detail(connection, updated, include_records=False)
 
 
 def _close_failed_analysis(connection, row, user):
