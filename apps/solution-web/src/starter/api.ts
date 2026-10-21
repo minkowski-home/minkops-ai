@@ -66,6 +66,17 @@ export interface Task {
   summary: string;
   created_at: string;
   updated_at: string;
+  stage?: string;
+  execution?: RunExecution;
+}
+
+export interface RunExecution {
+  stage: string;
+  last_activity_at?: string | null;
+  ready?: number;
+  total?: number;
+  active?: number;
+  queued?: number;
 }
 
 export interface TaskEvent {
@@ -85,6 +96,11 @@ export interface Workspace {
   tasks: Task[];
 }
 
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
+}
+
 export async function api<T>(path: string, options: RequestInit = {}, csrf?: string): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
@@ -93,7 +109,7 @@ export async function api<T>(path: string, options: RequestInit = {}, csrf?: str
   const body = await response.json().catch(() => null) as (T & { detail?: string }) | null;
   if (!response.ok) {
     const detail = body?.detail;
-    throw new Error(typeof detail === "string" ? detail : `Request failed (${response.status}).`);
+    throw new ApiError(response.status, typeof detail === "string" ? detail : `Request failed (${response.status}).`);
   }
   return body as T;
 }

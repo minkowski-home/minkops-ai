@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
+import { useRead } from "../useRead";
+import { reads } from "../readCache";
 
 interface Item {
   id: string;
@@ -24,38 +26,28 @@ interface Item {
 /** Shared list across workflows. Detailed diagnostics stay in the audit store. */
 export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: string }) {
   const { user } = useAuth();
-  const [items, setItems] = useState<Item[]>([]),
-    [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState("pending");
   const [group, setGroup] = useState<"workflow" | "employee" | "status">("workflow");
   const [sort, setSort] = useState("newest"),
     [offset, setOffset] = useState(0);
-  const [busy, setBusy] = useState(false),
-    [notice, setNotice] = useState("");
+  const [pending, setPending] = useState<Set<string>>(new Set());
   const base = `/api/tenants/${tenant}/attention`;
   const query = `?status=${status}&offset=${offset}&group=${group}&sort=${sort}`;
-  const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
+  const scope = `${user?.id ?? ""}:${tenant}`;
+  const { data: items = [], error: loadError, loading, refresh, setData: setItems } = useRead<Item[]>(scope, base + query, { interval: 5000 });
+  const { data: notice = "", setData: setNotice } = useRead<string>(scope, base + "#notice", { enabled: false });
+  const busy = pending.size > 0;
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    setLoading(true);
-    const poll = async () => {
-      try {
-        const value = await api<Item[]>(base + query);
-        if (active) { setItems(value); setLoadError(""); }
-      } catch {
-        if (active) setLoadError("Could not refresh attention items. Retrying automatically.");
-      }
-      if (active) { setLoading(false); timer = setTimeout(() => void poll(), 5000); }
-    };
-    void poll();
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [base, query, attempt]);
-  async function action(path: string, body?: Record<string, string>) {
+    const id = window.location.hash.slice(1);
+    if (id) document.getElementById(id)?.scrollIntoView({ block: "center" });
+  }, [items]);
+  const actionKey = (path: string, body?: Record<string, string>) => path + (body?.action ?? "");
+  const itemBusy = (id: string) => [...pending].some(key => key.startsWith(`/${id}/`));
+  async function action(path: string, body?: Record<string, string>, itemId?: string) {
     if (!user) return;
-    setBusy(true);
+    const key = actionKey(path, body);
+    if (pending.has(key)) return;
+    setPending(current => new Set(current).add(key));
     setNotice("");
     try {
       const result = await api<{ queued?: number; status?: string }>(
@@ -69,11 +61,25 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
           : result.status === "active" ? "Confirmed; waiting work continues"
           : result.status ? "Left for manual handling" : "Marked done"
       );
-      setItems(await api<Item[]>(base + query));
-    } catch {
-      setNotice("Action unavailable");
+      if (itemId && !path.endsWith("/refresh")) {
+        setItems(current => status === "pending" ? (current ?? []).filter(item => item.id !== itemId)
+          : (current ?? []).map(item => item.id === itemId ? { ...item, status: "done" } : item));
+      }
+      // A receipt is already authoritative. Refresh failures retain that result;
+      // invalidation also fences polls started before the committed decision.
+      reads.invalidate(scope, resource => !resource.endsWith("#notice"));
+    } catch (caught) {
+      let receipt: { action: string; status: string } | null = null;
+      if (itemId && path.endsWith("/profile")) {
+        try { receipt = await api(`${base}/${itemId}/decision`); } catch { /* An unreadable receipt remains uncertain. */ }
+      }
+      setNotice(receipt && receipt.action === body?.action
+        ? receipt.status === "active" ? "Confirmed; waiting work continues" : "Decision recorded; left for manual handling"
+        : `${caught instanceof Error ? caught.message : "Could not confirm this action."} The outcome is not yet confirmed. Refresh the current item before trying again.`);
+      if (receipt && receipt.action === body?.action && itemId && status === "pending") setItems(current => (current ?? []).filter(item => item.id !== itemId));
+      reads.invalidate(scope, resource => !resource.endsWith("#notice"));
     } finally {
-      setBusy(false);
+      setPending(current => { const next = new Set(current); next.delete(key); return next; });
     }
   }
   const ordered = [...items].sort((a, b) =>
@@ -86,14 +92,14 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
     <section className="route-screen">
       <h2>Attention items</h2>
       {loading && <LoadingIndicator>Loading attention items…</LoadingIndicator>}
-      {loadError && <RetryMessage onRetry={() => setAttempt(value => value + 1)}>{loadError}</RetryMessage>}
+      {loadError && <RetryMessage onRetry={() => void refresh()}>Could not refresh attention items. Showing the last received results; retrying automatically.</RetryMessage>}
       <div className="accounts-toolbar">
         <button
           className="button button-ghost"
           disabled={busy}
           onClick={() => void action("/refresh")}
         >
-          {busy && <Spinner />}Refresh pending items
+          {pending.has("/refresh") && <Spinner />}{pending.has("/refresh") ? "Refreshing…" : "Refresh pending items"}
         </button>
         <label className="config-field">
           Status
@@ -149,7 +155,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
           {ordered
             .filter((i) => (i[group] || "Other") === g)
             .map((i) => (
-              <article className="accounts-bill" key={i.id}>
+              <article className="accounts-bill" key={i.id} id={`attention-${i.id}`}>
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
                 <p>{i.reason || "This item needs attention in the original system."}</p>
@@ -171,34 +177,38 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                 {i.status === "pending" && i.layout ? (
                   <div className="accounts-toolbar">
                     {i.layout.actions.map((answer) => (
-                      <button key={answer} className={answer === "nothing" ? "button button-ghost" : "button"} disabled={busy}
-                        onClick={() => void action(`/${i.id}/profile`, { action: answer })}>
-                        {{ dmy: "Day first", mdy: "Month first", confirm: "Confirm", nothing: "Do nothing" }[answer] ?? answer}
+                      <button key={answer} className={answer === "nothing" ? "button button-ghost" : "button"} disabled={itemBusy(i.id)}
+                        onClick={() => void action(`/${i.id}/profile`, { action: answer }, i.id)}>
+                        {pending.has(actionKey(`/${i.id}/profile`, { action: answer })) && <Spinner />}
+                        {pending.has(actionKey(`/${i.id}/profile`, { action: answer })) ? "Confirming…" : ({ dmy: "Day first", mdy: "Month first", confirm: "Confirm", nothing: "Do nothing" }[answer] ?? answer)}
                       </button>
                     ))}
                   </div>
                 ) : i.status === "pending" && i.profile ? (
                   <div className="accounts-toolbar">
-                    <button className="button" disabled={busy}
-                      onClick={() => void action(`/${i.id}/profile`, { action: "confirm" })}>Confirm</button>
-                    <button className="button button-ghost" disabled={busy}
-                      onClick={() => void action(`/${i.id}/profile`, { action: "nothing" })}>Do nothing</button>
+                    <button className="button" disabled={itemBusy(i.id)}
+                      onClick={() => void action(`/${i.id}/profile`, { action: "confirm" }, i.id)}>
+                      {pending.has(actionKey(`/${i.id}/profile`, { action: "confirm" })) && <Spinner />}
+                      {pending.has(actionKey(`/${i.id}/profile`, { action: "confirm" })) ? "Confirming…" : "Confirm"}</button>
+                    <button className="button button-ghost" disabled={itemBusy(i.id)}
+                      onClick={() => void action(`/${i.id}/profile`, { action: "nothing" }, i.id)}>
+                      {pending.has(actionKey(`/${i.id}/profile`, { action: "nothing" })) ? "Applying…" : "Do nothing"}</button>
                   </div>
                 ) : i.status === "pending" ? (
                   <div className="accounts-toolbar">
                     <button
                       className="button button-ghost"
-                      disabled={busy}
-                      onClick={() => void action(`/${i.id}/done`)}
+                      disabled={itemBusy(i.id)}
+                      onClick={() => void action(`/${i.id}/done`, undefined, i.id)}
                     >
-                      Mark as Done
+                      {pending.has(`/${i.id}/done`) && <Spinner />}{pending.has(`/${i.id}/done`) ? "Marking done…" : "Mark as Done"}
                     </button>
                     <button
                       className="button button-ghost"
-                      disabled={busy}
-                      onClick={() => void action(`/${i.id}/refresh`)}
+                      disabled={itemBusy(i.id)}
+                      onClick={() => void action(`/${i.id}/refresh`, undefined, i.id)}
                     >
-                      Refresh
+                      {pending.has(`/${i.id}/refresh`) && <Spinner />}{pending.has(`/${i.id}/refresh`) ? "Refreshing…" : "Refresh"}
                     </button>
                   </div>
                 ) : (

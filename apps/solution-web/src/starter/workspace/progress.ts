@@ -1,4 +1,4 @@
-type Observation = { status: string; progress: number; summary?: string; events: { event_type: string; summary?: string }[] };
+type Observation = { status: string; progress: number; summary?: string; stage?: string; execution?: import("../api").RunExecution; events: { event_type: string; summary?: string }[] };
 
 export type ProgressState = "upcoming" | "done" | "active" | "waiting" | "attention" | "failed";
 export interface TaskProgressView {
@@ -31,7 +31,7 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
       : mode === "simple"
         ? ["Get ready", "Work", "Finished"]
         : ["Get ready", "Read bills", "Review", "Save", "Finished"];
-  const event = task.events
+  const event = task.execution?.stage ?? task.stage ?? task.events
     .filter((e) => !["failed", "cancelled"].includes(e.event_type) && !e.event_type.startsWith("control."))
     .at(-1)?.event_type;
   const observed: Record<string, number> = local
@@ -41,6 +41,12 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
         received: 0,
         executing: 1,
         extracted: 1,
+        routing: 1,
+        learning_pattern: 1,
+        learning_layout: 1,
+        awaiting_input: 1,
+        reading: 1,
+        recovering: 1,
         review: 2,
         approved: 2,
         writing: 3,
@@ -75,7 +81,9 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
       ? "Needs attention"
       : finished
         ? "Finished and checked"
-        : (localLabels[event ?? ""] ??
+        : (event === "awaiting_input" ? "Waiting for your confirmation" : event === "routing" ? "Choosing companies"
+          : event === "learning_pattern" ? "Learning the posting pattern" : event === "learning_layout" ? "Learning the statement layout" : event === "recovering" ? "Recovering processing"
+          : localLabels[event ?? ""] ??
           (task.status === "attention"
             ? "Ready for your review"
             : task.status === "handoff"
@@ -94,13 +102,14 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
   const controlled = ["paused", "stopped"].includes(task.status);
   const stopSummary = task.events.filter(e => e.event_type === "control.stop").at(-1)?.summary;
   const waiting = current === 0 || event === "local_waiting";
-  const needsInput = task.status === "attention" || event === "local_failed";
-  const running = !finished && !controlled && task.status !== "failed" && !needsInput;
+  const needsInput = task.status === "attention" || event === "local_failed" || event === "awaiting_input";
+  const running = !finished && !controlled && task.status !== "failed" && !needsInput && event !== "recovering";
   const states: ProgressState[] = stages.map((_, index) => index < current || finished ? "done" : index > current ? "upcoming"
     : task.status === "failed" || task.status === "stopped" ? "failed" : controlled || waiting ? "waiting" : needsInput ? "attention" : "active");
   return { stages, current, finished, states, running, label: controlled ? task.status === "paused" ? "Paused" : "Stopped" : label,
     activity: controlled ? task.status === "paused" ? "Resume to continue. An operation already underway may finish." : stopSummary || "Remaining work stopped. Completed saves remain." : task.summary,
-    percent: finished ? 100 : null, meterLabel: finished ? "Workflow complete" : controlled ? "Run paused or stopped" : label };
+    percent: finished ? 100 : null, meterLabel: finished ? "Workflow complete" : controlled ? "Run paused or stopped" : label,
+    countLabel: task.execution?.total ? `${task.execution.ready ?? 0} of ${task.execution.total} read` : undefined };
 }
 
 /** Wall-clock run time from recorded timestamps; never a guess for missing or future starts. */

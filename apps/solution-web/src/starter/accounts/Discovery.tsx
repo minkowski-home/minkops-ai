@@ -11,6 +11,8 @@ import { TaskProgress } from "../workspace/TaskProgress";
 import { Spinner } from "../components/Feedback";
 import { canConfirm, discoveryProgress, scopeChangeLines, sourceModes, type Config, type DiscoveryRun, type SourceMode } from "./discoveryView";
 import { DiscoveryResults } from "./DiscoveryResults";
+import { useRead } from "../useRead";
+import { reads } from "../readCache";
 
 import { DestinationPCPicker } from '../desktop/DestinationPC';
 import { destinationAvailable, destinationDevices, initialDestination, type DestinationDevice as Device } from '../desktop/destinationPCs';
@@ -161,40 +163,26 @@ export function DiscoveryLaunch({ tenant, routeSlug, workflow, onConfigChange, s
 
 export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { tenant: string; taskId: string; controlState?: string }) {
   const { user } = useAuth();
-  const [run, setRun] = useState<DiscoveryRun | null>(null);
   const [edited, setEdited] = useState<Catalog | null>(null);
   const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState<"confirm" | "export" | null>(null);
   const [filter, setFilter] = useState("");
-  const [attempt, setAttempt] = useState(0);
   const base = `/api/tenants/${tenant}/discovery`;
+  const scope = `${user?.id ?? ""}:${tenant}`;
+  const path = base + `/tasks/${taskId}`;
+  const { data: run, error: loadError, refresh, setData: setRun } = useRead<DiscoveryRun | null>(scope, path, {
+    interval: next => next === null || (next && ["completed", "failed", "stopped"].includes(next.state)) ? 0 : next ? 2000 : 5000,
+  });
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    let failures = 0;
-    const poll = async () => {
-      try {
-        const next = await api<DiscoveryRun | null>(base + `/tasks/${taskId}`);
-        if (!active) return;
-        if (!next) throw new Error("This discovery run could not be found.");
-        failures = 0; setLoadError(""); setRun(current => current?.ready ? current : next);
-        if (next.mapping_run?.result) setEdited(current => current ?? structuredClone(next.mapping_run!.result as Catalog));
-        if (!["completed", "failed", "stopped"].includes(next.state)) timer = setTimeout(() => void poll(), 2000);
-      } catch (e) {
-        if (!active) return;
-        setLoadError(e instanceof Error ? e.message : "Could not load discovery.");
-        // Preserve the last results and resume after transient network failures.
-        timer = setTimeout(() => void poll(), Math.min(15000, 2000 * 2 ** Math.min(failures++, 3)));
-      }
-    };
-    void poll();
-    return () => { active = false; clearTimeout(timer); };
-  }, [base, taskId, attempt, controlState]);
+    if (run?.mapping_run?.result) setEdited(current => current ?? structuredClone(run.mapping_run!.result as Catalog));
+  }, [run]);
   async function confirm() {
     if (!user || !run) return;
     setBusy("confirm"); setError("");
-    try { setRun(await api<DiscoveryRun>(base + `/runs/${run.id}/confirm`, { method: "POST", body: JSON.stringify({ excel_mappings: edited }) }, user.csrf_token)); }
+    try {
+      setRun(await api<DiscoveryRun>(base + `/runs/${run.id}/confirm`, { method: "POST", body: JSON.stringify({ excel_mappings: edited }) }, user.csrf_token));
+      reads.invalidate(scope, resource => resource !== path && !resource.endsWith("#notice"));
+    }
     catch (e) { setError(e instanceof Error ? e.message : "Could not confirm sources."); }
     finally { setBusy(null); }
   }
@@ -205,9 +193,9 @@ export function DiscoveryReview({ tenant, taskId, controlState = "active" }: { t
     catch (e) { setError(e instanceof Error ? e.message : "Could not save source catalog."); }
     finally { setBusy(null); }
   }
-  const retry = <button className="button button-ghost" onClick={() => setAttempt(value => value + 1)}>Retry now</button>;
+  const retry = <button className="button button-ghost" onClick={() => void refresh()}>Retry now</button>;
   if (!run) return <section className="accounts-panel discovery-panel">
-    {loadError ? <><p role="alert">{loadError}</p>{retry}</> : <p className="discovery-loading" role="status"><Spinner /> Loading discovery progress…</p>}
+    {loadError || run === null ? <><p role="alert">{loadError || "This discovery run could not be found."}</p>{retry}</> : <p className="discovery-loading" role="status"><Spinner /> Loading discovery progress…</p>}
   </section>;
   const pending = ["queued", "executing"].includes(run.state);
   return <>

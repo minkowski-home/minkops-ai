@@ -135,5 +135,5 @@ export function WorkflowQuickRun(props: LaunchProps) {
 export function WorkflowReview(props: { tenant: string; taskId: string; workflow?: Workflow; controlState?: string }) {
   return props.workflow && presentationFor(props.workflow) === "proposal"
     ? <ProposalReview tenant={props.tenant} taskId={props.taskId} controlState={props.controlState} />
-    : <AccountsReview tenant={props.tenant} taskId={props.taskId} controlState={props.controlState} />;
+    : <AccountsReview tenant={props.tenant} taskId={props.taskId} controlState={props.controlState} presentation={props.workflow ? presentationFor(props.workflow) : null} />;
 }

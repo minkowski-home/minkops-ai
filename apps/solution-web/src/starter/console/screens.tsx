@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
@@ -15,6 +15,9 @@ import { TaskProgress } from "../workspace/TaskProgress";
 import { RunControls } from "../workspace/RunControls";
 import { sourceModes } from "../accounts/discoveryView";
 import { LoadingIndicator, Spinner } from "../components/Feedback";
+import { useRead } from "../useRead";
+import { reads } from "../readCache";
+import type { Run } from "../accounts/types";
 
 const statusText: Record<string, string> = {
   active: "Active", inactive: "Inactive", paused: "Paused", planned: "Planned",
@@ -275,56 +278,39 @@ export function TaskDetail({ workspace, routeSlug, id }: {
   workspace: Workspace; routeSlug: string; id: string;
 }) {
   const snapshot = useMemo(() => taskSnapshot(workspace.tasks, id), [workspace.tasks, id]);
-  const [detail, setDetail] = useState<TaskDetails | null>(() => snapshot);
-  const [error, setError] = useState("");
-  const [attempt, setAttempt] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const controlRevision = useRef(0);
-  useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    setDetail((current) => current?.id === id ? current : snapshot);
-    setError("");
-    setLoading(true);
-    const poll = async () => {
-      const revision = controlRevision.current;
-      try {
-        const result = await api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`);
-        if (!active || revision !== controlRevision.current) return;
-        setDetail(result); setError("");
-        if (!["completed", "failed", "stopped"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
-      } catch (caught) {
-        if (active) {
-          setError(caught instanceof Error ? caught.message : "Could not load task.");
-          timer = setTimeout(() => void poll(), 5000);
-        }
-      } finally { if (active) setLoading(false); }
-    };
-    void poll();
-    return () => { active = false; clearTimeout(timer); };
-  }, [workspace.tenant.slug, id, snapshot, attempt]);
+  const { user } = useAuth();
+  const scope = `${user?.id ?? ""}:${workspace.tenant.slug}`;
+  const path = `/api/tenants/${workspace.tenant.slug}/tasks/${id}`;
+  const { data: detail, error, loading, refresh, setData } = useRead<TaskDetails>(scope, path, {
+    initial: snapshot ?? undefined, interval: result => result && ["completed", "failed", "stopped"].includes(result.status) ? 0 : 2000,
+  });
+  const workflow = workspace.workflows.find((w) => w.id === detail?.workflow_id);
+  const presentation = workflow ? presentationFor(workflow) : null;
+  // Subscribe to the same read used by the result panel, without a second poll.
+  // This keeps the main checkpoint and the displayed blockers consistent.
+  const observation = useRead<Run | null>(scope, `/api/tenants/${workspace.tenant.slug}/accounts/tasks/${id}/run`, {
+    enabled: presentation === "accounts-bill" || presentation === "accounts-statement",
+  });
   if (error && !detail) return <section className="route-screen">
     <h2>Task unavailable</h2><p role="alert">{error}</p>
-    <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
+    <button className="button button-ghost" onClick={() => void refresh()}>Retry</button>
   </section>;
   if (!detail) return <section className="route-screen"><LoadingIndicator>Loading task…</LoadingIndicator></section>;
-  const workflow = workspace.workflows.find((w) => w.id === detail.workflow_id);
-  const presentation = workflow ? presentationFor(workflow) : null;
   const mode: ProgressMode = presentation === "accounts-bill" ? "bill-entry" : presentation === "accounts-discovery" ? "source-discovery"
     : !detail.workflow_id && detail.title === 'Check Tally connection' ? 'tally.probe'
       : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : detail.workflow_id ? 'proposal' : 'simple';
-  const progress = progressView(detail, mode);
+  const progress = progressView({ ...detail, execution: observation.data?.execution ?? detail.execution }, mode);
   return <section className="route-screen detail-screen task-detail">
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
     <header className="detail-heading"><div><h2>{detail.title}</h2></div>
       <Status value={detail.status} /></header>
     <RunTiming task={detail} />
-    <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { controlRevision.current++; setDetail(task); setAttempt(value => value + 1); }} />
+    <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { setData(task); reads.invalidate(scope, resource => resource !== path); }} />
     {mode === 'source-discovery' && detail.status === 'stopped' && <p role="status" className="form-message">{progress.activity}</p>}
     {mode !== 'source-discovery' && <TaskProgress view={progress} stale={Boolean(error)} />}
     <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} controlState={detail.control_state ?? 'active'} />
       {error && <p role="alert" className="form-message">Could not refresh <button
-        className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
+        className="button button-ghost" onClick={() => void refresh()}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}
   </section>;
 }

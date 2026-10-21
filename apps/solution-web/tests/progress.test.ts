@@ -2,6 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { elapsedLabel, progressView } from "../src/starter/workspace/progress.ts";
 
+test("durable stage keeps a dashboard snapshot at the same checkpoint before events load", () => {
+  const snapshot = { status: "running", progress: 0, stage: "executing", events: [] };
+  assert.equal(progressView(snapshot).current, 1);
+  assert.equal(progressView(snapshot).current, progressView({ ...snapshot, events: [{ event_type: "executing" }] }).current);
+});
+
+test("execution observations distinguish a confirmation wait from active reading", () => {
+  const view = progressView({ status: "running", progress: 0, events: [{ event_type: "executing" }],
+    execution: { stage: "awaiting_input", ready: 1, total: 3, active: 0, queued: 2 } });
+  assert.equal(view.current, 1); assert.equal(view.running, false);
+  assert.equal(view.label, "Waiting for your confirmation");
+  assert.equal(view.states[1], "attention");
+  assert.equal(view.countLabel, "1 of 3 read");
+});
+
 test("automatic stops show the recorded active-time limit and retained-progress explanation", () => {
   const summary = "Stopped after 45 minutes of active processing. Progress and completed saves are retained; an underway save may still finish.";
   const task = {status: "stopped", progress: 40, events: [

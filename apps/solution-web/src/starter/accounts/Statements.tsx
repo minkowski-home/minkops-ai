@@ -8,6 +8,7 @@ import {downloadFile} from '../desktop/bridge';
 import {chooseFolder, refreshFolder, supportsLocalFolder} from './localFiles';
 import type {Run, Source} from './types';
 import {restoreSelection,selectionKeys} from './fileSelection';
+import {Spinner} from '../components/Feedback';
 
 interface Discovery {id:string;device_id:string;ready:boolean}
 const STATEMENT_FILES=/\.(csv|xlsx)$/i;
@@ -94,6 +95,7 @@ export function StatementLaunch(props:RunSettingsProps & {routeSlug:string;desti
 interface StatementRow {source_file:string;sheet:string;row:number;branch?:string;date?:string;reference?:string;amount_cents?:number;balance_cents?:number;company?:string;bank_ledger?:string;counter_ledger?:string;interpretation?:string;status:string;code?:string;reason?:string;save_hold?:boolean}
 export function StatementReview({tenant,run,onChanged,blocked}:{tenant:string;run:Run;onChanged:(run:Run)=>void;blocked:boolean}){
   const {user}=useAuth(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [pending,setPending]=useState(''),[notice,setNotice]=useState('');
   const [visible,setVisible]=useState(100);
   const rows=(run.result as unknown as {records?:StatementRow[]}|null)?.records??[];
   const groups=[...new Set(rows.map(r=>r.branch??'Unresolved'))].map(branch=>{
@@ -102,9 +104,10 @@ export function StatementReview({tenant,run,onChanged,blocked}:{tenant:string;ru
       dates:selected.flatMap(r=>r.date?[r.date]:[]).sort(),held:selected.filter(r=>r.code).length};
   });
   const settled=rows.filter(r=>['saved','duplicate'].includes(r.status));
-  async function act(action:string){if(!user)return;setBusy(true);setError('');try{
+  async function act(action:string){if(!user)return;setBusy(true);setPending(action);setError('');setNotice('');try{
     onChanged(await api<Run>(`/api/tenants/${tenant}/accounts/runs/${run.id}/approve`,{method:'POST',body:JSON.stringify({result:{action}})},user.csrf_token));
-  }catch(e){setError(e instanceof Error?e.message:'Could not complete this action.');}finally{setBusy(false);}}
+    setNotice('Decision recorded. The current result is shown below.');
+  }catch(e){setError(`${e instanceof Error?e.message:'Could not complete this action.'} Check the current outcome before trying again.`);}finally{setBusy(false);setPending('');}}
   return <section className="accounts-panel" aria-label="Statement preview"><h3>Statement preview</h3>
     <p>{rows.length} rows · {settled.filter(r=>r.status==='saved').length} saved · {settled.filter(r=>r.status==='duplicate').length} already in Tally</p>
     {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard access to the horizontally scrolling data region. */}
@@ -113,9 +116,9 @@ export function StatementReview({tenant,run,onChanged,blocked}:{tenant:string;ru
       setBusy(true);void downloadFile(`/api/tenants/${tenant}/accounts/runs/${run.id}/statement-exceptions.csv`,`statement-exceptions-${run.id}.csv`)
         .catch(()=>setError('Could not export exceptions.')).finally(()=>setBusy(false));}}>Export CSV</button>
       {run.state==='review'&&run.actor_id===user?.id&&<>
-        {rows.some(r=>r.status==='ready')&&<button className="button button-primary" disabled={busy||blocked} onClick={()=>void act('write_ready')}>Write ready rows</button>}
-        {rows.some(r=>r.save_hold)&&<button className="button button-ghost" disabled={busy||blocked} onClick={()=>void act('retry_saves')}>Retry save checks</button>}
-        {rows.some(r=>!['saved','duplicate','rejected'].includes(r.status))&&<button className="button button-ghost" disabled={busy||blocked} onClick={()=>void act('nothing')}>Do nothing with remaining rows</button>}
+        {rows.some(r=>r.status==='ready')&&<button className="button button-primary" disabled={busy||blocked} onClick={()=>void act('write_ready')}>{pending==='write_ready'&&<Spinner/>}{pending==='write_ready'?'Preparing saves…':'Write ready rows'}</button>}
+        {rows.some(r=>r.save_hold)&&<button className="button button-ghost" disabled={busy||blocked} onClick={()=>void act('retry_saves')}>{pending==='retry_saves'&&<Spinner/>}{pending==='retry_saves'?'Queuing checks…':'Retry save checks'}</button>}
+        {rows.some(r=>!['saved','duplicate','rejected'].includes(r.status))&&<button className="button button-ghost" disabled={busy||blocked} onClick={()=>void act('nothing')}>{pending==='nothing'&&<Spinner/>}{pending==='nothing'?'Applying…':'Do nothing with remaining rows'}</button>}
       </>}
     </div>
     {settled.length>0&&<details><summary>{settled.length} verified rows</summary>{settled.slice(0,visible).map((r,i)=><p key={i}>{r.date} · {r.reference} · {money(r.amount_cents??0)} · {r.company} · {r.bank_ledger} ↔ {r.counter_ledger}</p>)}</details>}
@@ -126,6 +129,7 @@ export function StatementReview({tenant,run,onChanged,blocked}:{tenant:string;ru
       <p>{r.reason??(r.status==='ready'?'Ledger interpretation and balances checked. Ready to save.':r.status==='writing'?'Saving and verifying in Tally.':r.status==='rejected'?'Left for manual handling.':'Needs attention.')}</p></article>)}
     {rows.length>visible&&<button className="button button-ghost" onClick={()=>setVisible(old=>old+100)}>Show more rows</button>}
     {run.state==='writing'&&<p role="status">Saving and verifying one voucher at a time. Keep Minkops and Tally running on your PC.</p>}
+    {notice&&<p role="status">{notice}</p>}
     {error&&<p role="alert">{error}</p>}
   </section>;
 }

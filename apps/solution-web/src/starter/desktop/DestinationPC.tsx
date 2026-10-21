@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { companionNotice, destinationAvailable, destinationDevices, destinationPreference, initialDestination, type DestinationDevice } from './destinationPCs';
+import { useRead } from '../useRead';
 
 export interface DestinationPCState {
   deviceId: string; available: boolean; loading: boolean; error: string; name: string;
@@ -10,31 +10,17 @@ export interface DestinationPCState {
 /** Shared workflow destination selection. Persist identity, never choose a fallback for a lost PC. */
 export function useDestinationPC(tenant: string, workflowKey: string) {
   const { user } = useAuth();
-  const [devices, setDevices] = useState<DestinationDevice[]>([]);
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const preference = destinationPreference(tenant, user?.id ?? '', workflowKey);
-  const refresh = useCallback(async (active: () => boolean = () => true) => {
-    try {
-      const all = await api<DestinationDevice[]>(`/api/tenants/${tenant}/desktop/devices`);
-      if (!active()) return;
-      const owned = destinationDevices(all, user?.id ?? '');
-      let saved: string | null = null;
-      try { saved = localStorage.getItem(preference); } catch { /* Preferences are optional. */ }
-      setDevices(owned);
-      setDeviceId(current => current ?? initialDestination(owned, saved));
-      setError('');
-    } catch (e) {
-      if (active()) setError(e instanceof Error ? e.message : 'Could not load destination PCs.');
-    } finally { if (active()) setLoading(false); }
-  }, [tenant, user?.id, preference]);
+  const { data, loading, error, refresh } = useRead<DestinationDevice[]>(`${user?.id ?? ''}:${tenant}`,
+    `/api/tenants/${tenant}/desktop/devices`, { interval: 5000 });
+  const devices = useMemo(() => destinationDevices(data ?? [], user?.id ?? ''), [data, user?.id]);
   useEffect(() => {
-    let active = true;
-    void refresh(() => active);
-    const timer = setInterval(() => void refresh(() => active), 5000);
-    return () => { active = false; clearInterval(timer); };
-  }, [refresh]);
+    if (!data) return;
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(preference); } catch { /* Preferences are optional. */ }
+    setDeviceId(current => current ?? initialDestination(devices, saved));
+  }, [data, devices, preference]);
   useEffect(() => {
     if (deviceId === null) return;
     try { localStorage.setItem(preference, JSON.stringify(deviceId)); } catch { /* Running works without storage. */ }
