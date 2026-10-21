@@ -78,3 +78,13 @@ def workflow(connection, tenant_row, key="bill-entry"):
     connection.execute("INSERT INTO workflow_employees(tenant_id,workflow_id,employee_id) VALUES (%s,%s,%s) "
                        "ON CONFLICT DO NOTHING", (tenant_row["id"], row["id"], employee["id"]))
     return row
+
+
+def run(connection, tenant_row, client_row, workflow_row, actor, items, *, key=None, handler="desk.test"):
+    """A run launched through the real path, with a small fixed bundle."""
+    from minkops_platform import work
+    return work.launch(connection, tenant_id=tenant_row["id"], client_id=client_row["id"], workflow=workflow_row,
+                       handler=handler, definition_version="1.0.0",
+                       bundle={"instructions": "Read the bill.", "tools": ["propose"]}, actor_id=actor["id"],
+                       request_key=key or uuid4(), request_hash="h", config={"review_mode": "all_outputs"},
+                       title="Bill entry", items=items)

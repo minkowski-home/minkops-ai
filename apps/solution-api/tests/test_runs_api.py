@@ -4,7 +4,6 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from uuid import uuid4
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -59,10 +58,7 @@ class RunsApiTests(unittest.TestCase):
             flow = factory.workflow(db, self.tenant)
             self.runs = {}
             for client in (self.granted, self.other):
-                run = work.launch(db, tenant_id=self.tenant["id"], client_id=client["id"], workflow=flow, handler="desk.test",
-                                  definition_version="1.0.0", bundle={"instructions": "x"}, actor_id=self.admin["id"],
-                                  request_key=uuid4(), request_hash="h", config={}, title="Bill entry",
-                                  items=[work.ItemSpec("bill", {"file_id": "a"})])
+                run = factory.run(db, self.tenant, client, flow, self.admin, [work.ItemSpec("bill", {"file_id": "a"})])
                 item = db.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
                 (record,) = work.add_records(db, item, [{"kind": "bill", "source": {"file_id": "a"}, "status": "held",
                                                          "hold_codes": ["supplier_missing"]}])

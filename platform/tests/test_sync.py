@@ -272,10 +272,8 @@ def test_a_finished_sync_releases_runs_that_waited_for_it(pc):
     tally = Tally()
     authorised(pc, tally)
     flow = factory.workflow(pc["db"], pc["tenant"])
-    run = work.launch(pc["db"], tenant_id=pc["tenant"]["id"], client_id=pc["client"]["id"], workflow=flow,
-                      handler="desk.test", definition_version="1.0.0", bundle={"x": 1}, actor_id=pc["owner"]["id"],
-                      request_key=uuid4(), request_hash="h", config={}, title="Bill entry",
-                      items=[work.ItemSpec("bill", {"file_id": "a"}, waiting_on=sync.blocker(pc["device"]["id"]))])
+    run = factory.run(pc["db"], pc["tenant"], pc["client"], flow, pc["owner"],
+                      [work.ItemSpec("bill", {"file_id": "a"}, waiting_on=sync.blocker(pc["device"]["id"]))])
     Companion(pc["db"], pc["device"], start(pc)).run(tally)
     assert pc["db"].execute("SELECT state FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()["state"] == "queued"
 

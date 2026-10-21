@@ -33,12 +33,8 @@ def scope():
 
 
 def launch(connection, scope, items, *, key=None):
-    from uuid import uuid4
-    return work.launch(connection, tenant_id=scope["tenant"]["id"], client_id=scope["client"]["id"],
-                       workflow=scope["workflow"], handler="desk.test", definition_version="1.0.0",
-                       bundle={"instructions": "Read the bill.", "tools": ["propose"]},
-                       actor_id=scope["operator"]["id"], request_key=key or uuid4(), request_hash="h",
-                       config={"review_mode": "all_outputs"}, title="Bill entry", items=items)
+    import factory
+    return factory.run(connection, scope["tenant"], scope["client"], scope["workflow"], scope["operator"], items, key=key)
 
 
 def generation(connection):
