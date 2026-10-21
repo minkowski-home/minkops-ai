@@ -200,8 +200,14 @@ def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
                 ("find_ledger", {"subjects": ["000405001234"]}),
                 ("propose", {"rows": [not_a_bank, unsure]})]
 
+    rule = desk["db"].execute(
+        """INSERT INTO memory_instructions(tenant_id,client_id,employee_key,workflow_key,text)
+           VALUES (%s,%s,'accounts-desk','statement-entry','Steel advances go to the supplier.') RETURNING id""",
+        (desk["tenant"]["id"], desk["client"]["id"])).fetchone()
+    desk["db"].commit()
+
     def corrected(answers, session):
-        return [("propose", {"rows": [booked(rows_of(session)[0], company)]})]
+        return [("propose", {"rows": [{**booked(rows_of(session)[0], company), "rules": [str(rule["id"])]}]})]
 
     fake = FakeAgents(script_for=lambda m, content: Script(first, corrected) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
@@ -225,6 +231,9 @@ def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
         ("held", ["statement_interpretation"])]
     assert rows[0]["proposal"]["resolved"]["data"]["counter_ledger"] == "Acme Steel" and rows[0]["checks"] == {
         "submissions": 2}
+    # The rule the row follows is kept with the text it said then.
+    assert rows[0]["proposal"]["rules"] == [{"id": str(rule["id"]), "version": 1,
+                                             "text": "Steel advances go to the supplier."}]
     assert rows[1]["review_reasons"] == ["Bank charges or interest?"]
     assert rows[2]["review_reasons"] == ["No ledger interpretation was returned for this transaction."]
     assert work.get_run(desk["db"], desk["tenant"]["id"], run["id"])["state"] == "review"

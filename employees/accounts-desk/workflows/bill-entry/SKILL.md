@@ -17,7 +17,8 @@ the bill does not give, never a guess. When `propose` rejects a bill, read the
 reason, then propose that bill again by its number; a bill you propose again
 replaces its earlier proposal, and each bill has three attempts. When the input
 lists `decided_bills`, a person has already decided those: keep their numbers
-and propose the others.
+and propose the others. List in `rules` the IDs of the client's rules the bill
+follows, or `[]`.
 
 ## Reading the file
 
@@ -95,6 +96,12 @@ address, or an alias the printed text actually matches.
 
 Propose the voucher this client's own practice records for the document.
 
+- **What guides treatment.** In order: a legible handwritten instruction on this
+  bill; the client's `rules`; what `memory` learnt about this supplier (look it up
+  by the supplier ledger's GUID); then history. `practice` says how the company
+  keeps its books. Tally's masters and Minkops's checks bind all of them. A
+  demoted memory entry was changed in Tally since, so prefer what the books show
+  now.
 - **Treatment.** Look at how this supplier's bills and similar purchases were
   booked before (`party_history`):
   - which voucher type (`voucher_types`) records them;

@@ -36,7 +36,7 @@ from minkops_platform.run_controls import control_state, require_active, resolve
 from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
-from . import desk_tools, mirror, supplier_gst, sync, writes
+from . import desk_tools, memory, mirror, supplier_gst, sync, writes
 from .desk_tools import Desk, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
@@ -68,6 +68,10 @@ OFFERED = ("nothing", "retry", "guess", "supplier", "retry_save")
 GUESSED = "Written as a best guess; review it in Tally."
 UNPRECEDENTED = ("This supplier's bills have not been booked this way before. Review the voucher type and ledgers "
                  "before approving.")
+DEMOTED = ("Someone changed a bill booked this way in Tally after Minkops saved it. Review the voucher type and "
+           "ledgers before approving.")
+GUESSED_BOOKING = ("This supplier's bills were last booked this way as a best guess. Review the voucher type and "
+                   "ledgers before approving.")
 
 
 # --- launch ---------------------------------------------------------------------------
@@ -322,11 +326,12 @@ def _propose_one(connection, desk, record, bill):
               for changed in [_changed(checks["read"], reading)] if changed]
     company = _company(desk, bill)
     facts = _facts(record, document, company)
-    if bill["exception"]:
-        return _hold(connection, desk, record, bill, company, bill["exception"]["code"], bill["exception"]["detail"],
-                     facts=facts, checks=checks, review=review)
     locked = run["config"].get("locked_company_guid") if run["config"]["company_mode"] == "locked" else None
     try:
+        cited = desk.cite(connection, bill["rules"])
+        if bill["exception"]:
+            return _hold(connection, desk, record, bill, company, bill["exception"]["code"],
+                         bill["exception"]["detail"], facts=facts, checks=checks, review=review, rules=cited)
         if company is None:
             raise HoldReason("company_unresolved", "Choose the buyer among the client's companies with find_company, "
                                                    "or propose the exception company_unresolved.")
@@ -344,10 +349,9 @@ def _propose_one(connection, desk, record, bill):
                            company_id=company["id"] if company else None, proposal={"bill": bill},
                            checks={**checks, "code": refusal.code, "error": str(refusal)[:300]})
         return {"status": "rejected", "reason": str(refusal)}
-    if not _precedent(connection, desk, company, bound, bill):
-        review.append(UNPRECEDENTED)
+    review += [note for note in [_precedent(connection, desk, company, bound, bill)] if note]
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review, facts=facts,
-                       company_id=company["id"], checks=checks, proposal=_proposal(bill, bound))
+                       company_id=company["id"], checks=checks, proposal=_proposal(bill, bound, rules=cited))
     # Review notes are for the person approving: told of one, a session would rebook a sound bill to avoid it.
     return {"status": "accepted"}
 
@@ -357,10 +361,11 @@ def _proposal(bill, bound, **extra):
             "destination_key": bound.destination_key, **extra}
 
 
-def _hold(connection, desk, record, bill, company, code, reason, *, facts, checks, review):
+def _hold(connection, desk, record, bill, company, code, reason, *, facts, checks, review, rules=()):
     offers = _offers(connection, desk, bill, company, [code]) if company else []
     work.update_record(connection, record, status="held", hold_codes=[code], review_reasons=[reason[:300], *review],
-                       facts=facts, company_id=company["id"] if company else None, proposal={"bill": bill},
+                       facts=facts, company_id=company["id"] if company else None,
+                       proposal={"bill": bill, **({"rules": list(rules)} if rules else {})},
                        checks={**checks, "offers": offers})
     return {"status": "held", "code": code, "reason": reason}
 
@@ -380,19 +385,32 @@ def _offers(connection, desk, bill, company, codes):
 
 
 def _precedent(connection, desk, company, bound, bill):
-    """Whether the client booked this supplier's bills this way before: the same voucher type and expense ledgers,
-    without stock items.
+    """The review a booking needs, or None when the client booked this supplier's bills this way before.
 
-    A bill without one is a first: it goes to review, whatever the review mode.
+    "This way" is the same voucher type and expense ledgers, without stock items. What memory learnt comes
+    first: a booking someone changed in Tally since, or one first written as a best guess, waits for a person
+    even when history repeats it; one a person approved is a precedent. Otherwise the books' history
+    decides. A bill without a precedent is a first: it goes to review, whatever the review mode.
     """
     if bound.party not in bound.identities:
-        return False
+        return UNPRECEDENTED
     wanted = {ln["ledger"] for ln, item in zip(bound.lines[1:], bill["voucher"]["lines"], strict=True)
               if item["role"] in TAXABLE_ROLES}
-    return any(row["voucher_type"] == bound.voucher_type["NAME"] and wanted <= set(row["ledgers"])
-               and not mirror.stock_lines(row["data"])
-               for part in desk.parts[company["guid"]]
-               for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50))
+    learnt = [row["status"] for row in memory.entries(
+        connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=desk.part_ids(company),
+        kinds=["booking"], subjects=[bound.identities[bound.party]["GUID"]])
+        if row["value"]["voucher_type"] == bound.voucher_type["NAME"] and wanted <= set(row["value"]["ledgers"])]
+    if "demoted" in learnt:
+        return DEMOTED
+    if "confirmed" in learnt:
+        return None
+    if "unconfirmed" in learnt:
+        return GUESSED_BOOKING
+    booked = any(row["voucher_type"] == bound.voucher_type["NAME"] and wanted <= set(row["ledgers"])
+                 and not mirror.stock_lines(row["data"])
+                 for part in desk.parts[company["guid"]]
+                 for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50))
+    return None if booked else UNPRECEDENTED
 
 
 def check_gstin(call, arguments):
@@ -456,7 +474,9 @@ BILL_SCHEMA = schema({
     "company_guid": GUID, "company_evidence": {"type": ["string", "null"], "maxLength": 1000},
     "voucher": _nullable(VOUCHER), "supplier_details": _nullable(SUPPLIER), "evidence": EVIDENCE,
     "exception": _nullable(schema({"code": {"enum": list(EXCEPTIONS)}, "detail": TEXT}, ["code", "detail"])),
-}, ["bill", "document", "company_guid", "company_evidence", "voucher", "supplier_details", "evidence", "exception"])
+    "rules": {"type": "array", "maxItems": 10, "items": {"type": "string", "minLength": 36, "maxLength": 36}},
+}, ["bill", "document", "company_guid", "company_evidence", "voucher", "supplier_details", "evidence", "exception",
+    "rules"])
 BILL_TOOLS = {tool.name: tool for tool in (
     Tool("propose", "Propose bills of this file, numbered from 1 in the order they appear; `count` is how many bills "
          "the file holds. Each is checked against its company at once, and a rejected bill says why. Proposing a "
@@ -554,7 +574,7 @@ def detail(connection, run, record):
     supplier = {key: value for key, value in (bill.get("supplier_details") or {}).items() if key != "evidence"}
     return {**summarize(run, record), "facts": record["facts"], "preview": proposal.get("preview"),
             "evidence": bill.get("evidence"), "lines": (bill.get("voucher") or {}).get("lines"),
-            "exception": bill.get("exception"), "repeat_of": proposal.get("repeat_of"),
+            "exception": bill.get("exception"), "repeat_of": proposal.get("repeat_of"), "rules": proposal.get("rules"),
             "guess": proposal.get("guess", False), "current": record["current"],
             **({"new_supplier": {"name": (bill.get("document") or {}).get("supplier_name"), **supplier}}
                if "supplier" in _offered(record) else {})}
@@ -782,8 +802,12 @@ def written(connection, run, record, write, receipt):
         except ValueError as error:
             raise ServiceError("invalid", str(error)) from error
     if outcome in ("saved", "duplicate"):
-        review = [GUESSED] if record["proposal"].get("guess") else []
-        work.update_record(connection, record, status=outcome, current=current, hold_codes=[], review_reasons=review)
+        guessed = bool(record["proposal"].get("guess"))
+        work.update_record(connection, record, status=outcome, current=current, hold_codes=[],
+                           review_reasons=[GUESSED] if guessed else [])
+        # A verified save a person approved is how this supplier's bills are booked.
+        memory.learn_booking(connection, run, record, write["plan"], current["guid"],
+                             actor_id=_approver(connection, run, record), guessed=guessed)
         follow = {"status": "duplicate", "current": current, "hold_codes": [], "review_reasons": []}
     else:
         if outcome == "correction":
@@ -800,6 +824,14 @@ def written(connection, run, record, write, receipt):
         work.update_record(connection, follower, **follow)
     return {"verified": outcome in ("saved", "duplicate"),
             "outcome": outcome if outcome in ("saved", "duplicate") else "held"}
+
+
+def _approver(connection, run, record):
+    """Who approved a bill: a person's own decision on it, else the run's Write ready bills or standing approval."""
+    row = connection.execute("""SELECT actor_id FROM record_decisions WHERE tenant_id=%s AND record_id=%s
+                                AND action<>'nothing' ORDER BY created_at DESC LIMIT 1""",
+                             (run["tenant_id"], record["id"])).fetchone()
+    return row["actor_id"] if row else run["actor_id"]
 
 
 def stopped(connection, run):

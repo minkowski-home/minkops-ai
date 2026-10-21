@@ -286,8 +286,9 @@ def propose(call, arguments):
             continue
         try:
             company = state.company(entry["company_guid"])
+            cited = state.cite(connection, entry.get("rules", []))
             resolved = validated_plan(record["facts"], [state.view(connection, company)], entry)
-            proposal = {"selection": entry, "resolved": resolved}
+            proposal = {"selection": entry, "resolved": resolved, **({"rules": cited} if cited else {})}
             if entry.get("pair"):
                 if resolved["family"] != "contra" or entry["pair"] == ref:
                     raise ValueError("Only a Contra pairs with another row, and never with itself.")
@@ -413,6 +414,7 @@ SELECTION = schema({
         "amount": {"type": "number", "exclusiveMinimum": 0}, "cost_centre_guid": GUID, "cost_category_guid": GUID},
         ["role", "ledger_guid", "amount"])},
     "pair": {**REF, "description": "The other leg's ref, for a transfer between own accounts."},
+    "rules": {"type": "array", "maxItems": 10, "items": REF, "description": "The client's rules this row follows."},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
 }, ["ref", "company_guid", "bank_ledger_guid", "counter_ledger_guid", "voucher_type_guid", "evidence"])
 EXCEPTION = schema({"ref": REF, "exception": schema({"code": {"enum": list(EXCEPTIONS)},
@@ -691,7 +693,7 @@ def detail(connection, run, record):
     return {**summarize(run, record), "facts": record["facts"], "evidence": (proposal.get("selection") or {}).get(
         "evidence") or (proposal.get("exception") or {}).get("detail"), "transfer": proposal.get("transfer"),
             "repeat_of": proposal.get("repeat_of"), "current": record["current"],
-            "lines": (proposal.get("resolved") or {}).get("lines")}
+            "lines": (proposal.get("resolved") or {}).get("lines"), "rules": proposal.get("rules")}
 
 
 def decide(connection, run, record, action, detail, context):

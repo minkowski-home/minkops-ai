@@ -112,7 +112,7 @@ def proposal(company, n=1, **changes):
                     "lines": [line("expense", "g-cabins", 160000.0),
                               line("tax", "g-cgst", 14400.0, tax={"head": "cgst", "rate": 9, "taxable": 160000.0}),
                               line("tax", "g-sgst", 14400.0, tax={"head": "sgst", "rate": 9, "taxable": 160000.0})]},
-        "supplier_details": None, "exception": None,
+        "supplier_details": None, "exception": None, "rules": [],
         "evidence": [{"field": "supplier_name", "page": 1, "quote": "Sunrise Office Systems"},
                      {"field": "total", "page": 1, "quote": "Invoice total 188,800.00"}]}
     for path, value in changes.items():
@@ -492,7 +492,8 @@ def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(de
 def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the_gate(desk):
     company = desk["company"]["guid"]
     unaddressed = {"bill": 1, "document": None, "company_guid": None, "company_evidence": None, "voucher": None,
-                   "supplier_details": None, "evidence": [{"field": "buyer", "page": 1, "quote": "Billed to: Unknown"}],
+                   "supplier_details": None, "rules": [],
+                   "evidence": [{"field": "buyer", "page": 1, "quote": "Billed to: Unknown"}],
                    "exception": {"code": "company_unresolved", "detail": "The buyer is none of the client's companies."}}
     unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
     early = proposal(company, **{"document.date": "2026-03-31"})
@@ -678,6 +679,57 @@ def test_a_supplier_booked_item_wise_shows_its_items_and_a_plain_reading_waits_f
     # approval it waits for a person.
     [proposed] = records(desk, run)
     assert (proposed["status"], proposed["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
+
+
+def repairs(company, number):
+    """A Sunrise bill of 10,000.00 and 9% CGST and SGST, booked to repairs: unlike Sunrise's earlier bills."""
+    entry = second_bill(company, 1)
+    entry["document"]["number"] = number
+    entry["voucher"]["lines"][0]["ledger_guid"] = "g-repairs"
+    return entry
+
+
+def repairs_pdf(number):
+    return factory.text_pdf(invoice(number=number, day="02-Sep-2026", taxable="10,000.00", tax="900.00",
+                                    total="11,800.00"))
+
+
+def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_next_bill_to_review(desk):
+    from minkops_platform.accounts import memory
+    company, db = desk["company"]["guid"], desk["db"]
+
+    def bill(number, **config):
+        name = f"{number.replace('/', '-')}.pdf"
+        fake = by_file(**{name: [[("propose", {"count": 1, "bills": [repairs(company, number)]})]]})
+        run = launch(desk, {name: repairs_pdf(number)}, **config)
+        read(desk, fake, run)
+        return records(desk, run)[0]
+
+    # A first booking for the supplier waits for a person; their approval and Tally's readback teach it.
+    first = bill("SOS/26/0501")
+    assert first["review_reasons"] == [bill_entry.UNPRECEDENTED]
+    decide(desk, first, "approve")
+    companion(desk)
+    learnt = db.execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking'",
+                        (desk["company"]["id"],)).fetchone()
+    assert (learnt["subject"], learnt["status"], learnt["uses"]) == ("g-sunrise", "confirmed", 1)
+    assert learnt["value"] == {"voucher_type": "Purchase", "ledgers": ["Input CGST 9%", "Input SGST 9%",
+                                                                       "Repairs and Maintenance"]}
+    # One approval confirms the booking: under standing approval the next such bill is written unreviewed.
+    second = bill("SOS/26/0502", review_mode="only_exceptions")
+    assert (second["status"], second["review_reasons"]) == ("writing", [])
+    companion(desk)
+    # Someone rebooked the first bill to cabins in Tally: the next sync demotes what Minkops learnt.
+    saved = {**PRIOR, "GUID": "tally-1", "ALTERID": "9", "REFERENCE": "SOS/26/0501", "DATE": "20260902",
+             "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": "Sunrise Office Systems", "AMOUNT": "11800.00"},
+                                       {"LEDGERNAME": "Office Cabins", "AMOUNT": "-10000.00"},
+                                       {"LEDGERNAME": "Input CGST 9%", "AMOUNT": "-900.00"},
+                                       {"LEDGERNAME": "Input SGST 9%", "AMOUNT": "-900.00"}]}
+    version = factory.books(db, desk["company"], masters(desk["company"]), [PRIOR, saved])
+    memory.revalidate(db, desk["company"], version)
+    db.commit()
+    third = bill("SOS/26/0503", review_mode="only_exceptions")
+    assert (third["status"], third["review_reasons"]) == ("proposed", [bill_entry.DEMOTED])
 
 
 def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the_rest(desk):

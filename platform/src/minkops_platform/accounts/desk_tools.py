@@ -17,8 +17,9 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.lanes import Wait
 from minkops_platform.runtime.tools import Tool, ToolError
 
-from . import mirror, sync
+from . import memory, mirror, sync
 from .voucher_types import base_types
+from .vouchers import HoldReason
 
 
 def prepare(connection, tenant, user, client):
@@ -100,7 +101,7 @@ class Desk:
         for parts in self.parts.values():
             parts.sort(key=lambda part: part["books_from"])
         self.companies = {guid: parts[-1] for guid, parts in self.parts.items()}
-        self._groups, self._types, self._views = {}, {}, {}
+        self._groups, self._types, self._views, self._rules = {}, {}, {}, None
 
     def company(self, guid, on=None):
         """The company with this GUID; for a year split, the part whose books cover `on` (ISO date)."""
@@ -111,6 +112,29 @@ class Desk:
             return parts[-1]
         covering = [part for part in parts if part["books_from"].isoformat() <= on]
         return covering[-1] if covering else parts[0]
+
+    def part_ids(self, company=None):
+        """Every part of one company (its year-split siblings share what memory learnt), or of all of them."""
+        groups = [self.parts[company["guid"]]] if company else self.parts.values()
+        return [part["id"] for parts in groups for part in parts]
+
+    def rules(self, connection):
+        """The client's active rules for this run's workflow and companies, read once per item."""
+        if self._rules is None:
+            self._rules = memory.instructions(connection, self.run["tenant_id"], self.run["client_id"],
+                                              workflow_key=self.run["workflow_key"], company_ids=self.part_ids())
+        return self._rules
+
+    def cite(self, connection, ids):
+        """The rules a proposal follows, as {id, version, text}; citing anything else is refused."""
+        known = {str(rule["id"]): rule for rule in self.rules(connection)}
+        for rule_id in ids:
+            if rule_id not in known:
+                raise HoldReason("classification_uncertain", (
+                    f"Rule {rule_id} is not one of this client's active rules for this workflow. Cite only rules "
+                    "the rules lookup returns."))
+        return [{"id": rule_id, "version": known[rule_id]["version"], "text": known[rule_id]["text"]}
+                for rule_id in dict.fromkeys(ids)]
 
     def until(self, company):
         """The last day this part's books cover before a later part of the same company begins, or None."""
@@ -231,6 +255,39 @@ def party_history(call, arguments):
     return {"vouchers": [voucher(row) for row in rows], **({"unknown_ledgers": unknown} if unknown else {})}
 
 
+def remembered(call, arguments):
+    desk = call.state
+    company = desk.company(arguments["company"])
+    rows = memory.entries(call.connection, desk.run["tenant_id"], desk.run["client_id"],
+                          company_ids=desk.part_ids(company), kinds=arguments.get("kinds"),
+                          subjects=arguments["subjects"])
+    return {"entries": [{"kind": row["kind"], "subject": row["subject"], "value": row["value"], "status": row["status"],
+                         "uses": row["uses"]} for row in rows]}
+
+
+def rules(call, arguments):
+    desk = call.state
+    subjects = [subject.casefold() for subject in arguments.get("subjects") or []]
+    names = {part["id"]: part["name"] for parts in desk.parts.values() for part in parts}
+    return {"rules": [{"id": str(rule["id"]), "version": rule["version"], "text": rule["text"],
+                       **({"company": names[rule["company_id"]]} if rule["company_id"] else {})}
+                      for rule in desk.rules(call.connection)
+                      if not subjects or any(subject in rule["text"].casefold() for subject in subjects)]}
+
+
+def practice(call, arguments):
+    desk = call.state
+    parts = desk.part_ids(desk.company(arguments["company"]))
+    rows = memory.entries(call.connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=parts,
+                          kinds=["practice"], statuses=("confirmed",))
+    questions = call.connection.execute(
+        "SELECT probe, prompt FROM practice_questions WHERE company_id = ANY(%s) AND status='open' ORDER BY probe",
+        (parts,)).fetchall()
+    return {"practices": [{"subject": row["subject"], "value": row["value"], "settled_by": "answer" if any(
+                item.get("kind") == "answer" for item in row["evidence"]) else "books"} for row in rows],
+            "open_questions": [{"subject": row["probe"], "prompt": row["prompt"]} for row in questions]}
+
+
 def cost_centres(call, arguments):
     desk = call.state
     company = desk.company(arguments["company"])
@@ -264,4 +321,15 @@ TOOLS = {tool.name: tool for tool in (
                 ["company", "ledgers"]), party_history),
     Tool("cost_centres", "Cost centres of a company matching each subject, with their categories.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["company", "subjects"]), cost_centres),
+    Tool("memory", "What Minkops learnt about these subjects in a company: how a supplier's bills were booked when a "
+         "person approved them (subject: the supplier ledger's GUID), and how the company keeps its books (subject: "
+         "a practice name). A demoted entry was changed in Tally since it was learnt; an unconfirmed one was a best "
+         "guess.", schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {
+             "type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["booking", "practice"]}}},
+             ["company", "subjects"]), remembered),
+    Tool("rules", "The rules people wrote for this client's work, each with its ID and version. A proposal that "
+         "follows a rule cites its ID. Give subjects to see only the rules that mention them.",
+         schema({"subjects": {**SUBJECTS, "minItems": 0}}, []), rules),
+    Tool("practice", "How a company keeps its books, as its history or a person's answer settled it, and the "
+         "practice questions still open.", schema({"company": COMPANY}, ["company"]), practice),
 )}

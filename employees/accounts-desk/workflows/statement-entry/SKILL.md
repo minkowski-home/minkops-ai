@@ -31,7 +31,8 @@ accounts is a Contra.
    similar transactions before (`party_history`). Search for every plausible
    candidate (several spellings, aliases, GSTINs) and compare them. Similarity
    alone is not proof: don't choose a ledger only because it is the one search
-   hit.
+   hit. The client's `rules` come before history; a row that follows one cites
+   its ID in `rules`. `practice` says how the company books bank payments.
 3. **Voucher type.** An active Payment, Receipt or Contra type of that company
    (`voucher_types`).
 4. **Cost allocation**, optionally: a cost centre with its category, on a
