@@ -20,8 +20,6 @@ export interface SettingSpec {
   title?: string;
   description?: string;
   enum?: (string | number)[];
-  "x-enabled-options"?: (string | number)[];
-  "x-step"?: string;
 }
 
 export interface ConfigSchema {
@@ -67,16 +65,6 @@ export interface Task {
   created_at: string;
   updated_at: string;
   stage?: string;
-  execution?: RunExecution;
-}
-
-export interface RunExecution {
-  stage: string;
-  last_activity_at?: string | null;
-  ready?: number;
-  total?: number;
-  active?: number;
-  queued?: number;
 }
 
 export interface TaskEvent {

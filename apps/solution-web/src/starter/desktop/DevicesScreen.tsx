@@ -4,7 +4,7 @@ import { api } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { desktopBridge, type DesktopStatus } from "./bridge";
 import { LoadingIndicator, RetryMessage } from "../components/Feedback";
-import { companionNotice, type DestinationDevice as Device } from "./destinationPCs";
+import { companionNotice, type Device } from "./companion";
 
 export function DevicesScreen({
   tenant,

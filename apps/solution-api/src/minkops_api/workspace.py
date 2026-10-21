@@ -48,7 +48,11 @@ def workflows_for(connection, tenant_id):
         workflow["run_schema"] = None
         workflow["run_defaults"] = None
         if binding:
-            definition = installed_definition(binding, workflow["key"])
+            try:
+                definition = installed_definition(binding, workflow["key"])
+            except (ValueError, OSError):
+                # Installed from a definition this version no longer ships: listed, but not runnable.
+                continue
             workflow["run_schema"] = definition.run_schema
             workflow["run_defaults"] = definition.metadata["run_defaults"]
     return workflows

@@ -8,8 +8,7 @@
         "all_outputs",
         "only_exceptions"
       ],
-      "title": "Default review mode",
-      "x-step": "Review and save"
+      "title": "Default review mode"
     },
     "company_mode": {
       "type": "string",

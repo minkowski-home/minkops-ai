@@ -35,6 +35,26 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200, login.text)
         self.csrf = self.client.get("/api/auth/me").json()["csrf_token"]
 
+    def test_a_workflow_installed_from_a_retired_definition_is_listed_but_not_runnable(self):
+        from psycopg.types.json import Jsonb
+        with psycopg.connect(URL) as c:
+            c.execute("""INSERT INTO workflows(tenant_id,key,name,status,execution_binding)
+                SELECT id,'source-discovery','Source discovery','active',%s FROM tenants WHERE slug='mock-tenant'
+                ON CONFLICT (tenant_id,key) DO UPDATE SET execution_binding=EXCLUDED.execution_binding""",
+                      (Jsonb({"definition": "accounts-desk/workflows/source-discovery", "handler": "accounts.discovery",
+                              "presentation": "accounts-discovery"}),))
+        try:
+            workspace = self.client.get("/api/tenants/mock-tenant/workspace")
+            self.assertEqual(workspace.status_code, 200, workspace.text)
+            retired = next(w for w in workspace.json()["workflows"] if w["key"] == "source-discovery")
+            self.assertIsNone(retired["run_schema"])
+            current = next(w for w in workspace.json()["workflows"] if w["key"] == "bill-entry")
+            self.assertEqual(current["presentation"], "desk-review")
+            self.assertIn("company_mode", current["run_schema"]["properties"])
+        finally:
+            with psycopg.connect(URL) as c:
+                c.execute("DELETE FROM workflows WHERE key='source-discovery' AND tenant_id=(SELECT id FROM tenants WHERE slug='mock-tenant')")
+
     def test_pr_infra_empty_and_mock_has_linked_catalog(self):
         pr = self.client.get("/api/tenants/pr-infra/workspace")
         self.assertEqual(pr.status_code, 200, pr.text)

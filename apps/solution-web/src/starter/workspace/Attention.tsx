@@ -14,8 +14,6 @@ interface Item {
   reason: string;
   status: string;
   kind?: string;
-  /** A company's derived posting pattern awaiting one confirmation. */
-  profile?: { company: string; summary: string[]; waiting: number };
   /** A new statement format: one date-order answer, or sample rows to confirm. */
   layout?: { prompt: string; actions: string[]; samples: { date: string; amount_cents: number; account: string; narration: string }[] };
   workflow: string;
@@ -50,18 +48,14 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
     setPending(current => new Set(current).add(key));
     setNotice("");
     try {
-      const result = await api<{ queued?: number; status?: string }>(
+      const result = await api<{ status?: string }>(
         base + path,
         { method: "POST", ...(body ? { body: JSON.stringify(body) } : {}) },
         user.csrf_token
       );
-      setNotice(
-        result.queued !== undefined
-          ? `${result.queued} check${result.queued === 1 ? "" : "s"} queued`
-          : result.status === "active" ? "Confirmed; waiting work continues"
-          : result.status ? "Left for manual handling" : "Marked done"
-      );
-      if (itemId && !path.endsWith("/refresh")) {
+      setNotice(result.status === "active" ? "Confirmed; waiting work continues"
+        : result.status === "done" ? "Marked done" : "Left for manual handling");
+      if (itemId) {
         setItems(current => status === "pending" ? (current ?? []).filter(item => item.id !== itemId)
           : (current ?? []).map(item => item.id === itemId ? { ...item, status: "done" } : item));
       }
@@ -70,7 +64,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
       reads.invalidate(scope, resource => !resource.endsWith("#notice"));
     } catch (caught) {
       let receipt: { action: string; status: string } | null = null;
-      if (itemId && path.endsWith("/profile")) {
+      if (itemId && path.endsWith("/decision")) {
         try { receipt = await api(`${base}/${itemId}/decision`); } catch { /* An unreadable receipt remains uncertain. */ }
       }
       setNotice(receipt && receipt.action === body?.action
@@ -94,13 +88,6 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
       {loading && <LoadingIndicator>Loading attention items…</LoadingIndicator>}
       {loadError && <RetryMessage onRetry={() => void refresh()}>Could not refresh attention items. Showing the last received results; retrying automatically.</RetryMessage>}
       <div className="accounts-toolbar">
-        <button
-          className="button button-ghost"
-          disabled={busy}
-          onClick={() => void action("/refresh")}
-        >
-          {pending.has("/refresh") && <Spinner />}{pending.has("/refresh") ? "Refreshing…" : "Refresh pending items"}
-        </button>
         <label className="config-field">
           Status
           <select
@@ -159,13 +146,6 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
                 <p>{i.reason || "This item needs attention in the original system."}</p>
-                {i.profile && (
-                  <div>
-                    <p>How Minkops will post bills for {i.profile.company}
-                      {i.profile.waiting ? ` (${i.profile.waiting} bill${i.profile.waiting === 1 ? "" : "s"} waiting)` : ""}:</p>
-                    <ul>{i.profile.summary.map((line) => <li key={line}>{line}</li>)}</ul>
-                  </div>
-                )}
                 {i.layout && (
                   <div>
                     <p>{i.layout.prompt}</p>
@@ -178,21 +158,11 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                   <div className="accounts-toolbar">
                     {i.layout.actions.map((answer) => (
                       <button key={answer} className={answer === "nothing" ? "button button-ghost" : "button"} disabled={itemBusy(i.id)}
-                        onClick={() => void action(`/${i.id}/profile`, { action: answer }, i.id)}>
-                        {pending.has(actionKey(`/${i.id}/profile`, { action: answer })) && <Spinner />}
-                        {pending.has(actionKey(`/${i.id}/profile`, { action: answer })) ? "Confirming…" : ({ dmy: "Day first", mdy: "Month first", confirm: "Confirm", nothing: "Do nothing" }[answer] ?? answer)}
+                        onClick={() => void action(`/${i.id}/decision`, { action: answer }, i.id)}>
+                        {pending.has(actionKey(`/${i.id}/decision`, { action: answer })) && <Spinner />}
+                        {pending.has(actionKey(`/${i.id}/decision`, { action: answer })) ? "Confirming…" : ({ dmy: "Day first", mdy: "Month first", confirm: "Confirm", nothing: "Do nothing" }[answer] ?? answer)}
                       </button>
                     ))}
-                  </div>
-                ) : i.status === "pending" && i.profile ? (
-                  <div className="accounts-toolbar">
-                    <button className="button" disabled={itemBusy(i.id)}
-                      onClick={() => void action(`/${i.id}/profile`, { action: "confirm" }, i.id)}>
-                      {pending.has(actionKey(`/${i.id}/profile`, { action: "confirm" })) && <Spinner />}
-                      {pending.has(actionKey(`/${i.id}/profile`, { action: "confirm" })) ? "Confirming…" : "Confirm"}</button>
-                    <button className="button button-ghost" disabled={itemBusy(i.id)}
-                      onClick={() => void action(`/${i.id}/profile`, { action: "nothing" }, i.id)}>
-                      {pending.has(actionKey(`/${i.id}/profile`, { action: "nothing" })) ? "Applying…" : "Do nothing"}</button>
                   </div>
                 ) : i.status === "pending" ? (
                   <div className="accounts-toolbar">
@@ -202,13 +172,6 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                       onClick={() => void action(`/${i.id}/done`, undefined, i.id)}
                     >
                       {pending.has(`/${i.id}/done`) && <Spinner />}{pending.has(`/${i.id}/done`) ? "Marking done…" : "Mark as Done"}
-                    </button>
-                    <button
-                      className="button button-ghost"
-                      disabled={itemBusy(i.id)}
-                      onClick={() => void action(`/${i.id}/refresh`, undefined, i.id)}
-                    >
-                      {pending.has(`/${i.id}/refresh`) && <Spinner />}{pending.has(`/${i.id}/refresh`) ? "Refreshing…" : "Refresh"}
                     </button>
                   </div>
                 ) : (
