@@ -142,7 +142,7 @@ def booked(row, company):
     base = {"ref": row["ref"], "company_guid": company, "voucher_type_guid": "g-payment", "evidence": "Fixture."}
     bank = "g-hdfc" if "HDFC" in narration or "ICICI" in narration and "FROM" in narration else "g-icici"
     if "ACME" in narration:
-        return {**base, "bank_ledger_guid": "g-icici", "counter_ledger_guid": "g-acme"}
+        return {**base, "bank_ledger_guid": "g-icici", "counter_ledger_guid": "g-acme", "payee": "ACME STEEL"}
     if "RETURN" in narration:
         return {**base, "bank_ledger_guid": "g-icici", "counter_ledger_guid": "g-acme", "voucher_type_guid": "g-receipt"}
     if "CHARGES" in narration:
@@ -371,6 +371,12 @@ def test_an_approved_row_writes_once_and_an_interrupted_save_is_never_resent(des
     assert plan["remote_id"] == first["plan"]["remote_id"] == second["plan"]["remote_id"]
     saved = work.get_record(desk["db"], desk["tenant"]["id"], acme["id"])
     assert (saved["status"], saved["current"]["guid"]) == ("saved", "tally-1")
+    # A verified row a person approved teaches how its payee is booked, found again by the payee's name.
+    from minkops_platform.accounts import memory
+    [learnt] = memory.entries(desk["db"], desk["tenant"]["id"], desk["client"]["id"],
+                              company_ids=[desk["company"]["id"]], kinds=["routing"], subjects=["Acme  steel"])
+    assert (learnt["status"], learnt["value"]) == ("confirmed", {"payee": "ACME STEEL", "counter_ledger": "Acme Steel",
+                                                                 "voucher_type": "Payment"})
 
 
 def test_an_unsettled_date_order_waits_for_one_answer_then_reads_the_rows(desk):

@@ -320,11 +320,12 @@ TOOLS = {tool.name: tool for tool in (
                 ["company", "ledgers"]), party_history),
     Tool("cost_centres", "Cost centres of a company matching each subject, with their categories.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["company", "subjects"]), cost_centres),
-    Tool("memory", "What Minkops learnt about these subjects in a company: how a supplier's bills were booked when a "
-         "person approved them (subject: the supplier ledger's GUID), and how the company keeps its books (subject: "
-         "a practice name). A demoted entry was changed in Tally since it was learnt; an unconfirmed one was a best "
-         "guess.", schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {
-             "type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["booking", "practice"]}}},
+    Tool("memory", "What Minkops learnt about these subjects in a company, from saves a person approved: how a "
+         "supplier's bills were booked (subject: the supplier ledger's GUID), how a payee's bank rows were booked "
+         "(subject: the payee's name), and how the company keeps its books (subject: a practice name). A demoted "
+         "entry was changed in Tally since it was learnt; an unconfirmed one was a best guess.",
+         schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {
+             "type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["booking", "routing", "practice"]}}},
              ["company", "subjects"]), remembered),
     Tool("rules", "Every rule people wrote for this client's work in this workflow, each with its ID and version. "
          "Read them before choosing treatment; a proposal that follows a rule cites its ID.", schema({}, []), rules),

@@ -33,7 +33,7 @@ from minkops_platform.run_controls import control_state, require_active, resolve
 from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
-from . import desk_tools, mirror, statement_layouts, sync, writes
+from . import desk_tools, memory, mirror, statement_layouts, sync, writes
 from .desk_tools import COMPANY, SUBJECTS, Desk, schema
 from .holds import ACTIONS, STATEMENT, hold
 from .holds import actions as hold_actions
@@ -415,6 +415,8 @@ SELECTION = schema({
         ["role", "ledger_guid", "amount"])},
     "pair": {**REF, "description": "The other leg's ref, for a transfer between own accounts."},
     "rules": {"type": "array", "maxItems": 10, "items": REF, "description": "The client's rules this row follows."},
+    "payee": {"type": "string", "minLength": 1, "maxLength": 200,
+              "description": "The counterparty the narration names, as printed, without references or amounts."},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
 }, ["ref", "company_guid", "bank_ledger_guid", "counter_ledger_guid", "voucher_type_guid", "evidence"])
 EXCEPTION = schema({"ref": REF, "exception": schema({"code": {"enum": list(EXCEPTIONS)},
@@ -795,6 +797,9 @@ def written(connection, run, record, write, receipt):
         except ValueError as error:
             raise ServiceError("invalid", str(error)) from error
         work.update_record(connection, record, status=outcome, current=current, hold_codes=[], review_reasons=[])
+        # A verified row a person approved is how its payee's rows are booked.
+        memory.learn_routing(connection, run, record, write["plan"], current["guid"],
+                             actor_id=memory.approver(connection, run, record))
         follow = {"status": "duplicate", "hold_codes": [], "review_reasons": []}
     else:
         code = receipt.get("hold") if receipt.get("hold") in SAVE_HOLDS else "statement_save_held"

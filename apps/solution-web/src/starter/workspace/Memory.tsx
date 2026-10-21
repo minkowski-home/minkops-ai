@@ -31,6 +31,10 @@ const STATUS: Record<string, string> = {
   disabled: "Disabled",
 };
 const WORKFLOWS: Record<string, string> = { "bill-entry": "Bill entry", "statement-entry": "Statement entry" };
+const KINDS: Record<string, string> = {
+  booking: "How the supplier's bills are booked", routing: "How the payee's bank rows are booked",
+  practice: "How the books are kept",
+};
 
 const words = (key: string) => key.replace(/_/g, " ").replace(/^./, (first) => first.toUpperCase());
 
@@ -44,8 +48,8 @@ function describe(value: Record<string, unknown>) {
 function source(entry: Entry) {
   if (entry.evidence.some((item) => item.kind === "answer")) return "answered by a person";
   const approved = entry.evidence.filter((item) => item.kind === "outcome").length;
-  return approved ? `learnt from ${approved === 1 ? "an approved bill" : `${approved} approved bills`}`
-    : "settled by the books";
+  const saves = entry.kind === "routing" ? ["an approved row", "approved rows"] : ["an approved bill", "approved bills"];
+  return approved ? `learnt from ${approved === 1 ? saves[0] : `${approved} ${saves[1]}`}` : "settled by the books";
 }
 
 /** A client's memory for the Accounts desk. Every member who can reach the client reads it; admins change it. */
@@ -106,7 +110,7 @@ export function MemoryScreen({ tenant }: { tenant: string }) {
       <section className="related-panel"><h3>Learnt from the books</h3>
         {page.entries.length ? page.entries.map((entry) => <article className="accounts-bill" key={entry.id}>
           <strong>{entry.kind === "practice" ? words(entry.subject) : entry.subject}</strong>
-          <span> · {entry.kind === "booking" ? "How bills are booked" : "How the books are kept"}
+          <span> · {KINDS[entry.kind] ?? words(entry.kind)}
             {entry.company ? ` · ${entry.company}` : ""}</span>
           <p>{describe(entry.value)}</p>
           <small>{STATUS[entry.status] ?? entry.status} · {source(entry)}

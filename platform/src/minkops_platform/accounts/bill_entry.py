@@ -861,7 +861,7 @@ def written(connection, run, record, write, receipt):
                            review_reasons=[GUESSED] if guessed else [])
         # A verified save a person approved is how this supplier's bills are booked.
         memory.learn_booking(connection, run, record, write["plan"], current["guid"],
-                             actor_id=_approver(connection, run, record), guessed=guessed)
+                             actor_id=memory.approver(connection, run, record), guessed=guessed)
         follow = {"status": "duplicate", "current": current, "hold_codes": [], "review_reasons": []}
     else:
         if outcome == "correction":
@@ -878,14 +878,6 @@ def written(connection, run, record, write, receipt):
         work.update_record(connection, follower, **follow)
     return {"verified": outcome in ("saved", "duplicate"),
             "outcome": outcome if outcome in ("saved", "duplicate") else "held"}
-
-
-def _approver(connection, run, record):
-    """Who approved a bill: a person's own decision on it, else the run's Write ready bills or standing approval."""
-    row = connection.execute("""SELECT actor_id FROM record_decisions WHERE tenant_id=%s AND record_id=%s
-                                AND action<>'nothing' ORDER BY created_at DESC LIMIT 1""",
-                             (run["tenant_id"], record["id"])).fetchone()
-    return row["actor_id"] if row else run["actor_id"]
 
 
 def stopped(connection, run):

@@ -51,6 +51,7 @@ test('admins disable what was learnt and write, edit and delete rules', async ({
   await page.goto('http://127.0.0.1:3000/mock-tenant/memory');
   const learnt = page.locator('article').filter({hasText:'Sunrise Office Systems'});
   await expect(learnt).toContainText('Voucher type: Purchase · Ledgers: Input CGST 9%, Office Cabins');
+  await expect(learnt).toContainText("How the supplier's bills are booked · Test Company");
   await expect(learnt).toContainText('Confirmed · learnt from 2 approved bills · used 2 times');
   await expect(page.locator('article').filter({hasText:'Receipt register'})).toContainText('answered by a person');
   for (const theme of ['minkops-light', 'minkops-dark', 'slate-light', 'slate-dark']) {

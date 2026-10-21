@@ -7,8 +7,9 @@ it; nothing is loaded into context up front.
 - Structured entries are contract-like key-values with the evidence behind
   them and the native GUIDs they name. `practice` entries say how a company
   keeps its books, from the sync's probes or a person's one-click answer.
-  `booking` entries say how a supplier's bills are booked, learnt from saves
-  that were verified and approved.
+  `booking` entries say how a supplier's bills are booked, and `routing`
+  entries how a payee's bank rows are, each learnt from saves that were
+  verified and approved.
 - Every sync revalidates them: an edit made in Tally to a voucher an entry was
   learnt from demotes it, and an entry whose GUIDs are missing from three syncs
   in a row retires.
@@ -56,16 +57,39 @@ def live(connection, tenant_id, client_id, *, company_id, kind, subject, employe
         (tenant_id, client_id, employee, company_id, kind, subject)).fetchone()
 
 
+def _key(name):
+    """A payee's name as an entry subject: spacing and case never make two payees."""
+    return mirror.normalized(name).replace(":", " ")
+
+
 def entries(connection, tenant_id, client_id, *, company_ids, kinds=None, subjects=None, statuses=LIVE,
             employee=EMPLOYEE):
-    """Entries for these companies and client-wide ones, optionally of some kinds or about some subjects."""
+    """Entries for these companies and client-wide ones, optionally of some kinds or about some subjects.
+
+    A subject matches an entry's subject, the part of it before its treatment (a supplier's GUID, a payee's
+    name), or any GUID the entry names.
+    """
+    wanted = None if subjects is None else sorted({*subjects, *(_key(subject) for subject in subjects)})
     return connection.execute(
         """SELECT * FROM memory_entries WHERE tenant_id=%s AND client_id=%s AND employee_key=%s
            AND (company_id IS NULL OR company_id = ANY(%s::uuid[])) AND status = ANY(%s)
-           AND (%s::text[] IS NULL OR kind = ANY(%s)) AND (%s::text[] IS NULL OR subject = ANY(%s) OR guids && %s)
+           AND (%s::text[] IS NULL OR kind = ANY(%s))
+           AND (%s::text[] IS NULL OR subject = ANY(%s) OR split_part(subject, ':', 1) = ANY(%s) OR guids && %s)
            ORDER BY kind, subject, company_id""",
-        (tenant_id, client_id, employee, list(company_ids), list(statuses), kinds, kinds, subjects, subjects,
-         subjects)).fetchall()
+        (tenant_id, client_id, employee, list(company_ids), list(statuses), kinds, kinds, wanted, wanted, wanted,
+         wanted)).fetchall()
+
+
+def _treatment(guids):
+    return hashlib.sha256(json.dumps(guids).encode()).hexdigest()[:16]
+
+
+def approver(connection, run, record_row):
+    """Who approved a record: a person's own decision on it, else the run's Write ready rows or standing approval."""
+    row = connection.execute("""SELECT actor_id FROM record_decisions WHERE tenant_id=%s AND record_id=%s
+                                AND action<>'nothing' ORDER BY created_at DESC LIMIT 1""",
+                             (run["tenant_id"], record_row["id"])).fetchone()
+    return row["actor_id"] if row else run["actor_id"]
 
 
 def record(connection, *, tenant_id, client_id, company_id, kind, subject, value, evidence, guids=(),
@@ -130,12 +154,34 @@ def learn_booking(connection, run, record_row, plan, voucher_guid, *, actor_id, 
         return None
     treatment = [plan["voucher_type"]["GUID"], *sorted(references[name]["GUID"] for name in expense)]
     return record(connection, tenant_id=run["tenant_id"], client_id=run["client_id"],
-                  company_id=record_row["company_id"], kind="booking",
-                  subject=f"{guid}:{hashlib.sha256(json.dumps(treatment).encode()).hexdigest()[:16]}",
+                  company_id=record_row["company_id"], kind="booking", subject=f"{guid}:{_treatment(treatment)}",
                   value={"supplier": party, "voucher_type": plan["voucher_type"]["NAME"], "ledgers": expense},
                   guids=[guid, *treatment], evidence={"kind": "outcome", "voucher": voucher_guid,
                                                       "run": str(run["id"]), "record": str(record_row["id"])},
                   status="unconfirmed" if guessed else "confirmed", actor_id=actor_id, use=True)
+
+
+def learn_routing(connection, run, record_row, plan, voucher_guid, *, actor_id):
+    """A verified bank row a person approved becomes one way rows with its payee are booked.
+
+    The payee is the counterparty the row's narration names; the treatment is
+    the counter ledger and voucher type, one entry for each way a payee's rows
+    are booked.
+    """
+    proposal = record_row["proposal"] or {}
+    payee = (proposal.get("selection") or {}).get("payee")
+    counter = ((proposal.get("resolved") or {}).get("data") or {}).get("counter_ledger")
+    references = plan["references"]["ledgers"]
+    if not payee or counter not in references:
+        return None
+    treatment = [references[counter]["GUID"], plan["voucher_type"]["GUID"]]
+    return record(connection, tenant_id=run["tenant_id"], client_id=run["client_id"],
+                  company_id=record_row["company_id"], kind="routing",
+                  subject=f"{_key(payee)}:{_treatment(treatment)}",
+                  value={"payee": payee, "counter_ledger": counter, "voucher_type": plan["voucher_type"]["NAME"]},
+                  guids=treatment, evidence={"kind": "outcome", "voucher": voucher_guid, "run": str(run["id"]),
+                                             "record": str(record_row["id"])},
+                  status="confirmed", actor_id=actor_id, use=True)
 
 
 def revalidate(connection, company, version):
@@ -149,7 +195,7 @@ def revalidate(connection, company, version):
     named = sorted({guid for row in rows for guid in row["guids"]})
     names = {row["guid"]: row["name"] for row in mirror.masters(connection, company["id"], version["version"],
                                                                  guids=named)}
-    learnt = sorted({item["voucher"] for row in rows if row["kind"] == "booking" for item in row["evidence"]
+    learnt = sorted({item["voucher"] for row in rows if row["kind"] in LEDGERS for item in row["evidence"]
                      if item.get("kind") == "outcome" and item.get("voucher")})
     vouchers = {row["guid"]: row for row in mirror.vouchers(connection, company["id"], version["version"], guids=learnt)}
     for entry in rows:
@@ -170,16 +216,21 @@ def revalidate(connection, company, version):
             _event(connection, entry, "demoted", detail=changed)
 
 
-def _rebooked(entry, vouchers, names):
-    """How a voucher this booking was learnt from now differs in Tally, or None when none does.
+# Where each kind of entry lists the ledgers its vouchers must still post to, by GUID.
+LEDGERS = {"booking": slice(2, None), "routing": slice(0, 1)}
 
-    A booking names its supplier, voucher type and then its ledgers by GUID, so a
-    ledger renamed in Tally is still the same booking.
+
+def _rebooked(entry, vouchers, names):
+    """How a voucher this entry was learnt from now differs in Tally, or None when none does.
+
+    Entries name their ledgers by GUID, so a ledger renamed in Tally is still the
+    same treatment.
     """
-    if entry["kind"] != "booking":
+    if entry["kind"] not in LEDGERS:
         return None
-    wanted = {names.get(guid) for guid in entry["guids"][2:]} if all(
-        guid in names for guid in entry["guids"][2:]) else set(entry["value"]["ledgers"])
+    ledgers = entry["guids"][LEDGERS[entry["kind"]]]
+    wanted = {names.get(guid) for guid in ledgers} if all(guid in names for guid in ledgers) else (
+        set(entry["value"].get("ledgers") or [entry["value"].get("counter_ledger")]))
     for item in entry["evidence"]:
         if item.get("kind") != "outcome" or not item.get("voucher"):
             continue
@@ -298,7 +349,9 @@ def _labels(connection, rows):
     """A booking names its supplier by GUID first: shown by the ledger's name in the company's latest books."""
     labels = {}
     for row in rows:
-        if row["kind"] == "booking" and row["company_id"] and row["guids"]:
+        if row["kind"] == "routing":
+            labels[row["id"]] = row["value"]["payee"]
+        elif row["kind"] == "booking" and row["company_id"] and row["guids"]:
             latest = mirror.latest(connection, row["company_id"])
             found = latest and mirror.masters(connection, row["company_id"], latest["version"], guids=row["guids"][:1])
             if found:
