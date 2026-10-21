@@ -59,6 +59,8 @@ const observed = (plan, overrides = {}) => ({
   tag: plan.header.tag ? plan.remote_id : null, unsupported: false, fingerprint: 'v5:existing',
   entries: plan.lines.map(l => ({ledger: l.ledger, amount_cents: signed(l)})).sort((a, b) => a.ledger.localeCompare(b.ledger) || a.amount_cents - b.amount_cents),
   allocations: plan.lines.filter(l => l.allocation).map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})),
+  bills: plan.lines.flatMap(l => (l.bills ?? []).map(b => ({ledger: l.ledger, name: b.name ?? null, type: b.type,
+    amount_cents: l.side === 'credit' ? b.amount_cents : -b.amount_cents}))),
   ...overrides,
 });
 const accepted = '<RESPONSE><CREATED>1</CREATED><ALTERED>0</ALTERED><ERRORS>0</ERRORS></RESPONSE>';
@@ -147,6 +149,40 @@ test('disabled or regrouped cost allocations hold before importing a voucher', a
   }
 });
 
+// Protocol 6: a bill-by-bill ledger's line carries its bill references.
+const billed = {...purchase, format_version: 6,
+  lines: purchase.lines.map((l, i) => i === 0 ? {...l, bills: [{name: 'INV-17', type: 'New Ref', amount_cents: 118040}]} : l)};
+const settling = {...payment, format_version: 6, lines: [
+  {ledger: 'HDFC', side: 'credit', amount_cents: 150000, allocation: null},
+  {ledger: 'Supplier A', side: 'debit', amount_cents: 150000, allocation: null, bills: [
+    {name: 'INV-17', type: 'Agst Ref', amount_cents: 118040}, {name: null, type: 'On Account', amount_cents: 31960}]}],
+  duplicate: {...payment.duplicate, match: {ledger: 'HDFC', side: 'credit', amount_cents: 150000}}};
+
+test('bill references are written with their ledger line, in native signs, and required on readback', async () => {
+  const io = harness([[], [observed(billed)]]);
+  assert.equal((await saveVoucher(billed, io.options)).outcome, 'saved');
+  assert.ok(io.imports[0].includes('<LEDGERNAME>Supplier A</LEDGERNAME><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE><AMOUNT>1180.40</AMOUNT>'
+    + '<BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>New Ref</BILLTYPE><AMOUNT>1180.40</AMOUNT></BILLALLOCATIONS.LIST>'));
+  const payments = harness([[], [observed(settling)]]);
+  const paid = await saveVoucher(settling, payments.options);
+  assert.equal(paid.outcome, 'saved');
+  assert.deepEqual(paid.current.bills, [{ledger: 'Supplier A', name: 'INV-17', type: 'Agst Ref', amount_cents: -118040},
+    {ledger: 'Supplier A', name: null, type: 'On Account', amount_cents: -31960}]);
+  assert.ok(payments.imports[0].includes('<BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>Agst Ref</BILLTYPE><AMOUNT>-1180.40</AMOUNT>'
+    + '</BILLALLOCATIONS.LIST><BILLALLOCATIONS.LIST><BILLTYPE>On Account</BILLTYPE><AMOUNT>-319.60</AMOUNT></BILLALLOCATIONS.LIST>'));
+  // A readback missing the reference is not the approved voucher.
+  const lost = harness([[], [observed(billed, {bills: []})]]);
+  assert.equal((await saveVoucher(billed, lost.options)).hold, 'uncertain_import');
+  const bad = [
+    {...purchase, lines: billed.lines},
+    {...billed, lines: billed.lines.map((l, i) => i === 0 ? {...l, bills: [{name: 'INV-17', type: 'New Ref', amount_cents: 100}]} : l)},
+    {...billed, lines: billed.lines.map((l, i) => i === 0 ? {...l, bills: [{name: 'INV-17', type: 'Credit', amount_cents: 118040}]} : l)},
+    {...billed, lines: billed.lines.map((l, i) => i === 0 ? {...l, bills: [{type: 'New Ref', amount_cents: 118040}]} : l)},
+    {...settling, lines: settling.lines.map((l, i) => i === 1 ? {...l, bills: [{name: 'X', type: 'On Account', amount_cents: 150000}]} : l)},
+  ];
+  for (const plan of bad) await assert.rejects(saveVoucher(plan, harness([[]]).options), /Unsupported voucher plan/);
+});
+
 test('a supplier credit note is a Debit Note with the party debited', async () => {
   const note = {...purchase, family: 'debit_note', voucher_type: {NAME: 'Debit Note', GUID: 'vt-dn'},
     lines: purchase.lines.map(l => ({...l, side: l.side === 'credit' ? 'debit' : 'credit'})),
@@ -175,9 +211,16 @@ test('voucher reads are bounded to the calendar window and parsed into comparabl
     guid: 'g', master_id: '7', date: '20261001', voucher_type: 'Purchase GST', reference: 'INV-17', number: '12',
     narration: `[Minkops statement:${id}] UPI`, party_ledger: 'Supplier A', tag: id, unsupported: false, fingerprint: undefined,
     entries: [{ledger: 'Purchase 18%', amount_cents: -118040}, {ledger: 'Supplier A', amount_cents: 118040}],
-    allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}],
+    allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}], bills: [],
   });
   assert.match(record.fingerprint, /^v5:[a-f0-9]{64}$/);
+  // Bill references are read with their ledger; they no longer make a voucher unsupported.
+  const referenced = voucher('20261001').replace('<AMOUNT>1180.40</AMOUNT></ALLLEDGERENTRIES.LIST>',
+    '<AMOUNT>1180.40</AMOUNT><BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>New Ref</BILLTYPE><AMOUNT>1180.40</AMOUNT>'
+    + '</BILLALLOCATIONS.LIST></ALLLEDGERENTRIES.LIST>');
+  const [withBills] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(referenced)});
+  assert.deepEqual([withBills.unsupported, withBills.bills],
+    [false, [{ledger: 'Supplier A', name: 'INV-17', type: 'New Ref', amount_cents: 118040}]]);
   const inventory = voucher('20261001').replace('</VOUCHER>', '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME></ALLINVENTORYENTRIES.LIST></VOUCHER>');
   assert.equal((await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(inventory)}))[0].unsupported, true);
   await assert.rejects(readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20270401'))}), /outside the requested window/);

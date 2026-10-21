@@ -44,8 +44,8 @@ def public_device(row):
     }
 
 
-# Every native voucher is a protocol-5 plan, which companions execute from 0.9.0.
-MINIMUM_COMPANION = (0, 9, 0)
+# Every new native voucher is a protocol-6 plan, which companions execute from 0.10.0.
+MINIMUM_COMPANION = (0, 10, 0)
 
 
 def companion_report(version, host, session):

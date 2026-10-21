@@ -36,6 +36,9 @@ def view(key="company"):
     """A company's pinned mirror, in the shape mirror.company_view returns."""
     masters = [{"type": "LEDGER", "data": {"NAME": n, "GUID": guid(n, key), "PARENT": parent, "ALTERID": "5",
                                            "ISCOSTCENTRESON": costs}} for n, parent, costs in LEDGERS]
+    # A supplier whose balance Tally keeps bill by bill.
+    masters.append({"type": "LEDGER", "data": {"NAME": "Billwise Traders", "GUID": guid("Billwise Traders", key),
+                                               "PARENT": "Sundry Creditors", "ALTERID": "5", "ISBILLWISEON": "Yes"}})
     masters += [{"type": "VOUCHERTYPE", "data": dict(t)} for t in TYPES]
     masters += [{"type": "COSTCATEGORY", "data": {"NAME": "Sites", "GUID": "cat-sites"}},
                 {"type": "COSTCENTRE", "data": {"NAME": "Site 4", "GUID": "cc-site-4", "CATEGORY": "Sites"}},
@@ -108,7 +111,7 @@ class BoundBillTest(unittest.TestCase):
         self.assertEqual(bill.destination_key, "bill:company")
         plan = bill.native_plan(REMOTE)
         self.assertEqual((plan["format_version"], plan["family"], plan["fence"], plan["port"]),
-                         (5, "purchase", "retry_after_read", 9001))
+                         (6, "purchase", "retry_after_read", 9001))
         self.assertEqual(plan["header"], {"date": "2026-10-14", "reference": "INV/26/0412", "party_ledger": "Acme Cement",
                                           "narration": "Minkops reviewed bill INV/26/0412", "tag": None})
         self.assertEqual(plan["duplicate"]["families"], ["purchase", "journal"])
@@ -241,6 +244,20 @@ class BoundBillTest(unittest.TestCase):
         created = check(new, assume_new_supplier=True)
         self.assertEqual((created.party, created.identity),
                          ("ACME CEMENT", vouchers.document_identity("Acme Cement", "INV/26/0412", date(2026, 10, 14))))
+
+    def test_a_bill_by_bill_supplier_is_owed_a_new_reference_named_by_the_invoice(self):
+        billwise = {"voucher.party.ledger_guid": guid("Billwise Traders")}
+        plan = check(proposal(**billwise)).native_plan(REMOTE)
+        party = plan["lines"][0]
+        self.assertEqual((plan["format_version"], party["ledger"], party["bills"]), (6, "Billwise Traders", [
+            {"name": "INV/26/0412", "type": "New Ref", "amount_cents": party["amount_cents"]}]))
+        # Other suppliers' lines carry no reference.
+        self.assertNotIn("bills", check(proposal()).native_plan(REMOTE)["lines"][0])
+        # A debit note adjusts a bill it would have to name; that is entered in Tally.
+        note = proposal(**billwise, **{"document.kind": "credit_note", "voucher.family": "debit_note",
+                                       "voucher.voucher_type_guid": "vt-debit-note"})
+        note["voucher"]["lines"] = [{**line, "side": "credit"} for line in note["voucher"]["lines"]]
+        self.assertEqual(held(note)[0], "unsupported_structure")
 
     def test_values_the_bill_did_not_give_or_gave_malformed_never_reach_a_plan(self):
         # An unread origin is a missing value, not a foreign supplier.

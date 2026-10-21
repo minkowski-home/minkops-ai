@@ -269,7 +269,7 @@ def readback(plan, guid="tally-1"):
     return {"guid": guid, "master_id": "71", "date": plan["header"]["date"].replace("-", ""),
             "voucher_type": plan["voucher_type"]["NAME"], "family": plan["family"],
             "reference": plan["header"]["reference"], "number": "", "narration": plan["header"]["narration"],
-            "party_ledger": "", "tag": plan["remote_id"], "fingerprint": f"fp-{guid}", "allocations": [],
+            "party_ledger": "", "tag": plan["remote_id"], "fingerprint": f"fp-{guid}", "allocations": [], "bills": [],
             "lines": [{"ledger": line["ledger"],
                        "amount_cents": line["amount_cents"] * (1 if line["side"] == "credit" else -1)}
                       for line in plan["lines"]]}
@@ -284,7 +284,7 @@ def companion(desk, outcome="saved"):
     if job is None or job["operation"] != "tally.write":
         db.rollback()
         return None
-    plan = desktop.plan(db, device, job["id"], job["claim_token"], 5)
+    plan = desktop.plan(db, device, job["id"], job["claim_token"], 6)
     receipt = ({"outcome": outcome, "current": readback(plan)} if outcome in ("saved", "duplicate")
                else {"outcome": "attention", "hold": outcome, "message": "Tally is not running."})
     desktop.finish(db, device, job["id"], {"claim_token": job["claim_token"], "result": receipt})

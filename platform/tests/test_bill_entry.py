@@ -225,7 +225,7 @@ def readback(plan, guid="tally-1", lines=None):
     return {"guid": guid, "master_id": "71", "date": plan["header"]["date"].replace("-", ""),
             "voucher_type": plan["voucher_type"]["NAME"], "family": plan["family"], "reference": plan["header"]["reference"],
             "number": "", "narration": plan["header"]["narration"], "party_ledger": plan["header"]["party_ledger"],
-            "tag": None, "fingerprint": f"fp-{guid}", "allocations": [],
+            "tag": None, "fingerprint": f"fp-{guid}", "allocations": [], "bills": [],
             "lines": lines or [{"ledger": ln["ledger"], "amount_cents": ln["amount_cents"] * (1 if ln["side"] == "credit"
                                                                                                else -1)}
                                for ln in plan["lines"]]}
@@ -243,7 +243,7 @@ def companion(desk, respond=saved):
     if job is None or job["operation"] not in ("tally.write", "tally.supplier"):
         db.rollback()
         return None
-    plan = desktop.plan(db, device, job["id"], job["claim_token"], 5)
+    plan = desktop.plan(db, device, job["id"], job["claim_token"], 6)
     desktop.finish(db, device, job["id"], {"claim_token": job["claim_token"], "result": respond(job["operation"], plan)})
     db.commit()
     return job["operation"], plan
@@ -330,16 +330,16 @@ def test_an_approved_bill_is_saved_once_and_tally_holding_another_version_is_nev
     read(desk, fake, first)
     [bill] = records(desk, first)
     assert decide(desk, bill, "approve")["status"] == "writing"
-    # A companion that predates protocol 5 is refused the plan before it touches Tally.
+    # A companion that predates protocol 6 is refused the plan before it touches Tally.
     db = desk["db"]
     device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
     job = desktop.claim(db, device, desktop.companion_report("0.10.0", "Rehearsal PC", "console"))
     with pytest.raises(ServiceError, match="Update Minkops on this PC"):
-        desktop.plan(db, device, job["id"], job["claim_token"], 4)
+        desktop.plan(db, device, job["id"], job["claim_token"], 5)
     db.rollback()
     operation, plan = companion(desk)
     assert (operation, plan["format_version"], plan["family"], plan["voucher_type"]["NAME"]) == (
-        "tally.write", 5, "purchase", "Purchase")
+        "tally.write", 6, "purchase", "Purchase")
     assert plan["header"]["reference"] == "SOS/26/0412" and plan["header"]["party_ledger"] == "Sunrise Office Systems"
     assert plan["duplicate"]["window"] == {"from": "2026-04-01", "to": "2027-03-31"}
     bill = record(desk, bill)

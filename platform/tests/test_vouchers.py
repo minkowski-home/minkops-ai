@@ -52,6 +52,9 @@ def observed(plan, **overrides):
         "allocations": [{"ledger": ln["ledger"], "category": ln["allocation"]["category"], "centre": ln["allocation"]["centre"],
                          "amount_cents": next(e["amount_cents"] for e in signed if e["ledger"] == ln["ledger"])}
                         for ln in plan["lines"] if ln["allocation"]],
+        "bills": [{"ledger": ln["ledger"], "name": bill.get("name"), "type": bill["type"],
+                   "amount_cents": bill["amount_cents"] if ln["side"] == "credit" else -bill["amount_cents"]}
+                  for ln in plan["lines"] for bill in ln.get("bills") or []],
         "fingerprint": "v5:" + "a" * 64,
     }
     current.update(overrides)
@@ -101,7 +104,7 @@ class StatementVoucherTest(unittest.TestCase):
     def test_payment_keeps_its_tag_reference_and_allocation_and_lists_proven_siblings(self):
         sibling = "87654321-4321-5321-8321-cba987654321"
         plan = vouchers.statement_voucher(RESOLVED, remote_id=ID, identity="row", distinct=[sibling])
-        self.assertEqual((plan["format_version"], plan["family"], plan["fence"]), (5, "payment", "strict"))
+        self.assertEqual((plan["format_version"], plan["family"], plan["fence"]), (6, "payment", "strict"))
         self.assertEqual(plan["lines"], [
             {"ledger": "HDFC", "side": "credit", "amount_cents": 1770, "allocation": None},
             {"ledger": "Bank Charges", "side": "debit", "amount_cents": 1770,
@@ -133,7 +136,7 @@ class ReceiptTest(unittest.TestCase):
             "invoice_number": "MOCK-1", "vendor": "Supplier", "voucher_type": "Purchase GST",
             "entries": [{"ledger": "CGST", "amount": -900}, {"ledger": "Purchases", "amount": -10000},
                         {"ledger": "SGST", "amount": -900}, {"ledger": "Supplier", "amount": 11800}],
-            "fingerprint": "v5:" + "a" * 64,
+            "bills": [], "fingerprint": "v5:" + "a" * 64,
         })
 
     def test_tampered_bill_receipts_are_rejected(self):
@@ -176,6 +179,16 @@ class ReceiptTest(unittest.TestCase):
         self.assertEqual(reason(lines=extra), "Tally's voucher for MOCK-1 also posts to Round Off.")
         allocated = [{"ledger": "Purchases", "category": "Sites", "centre": "Site 4", "amount_cents": -10000}]
         self.assertEqual(reason(allocations=allocated), "Tally's voucher for MOCK-1 has other cost allocations.")
+
+    def test_a_bill_by_bill_receipt_must_carry_the_approved_references(self):
+        billed = {**BILL, "format_version": 6, "lines": [
+            {**BILL["lines"][0], "bills": [{"name": "MOCK-1", "type": "New Ref", "amount_cents": 11800}]},
+            *BILL["lines"][1:]]}
+        view = vouchers.observed_bill(billed, "saved", observed(billed), identity=IDENTITY)
+        self.assertEqual(view["bills"], [{"ledger": "Supplier", "name": "MOCK-1", "type": "New Ref", "amount_cents": 11800}])
+        for bills in ([], [{"ledger": "Supplier", "name": "MOCK-2", "type": "New Ref", "amount_cents": 11800}]):
+            with self.subTest(bills=bills), self.assertRaises(ValueError):
+                vouchers.observed_bill(billed, "saved", observed(billed, bills=bills), identity=IDENTITY)
 
     def test_a_saved_correction_must_keep_the_voucher_it_replaced(self):
         plan = {**BILL, "operation": "update", "expected": {"guid": "a1b2c3d4-0000-4000-8000-000000000001", "fingerprint": "v5:x"}}

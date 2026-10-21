@@ -17,7 +17,8 @@ from uuid import NAMESPACE_URL, uuid5
 from .mirror import text
 from .voucher_types import base_types
 
-FORMAT = 5
+# Plan protocol 6 adds a line's bill references to protocol 5; a companion that executes 6 executes 5.
+FORMAT = 6
 NARRATION_TAG = "statement"
 
 
@@ -120,15 +121,16 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
 
 
 _VIEW = {"guid", "master_id", "date", "voucher_type", "family", "reference", "number", "narration", "party_ledger",
-         "tag", "lines", "allocations", "fingerprint"}
+         "tag", "lines", "allocations", "bills", "fingerprint"}
+BILL_TYPES = ("New Ref", "Agst Ref", "Advance", "On Account")
 
 
 def _current(current):
     """Structural checks on a reported voucher; values are data, never trusted."""
     if not isinstance(current, dict) or set(current) != _VIEW:
         raise ValueError("Tally receipt must contain an observed voucher.")
-    if (any(not isinstance(current[k], str) for k in _VIEW - {"lines", "allocations", "tag"})
-            or any(len(current[k]) > 500 for k in _VIEW - {"lines", "allocations", "tag", "narration"})
+    if (any(not isinstance(current[k], str) for k in _VIEW - {"lines", "allocations", "bills", "tag"})
+            or any(len(current[k]) > 500 for k in _VIEW - {"lines", "allocations", "bills", "tag", "narration"})
             or len(current["narration"]) > 5000 or (current["tag"] is not None and not isinstance(current["tag"], str))):
         raise ValueError("Invalid observed voucher.")
     if not current["guid"] or not current["master_id"] or not re.fullmatch(r"\d{8}", current["date"]) or not current["fingerprint"]:
@@ -141,6 +143,11 @@ def _current(current):
             not isinstance(a, dict) or set(a) != {"ledger", "category", "centre", "amount_cents"}
             or type(a["amount_cents"]) is not int for a in current["allocations"]):
         raise ValueError("Invalid allocation readback.")
+    if not isinstance(current["bills"], list) or any(
+            not isinstance(b, dict) or set(b) != {"ledger", "name", "type", "amount_cents"} or b["type"] not in BILL_TYPES
+            or not (b["name"] is None or isinstance(b["name"], str)) or type(b["amount_cents"]) is not int
+            for b in current["bills"]):
+        raise ValueError("Invalid bill reference readback.")
     return current
 
 
@@ -155,11 +162,23 @@ def _allocations(plan):
                   key=lambda a: (a["ledger"], a["amount_cents"]))
 
 
+def _bills(bills):
+    return sorted(bills, key=lambda b: (b["ledger"], b["amount_cents"], b["type"], b["name"] or ""))
+
+
+def _planned_bills(plan):
+    """The bill references the plan approves, signed as Tally reports them."""
+    return _bills([{"ledger": ln["ledger"], "name": bill.get("name"), "type": bill["type"],
+                    "amount_cents": bill["amount_cents"] if ln["side"] == "credit" else -bill["amount_cents"]}
+                   for ln in plan["lines"] for bill in ln.get("bills") or []])
+
+
 def _exact(plan, current):
     if (current["date"] != plan["header"]["date"].replace("-", "")
             or sorted(current["lines"], key=lambda e: (e["ledger"], e["amount_cents"])) != _lines(plan)
-            or sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != _allocations(plan)):
-        raise ValueError("Tally readback differs from the approved amounts or ledgers.")
+            or sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != _allocations(plan)
+            or _bills(current["bills"]) != _planned_bills(plan)):
+        raise ValueError("Tally readback differs from the approved amounts, ledgers or bill references.")
 
 
 def _entries(current):
@@ -206,7 +225,7 @@ def observed_bill(plan, outcome, current, *, identity):
                 raise ValueError("Tally saved the bill under a different voucher type.")
     return {"master_id": current["master_id"], "guid": current["guid"], "date": current["date"],
             "invoice_number": number, "vendor": current["party_ledger"], "voucher_type": current["voucher_type"],
-            "entries": _entries(current), "fingerprint": current["fingerprint"]}
+            "entries": _entries(current), "bills": current["bills"], "fingerprint": current["fingerprint"]}
 
 
 def correction_reason(plan, current):
@@ -255,7 +274,7 @@ def observed_statement(plan, current):
     _exact(plan, current)
     return {"guid": current["guid"], "master_id": current["master_id"], "fingerprint": current["fingerprint"],
             "date": current["date"], "voucher_type": current["voucher_type"], "tag": current["tag"],
-            "entries": _entries(current), "allocations": current["allocations"]}
+            "entries": _entries(current), "allocations": current["allocations"], "bills": current["bills"]}
 
 
 # ---------------------------------------------------------------------------
@@ -371,13 +390,16 @@ def _printed_totals(document, lines, raw):
 class Bill:
     """A proposal bound to the company's identities; the single source of its plan."""
 
-    def __init__(self, company, record, family, voucher_type, party, party_identity, lines, identities):
+    def __init__(self, company, record, family, voucher_type, party, party_identity, lines, identities, *,
+                 billwise=False):
         document = record["document"]
         self.company, self.family, self.voucher_type, self.party = company, family, voucher_type, party
         self.kind, self.number, self.date = document["kind"], document["number"], document["date"]
         self.total_cents = _money(document["total"], "The bill total")
         self.lines = lines
         self.identities = {party: party_identity, **identities} if party_identity else dict(identities)
+        # A supplier kept bill by bill is owed a New Ref named by the invoice.
+        self.billwise = billwise
         self.series = "credit_note" if self.kind == "credit_note" else "invoice"
         self.identity = document_identity(party, self.number, date.fromisoformat(self.date), series=self.series)
 
@@ -395,7 +417,9 @@ class Bill:
             "header": {"date": self.date, "reference": self.number, "party_ledger": self.party,
                        "narration": f"Minkops reviewed {label} {self.number}" + (f"; {note}" if note else ""),
                        "tag": None},
-            "lines": self.lines,
+            "lines": [{**self.lines[0], "bills": [{"name": self.number, "type": "New Ref",
+                                                    "amount_cents": self.lines[0]["amount_cents"]}]},
+                      *self.lines[1:]] if self.billwise else self.lines,
             "references": {"company_guid": self.company["guid"], "ledgers": self.identities},
             "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice"
                           else ["debit_note"], "party_ledger": self.party, "number": self.number,
@@ -470,6 +494,10 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     else:
         ledger = masters.one("LEDGER", party["ledger_guid"], "supplier_unresolved", "The supplier must be one ledger.")
         party_name, party_identity = masters.name(ledger), masters.identity(ledger)
+    billwise = party_identity is not None and masters.scalar(ledger, "ISBILLWISEON").casefold() == "yes"
+    if billwise and document["kind"] == "credit_note":
+        raise HoldReason("unsupported_structure", f"{party_name} keeps bill-by-bill balances, so its debit note must "
+                                                  "name the bill it adjusts. Enter it in Tally.")
     if not isinstance(party.get("evidence"), str) or not party["evidence"].strip():
         raise HoldReason("supplier_unresolved", "The supplier selection needs evidence.")
     raw = voucher.get("lines")
@@ -542,4 +570,5 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
             "figures conflict."))
     native = [_line(party_name, side, total - sum(cents for _, cents in tds)), *lines]
     voucher_type_ref = {"NAME": masters.name(voucher_type), "GUID": masters.scalar(voucher_type, "GUID")}
-    return Bill(company, record, family, voucher_type_ref, party_name, party_identity, native, identities)
+    return Bill(company, record, family, voucher_type_ref, party_name, party_identity, native, identities,
+                billwise=billwise)

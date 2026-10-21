@@ -1,11 +1,13 @@
-/** Native accounting-voucher adapter, plan protocol 5. One writer for every
- * supported family: a plan states a header and balanced ledger lines; this
+/** Native accounting-voucher adapter, plan protocols 5 and 6. One writer for
+ * every supported family: a plan states a header and balanced ledger lines; this
  * module rechecks the pinned Tally identities, reads before writing, imports at
  * most once per attempt and accepts only an exact readback. XML/TDL, endpoints
  * and amounts are fixed here; the renderer and the server supply only data.
  *
- * Inventory, bill-wise and multi-centre allocations are outside this contract:
- * the server holds them as named connector limitations before a plan exists. */
+ * Protocol 6 adds a line's bill references (New Ref, Agst Ref, Advance, On
+ * Account), written and read back with it. Inventory and multi-centre
+ * allocations are outside this contract: the server holds them as named
+ * connector limitations before a plan exists. */
 import {createHash} from 'node:crypto';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
 import {readTallyReferences} from './tally-references.js';
@@ -20,6 +22,7 @@ const BASE_FAMILY = new Map(Object.entries(FAMILIES).map(([family, base]) => [ba
 /** Families whose party ledger has a fixed side; others carry no party rule here. */
 const PARTY_SIDE = {purchase: 'credit', debit_note: 'debit'};
 const NUMBER_FIELDS = new Set(['REFERENCE', 'VOUCHERNUMBER', 'NARRATION']);
+const BILL_TYPES = new Set(['New Ref', 'Agst Ref', 'Advance', 'On Account']);
 const MAX_WINDOW_DAYS = 366;
 
 const list = v => v == null ? [] : Array.isArray(v) ? v : [v];
@@ -35,6 +38,10 @@ const safeText = (v, max = 200) => typeof v === 'string' && v.trim() !== '' && v
 /** Tally's native sign: credits are positive, debits negative. */
 const signed = line => line.side === 'credit' ? line.amount_cents : -line.amount_cents;
 const byLedger = (a, b) => a.ledger.localeCompare(b.ledger) || a.amount_cents - b.amount_cents;
+const byBill = (a, b) => byLedger(a, b) || a.type.localeCompare(b.type) || String(a.name ?? '').localeCompare(String(b.name ?? ''));
+/** A line's bill references as Tally signs them, comparable with a readback. */
+const lineBills = line => (line.bills ?? []).map(bill => ({ledger: line.ledger, name: bill.name ?? null, type: bill.type,
+  amount_cents: line.side === 'credit' ? bill.amount_cents : -bill.amount_cents}));
 const nativeCents = v => {
   const n = Number(scalar(v)) * 100;
   if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n - Math.round(n)) > 0.00001) throw new Error('Invalid native money.');
@@ -124,7 +131,7 @@ export function voucherFamilies(records) {
 /** Structural checks only; business rules are the server's. Throws before any native call. */
 export function validatePlan(plan) {
   const fail = reason => { throw new Error(`Unsupported voucher plan: ${reason}.`); };
-  if (plan?.format_version !== 5) fail('format');
+  if (![5, 6].includes(plan?.format_version)) fail('format');
   if (!Object.hasOwn(FAMILIES, plan.family)) fail('family');
   if (!['append', 'update'].includes(plan.operation)) fail('operation');
   if (!safeText(plan.company) || !safeText(plan.company_guid) || !Number.isInteger(plan.port) || plan.port < 1 || plan.port > 65535) fail('company');
@@ -144,6 +151,17 @@ export function validatePlan(plan) {
   for (const line of lines) {
     if (!safeText(line?.ledger) || !['debit', 'credit'].includes(line.side) || !Number.isSafeInteger(line.amount_cents) || line.amount_cents <= 0) fail('line');
     if (line.allocation != null && !['category', 'category_guid', 'centre', 'centre_guid'].every(k => safeText(line.allocation[k]))) fail('allocation');
+    if (line.bills != null) {
+      // Protocol 6 only: references that name their bill (On Account names none) and add up to the line.
+      if (plan.format_version < 6 || !Array.isArray(line.bills) || !line.bills.length || line.bills.length > 20) fail('bills');
+      let referenced = 0;
+      for (const bill of line.bills) {
+        if (!BILL_TYPES.has(bill?.type) || !Number.isSafeInteger(bill.amount_cents) || bill.amount_cents <= 0) fail('bill');
+        if (bill.type === 'On Account' ? bill.name != null : !safeText(bill.name, 100)) fail('bill name');
+        referenced += bill.amount_cents;
+      }
+      if (referenced !== line.amount_cents) fail('bill total');
+    }
     if (line.side === 'debit') debit += line.amount_cents; else credit += line.amount_cents;
   }
   if (!Number.isSafeInteger(debit) || debit !== credit) fail('unbalanced');
@@ -188,11 +206,14 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
     const date = scalar(v.DATE);
     if (date < from || date > to) throw new Error('Tally returned a voucher outside the requested window.');
     const entries = list(v['ALLLEDGERENTRIES.LIST'] ?? v['LEDGERENTRIES.LIST']);
-    const allocations = [];
+    const allocations = [], bills = [];
     let unsupported = scalar(v.ISINVOICE).toLowerCase() === 'yes'
       || ['ALLINVENTORYENTRIES.LIST', 'INVENTORYENTRIES.LIST'].some(key => populated(v[key]));
     for (const entry of entries) {
-      if (['BILLALLOCATIONS.LIST', 'INVENTORYALLOCATIONS.LIST'].some(key => populated(entry[key]))) unsupported = true;
+      if (populated(entry['INVENTORYALLOCATIONS.LIST'])) unsupported = true;
+      for (const bill of list(entry['BILLALLOCATIONS.LIST']).filter(populated))
+        bills.push({ledger: scalar(entry.LEDGERNAME), name: scalar(bill.NAME) || null, type: scalar(bill.BILLTYPE),
+          amount_cents: nativeCents(bill.AMOUNT)});
       const centres = list(entry['CATEGORYALLOCATIONS.LIST']).flatMap(category =>
         list(category['COSTCENTREALLOCATIONS.LIST']).filter(populated).map(centre => ({
           ledger: scalar(entry.LEDGERNAME), category: scalar(category.CATEGORY), centre: scalar(centre.NAME), amount_cents: nativeCents(centre.AMOUNT)})));
@@ -206,7 +227,7 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
       party_ledger: scalar(v.PARTYLEDGERNAME), tag: scalar(v.NARRATION).match(/\[Minkops [a-z]+:([a-f0-9-]{36})\]/)?.[1] ?? null,
       unsupported, fingerprint: `v5:${hash(v)}`,
       entries: entries.map(e => ({ledger: scalar(e.LEDGERNAME), amount_cents: nativeCents(e.AMOUNT)})).sort(byLedger),
-      allocations: allocations.sort(byLedger),
+      allocations: allocations.sort(byLedger), bills: bills.sort(byBill),
     };
   });
 }
@@ -241,12 +262,13 @@ async function recheck(plan, {request, readReferences}) {
   return {types, typeName: nameOf(live[0])};
 }
 
-/** The approved lines, allocations and date; the voucher type only when given. */
+/** The approved lines, allocations, bill references and date; the voucher type only when given. */
 function equal(current, plan, typeName) {
   const lines = plan.lines.map(l => ({ledger: l.ledger, amount_cents: signed(l)})).sort(byLedger);
   const allocations = plan.lines.filter(l => l.allocation)
     .map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})).sort(byLedger);
   return current.date === compact(plan.header.date) && hash(current.entries) === hash(lines) && hash(current.allocations) === hash(allocations)
+    && hash(current.bills ?? []) === hash(plan.lines.flatMap(lineBills).sort(byBill))
     && (typeName == null || current.voucher_type.toLowerCase() === typeName.toLowerCase());
 }
 
@@ -268,7 +290,7 @@ function documentMatches(voucher, duplicate) {
 function observedVoucher(v, family) {
   return {guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family,
     reference: v.reference, number: v.number, narration: v.narration, party_ledger: v.party_ledger, tag: v.tag,
-    lines: v.entries, allocations: v.allocations, fingerprint: v.fingerprint};
+    lines: v.entries, allocations: v.allocations, bills: v.bills ?? [], fingerprint: v.fingerprint};
 }
 
 const hold = (code, message) => ({outcome: 'attention', hold: code, ...(message ? {message} : {})});
@@ -318,7 +340,8 @@ function importBody(plan, typeName, current) {
   const lines = plan.lines.map(line => {
     const amount = signed(line), deemed = amount < 0 ? 'Yes' : 'No', money = (amount / 100).toFixed(2), a = line.allocation;
     const allocation = a ? `<CATEGORYALLOCATIONS.LIST><CATEGORY>${xml(a.category)}</CATEGORY><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><COSTCENTREALLOCATIONS.LIST><NAME>${xml(a.centre)}</NAME><AMOUNT>${money}</AMOUNT></COSTCENTREALLOCATIONS.LIST></CATEGORYALLOCATIONS.LIST>` : '';
-    return `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(line.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><AMOUNT>${money}</AMOUNT>${allocation}</ALLLEDGERENTRIES.LIST>`;
+    const bills = lineBills(line).map(b => `<BILLALLOCATIONS.LIST>${b.name != null ? `<NAME>${xml(b.name)}</NAME>` : ''}<BILLTYPE>${xml(b.type)}</BILLTYPE><AMOUNT>${(b.amount_cents / 100).toFixed(2)}</AMOUNT></BILLALLOCATIONS.LIST>`).join('');
+    return `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(line.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><AMOUNT>${money}</AMOUNT>${allocation}${bills}</ALLLEDGERENTRIES.LIST>`;
   }).join('');
   return `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="${xml(type)}" OBJVIEW="Accounting Voucher View"><GUID>${xml(guid)}</GUID><DATE>${compact(header.date)}</DATE><VOUCHERTYPENAME>${xml(type)}</VOUCHERTYPENAME>${header.reference ? `<REFERENCE>${xml(header.reference)}</REFERENCE>` : ''}${header.party_ledger ? `<PARTYLEDGERNAME>${xml(header.party_ledger)}</PARTYLEDGERNAME>` : ''}<PERSISTEDVIEW>Accounting Voucher View</PERSISTEDVIEW><ISINVOICE>No</ISINVOICE><NARRATION>${xml(narration)}</NARRATION>${lines}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
 }

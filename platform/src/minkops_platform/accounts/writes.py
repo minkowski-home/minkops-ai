@@ -80,7 +80,8 @@ def plan(connection, device, job, plan_version):
     if write["finished_at"]:
         raise ServiceError("conflict", "This Tally write is no longer pending.")
     voucher = write["plan"].get("kind") != "supplier"
-    if voucher and (plan_version < FORMAT or write["plan"].get("format_version") != FORMAT):
+    # A plan waits for a companion that executes its protocol; an earlier pending plan stays executable.
+    if voucher and not (write["plan"].get("format_version") or FORMAT + 1) <= min(plan_version, FORMAT):
         raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then retry the save.")
     return {**write["plan"], "port": device["tally_port"]}
 
