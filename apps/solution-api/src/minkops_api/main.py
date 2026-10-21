@@ -13,6 +13,7 @@ from minkops_api.attention import router as attention_router
 from minkops_api.auth import router as core_router
 from minkops_api.clients import router as clients_router
 from minkops_api.desktop import router as desktop_router
+from minkops_api.memory import router as memory_router
 from minkops_api.runs import router as runs_router
 from minkops_api.workspace import router as workspace_router
 
@@ -59,6 +60,7 @@ app.include_router(desktop_router)
 app.include_router(attention_router)
 app.include_router(clients_router)
 app.include_router(runs_router)
+app.include_router(memory_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

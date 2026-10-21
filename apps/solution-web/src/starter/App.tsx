@@ -10,6 +10,7 @@ import Login, { InvitePage, JoinPage, SignupPage, VerifyPage } from "./pages/Log
 import { ThemeProvider } from "./theme/ThemeContext";
 import { DevicesScreen } from './desktop/DevicesScreen';
 import { Attention } from './workspace/Attention';
+import { MemoryScreen } from './workspace/Memory';
 import { LoadingIndicator } from './components/Feedback';
 import { useRead } from "./useRead";
 
@@ -45,7 +46,8 @@ function Console() {
   const title = path.includes("/employees/") ? "Employee" : path.endsWith("/employees") ? "Employees"
     : path.includes("/workflows/") ? "Workflow" : path.endsWith("/workflows") ? "Workflows"
       : path.includes("/tasks/") ? "Task" : path.endsWith("/connections") ? "Connected PCs"
-        : path.endsWith("/attention") ? "Attention items" : path.endsWith("/access") ? "Access" : "Dashboard";
+        : path.endsWith("/attention") ? "Attention items" : path.endsWith("/memory") ? "Memory"
+          : path.endsWith("/access") ? "Access" : "Dashboard";
   const attentionCount = workspace.attention_count ?? 0;
 
   return <ConsoleShell title={title} tenantName={workspace.tenant.name} routeSlug={routeSlug}
@@ -63,6 +65,7 @@ function Console() {
       <Route path="tasks/:id" element={<TaskRoute workspace={workspace} routeSlug={routeSlug} />} />
       <Route path="connections" element={<DevicesScreen tenant={slug} routeSlug={routeSlug} />} />
       <Route path="attention" element={<Attention tenant={slug} routeSlug={routeSlug} />} />
+      <Route path="memory" element={<MemoryScreen tenant={slug} />} />
       <Route path="access" element={workspace.can_edit
         ? <AccessScreen workspace={workspace} onSaved={refreshWorkspace} />
         : <Navigate to="dashboard" replace />} />
