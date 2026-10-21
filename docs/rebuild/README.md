@@ -372,8 +372,8 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | --- | --- | --- |
 | 0. Acceptance harness | Done | One closed hold matrix pinned by a golden test (`test_holds.py`). Golden bill, statement-row and narration-token identities (`test_vouchers.py`). Synthetic look-alikes of the PR Infra statement and bills, with private-file structure checks (`test_synthetic_fixtures.py`). The five-company rehearsal is verified live (`scripts/rehearsal_status.mjs`). The runtime review's missing tests land with slice 1's decision path, and scorer timing with slice 5's bill runs. |
 | 1. Foundation | Done | Code and tests provision the dedicated instance (`test_database_provisioning.py`); it has not been created or deployed. Client businesses, per-client access and company identity are in migration `0020` (`test_clients.py`). The run model is in migration `0021`: leased items, versioned records, idempotent decisions, commit-time wake-ups and bounded status (`test_work.py`, `test_runs_api.py`). That includes the runtime review's missing cases: confirming after the worker drained, a response lost after commit, and the same decision twice. 663 Python tests pass. |
-| 2. Sync and mirror | In progress | |
-| 3. Session tool loop | Not started | |
+| 2. Sync and mirror | Done | The versioned mirror, the sync protocol with its regression and census guards, practice probes and background refresh (`test_mirror.py`, `test_sync.py`, `test_practice.py`, `test_sync_api.py`, `sync.test.js`, `jobs.test.js`). Rehearsed live through the headless companion: all five companies were found, authorised and mirrored in full in 14 s, matching Tally's own voucher counts and seven master types exactly. A created voucher arrived as a delta, a cancellation as a flag, and a deletion as a census tombstone ([evidence](evidence.md#rehearsed-on-tallyprime-edit-log-1172-21-october-2026)). Source Discovery is replaced by the sync; it is deleted with the staged bill and statement pipelines in slices 4–5, which still read it. |
+| 3. Session tool loop | In progress | |
 | 4. Statement slice | Not started | |
 | 5. Bill slice | Not started | |
 | 6. Memory, rules and questions | Not started | |
@@ -387,4 +387,11 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 
 **For the next manual testing phase** (steps that need a person at Tally or Windows):
 
-- None yet.
+- **Split Company Data.**
+  1. Split a copy of a rehearsal company in Tally's UI.
+  2. Open both halves and request a sync.
+  3. Expect the sibling with the new BooksFrom to raise its own "New company found" card, and the original to keep its mirror.
+- **Restore an older backup.**
+  1. Back up a rehearsal company, add a voucher and sync.
+  2. Restore the backup in Tally's UI and sync again.
+  3. Expect a full rebuild with reason `marker_regressed`, and the added voucher gone from the new version.
