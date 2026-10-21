@@ -5,7 +5,7 @@ keys remain authoritative for backfills and externally created records.
 """
 
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from minkops_platform.errors import ServiceError
 
@@ -162,33 +162,6 @@ def recheck_target(connection, tenant, user, current):
     # The approved snapshot stays pinned. The native adapter rechecks exact
     # company/master versions and duplicates immediately before each write.
     return current
-
-
-def allocation_entries(data, allocations=None):
-    """Canonical tax lines; never infer rates or combine different tax ledgers."""
-    if allocations is None:
-        return [{"ledger": data.get("tax_ledger"), "amount": data["tax"]}] if data.get("tax") else []
-    if not isinstance(allocations, list) or not 1 <= len(allocations) <= 8 or data.get("tax_ledger") is not None:
-        raise ValueError("Select either one tax ledger or explicit split tax allocations.")
-    result = []
-    try:
-        for line in allocations:
-            if (not isinstance(line, dict) or not {"ledger", "amount"} <= set(line)
-                    or set(line) - {"ledger", "amount", "ref", "evidence"}
-                    or not isinstance(line["ledger"], str) or not line["ledger"].strip()
-                    or type(line["amount"]) not in (int, float)):
-                raise ValueError("Invalid tax allocation.")
-            amount = Decimal(str(line["amount"]))
-            if not amount.is_finite() or amount <= 0 or amount.as_tuple().exponent < -2 or amount * 100 > 2**53 - 1:
-                raise ValueError("Tax allocations require positive exact money values.")
-            result.append({"ledger": line["ledger"], "amount": line["amount"]})
-        if sum(Decimal(str(line["amount"])) for line in result) != Decimal(str(data["tax"])):
-            raise ValueError("Tax allocations must equal the bill's total tax exactly.")
-        if len({line["ledger"] for line in result}) != len(result):
-            raise ValueError("Distinct tax allocations require distinct native ledgers.")
-    except (InvalidOperation, KeyError, TypeError) as error:
-        raise ValueError("Invalid tax allocation amounts.") from error
-    return result
 
 
 def capture_tally_findings(result, config):

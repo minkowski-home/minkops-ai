@@ -36,7 +36,8 @@ def resolved(item, observation):
         return bool(current)
     baseline = target.get("baseline") or {}
     # Fingerprints from different native readers are not comparable: never
-    # treat a reader change as an edit made in Tally.
+    # treat a reader change as an edit made in Tally. A baseline saved by the
+    # retired reader therefore stays pending until someone marks it Done.
     if str(baseline.get("fingerprint", "")).startswith("v5:") != str(current.get("fingerprint", "")).startswith("v5:"):
         return False
     return item["kind"] in ("bill", "review") and bool(baseline.get("fingerprint")) and (
@@ -167,18 +168,15 @@ def plan(connection, device, job, *, plan_version=1):
     item = get(connection, device["tenant_id"], job["input"]["item_id"])
     if str(item["target"].get("device_id")) != str(device["id"]) or item["status"] != "pending":
         raise ServiceError("conflict", "Attention item no longer pending on this PC.")
-    if item["target"].get("gst_supplier") and plan_version < 4:
-        raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later before creating or verifying this GST supplier.")
-    return native_target(item["target"], plan_version)
+    if plan_version < 5:
+        raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then check this item again.")
+    return native_target(item["target"])
 
 
-def native_target(target, plan_version):
-    """A protocol-5 companion observes bills with the voucher writer's reader,
-    so a refresh fingerprint is comparable with the one saved at write time.
-    A baseline saved by the older reader keeps being observed by that reader."""
-    baseline = (target.get("baseline") or {}).get("fingerprint")
-    if (plan_version < 5 or target.get("tool") != "tally" or not target.get("date")
-            or (baseline is not None and not str(baseline).startswith("v5:"))):
+def native_target(target):
+    """Companions observe a bill with the voucher writer's reader, so a refresh
+    fingerprint is comparable with the one saved at write time."""
+    if target.get("tool") != "tally" or not target.get("date"):
         return target
     from datetime import date
 

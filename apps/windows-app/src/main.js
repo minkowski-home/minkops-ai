@@ -40,7 +40,6 @@ import {
   readTallyIni,
   inspectTallyAttention,
   tallyCrashEvents,
-  saveTallyBill,
   saveVoucher,
   saveCatalogSnapshot,
 } from "@minkops/desktop-connectors";
@@ -303,17 +302,10 @@ function startWorker() {
       };
       if (job.operation === "tally.statement" || job.operation === "tally.save") {
         const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
-        // Protocol 5: one writer for every voucher family.
-        if (plan.format_version === 5)
-          return saveVoucher(plan, {request: tallyRequest, beforeImport: durableIntent, pc,
-            diagnose: (record) => jobDiagnostics.set(job.id, record)});
-        // Servers upgrade every statement plan for protocol 5 or refuse it.
-        if (job.operation === "tally.statement") throw new Error("Unsupported statement plan.");
-        return saveTallyBill(plan, {
-          request: tallyRequest,
-          pc,
-          diagnose: (record) => jobDiagnostics.set(job.id, record),
-        });
+        // Protocol 5: one writer for every voucher family; servers serve nothing older.
+        if (plan.format_version !== 5) throw new Error("Unsupported voucher plan.");
+        return saveVoucher(plan, {request: tallyRequest, beforeImport: durableIntent, pc,
+          diagnose: (record) => jobDiagnostics.set(job.id, record)});
       }
       if (job.operation !== "accounts.save")
         throw new Error("Unsupported local operation.");

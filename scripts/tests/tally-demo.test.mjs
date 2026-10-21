@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { masterXml, voucherXml, checkImport, verifyVoucher } from "../seed_tally_demo.mjs";
+import { masterXml, voucherXml, checkImport, verifyVoucher, proofPlan } from "../seed_tally_demo.mjs";
+import { validatePlan } from "../../connectors/desktop/src/voucher.js";
 
 test("fixture XML escapes identities and retains separate tax allocations", () => {
   const xml = voucherXml({guid:"guid", type:"Purchase", date:"2026-10-02", reference:'A&B<1>',
@@ -8,6 +9,20 @@ test("fixture XML escapes identities and retains separate tax allocations", () =
       {ledger:'CGST',amount:'-9.00'}, {ledger:'SGST',amount:'-9.00'}]});
   assert.match(xml, /A&amp;B&lt;1&gt;/);
   assert.equal((xml.match(/<ALLLEDGERENTRIES.LIST>/g) ?? []).length, 4);
+});
+
+test("the adapter proof is a valid protocol-5 bill with pinned identities and its invoice year", () => {
+  const ledgers = ["QA18 Supplier", "QA18 Purchases", "QA18 CGST", "QA18 SGST"].map((name, i) =>
+    ({"@_NAME": name, GUID: `g${i}`, PARENT: "Group", ALTERID: " 4"}));
+  const plan = proofPlan({company: "QA18 Co", company_guid: "co-guid"},
+    {guid: "a9867ffb-262d-5f0e-afce-41619ab9d16e", date: "2026-02-01", reference: "QA-1", party: "QA18 Supplier",
+      entries: [{ledger: "QA18 Supplier", amount: "118.00"}, {ledger: "QA18 Purchases", amount: "-100.00"},
+        {ledger: "QA18 CGST", amount: "-9.00"}, {ledger: "QA18 SGST", amount: "-9.00"}]},
+    ledgers, {"@_NAME": "Purchase", GUID: "vt"});
+  assert.equal(validatePlan(plan), plan);
+  assert.deepEqual(plan.lines[0], {ledger: "QA18 Supplier", side: "credit", amount_cents: 11800, allocation: null});
+  assert.deepEqual(plan.duplicate.window, {from: "2025-04-01", to: "2026-03-31"});
+  assert.equal(plan.references.ledgers["QA18 CGST"].GUID, "g2");
 });
 
 test("no malformed/unbalanced fixture can reach Tally", () => {

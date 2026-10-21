@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {saveVoucher, readVouchers, validatePlan, voucherFamilies} from '../src/voucher.js';
+import {classifyRejection, saveVoucher, readVouchers, validatePlan, voucherFamilies} from '../src/voucher.js';
 import {TallyUnavailable} from '../src/tally-session.js';
 
 const id = '12345678-1234-5234-8234-123456789abc';
@@ -306,4 +306,23 @@ test('voucher families follow reserved names through custom parents, keeping ina
   assert.equal(family.has('sales'), false);
   assert.equal(active.has('site purchase'), false);
   assert.equal(active.has('purchase gst'), true);
+});
+
+test("Tally's rejection reasons map to one short action each", () => {
+  const cases = {
+    "Voucher date is out of the financial year": "date",
+    "Date is before Books beginning date": "date",
+    "You are not authorised to create Vouchers": "permission",
+    "Access denied for this user": "permission",
+    "Voucher Type 'Purchase GST' does not exist": "voucher_type",
+    "Voucher Number is required": "voucher_number",
+    "Ledger 'Supplier' does not exist!": "ledger",
+    "Something unusual": "other",
+  };
+  for (const [reason, code] of Object.entries(cases)) {
+    const rejection = classifyRejection(reason);
+    assert.equal(rejection.code, code, reason);
+    assert.ok(rejection.message.length <= 300);
+    assert.doesNotMatch(rejection.message, new RegExp(reason.slice(0, 12)), "native text stays in diagnostics");
+  }
 });

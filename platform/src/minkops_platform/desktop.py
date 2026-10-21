@@ -44,8 +44,8 @@ def public_device(row):
     }
 
 
-# Tally work needs the open-company session contract and pinned voucher types.
-MINIMUM_COMPANION = (0, 7, 0)
+# Every native voucher is a protocol-5 plan, which companions execute from 0.9.0.
+MINIMUM_COMPANION = (0, 9, 0)
 
 
 def companion_report(version, host, session):
@@ -573,38 +573,34 @@ def _claimed_job(connection, device, job_id, claim_token):
 
 
 def _native_plan(run, write, plan_version):
-    """The approved plan in the newest format this companion executes.
+    """The approved plan as the protocol-5 voucher a companion executes.
 
-    Protocol-5 companions receive every upgradable plan as a v5 voucher; a plan
-    without pinned native identities keeps its approved format and writer.
-    Statement siblings with the same day, bank and amount are proven distinct
-    by the run's verified balance chain, so they never hold each other.
+    Statement rows stored in the older row format are served upgraded. Siblings
+    with the same day, bank and amount are proven distinct by the run's verified
+    balance chain, so they never hold each other.
     """
     from .accounts.vouchers import FORMAT, upgrade
 
-    plan = write["plan"]
-    if plan_version >= FORMAT:
-        distinct = []
-        if plan.get("format_version") == 4:
-            def facts(sibling):
-                if sibling.get("format_version") == FORMAT:
-                    match = sibling["duplicate"]["match"]
-                    amount = match["amount_cents"] * (-1 if match["side"] == "credit" else 1)
-                    return sibling["header"]["date"], amount
-                return sibling["data"]["date"], sibling["data"]["amount_cents"]
-
-            distinct = [row["plan"]["remote_id"] for row in run["result"]["records"]
-                        if row.get("plan") and row["plan"]["remote_id"] != plan["remote_id"]
-                        and row["plan"]["destination_key"] == plan["destination_key"]
-                        and facts(row["plan"]) == facts(plan)]
-        upgraded = upgrade(plan, identity=write["identity"], distinct=distinct)
-        if upgraded is not None:
-            return upgraded
-        if plan.get("format_version") == 4:
-            raise ServiceError("conflict", "This approved statement row lacks pinned Tally identities. Start a new run.")
-    if plan.get("format_version", 1) > plan_version:
+    if plan_version < FORMAT:
         raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then use Retry save.")
-    return plan
+    plan = write["plan"]
+    distinct = []
+    if plan.get("format_version") == 4:
+        def facts(sibling):
+            if sibling.get("format_version") == FORMAT:
+                match = sibling["duplicate"]["match"]
+                amount = match["amount_cents"] * (-1 if match["side"] == "credit" else 1)
+                return sibling["header"]["date"], amount
+            return sibling["data"]["date"], sibling["data"]["amount_cents"]
+
+        distinct = [row["plan"]["remote_id"] for row in run["result"]["records"]
+                    if row.get("plan") and row["plan"]["remote_id"] != plan["remote_id"]
+                    and row["plan"]["destination_key"] == plan["destination_key"]
+                    and facts(row["plan"]) == facts(plan)]
+    upgraded = upgrade(plan, identity=write["identity"], distinct=distinct)
+    if upgraded is None:
+        raise ServiceError("conflict", "This approved entry uses a retired plan format. Start a new run.")
+    return upgraded
 
 
 def plan(connection, device, job_id, claim_token, plan_version=1):
@@ -618,8 +614,8 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
     if job["state"] == "executing" and job["operation"] == "tally.statement":
         from .accounts.tally_writes import spec
         run, write = spec(connection, device, job["input"], underway=True)
-        if run["workflow_key"] != "statement-entry" or plan_version < 4:
-            raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later for statement saves.")
+        if run["workflow_key"] != "statement-entry":
+            raise ServiceError("conflict", "This native operation does not match the approved workflow contract.")
         return _native_plan(run, write, plan_version)
     if job["state"] == "executing" and job["operation"] == "sources.discover":
         from . import discovery

@@ -203,7 +203,7 @@ class StatementHandler(AccountsHandler):
         if not latest or str(latest['id'])!=str(found['id']):
             raise ValueError('Use the latest confirmed Source Discovery on this PC.')
         device=desktop.owned_device(connection,tenant['id'],user['id'],found['device_id'])
-        desktop.require_companion(device,minimum=(0,9,0))
+        desktop.require_companion(device)
         if body.get('destination_device_id') and str(device['id'])!=str(body['destination_device_id']):
             raise ValueError('Source Discovery belongs to a different destination PC.')
         context=workflow_context(connection,tenant['id'],discovery_id,['tally'])

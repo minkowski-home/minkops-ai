@@ -216,7 +216,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=old, json={}).status_code, 401
         )
-        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.9.0"}
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()[
                 "id"
@@ -315,7 +315,7 @@ class DesktopTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         self.device = response.json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.9.0"}
         self.worker_base = "/api/desktop/worker"
         return self.device
 
@@ -500,9 +500,10 @@ class DesktopTests(unittest.TestCase):
         body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
         outdated = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
         self.assertEqual(outdated.status_code, 409, outdated.text)
-        self.assertIn("Update Minkops on Office PC to 0.7.0 or later", outdated.json()["detail"])
-        self.claim_as({"X-Minkops-Companion-Version": "0.6.10"})
-        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
+        self.assertIn("Update Minkops on Office PC to 0.9.0 or later", outdated.json()["detail"])
+        for version in ("0.6.10", "0.8.1"):  # Only protocol-5 companions receive Tally work.
+            self.claim_as({"X-Minkops-Companion-Version": version})
+            self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
         self.claim_as({"X-Minkops-Companion-Version": "0.10.0"})
         self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
 

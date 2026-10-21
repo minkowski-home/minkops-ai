@@ -58,8 +58,8 @@ class GSTSupplierTests(unittest.TestCase):
         self.assertEqual(decision.status_code, 200, decision.text)
         job = self.client.post("/api/desktop/worker/claim", headers=self.worker, json={}).json()
         plan_route = f"/api/desktop/worker/jobs/{job['id']}/plan?claim_token={job['claim_token']}"
-        self.assertEqual(self.client.get(plan_route, headers={**self.worker, "X-Minkops-Plan-Version": "3"}).status_code, 409)
-        plan = self.client.get(plan_route, headers={**self.worker, "X-Minkops-Plan-Version": "4"})
+        self.assertEqual(self.client.get(plan_route, headers={**self.worker, "X-Minkops-Plan-Version": "4"}).status_code, 409)
+        plan = self.client.get(plan_route, headers={**self.worker, "X-Minkops-Plan-Version": "5"})
         self.assertEqual(plan.status_code, 200, plan.text)
         self.assertEqual(plan.json()["gst_supplier"]["gstin"], "27AABCM1256F1ZR")
         master = {"NAME": "Synthetic GST supplier", "GUID": "created", "ALTERID": "2", "PARENT": "Sundry Creditors"}

@@ -175,16 +175,15 @@ class ReceiptTest(unittest.TestCase):
 
 
 class AttentionReaderTest(unittest.TestCase):
-    def test_protocol_five_refreshes_read_the_invoice_window_unless_an_older_reader_saved_the_baseline(self):
+    def test_refreshes_read_the_invoice_window_with_the_voucher_writers_reader(self):
         from minkops_platform.attention import native_target
         target = {"tool": "tally", "date": "2027-03-31", "vendor": "Supplier", "invoice_number": "MOCK-1", "baseline": None}
-        self.assertEqual(native_target(target, 5)["document"],
+        self.assertEqual(native_target(target)["document"],
                          {"window": {"from": "2026-04-01", "to": "2027-03-31"}, "number_fields": ["REFERENCE"],
                           "families": ["purchase", "journal"]})
-        self.assertNotIn("document", native_target(target, 4))
-        self.assertNotIn("document", native_target({**target, "baseline": {"fingerprint": "a" * 64}}, 5))
-        self.assertIn("document", native_target({**target, "baseline": {"fingerprint": "v5:" + "a" * 64}}, 5))
-        self.assertNotIn("document", native_target({**target, "date": None}, 5))
+        # A baseline from the retired reader is read the same way; resolved() keeps it pending.
+        self.assertIn("document", native_target({**target, "baseline": {"fingerprint": "a" * 64}}))
+        self.assertNotIn("document", native_target({**target, "date": None}))
 
     def test_a_reader_change_is_never_mistaken_for_an_edit_in_tally(self):
         from minkops_platform.attention import resolved

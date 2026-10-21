@@ -81,7 +81,7 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             from minkops_platform import desktop
 
             desktop.require_companion(
-                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 9, 0))
+                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]))
             from minkops_platform.discovery import workflow_context
 
             source_context = workflow_context(

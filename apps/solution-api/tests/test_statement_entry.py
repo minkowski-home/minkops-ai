@@ -329,16 +329,18 @@ class StatementTests(unittest.TestCase):
             job=self.client.post('/api/desktop/worker/claim',headers=self.worker,json={}).json()
             route=f"/api/desktop/worker/jobs/{job['id']}"
             query='/plan?claim_token='+job['claim_token']
-            self.assertEqual(self.client.get(route+query,headers={**self.worker,'X-Minkops-Plan-Version':'3'}).status_code,409)
-            plan=self.client.get(route+query,headers={**self.worker,'X-Minkops-Plan-Version':'4'}).json()
-            data=plan['data']
-            current={'guid':'native-'+str(uuid.uuid4()),'fingerprint':'fingerprint','tag':plan['remote_id'],
-                'date':data['date'].replace('-',''),'voucher_type':plan['voucher_type']['NAME'],'allocation':None,
-                'entries':sorted([{'ledger':'Bank','amount':-data['amount_cents']},{'ledger':'Expense','amount':data['amount_cents']}],key=lambda e:e['ledger'])}
+            self.assertEqual(self.client.get(route+query,headers={**self.worker,'X-Minkops-Plan-Version':'4'}).status_code,409)
+            plan=self.client.get(route+query,headers={**self.worker,'X-Minkops-Plan-Version':'5'}).json()
+            current={'guid':'a1b2c3d4-0000-4000-8000-'+uuid.uuid4().hex[:12],'master_id':'5',
+                'date':plan['header']['date'].replace('-',''),'voucher_type':plan['voucher_type']['NAME'],'family':plan['family'],
+                'reference':plan['header']['reference'],'number':'','narration':plan['header']['narration'],'party_ledger':'',
+                'tag':plan['remote_id'],'allocations':[],'fingerprint':'v5:'+'e'*64,
+                'lines':sorted(({'ledger':ln['ledger'],'amount_cents':ln['amount_cents'] if ln['side']=='credit' else -ln['amount_cents']}
+                                for ln in plan['lines']),key=lambda e:e['ledger'])}
             receipt={'claim_token':job['claim_token'],'result':{'outcome':'saved','company_guid':'statement-company','current':current}}
-            current['entries'][0]['amount']+=1
+            current['lines'][0]['amount_cents']+=1
             self.assertEqual(self.client.post(route+'/finish',headers=self.worker,json=receipt).status_code,422)
-            current['entries'][0]['amount']-=1
+            current['lines'][0]['amount_cents']-=1
             finished=self.client.post(route+'/finish',headers=self.worker,json=receipt)
             self.assertEqual(finished.status_code,200,finished.text)
             self.assertEqual(self.client.post(route+'/finish',headers=self.worker,json=receipt).status_code,200)

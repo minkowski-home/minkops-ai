@@ -17,7 +17,6 @@ export { inspectExcel, excelSchemaBytes } from './discovery.js';
 export { readTallyReferences } from './tally-references.js';
 export { checkTally, requireOpenCompany, readOpenCompanies, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
 export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
-export { saveTallyBill } from './tally.js';
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;

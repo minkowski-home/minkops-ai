@@ -9,12 +9,12 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
 
-from .bills import add_note, allocation_entries
+from .bills import add_note
 from .repository import observe, run_for
 
 PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
 # Short labels for typed holds the companion reports before or instead of a
-# write (connectors/desktop/src/tally.js saveTallyBill). Unknown codes fall back.
+# write (connectors/desktop/src/voucher.js saveVoucher). Unknown codes fall back.
 HOLD_TITLES = {
     "company_not_open": "Open company in Tally",
     "no_company": "Open company in Tally",
@@ -331,92 +331,16 @@ def accept(connection, device, payload, receipt):
         raise ServiceError("invalid", "Invalid Tally write receipt.")
     outcome = receipt["outcome"]
     current = receipt.get("current")
-    if outcome in ("saved", "duplicate", "correction") and isinstance(current, dict) and "lines" in current:
-        # Protocol 5: verify against the plan this companion was served.
-        from .vouchers import observed_bill, upgrade
+    if outcome in ("saved", "duplicate", "correction"):
+        # Verify against the exact protocol-5 plan this companion was served.
+        from .vouchers import FORMAT, observed_bill
 
-        plan = upgrade(write["plan"], identity=write["identity"])
-        if plan is None:
+        if write["plan"].get("format_version") != FORMAT:
             raise ServiceError("invalid", "This approved bill was not served as a protocol 5 voucher.")
         try:
-            current = observed_bill(plan, outcome, current, identity=write["identity"])
+            current = observed_bill(write["plan"], outcome, current, identity=write["identity"])
         except ValueError as error:
             raise ServiceError("invalid", str(error)) from error
-    elif outcome in ("saved", "duplicate", "correction"):
-        if not isinstance(current, dict) or set(current) - {"voucher_type"} != {
-            "master_id",
-            "guid",
-            "date",
-            "invoice_number",
-            "vendor",
-            "entries",
-            "fingerprint",
-        }:
-            raise ServiceError("invalid", "Tally receipt must contain an observed voucher.")
-        # Companions from 0.7.0 report the observed voucher type; older ones omit it.
-        if "voucher_type" in current and (
-            not isinstance(current["voucher_type"], str) or not 1 <= len(current["voucher_type"]) <= 200
-        ):
-            raise ServiceError("invalid", "Invalid observed voucher type.")
-        if (
-            any(
-                not isinstance(current[k], str) or not 1 <= len(current[k]) <= 200
-                for k in ("master_id", "guid", "date", "invoice_number", "vendor", "fingerprint")
-            )
-            or not isinstance(current["entries"], list)
-            or not 1 <= len(current["entries"]) <= 100
-        ):
-            raise ServiceError("invalid", "Invalid observed voucher.")
-        if any(
-            not isinstance(e, dict)
-            or set(e) != {"ledger", "amount"}
-            or not isinstance(e["ledger"], str)
-            or type(e["amount"]) is not int
-            for e in current["entries"]
-        ):
-            raise ServiceError("invalid", "Invalid ledger readback.")
-        from .bills import business_identity
-
-        actual = {
-            "vendor": current["vendor"],
-            "invoice_number": current["invoice_number"],
-            "date": f"{current['date'][:4]}-{current['date'][4:6]}-{current['date'][6:]}",
-        }
-        try:
-            if business_identity(actual) != write["identity"]:
-                raise ValueError()
-        except ValueError as error:
-            raise ServiceError("invalid", "Readback belongs to a different bill.") from error
-        if outcome in ("saved", "duplicate"):
-            from decimal import Decimal
-
-            data = write["plan"]["data"]
-
-            def money(v):
-                return int(Decimal(str(v)) * 100)
-
-            expected = [
-                {"ledger": data["vendor"], "amount": money(data["total"])},
-                {"ledger": data["purchase_ledger"], "amount": -money(data["subtotal"])},
-            ]
-            expected.extend({"ledger": line["ledger"], "amount": -money(line["amount"])}
-                            for line in allocation_entries(data, write["plan"].get("tax_allocations")))
-
-            def key(e):
-                return e["ledger"], e["amount"]
-
-            if current["date"] != data["date"].replace("-", "") or sorted(
-                current["entries"], key=key
-            ) != sorted(expected, key=key):
-                raise ServiceError(
-                    "conflict", "Tally readback differs from the approved amounts or ledgers."
-                )
-            if (
-                outcome == "saved"
-                and write["plan"].get("expected")
-                and current["guid"] != write["plan"]["expected"]["guid"]
-            ):
-                raise ServiceError("conflict", "Tally returned a different voucher identifier.")
     result = json.loads(json.dumps(run["result"]))
     record = result["records"][write["record_index"]]
     record["status"] = outcome if outcome in ("saved", "duplicate") else "held"
