@@ -84,7 +84,7 @@ const REJECTIONS = [
   ["permission", /not (?:authori[sz]ed|allowed|permitted)|access denied|no (?:access|rights)|security/i,
     "The Tally user who is logged in cannot create this voucher. Log in as a user allowed to enter purchases, then use Retry save."],
   ["voucher_type", /voucher ?type/i,
-    "Tally rejected the purchase voucher type. Check it in Tally, refresh Source Discovery, then start a new run."],
+    "Tally rejected the voucher type. Check it in Tally, then start a new run."],
   ["voucher_number", /voucher (?:no\b|number)/i,
     "Tally needs a voucher number for this voucher type. Check its numbering in Tally, then use Retry save."],
   ["ledger", /ledger|does not exist|not found/i,
@@ -341,7 +341,7 @@ export async function saveVoucher(plan, {
   try {
     await requireCompany(company, session);
     const live = await recheck(plan, {request, readReferences});
-    if (!live) return hold('destination_changed', 'A ledger, voucher type or cost allocation changed in Tally since discovery. Refresh Source Discovery before saving.');
+    if (!live) return hold('destination_changed', 'A ledger, voucher type or cost allocation changed in Tally after this run read the books. Start a new run to save against the current books.');
     const familyOf = v => live.types.family.get(v.voucher_type.toLowerCase()) ?? null;
     const receipt = (outcome, v) => ({outcome, company_guid: plan.company_guid, current: observedVoucher(v, familyOf(v))});
     const decision = decide(plan, await window(), live, receipt);

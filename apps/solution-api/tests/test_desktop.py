@@ -21,12 +21,12 @@ class DesktopTests(unittest.TestCase):
     def test_authenticated_activity_and_heartbeat_refresh_presence_without_claiming(self):
         self.pair()
         job, _ = self.launch()
-        for path in ("/api/desktop/discovery/package", self.worker_base + "/heartbeat"):
+        for path, body, status in ((self.worker_base + "/diagnostics", {"companion": {"version": "0.10.0"}}, 201),
+                                   (self.worker_base + "/heartbeat", {}, 200)):
             with psycopg.connect(URL) as c:
                 c.execute("UPDATE desktop_devices SET last_seen_at=now()-interval '5 minutes' WHERE id=%s", (self.device["id"],))
-            response = (self.client.get(path, headers=self.worker) if path.endswith("package")
-                        else self.client.post(path, headers=self.worker, json={}))
-            self.assertEqual(response.status_code, 200, response.text)
+            response = self.client.post(path, headers=self.worker, json=body)
+            self.assertEqual(response.status_code, status, response.text)
             with psycopg.connect(URL) as c:
                 self.assertTrue(c.execute("SELECT last_seen_at>now()-interval '5 seconds' FROM desktop_device_presence WHERE device_id=%s", (self.device["id"],)).fetchone()[0])
                 self.assertEqual(c.execute("SELECT state FROM desktop_jobs WHERE id=%s", (job["id"],)).fetchone()[0], "queued")

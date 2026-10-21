@@ -121,7 +121,8 @@ class Desk:
         """The company in the shape the voucher gates read, built once per item."""
         if company["id"] not in self._views:
             view = mirror.company_view(connection, company, company["version"])
-            self._views[company["id"]] = {**view, "port": company["tally_port"]}
+            self._views[company["id"]] = {**view, "port": company["tally_port"],
+                                          "books_from": company["books_from"].isoformat()}
         return self._views[company["id"]]
 
     def path(self, connection, company, parent):

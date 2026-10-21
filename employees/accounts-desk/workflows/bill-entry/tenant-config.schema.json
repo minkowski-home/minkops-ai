@@ -11,16 +11,6 @@
       "title": "Default review mode",
       "x-step": "Review and save"
     },
-    "input_format": {
-      "type": "string",
-      "enum": [
-        "pdf",
-        "image",
-        "mixed"
-      ],
-      "title": "Bill inputs",
-      "x-step": "Read bills"
-    },
     "company_mode": {
       "type": "string",
       "enum": [

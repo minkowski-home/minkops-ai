@@ -1,46 +1,23 @@
 {
   "key": "bill-entry",
-  "version": "0.18.0",
+  "version": "1.0.0",
   "name": "Bill entry",
-  "description": "Enter reviewed PDF and image bills into Tally with verified, repeatable writes.",
+  "description": "Read PDF and image bills, route each to the client's company, and save reviewed, verified Purchase, Journal and Debit Note vouchers.",
   "owner": "accounts-desk",
+  "handler": "desk.bill",
+  "presentation": "desk-review",
   "tenant_config_schema": "tenant-config.schema.json",
   "run_config_schema": "run-config.schema.json",
-  "output_schema": "output.schema.json",
   "instructions": "SKILL.md",
   "tenant_defaults": {
-    "review_mode": "all_outputs",
-    "input_format": "mixed"
+    "review_mode": "all_outputs"
   },
   "run_defaults": {
-    "input_format": "mixed",
     "company_mode": "infer",
     "locked_company_guid": null
   },
-  "agent_output_schema": "agent-output.schema.json",
-  "execution": {
-    "environment": "openai_hosted",
+  "sessions": {
     "model": "gpt-6-luna",
-    "python_packages": [
-      "pymupdf"
-    ],
-    "instructions": "execution-instructions.md",
-    "resources": [],
-    "result_path": "/workspace/outputs/result.json"
-  },
-  "handler": "accounts.bill",
-  "presentation": "accounts-bill",
-  "capabilities": [
-    "files.snapshot"
-  ],
-  "stages": {
-    "triage": {
-      "instructions": "stages/triage.md",
-      "agent_output_schema": "stages/triage.schema.json"
-    },
-    "posting_profile": {
-      "instructions": "stages/posting-profile.md",
-      "agent_output_schema": "stages/posting-profile.schema.json"
-    }
+    "reasoning_effort": "medium"
   }
 }

@@ -17,9 +17,9 @@ class SolutionDefinitionTests(unittest.TestCase):
         installation = load_solution(REPOSITORY_ROOT, "mock-client")
         self.assertEqual(installation.tenant_slug, "mock-tenant")
         self.assertEqual([e.metadata["key"] for e in installation.employees], ["accounts-desk"])
-        self.assertEqual(set(installation.workflows), {"source-discovery", "bill-entry", "statement-entry"})
-        self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "accounts.bill")
-        self.assertNotIn("output_mode", installation.workflows["bill-entry"].tenant_schema["properties"])
+        self.assertEqual(set(installation.workflows), {"bill-entry", "statement-entry"})
+        self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "desk.bill")
+        self.assertEqual(installation.bindings["bill-entry"]["handler"], "desk.bill")
         # The demo workspace grants standing exception-only authorization; the
         # reusable definition keeps explicit review of every output by default.
         self.assertEqual(
@@ -37,11 +37,10 @@ class SolutionDefinitionTests(unittest.TestCase):
     def test_pr_infra_enables_all_accounts_workflows_without_ledger_defaults(self):
         installation = load_solution(REPOSITORY_ROOT, "pr-infra")
         self.assertEqual([e.metadata['key'] for e in installation.employees], ['accounts-desk'])
-        self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry', 'bill-entry'})
+        self.assertEqual(set(installation.workflows), {'statement-entry', 'bill-entry'})
         self.assertEqual(installation.bindings['bill-entry']['defaults']['review_mode'], 'all_outputs')
         self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
-        statement = installation.workflows['statement-entry']
-        self.assertEqual((statement.session_bundle['model'], statement.execution_snapshot), ('gpt-6-luna', None))
+        self.assertEqual(installation.workflows['statement-entry'].session_bundle['model'], 'gpt-6-luna')
         self.assertEqual(installation.bindings['statement-entry']['handler'], 'desk.statement')
 
 
@@ -108,6 +107,6 @@ class InstallationDatabaseTests(unittest.TestCase):
         with self.connection.transaction(force_rollback=True):
             install(self.connection, composition, actor_email="installer@example.com")
             self.assertEqual(
-                self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 3
+                self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 2
             )
         self.assertEqual(self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 0)

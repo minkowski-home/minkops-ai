@@ -1,6 +1,5 @@
 """Business invariants for the disposable live Tally rehearsal package."""
 
-import os
 import sys
 import unittest
 from decimal import Decimal
@@ -80,29 +79,24 @@ class TallyDemoTests(unittest.TestCase):
         self.assertEqual(bill["expected"], "attention")
 
     def test_scorer_accepts_required_holds_and_rejects_flattened_saves(self):
-        # Importing the CLI reads its DSN, but grading never opens a connection.
-        from unittest.mock import patch
+        from bill_entry_fixtures import grade
 
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://unused"}):
-            from bill_entry_fixtures import grade
+        def record(status, *codes):
+            return {"status": status, "hold_codes": list(codes), "review_reasons": [], "proposal": None,
+                    "current": None, "company_guid": None}
 
-        for case, code in (
-            ("before_books", "date_before_books"),
-            ("inventory_required", "unsupported_structure"),
-        ):
+        for case, code in (("before_books", "date_before_books"), ("inventory_required", "unsupported_structure")):
             bill = next(b for b in self.company["bills"] if b["case"] == case)
-            result = grade(bill, [], {"code": code}, False, False)
-            self.assertEqual(result[0], "correct")
-            result = grade(bill, [{"status": "saved"}], {}, False, False)
-            self.assertEqual(result[0], "missed_exception!")
+            with self.subTest(case=case):
+                self.assertEqual(grade(bill, [record("held", code)])[0], "correct")
+                self.assertEqual(grade(bill, [record("saved")])[0], "missed_exception!")
+                self.assertEqual(grade(bill, [record("held", "extraction_failed")])[0], "wrong_reason")
 
-    def test_scorer_normalizes_supplier_names_in_generated_packages(self):
+    def test_scorer_compares_the_proposed_voucher_with_its_label(self):
         import json
         import tempfile
-        from unittest.mock import patch
 
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://unused"}):
-            from bill_entry_fixtures import compare, load_expected
+        from bill_entry_fixtures import compare, grade, load_expected
 
         bill = {**self.company["bills"][0], "sha256": "sample-hash"}
         with tempfile.TemporaryDirectory() as directory:
@@ -112,14 +106,15 @@ class TallyDemoTests(unittest.TestCase):
             expected = load_expected([directory])["sample-hash"]
         lines = [{"ledger": bill["purchase_ledger"], "side": "debit", "amount": bill["subtotal"]},
                  *({"ledger": t["ledger"], "side": "debit", "amount": t["amount"]} for t in bill["tax_allocations"])]
-        record = {
-            "company_guid": bill["company_guid"],
-            "data": {key: bill[key] for key in ("invoice_number", "date", "tax", "total")} | {"vendor": bill["supplier"]},
-            "preview": {"lines": [{"ledger": bill["supplier"], "side": "credit", "amount": bill["total"]}, *lines]},
-        }
+        record = {"status": "proposed", "hold_codes": [], "review_reasons": [], "current": None,
+                  "company_guid": bill["company_guid"], "proposal": {"preview": {
+                      "number": bill["invoice_number"], "date": bill["date"], "party": bill["supplier"],
+                      "total": bill["total"], "lines": [{"ledger": bill["supplier"], "side": "credit",
+                                                         "amount": bill["total"]}, *lines]}}}
         self.assertEqual(compare(expected, record), [])
-        record["preview"]["lines"][1]["ledger"] = "Another Purchase"
-        self.assertTrue(compare(expected, record))
+        self.assertEqual(grade(expected, [record])[0], "correct_ready")
+        record["proposal"]["preview"]["lines"][1]["ledger"] = "Another Purchase"
+        self.assertEqual(grade(expected, [record])[0], "wrong_proposal!")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,6 @@ from minkops_api.attention import router as attention_router
 from minkops_api.auth import router as core_router
 from minkops_api.clients import router as clients_router
 from minkops_api.desktop import router as desktop_router
-from minkops_api.discovery import router as discovery_router
 from minkops_api.runs import router as runs_router
 from minkops_api.workspace import router as workspace_router
 
@@ -23,14 +22,13 @@ app = FastAPI()
 
 
 def wakes_worker(method, path, status):
-    """Only transitions that can release hosted work need a dispatch attempt."""
+    """Only transitions that can make run items runnable need a dispatch attempt."""
     return method == 'POST' and status < 400 and (
-        path.endswith('/accounts/runs')
         # Launches, decisions and company authorisation can queue run items.
-        or (path.startswith('/api/tenants/') and ('/runs' in path or '/records/' in path or '/companies/' in path))
+        (path.startswith('/api/tenants/') and ('/runs' in path or '/records/' in path or '/companies/' in path))
+        # A finished sync releases waiting items; an answered question releases its sheets.
         or (path.startswith('/api/desktop/worker/jobs/') and path.endswith('/finish'))
-        or ('/attention/' in path and path.endswith('/profile'))
-        or ('/attention/bills/' in path and not path.endswith('/bulk-preview'))
+        or ('/attention/' in path and path.endswith('/decision'))
         or ('/tasks/' in path and path.endswith('/control')))
 
 
@@ -58,7 +56,6 @@ app.include_router(core_router)
 app.include_router(workspace_router)
 app.include_router(accounts_router)
 app.include_router(desktop_router)
-app.include_router(discovery_router)
 app.include_router(attention_router)
 app.include_router(clients_router)
 app.include_router(runs_router)

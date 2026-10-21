@@ -57,7 +57,13 @@ _CATALOG = [
         ("company_unresolved", EXCEPTION, "Company unclear", "The destination company could not be identified reliably."),
         ("unsupported_structure", EXCEPTION, "Manual entry needed",
          "This bill requires accounting entries outside the supported save format."),
+    ]),
+    # Neither recheck nor retry can clear these: Stop is final, and a run's books stay as it read them.
+    *_holds((BILL, STATEMENT), ("nothing",), [
         ("run_stopped", LIFECYCLE, "Run stopped", "The run was stopped before this bill was saved."),
+        ("destination_changed", NATIVE, "Tally changed",
+         "A ledger, voucher type or cost allocation changed in Tally after this run read the books. Start a new run "
+         "to enter this bill."),
     ]),
     *_holds((BILL,), NON_WRITING, [
         ("not_a_bill", EXCEPTION, "Not a bill", "This source does not contain a bill that can be entered."),
@@ -74,12 +80,9 @@ _CATALOG = [
          "A foreign supplier's invoice numbering cannot be checked for duplicates; enter it in Tally."),
         ("date_outside_company_period", EXCEPTION, "Outside company year",
          "The bill date is outside the routed company's year and no single sibling company covers it."),
-        ("destination_changed", EXCEPTION, "Tally changed", "The Tally destination changed after Source Discovery."),
         ("voucher_type_unresolved", EXCEPTION, "Voucher type needed",
          "A supported voucher type must be selected for this company."),
         ("extraction_failed", EXCEPTION, "Recheck bill", "The bill could not be processed and needs an explicit recheck."),
-        ("human_review", LIFECYCLE, "Review written bill",
-         "This bill was saved with a best guess and still requires human review."),
     ]),
     *_holds((BILL, STATEMENT), _INTERPRETATION, [
         ("classification_uncertain", EXCEPTION, "Ledger unclear",
@@ -87,9 +90,6 @@ _CATALOG = [
     ]),
     *_holds((BILL,), _INTERPRETATION, [
         ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
-        ("posting_profile_miss", EXCEPTION, "Unusual posting",
-         "This bill does not fit the company's confirmed posting pattern."),
-        ("manual_review", LIFECYCLE, "Needs review", "This bill needs manual review in the original system."),
     ]),
     *_holds((BILL,), ("supplier", "nothing", "retry"), [
         ("supplier_missing", EXCEPTION, "Missing supplier",
@@ -111,7 +111,6 @@ _CATALOG = [
         ("save_waiting", LIFECYCLE, "Save waiting", "This bill is waiting for its destination before saving."),
         ("save_interrupted", LIFECYCLE, "Save interrupted",
          "The save was interrupted and its destination needs reconciliation."),
-        ("pc_unavailable", LIFECYCLE, "PC unavailable", "The destination PC must reconnect before this bill can be saved."),
         ("save_held", LIFECYCLE, "Review in Tally", "This bill could not be saved and needs attention in the destination."),
     ]),
     # Statement rows. A source failure is corrected in the original file and
@@ -158,7 +157,8 @@ _CATALOG = [
 ]
 HOLDS = {hold.code: hold for hold in _CATALOG}
 assert len(HOLDS) == len(_CATALOG), "Hold codes must be unique."
-UNKNOWN = Hold("manual_review", LIFECYCLE, HOLDS["manual_review"].label, HOLDS["manual_review"].reason,
+# A code outside the list, or a hold with none, can never write.
+UNKNOWN = Hold("manual_review", LIFECYCLE, "Needs review", "This bill needs manual review in the original system.",
                NON_WRITING, frozenset((BILL, STATEMENT)))
 
 
@@ -169,7 +169,7 @@ def hold(code):
 
 def actions(codes):
     """The actions every one of a record's codes allows, in the first code's order."""
-    codes = [code for code in codes if code] or ["manual_review"]
+    codes = [code for code in codes if code] or [UNKNOWN.code]
     allowed = list(hold(codes[0]).actions)
     for code in codes[1:]:
         allowed = [action for action in allowed if action in hold(code).actions]

@@ -120,15 +120,6 @@ class StatementVoucherTest(unittest.TestCase):
         self.assertEqual((receipt["family"], receipt["header"]["reference"]), ("receipt", "UTR9"))
         self.assertEqual([(ln["ledger"], ln["side"]) for ln in receipt["lines"]], [("HDFC", "debit"), ("Bank Charges", "credit")])
 
-    def test_companions_receive_exactly_the_stored_protocol_five_plan(self):
-        from minkops_platform.desktop import _native_plan
-        from minkops_platform.errors import ServiceError
-
-        self.assertIs(_native_plan({"plan": STATEMENT}, 5), STATEMENT)
-        for plan, version in ((STATEMENT, 4), ({**STATEMENT, "format_version": 4}, 5)):
-            with self.subTest(version=version), self.assertRaises(ServiceError):
-                _native_plan({"plan": plan}, version)
-
 
 class ReceiptTest(unittest.TestCase):
     def setUp(self):
@@ -181,36 +172,6 @@ class ReceiptTest(unittest.TestCase):
                         observed(self.statement, voucher_type="Receipt"), observed(self.statement, date="20261002")):
             with self.subTest(current=current), self.assertRaises(ValueError):
                 vouchers.observed_statement(self.statement, current)
-
-
-    def test_a_refresh_observation_must_name_the_same_document(self):
-        target = {"vendor": "Supplier", "invoice_number": "MOCK-1"}
-        view = vouchers.observed_document(observed(self.bill), target)
-        self.assertEqual((view["invoice_number"], view["vendor"], view["fingerprint"][:3]), ("MOCK-1", "Supplier", "v5:"))
-        self.assertIsNone(vouchers.observed_document(observed(self.bill, reference="MOCK-2"), target))
-        self.assertIsNone(vouchers.observed_document(observed(self.bill, party_ledger="Other"), target))
-        self.assertIsNone(vouchers.observed_document({"lines": []}, target))
-
-
-class AttentionReaderTest(unittest.TestCase):
-    def test_refreshes_read_the_invoice_window_with_the_voucher_writers_reader(self):
-        from minkops_platform.attention import native_target
-        target = {"tool": "tally", "date": "2027-03-31", "vendor": "Supplier", "invoice_number": "MOCK-1", "baseline": None}
-        self.assertEqual(native_target(target)["document"],
-                         {"window": {"from": "2026-04-01", "to": "2027-03-31"}, "number_fields": ["REFERENCE"],
-                          "families": ["purchase", "journal"]})
-        # A baseline from the retired reader is read the same way; resolved() keeps it pending.
-        self.assertIn("document", native_target({**target, "baseline": {"fingerprint": "a" * 64}}))
-        self.assertNotIn("document", native_target({**target, "date": None}))
-
-    def test_a_reader_change_is_never_mistaken_for_an_edit_in_tally(self):
-        from minkops_platform.attention import resolved
-        baseline = {"guid": "g", "fingerprint": "a" * 64}
-        item = {"kind": "review", "target": {"baseline": baseline}}
-        self.assertFalse(resolved(item, {"valid": True, "current": {"guid": "g", "fingerprint": "v5:" + "b" * 64}}))
-        self.assertTrue(resolved(item, {"valid": True, "current": {"guid": "g", "fingerprint": "b" * 64}}))
-        v5 = {"kind": "review", "target": {"baseline": {"guid": "g", "fingerprint": "v5:" + "a" * 64}}}
-        self.assertTrue(resolved(v5, {"valid": True, "current": {"guid": "g", "fingerprint": "v5:" + "b" * 64}}))
 
 
 if __name__ == "__main__":

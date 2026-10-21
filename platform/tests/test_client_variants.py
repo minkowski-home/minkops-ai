@@ -10,11 +10,10 @@ from jsonschema import ValidationError
 
 from minkops_platform.installation import load_solution
 from minkops_platform.resources import REPOSITORY_ROOT
-from minkops_platform.runtime.bundles import validate_snapshot
 
 
 class ClientVariantTests(TestCase):
-    def test_client_procedure_is_additive_pinned_and_isolated_from_core(self):
+    def test_a_client_procedure_extends_the_instructions_pinned_with_both_versions_and_adds_no_resources(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             shutil.copytree(REPOSITORY_ROOT / "employees", root / "employees")
@@ -22,54 +21,28 @@ class ClientVariantTests(TestCase):
             directory = root / "solutions/client-a/employees/accounts-desk"
             binding = json.loads((directory / "binding.json").read_text())
             binding["employee"] = {"name": "Client A Accounts"}
-            binding["workflows"][0]["variant"] = "variant.json"
-            variant_dir = directory / "workflows" / binding["workflows"][0]["key"]
-            variant_dir.mkdir(parents=True)
-            (variant_dir / "variant.json").write_text(
-                json.dumps(
-                    {
-                        "version": "1.0.0",
-                        "instructions": "client.md",
-                        "defaults": {"max_files": 50},
-                    }
-                )
-            )
-            (variant_dir / "client.md").write_text("Client A: explain mappings in plain language.")
-            (directory / "binding.json").write_text(json.dumps(binding))
-            installed = load_solution(root, "client-a")
-            key = binding["workflows"][0]["key"]
-            definition = installed.workflows[key]
-            self.assertEqual(installed.employees[0].metadata["name"], "Client A Accounts")
-            snapshot = validate_snapshot(definition.execution_snapshot)
-            self.assertEqual(snapshot["variant"]["solution"], "client-a")
-            self.assertEqual(snapshot["variant"]["version"], "1.0.0")
-            self.assertIn("Client A:", snapshot["files"][snapshot["execution"]["instructions"]])
-            self.assertIn("Client A:", definition.instructions)
-            core = (root / "employees/accounts-desk/workflows" / key / "SKILL.md").read_text()
-            self.assertNotIn("Client A:", core)
-            self.assertEqual(installed.bindings[key]["solution"], "client-a")
-
-    def test_a_session_workflow_takes_the_client_procedure_as_instructions_and_no_resources(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            shutil.copytree(REPOSITORY_ROOT / "employees", root / "employees")
-            shutil.copytree(REPOSITORY_ROOT / "solutions/mock-client", root / "solutions/client-a")
-            directory = root / "solutions/client-a/employees/accounts-desk"
-            binding = json.loads((directory / "binding.json").read_text())
             entry = next(w for w in binding["workflows"] if w["key"] == "statement-entry")
             entry["variant"] = "variant.json"
             (directory / "binding.json").write_text(json.dumps(binding))
             variant_dir = directory / "workflows/statement-entry"
             variant_dir.mkdir(parents=True)
             (variant_dir / "client.md").write_text("Client A: book both legs of a NEFT return.")
-            (variant_dir / "variant.json").write_text(json.dumps({"version": "1.2.0", "instructions": "client.md"}))
-            bundle = load_solution(root, "client-a").workflows["statement-entry"].session_bundle
+            (variant_dir / "variant.json").write_text(json.dumps(
+                {"version": "1.2.0", "instructions": "client.md", "defaults": {"review_mode": "only_exceptions"}}))
+            installed = load_solution(root, "client-a")
+            definition = installed.workflows["statement-entry"]
+            bundle = definition.session_bundle
+            self.assertEqual(installed.employees[0].metadata["name"], "Client A Accounts")
             self.assertTrue(bundle["instructions"].endswith(
                 "## Client procedure\n\nClient A: book both legs of a NEFT return."))
             self.assertEqual(bundle["variant"], {"solution": "client-a", "core_version": "1.0.0", "version": "1.2.0"})
             self.assertNotIn("---", bundle["instructions"].split("\n", 1)[0])  # the skill manifest is not sent
+            self.assertEqual(installed.bindings["statement-entry"]["defaults"]["review_mode"], "only_exceptions")
+            self.assertEqual(installed.bindings["statement-entry"]["solution"], "client-a")
+            core = (root / "employees/accounts-desk/workflows/statement-entry/SKILL.md").read_text()
+            self.assertNotIn("Client A:", core)
             (variant_dir / "variant.json").write_text(json.dumps({"version": "1.2.0", "resources": ["client.md"]}))
-            with self.assertRaisesRegex(ValueError, "client instructions, not resources"):
+            with self.assertRaisesRegex(ValidationError, "resources"):
                 load_solution(root, "client-a")
 
     def test_variant_cannot_replace_handlers_schemas_or_escape_its_client_layer(self):

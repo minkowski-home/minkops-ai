@@ -14,12 +14,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
-from minkops_platform.runtime.bundles import (
-    EXECUTION_SCHEMA,
-    SESSIONS_SCHEMA,
-    build_session_bundle,
-    build_snapshot,
-)
+from minkops_platform.runtime.bundles import SESSIONS_SCHEMA, build_session_bundle
 
 DESCRIPTOR_SCHEMA = {
     "type": "object",
@@ -29,12 +24,13 @@ DESCRIPTOR_SCHEMA = {
         "name",
         "description",
         "owner",
+        "handler",
         "tenant_config_schema",
         "run_config_schema",
-        "output_schema",
         "instructions",
         "tenant_defaults",
         "run_defaults",
+        "sessions",
     ],
     "properties": {
         "key": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
@@ -42,38 +38,14 @@ DESCRIPTOR_SCHEMA = {
         "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
         **{
             key: {"type": "string", "minLength": 1}
-            for key in (
-                "name",
-                "description",
-                "tenant_config_schema",
-                "run_config_schema",
-                "output_schema",
-                "instructions",
-            )
+            for key in ("name", "description", "tenant_config_schema", "run_config_schema", "instructions")
         },
         "tenant_defaults": {"type": "object"},
         "run_defaults": {"type": "object"},
-        "agent_output_schema": {"type": "string", "minLength": 1},
-        # Named steps of one workflow: other instructions and output schema, same pinned bundle.
-        "stages": {
-            "type": "object",
-            "additionalProperties": {
-                "type": "object",
-                "required": ["instructions", "agent_output_schema"],
-                "additionalProperties": False,
-                "properties": {"instructions": {"type": "string", "minLength": 1},
-                               "agent_output_schema": {"type": "string", "minLength": 1}},
-            },
-        },
-        "execution": EXECUTION_SCHEMA,
         "sessions": SESSIONS_SCHEMA,
+        # The run handler (work.HANDLER_MODULES) and the review surface that presents its records.
         "handler": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*$"},
         "presentation": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-        "capabilities": {
-            "type": "array",
-            "uniqueItems": True,
-            "items": {"type": "string", "minLength": 1},
-        },
     },
     "additionalProperties": False,
 }
@@ -88,12 +60,9 @@ class WorkflowDefinition:
     metadata: dict[str, Any]
     tenant_schema: dict[str, Any]
     run_schema: dict[str, Any]
-    output_schema: dict[str, Any]
     instructions: str
-    agent_output_schema: dict[str, Any] | None = None
-    execution_snapshot: dict[str, Any] | None = None
-    # A tool-session workflow's pinned model and instructions (runtime.bundles).
-    session_bundle: dict[str, Any] | None = None
+    # The workflow's pinned model and instructions (runtime.bundles).
+    session_bundle: dict[str, Any]
 
 
 def load_definition(directory: Path) -> WorkflowDefinition:
@@ -110,10 +79,7 @@ def load_definition(directory: Path) -> WorkflowDefinition:
             raise ValueError("Definition files must stay inside the workflow directory")
         return path.read_text()
 
-    schemas = [
-        json.loads(read_local(key))
-        for key in ("tenant_config_schema", "run_config_schema", "output_schema")
-    ]
+    schemas = [json.loads(read_local(key)) for key in ("tenant_config_schema", "run_config_schema")]
     for schema in schemas:
         Draft202012Validator.check_schema(schema)
     instructions = read_local("instructions")
@@ -122,43 +88,18 @@ def load_definition(directory: Path) -> WorkflowDefinition:
     validate(schemas[0], metadata["tenant_defaults"])
     partial_run_schema = {**schemas[1], "required": []}
     validate(partial_run_schema, metadata["run_defaults"])
-    agent_schema = (
-        json.loads(read_local("agent_output_schema")) if "agent_output_schema" in metadata else None
-    )
-    if agent_schema is not None:
-        Draft202012Validator.check_schema(agent_schema)
-    if "execution" in metadata and "sessions" in metadata:
-        raise ValueError("A workflow runs in a hosted environment or in tool sessions, not both")
-    snapshot = build_snapshot(directory, metadata) if "execution" in metadata else None
-    bundle = build_session_bundle(directory, metadata) if "sessions" in metadata else None
-    return WorkflowDefinition(metadata, *schemas, instructions, agent_schema, snapshot, bundle)
+    return WorkflowDefinition(metadata, *schemas, instructions, build_session_bundle(directory, metadata))
 
 
-def resolve_run_config(
-    definition: WorkflowDefinition,
-    tenant_defaults: dict,
-    run_values: dict,
-    *,
-    allowed_source_ids: set[str],
-    allowed_destination_ids: set[str],
-    require_review: bool = False,
-) -> dict:
-    """Return a detached snapshot after schema and caller-supplied policy checks.
+def resolve_run_config(definition: WorkflowDefinition, tenant_defaults: dict, run_values: dict) -> dict:
+    """A detached run configuration: definition defaults, then tenant preferences, then the run's own values.
 
-    Tenant defaults are preferences, not permissions. Resource authorization
-    must come from trusted application state, never from the run request.
-    Persist this snapshot and definition version before eventual execution.
+    Tenant defaults are preferences, not permissions: what a run may read or
+    write comes from trusted application state, never from its configuration.
     """
     validate(definition.tenant_schema, tenant_defaults)
     resolved = deepcopy({**definition.metadata["run_defaults"], **tenant_defaults, **run_values})
     validate(definition.run_schema, resolved)
-    if not set(resolved.get("source_ids", [])).issubset(allowed_source_ids):
-        raise ValueError("Run selects a source outside the authorized scope")
-    destination = resolved.get("destination_id")
-    if destination is not None and destination not in allowed_destination_ids:
-        raise ValueError("Run selects an unauthorized destination")
-    if require_review and resolved.get("review_mode") != "all_outputs":
-        raise ValueError("This run requires review of all outputs")
     return resolved
 
 
@@ -216,10 +157,8 @@ def register_workflow(
                 Jsonb(
                     {
                         "definition": f"{metadata['owner']}/workflows/{metadata['key']}",
-                        "handler": metadata.get("handler", "skill.proposal"),
-                        "presentation": metadata.get("presentation", "proposal"),
-                        "policies": [],
-                        "capabilities": metadata.get("capabilities", []),
+                        "handler": metadata["handler"],
+                        "presentation": metadata.get("presentation"),
                     }
                 ),
             ),

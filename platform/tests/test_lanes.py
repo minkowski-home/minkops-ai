@@ -232,13 +232,30 @@ def test_retries_start_a_new_session_and_a_refusal_fails_only_its_item(desk):
     assert attempts == [("flaky", "1"), ("flaky", "2"), ("huge", "1")]
 
 
+def test_a_drain_waits_for_a_finished_session_to_close_unless_it_finished_long_ago(desk):
+    run = launch(desk, {"file_id": "a"}, {"file_id": "b"})
+    fresh, stale = items(desk, run)
+    for item, finished in ((fresh, "now()"), (stale, "now() - interval '1 hour'")):
+        desk["db"].execute(f"""UPDATE run_items SET state='done', session_id=%s, finished_at={finished}
+                               WHERE id=%s""", (f"session-{item['id']}", item["id"]))
+    desk["db"].commit()
+    # A closer that never runs here: the drain's verdict rests on the sessions' state alone.
+    with host(desk, FakeAgents(), close_seconds=3600) as lanes_:
+        assert not lanes_.settled(desk["db"])
+        desk["db"].execute("UPDATE run_items SET session_closed=true WHERE id=%s", (fresh["id"],))
+        desk["db"].commit()
+        # A session that still could not be deleted an hour on is the provider's to expire, not a reason to stay up.
+        assert lanes_.settled(desk["db"])
+
+
 def test_a_drain_acknowledges_its_wake_up_only_after_the_lanes_finish(desk):
     from minkops_platform.worker_hosting import drain
     fake = FakeAgents(Script(LOOKUP, PROPOSE))
     run = launch(desk, {"file_id": "a"}, {"file_id": "b"})
     with host(desk, fake) as lanes_:
-        drain(os.environ["TEST_DATABASE_URL"], work=lambda url: False, cleanup=lambda url: False, lanes=1,
-              host=lanes_)
+        assert drain(os.environ["TEST_DATABASE_URL"], lanes_)
+        # Acknowledged only once both items finished and their sessions were closed with their usage.
         assert {i["state"] for i in items(desk, run)} == {"done"}
+        assert all(i["session_closed"] for i in items(desk, run))
     wakeup = desk["db"].execute("SELECT generation, acknowledged, lease_until FROM worker_wakeup").fetchone()
     assert wakeup["generation"] == wakeup["acknowledged"] and wakeup["lease_until"] is None

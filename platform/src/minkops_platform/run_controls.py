@@ -11,7 +11,6 @@ TASK_STATUS = {
     "queued": "running",
     "executing": "running",
     "review": "attention",
-    "approved": "running",
     "writing": "handoff",
     "completed": "completed",
     "failed": "failed",
@@ -32,12 +31,11 @@ def require_active(connection, tenant_id, task_id):
 
 
 def owns_task(connection, tenant_id, task_id, actor_id):
-    owners = connection.execute("""SELECT actor_id FROM workflow_runs WHERE tenant_id=%s AND task_id=%s
-        UNION SELECT actor_id FROM discovery_runs WHERE tenant_id=%s AND task_id=%s
-        UNION SELECT actor_id FROM runs WHERE tenant_id=%s AND task_id=%s
-        UNION SELECT actor_id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s AND operation NOT LIKE 'attention.%%'
-            AND operation <> 'tally.write'""",
-        (tenant_id, task_id, tenant_id, task_id, tenant_id, task_id, tenant_id, task_id)).fetchall()
+    """Whether this actor started everything in the task; a write a reviewer approved is not ownership."""
+    owners = connection.execute("""SELECT actor_id FROM runs WHERE tenant_id=%s AND task_id=%s
+        UNION SELECT actor_id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s
+            AND operation NOT IN ('tally.write','tally.supplier')""",
+        (tenant_id, task_id, tenant_id, task_id)).fetchall()
     return bool(owners) and all(str(row["actor_id"]) == str(actor_id) for row in owners)
 
 
@@ -53,10 +51,13 @@ def task_control(connection, tenant_id, user, task_id, action):
 
 def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minutes=None):
     """Internal automatic stops share the operator's write/receipt fences."""
+    from . import work
+    from .accounts.writes import resume
+
     if action not in ("pause", "resume", "stop"):
         raise ServiceError("invalid", "Choose pause, resume or stop.")
     connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (f"control:{task_id}",))
-    runs = connection.execute("SELECT * FROM workflow_runs WHERE tenant_id=%s AND task_id=%s ORDER BY id FOR UPDATE",
+    runs = connection.execute("SELECT * FROM runs WHERE tenant_id=%s AND task_id=%s ORDER BY id FOR UPDATE",
                               (tenant_id, task_id)).fetchall()
     task = connection.execute("SELECT * FROM tasks WHERE tenant_id=%s AND id=%s FOR UPDATE", (tenant_id, task_id)).fetchone()
     if not task:
@@ -79,36 +80,14 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
         # Skip an already claimed job rather than waiting in the inverse
         # job -> run lock order. It is an underway operation, not queued work.
         connection.execute("""WITH queued AS (SELECT id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s
-            AND state='queued' AND operation<>'attention.refresh' FOR UPDATE SKIP LOCKED)
+            AND state='queued' FOR UPDATE SKIP LOCKED)
             UPDATE desktop_jobs j SET state='failed',error=%s,updated_at=now()
             FROM queued WHERE j.id=queued.id""", (tenant_id, task_id, error))
+        # Each run stops its items, records and pending writes. A run whose
+        # handler this version no longer has still stops its unstarted items.
         for run in runs:
-            from .runtime.assets import hydrate
-            hydrate(connection, run)
-            connection.execute("UPDATE workflow_runs SET state='failed',error=%s,updated_at=now() WHERE tenant_id=%s AND id=%s AND state NOT IN ('completed','failed')",
-                               (error, tenant_id, run["id"]))
-            if run['state'] not in ('completed','failed'):
-                connection.execute("UPDATE workflow_runs SET config=config || '{\"timeout_cancel_pending\":true}'::jsonb WHERE id=%s", (run['id'],))
-            connection.execute("UPDATE account_tally_writes SET cancelled_at=coalesce(cancelled_at,now()) WHERE tenant_id=%s AND run_id=%s AND finished_at IS NULL", (tenant_id, run["id"]))
-            binding = run["config"].get("runtime_binding", {})
-            # A batch parent owns its bills' attention; its children would
-            # otherwise open a second item for each bill under their own keys.
-            if run.get("parent_run_id") is None and binding.get("handler") == "accounts.bill":
-                from .accounts.attention import stopped
-                stopped(connection, run, actor["id"])
-            if run.get('parent_run_id') is None and binding.get('handler'):
-                from .runtime.application import get_handler
-                on_stop = getattr(get_handler(binding['handler']), 'on_stop', None)
-                if on_stop:
-                    on_stop(connection, run, actor)
-    # Runs of the run model own their stop: items, rows and pending writes. A run
-    # whose handler this version no longer has still stops its unstarted items.
-    from . import work
-    if action == "stop":
-        for run in connection.execute("SELECT * FROM runs WHERE tenant_id=%s AND task_id=%s ORDER BY id FOR UPDATE",
-                                      (tenant_id, task_id)).fetchall():
             try:
-                stopped = getattr(work.handler_for(run), "stopped", None)
+                stopped = work.handler_for(run).stopped
             except ServiceError:
                 stopped = None
             if stopped:
@@ -118,18 +97,7 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
     task = connection.execute("UPDATE tasks SET control_state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s RETURNING *",
                               (target, tenant_id, task_id)).fetchone()
     if action == "resume":
-        from .accounts.writes import resume
-        resume(connection, tenant_id, task_id)  # their PCs pick up pending writes again
-    if action == "resume":
-        from .runtime.application import binding_for, get_handler
-        for run in runs:
-            if run.get("parent_run_id") is None:
-                from .runtime.assets import hydrate
-                hydrate(connection, run)
-                resume = getattr(get_handler(binding_for(run).handler), "on_resume", None)
-                if resume:
-                    resume(connection, run, user)
-        task = connection.execute("SELECT * FROM tasks WHERE tenant_id=%s AND id=%s", (tenant_id, task_id)).fetchone()
+        resume(connection, tenant_id, task_id)  # its PCs pick up pending writes again
         # A cloud worker may have drained/acknowledged the queue while paused.
         # Resume must durably wake it even when no run state changes.
         connection.execute("UPDATE worker_wakeup SET generation=generation+1 WHERE singleton")

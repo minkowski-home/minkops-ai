@@ -1,102 +1,84 @@
-"""Cheap recovery checks dispatch only eligible work, never idle paid jobs."""
+"""The recovery sweep dispatches a worker only for work one can do, never for idle or blocked items."""
 import os
 import unittest
-from uuid import uuid4
 
+import factory
 import psycopg
-from psycopg.types.json import Jsonb
+from psycopg.rows import dict_row
 
 from db.testing import disposable_database
+from minkops_platform import work
+
+BLOCKER = {"kind": "sync", "ref": "pc-1"}
 
 
-@unittest.skipUnless(os.getenv('TEST_DATABASE_URL'), 'TEST_DATABASE_URL is required')
+@unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
 class WorkerRecoveryTests(unittest.TestCase):
     def setUp(self):
-        context = disposable_database(os.environ['TEST_DATABASE_URL'])
+        context = disposable_database(os.environ["TEST_DATABASE_URL"])
         self.url = context.__enter__()
         self.addCleanup(context.__exit__, None, None, None)
         self.calls = []
 
-    def run_row(self, config=None):
-        with psycopg.connect(self.url) as c:
-            tenant = c.execute("INSERT INTO tenants(slug,name) VALUES(%s,'Recovery') RETURNING id", (uuid4().hex,)).fetchone()[0]
-            actor = c.execute("INSERT INTO users(email,name,password_hash) VALUES(%s,'Recovery','unused') RETURNING id",
-                              (uuid4().hex+'@example.com',)).fetchone()[0]
-            task = c.execute("INSERT INTO tasks(tenant_id,title) VALUES(%s,'Recovery') RETURNING id", (tenant,)).fetchone()[0]
-            c.execute("INSERT INTO workflows(tenant_id,key,name) VALUES(%s,'source-discovery','Recovery')", (tenant,))
-            return c.execute("""INSERT INTO workflow_runs(tenant_id,task_id,actor_id,workflow_key,
-                definition_version,request_key,request_hash,config,file_ids)
-                VALUES(%s,%s,%s,'source-discovery','1',%s,'test',%s,'[]') RETURNING id""",
-                (tenant,task,actor,uuid4(),Jsonb(config or {}))).fetchone()[0]
+    def item(self, **spec):
+        """A run with one item, its wake-up already consumed as if a notification were lost."""
+        with psycopg.connect(self.url, row_factory=dict_row) as c:
+            tenant = factory.tenant(c)
+            run = factory.run(c, tenant, factory.client(c, tenant), factory.workflow(c, tenant), factory.user(c, tenant),
+                              [work.ItemSpec("bill", {"file_id": "a"}, **spec)])
+            c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL")
+            return tenant, run, c.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
 
     def recover(self):
         from minkops_platform.worker_hosting import recover
         return recover(self.url, lambda: self.calls.append(True))
 
-    def test_idle_even_with_old_notification_does_not_start_job(self):
+    def test_an_old_notification_with_nothing_to_do_starts_no_worker(self):
         with psycopg.connect(self.url) as c:
-            c.execute('UPDATE worker_wakeup SET generation=generation+1')
+            c.execute("UPDATE worker_wakeup SET generation=generation+1")
         self.assertFalse(self.recover())
         self.assertEqual(self.calls, [])
 
-    def test_missing_notification_is_recovered_and_duplicate_check_is_coalesced(self):
-        self.run_row()
-        with psycopg.connect(self.url) as c:
-            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL')
+    def test_a_queued_item_whose_wake_up_was_lost_is_recovered_once(self):
+        self.item()
         self.assertTrue(self.recover())
-        self.assertFalse(self.recover())
+        self.assertFalse(self.recover())  # the dispatch's lease coalesces a second sweep
         self.assertEqual(len(self.calls), 1)
 
-    def test_a_run_item_whose_wake_up_was_lost_is_recovered_but_a_waiting_one_is_not(self):
-        import factory
-        from psycopg.rows import dict_row
-
-        from minkops_platform import work
-        blocker = {'kind': 'sync', 'ref': 'pc-1'}
-        with psycopg.connect(self.url, row_factory=dict_row) as c:
-            tenant = factory.tenant(c)
-            factory.run(c, tenant, factory.client(c, tenant), factory.workflow(c, tenant), factory.user(c, tenant),
-                        [work.ItemSpec('bill', {'file_id': 'a'}, waiting_on=blocker)])
-            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL')
+    def test_a_waiting_item_is_recovered_only_once_its_blocker_is_released(self):
+        tenant, _, _ = self.item(waiting_on=BLOCKER)
         self.assertFalse(self.recover())
         with psycopg.connect(self.url, row_factory=dict_row) as c:
-            work.release(c, tenant['id'], blocker)
+            work.release(c, tenant["id"], BLOCKER)
             # The release's notification and dispatch were lost.
-            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL')
+            c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL")
         self.assertTrue(self.recover())
         self.assertEqual(len(self.calls), 1)
 
-    def test_blocked_and_stopped_work_is_not_runnable(self):
-        run = self.run_row({'awaits': {'profile': str(uuid4())}})
-        self.assertFalse(self.recover())
+    def test_an_item_of_a_stopped_task_is_not_runnable(self):
+        _, run, _ = self.item()
         with psycopg.connect(self.url) as c:
-            c.execute("UPDATE tasks SET control_state='stopped' WHERE id=(SELECT task_id FROM workflow_runs WHERE id=%s)", (run,))
-            c.execute("UPDATE workflow_runs SET config=config-'awaits' WHERE id=%s", (run,))
+            c.execute("UPDATE tasks SET control_state='stopped' WHERE id=%s", (run["task_id"],))
         self.assertFalse(self.recover())
 
-    def test_live_runner_is_not_disturbed(self):
+    def test_a_finished_session_still_open_at_the_provider_wakes_a_worker_to_close_it(self):
+        _, _, item = self.item()
+        with psycopg.connect(self.url) as c:
+            c.execute("""UPDATE run_items SET state='done', finished_at=now(), session_id='open-session'
+                         WHERE id=%s""", (item["id"],))
+            c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL")
+        self.assertTrue(self.recover())
+
+    def test_a_live_runner_is_not_disturbed(self):
         from minkops_platform.worker_hosting import RUNNER_LOCK
-        self.run_row()
+        self.item()
         with psycopg.connect(self.url, autocommit=True) as c:
-            c.execute('SELECT pg_advisory_lock(%s)', (RUNNER_LOCK,))
+            c.execute("SELECT pg_advisory_lock(%s)", (RUNNER_LOCK,))
             self.assertFalse(self.recover())
         self.assertEqual(self.calls, [])
 
-    def test_batch_waiting_for_a_decision_does_not_start_idle_jobs(self):
-        parent = self.run_row({'batch': True})
-        with psycopg.connect(self.url) as c:
-            child = c.execute("""INSERT INTO workflow_runs(tenant_id,task_id,actor_id,workflow_key,
-                definition_version,request_key,request_hash,config,file_ids,parent_run_id)
-                SELECT tenant_id,task_id,actor_id,workflow_key,definition_version,%s,'child',%s,'[]',id
-                FROM workflow_runs WHERE id=%s RETURNING id""",
-                (uuid4(), Jsonb({'awaits': {'profile': str(uuid4())}}), parent)).fetchone()[0]
-        self.assertFalse(self.recover())
-        with psycopg.connect(self.url) as c:
-            c.execute("UPDATE workflow_runs SET state='review',updated_at=clock_timestamp() WHERE id=%s", (child,))
-        self.assertTrue(self.recover(), 'A terminal unaggregated child needs reconciliation')
-
-    def test_stale_start_lease_recovers_but_fresh_start_lease_waits(self):
-        self.run_row()
+    def test_a_stale_start_lease_is_recovered_but_a_fresh_one_is_left_to_start(self):
+        self.item()
         with psycopg.connect(self.url) as c:
             c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")
         self.assertFalse(self.recover())
@@ -104,9 +86,6 @@ class WorkerRecoveryTests(unittest.TestCase):
             c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '27 minutes'")
         self.assertTrue(self.recover())
 
-    def test_terminal_session_cleanup_can_wake_maintenance(self):
-        run = self.run_row()
-        with psycopg.connect(self.url) as c:
-            c.execute("UPDATE workflow_runs SET state='review',session_id='recoverable-session' WHERE id=%s", (run,))
-            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL')
-        self.assertTrue(self.recover())
+
+if __name__ == "__main__":
+    unittest.main()

@@ -55,7 +55,6 @@ BINDING_SCHEMA = {
                     "key": {"type": "string", "pattern": SLUG.pattern},
                     "status": {"enum": ["active", "paused", "planned"]},
                     "defaults": {"type": "object"},
-                    "policies": {"type": "array"},
                     "variant": {"type": "string", "minLength": 1},
                 },
             },
@@ -93,13 +92,13 @@ class Installation:
 
 
 def client_variant(definition, directory, filename, solution_id):
-    """Add client guidance/resources to a core bundle; never replace executable contracts.
+    """Add a client's procedure to a core workflow's instructions; never replace its contracts.
 
-    Client procedures are trusted repository content, but permission/approval
-    enforcement stays in the installed handler and deterministic policy layer.
-    Both versions and the exact composed bytes travel with each durable run.
+    Client procedures are trusted repository content, but permission and
+    approval enforcement stays in the run's handler. Both versions and the
+    exact composed instructions are pinned with each run's bundle.
     """
-    from .runtime.bundles import digest, read_resource, validate_snapshot
+    from .runtime.bundles import read_resource
 
     variant = json.loads(read_resource(directory, filename))
     validate(
@@ -110,12 +109,6 @@ def client_variant(definition, directory, filename, solution_id):
             "properties": {
                 "version": {"type": "string", "pattern": r"^[0-9]+\.[0-9]+\.[0-9]+$"},
                 "instructions": {"type": "string", "minLength": 1},
-                "resources": {
-                    "type": "array",
-                    "uniqueItems": True,
-                    "maxItems": 30,
-                    "items": {"type": "string"},
-                },
                 "defaults": {"type": "object"},
                 "name": {"type": "string", "minLength": 1},
                 "description": {"type": "string"},
@@ -129,45 +122,6 @@ def client_variant(definition, directory, filename, solution_id):
     for field in ("name", "description"):
         if field in variant:
             metadata[field] = variant[field]
-    if definition.session_bundle is not None:
-        return _session_variant(definition, metadata, variant, directory, solution_id)
-    snapshot = deepcopy(definition.execution_snapshot)
-    if snapshot is None:
-        raise ValueError("Client variants require a core execution bundle.")
-    snapshot["variant"] = {
-        "solution": solution_id,
-        "core_version": metadata["version"],
-        "version": variant["version"],
-    }
-    snapshot["files"]["client/variant.json"] = json.dumps(variant, sort_keys=True)
-    for resource in variant.get("resources", []):
-        name = "client/" + resource
-        snapshot["files"][name] = read_resource(directory, resource)
-        snapshot["execution"]["resources"].append(name)
-    instructions = definition.instructions
-    if variant.get("instructions"):
-        addition = read_resource(directory, variant["instructions"])
-        if not addition.strip():
-            raise ValueError("Client instructions must not be empty.")
-        addition = "\n\n## Client procedure\n\n" + addition
-        instructions += addition
-        for path in {"SKILL.md", snapshot["execution"]["instructions"]}:
-            snapshot["files"][path] += addition
-    snapshot["sha256"] = digest(snapshot)
-    return replace(
-        definition,
-        metadata=metadata,
-        instructions=instructions,
-        execution_snapshot=validate_snapshot(snapshot),
-    )
-
-
-def _session_variant(definition, metadata, variant, directory, solution_id):
-    """A tool-session workflow takes the client procedure as more instructions, never resources."""
-    from .runtime.bundles import read_resource
-
-    if variant.get("resources"):
-        raise ValueError("Tool-session workflows take client instructions, not resources.")
     bundle = deepcopy(definition.session_bundle)
     bundle["variant"] = {"solution": solution_id, "core_version": metadata["version"], "version": variant["version"]}
     instructions = definition.instructions
@@ -181,7 +135,7 @@ def _session_variant(definition, metadata, variant, directory, solution_id):
 
 
 def load_solution(root: Path, solution_id: str) -> Installation:
-    from .runtime.application import get_handler, validate_policies
+    from .work import HANDLER_MODULES
 
     solution = owned_directory(root / "solutions", solution_id)
     manifest = read_json(solution / "installation.json")
@@ -228,9 +182,6 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             if key in workflows:
                 raise ValueError("Workflow keys must be unique in a tenant.")
             definition = load_definition(owned_directory(directory / "workflows", key))
-            from .solution_policy import bind_definition
-
-            definition = bind_definition(definition, solution_id, repository_root=root)
             if item.get("variant"):
                 variant_directory = owned_directory(client_employee / "workflows", key)
                 definition = client_variant(
@@ -238,12 +189,9 @@ def load_solution(root: Path, solution_id: str) -> Installation:
                 )
             if definition.metadata["owner"] != employee_key:
                 raise ValueError("Workflow must belong to its declared employee.")
-            handler = definition.metadata.get("handler", "skill.proposal")
-            from .work import HANDLER_MODULES
+            handler = definition.metadata["handler"]
             if handler not in HANDLER_MODULES:
-                get_handler(handler)
-            policies = item.get("policies", [])
-            validate_policies(policies)
+                raise ValueError(f"Workflow {key} names an unknown handler.")
             defaults = {**definition.metadata["tenant_defaults"], **item.get("defaults", {})}
             validate(definition.tenant_schema, defaults)
             workflows[key] = definition
@@ -253,9 +201,7 @@ def load_solution(root: Path, solution_id: str) -> Installation:
                 "solution": solution_id,
                 "definition": f"{employee_key}/workflows/{key}",
                 "handler": handler,
-                "presentation": definition.metadata.get("presentation", "proposal"),
-                "capabilities": definition.metadata.get("capabilities", []),
-                "policies": policies,
+                "presentation": definition.metadata.get("presentation"),
             }
     return Installation(manifest["tenant"], employees, workflows, bindings)
 
@@ -318,17 +264,7 @@ def install(connection, installation: Installation, *, actor_email: str):
             workflow_id = register_workflow(
                 connection, tenant["id"], definition, spec.get("defaults")
             )
-            binding = {
-                k: spec[k]
-                for k in (
-                    "definition",
-                    "handler",
-                    "presentation",
-                    "policies",
-                    "capabilities",
-                    "solution",
-                )
-            }
+            binding = {k: spec[k] for k in ("definition", "handler", "presentation", "solution")}
             cursor.execute(
                 "UPDATE workflows SET execution_binding=%s WHERE tenant_id=%s AND id=%s",
                 (Jsonb(binding), tenant["id"], workflow_id),
@@ -375,10 +311,8 @@ def installed_definition(binding, key):
         definition = composition.workflows[key]
     if (
         definition.metadata["owner"] != parts[0]
-        or definition.metadata.get("handler", "skill.proposal") != binding["handler"]
-        or definition.metadata.get("presentation", "proposal")
-        != binding.get("presentation", "proposal")
-        or set(definition.metadata.get("capabilities", [])) != set(binding.get("capabilities", []))
+        or definition.metadata["handler"] != binding["handler"]
+        or definition.metadata.get("presentation") != binding.get("presentation")
     ):
         raise ValueError(
             "Installed workflow binding differs from its definition. Reinstall explicitly."

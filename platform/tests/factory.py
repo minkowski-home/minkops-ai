@@ -58,12 +58,14 @@ def device(connection, tenant_row, owner):
         (tenant_row["id"], owner["id"], uuid4(), f"PC {suffix()}", uuid4().hex)).fetchone()
 
 
-def company(connection, tenant_row, device_row, client_row=None, *, name=None, status="authorised"):
+def company(connection, tenant_row, device_row, client_row=None, *, name=None, status="authorised", guid=None,
+            books_from="2026-04-01"):
+    """A company on a PC; a year split shares its GUID with another part, told apart by `books_from`."""
     return connection.execute(
         """INSERT INTO companies(tenant_id,client_id,device_id,guid,books_from,name,status)
-           VALUES (%s,%s,%s,%s,'2026-04-01',%s,%s) RETURNING *""",
-        (tenant_row["id"], client_row["id"] if client_row else None, device_row["id"], str(uuid4()),
-         name or f"Company {suffix()}", status)).fetchone()
+           VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+        (tenant_row["id"], client_row["id"] if client_row else None, device_row["id"], guid or str(uuid4()),
+         books_from, name or f"Company {suffix()}", status)).fetchone()
 
 
 def workflow(connection, tenant_row, key="bill-entry"):
@@ -109,3 +111,26 @@ def upload(connection, tenant_row, actor, files):
         """INSERT INTO account_files(tenant_id,source_id,path,sha256,content) VALUES (%s,%s,%s,%s,%s) RETURNING *""",
         (tenant_row["id"], source["id"], name, hashlib.sha256(content).hexdigest(), content)).fetchone()
         for name, content in files.items()]
+
+
+def text_pdf(*pages):
+    """A PDF whose pages carry these text lines, one below another, as a text layer."""
+    fonts = len(pages) * 2 + 3
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (3 + 2 * n)
+                                                                       for n in range(len(pages))), len(pages))]
+    for number, lines in enumerate(pages):
+        shown = " ".join(f"({line}) Tj 0 -16 Td" for line in lines)
+        stream = f"BT /F1 10 Tf 50 790 Td {shown} ET".encode()
+        objects += [b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents %d 0 R "
+                    b"/Resources << /Font << /F1 %d 0 R >> >> >>" % (4 + 2 * number, fonts),
+                    b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream"]
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    body, offsets = b"%PDF-1.4\n", []
+    for number, content in enumerate(objects, 1):
+        offsets.append(len(body))
+        body += b"%d 0 obj\n" % number + content + b"\nendobj\n"
+    xref = len(body)
+    body += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1) + b"".join(b"%010d 00000 n \n" % o
+                                                                                  for o in offsets)
+    return body + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)

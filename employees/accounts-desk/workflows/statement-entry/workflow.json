@@ -6,12 +6,8 @@
   "owner": "accounts-desk",
   "handler": "desk.statement",
   "presentation": "desk-review",
-  "capabilities": [
-    "files.snapshot"
-  ],
   "tenant_config_schema": "tenant-config.schema.json",
   "run_config_schema": "run-config.schema.json",
-  "output_schema": "output.schema.json",
   "instructions": "SKILL.md",
   "tenant_defaults": {
     "review_mode": "all_outputs"

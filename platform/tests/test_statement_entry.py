@@ -217,7 +217,7 @@ def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
     assert [(ledger["name"], ledger["company_guid"]) for ledger in lookups[1][0]["ledgers"]] == [
         ("ICICI Current A/c", company)]
     proposed = [json.loads(a["text"]) for a in chunk.answers if a["name"] == "propose"]
-    assert proposed[0]["rejected"][0]["reason"] == "The bank ledger must belong to the discovered Bank Accounts group."
+    assert proposed[0]["rejected"][0]["reason"] == "The bank ledger must belong to the Bank Accounts group."
     assert proposed[0]["held"] == [rows_of(chunk)[1]["ref"]] and proposed[1]["accepted"] == [rows_of(chunk)[0]["ref"]]
     rows = records(desk, run)
     assert [(r["status"], r["hold_codes"]) for r in rows] == [

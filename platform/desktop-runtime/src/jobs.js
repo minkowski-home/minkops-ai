@@ -71,9 +71,9 @@ export function createExecutor({ connectors, request, pc, grantFor, durableInten
       return result;
     }
     if (job.operation === "files.refresh") return { files: await connectors.inventory(grantFor(job.input.source_id).root) };
-    if (job.operation === "attention.refresh" || job.operation === "attention.supplier")
+    if (job.operation === "attention.refresh" || job.operation === "attention.supplier" || job.operation === "tally.supplier")
       return connectors.inspectTallyAttention(await plan(job),
-        { request: tallyRequest, createSupplier: job.operation === "attention.supplier" });
+        { request: tallyRequest, createSupplier: job.operation !== "attention.refresh" });
     if (job.operation === "tally.write" || job.operation === "tally.save") {
       const voucher = await plan(job);
       if (voucher.format_version > planVersion) throw new Error("Unsupported voucher plan.");

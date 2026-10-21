@@ -13,12 +13,12 @@ GOLDEN = {
     ("nothing", "retry"): (BILL, [
         "not_a_bill", "multiple_bills_unclear", "required_value_missing", "source_values_conflict",
         "supplier_unresolved", "date_before_books", "identity_rule_unknown", "date_outside_company_period",
-        "destination_changed", "voucher_type_unresolved", "extraction_failed", "human_review"]),
-    ("guess", "nothing", "retry"): (BILL, ["source_unreadable", "posting_profile_miss", "manual_review"]),
+        "voucher_type_unresolved", "extraction_failed"]),
+    ("guess", "nothing", "retry"): (BILL, ["source_unreadable"]),
     ("supplier", "nothing", "retry"): (BILL, ["supplier_missing"]),
     ("retry_save", "nothing"): (BOTH, [
         "company_not_open", "no_company", "duplicate_company", "not_running", "port_closed", "busy", "too_many",
-        "invalid_response", "rejected", "save_waiting", "save_interrupted", "pc_unavailable", "save_held"]),
+        "invalid_response", "rejected", "save_waiting", "save_interrupted", "save_held"]),
     ("nothing",): (STATEMENT, [
         "statement_format", "statement_layout_unconfirmed", "statement_value", "statement_balance",
         "statement_closing", "statement_summary", "statement_formula", "statement_conflict", "possible_existing",
@@ -27,7 +27,9 @@ GOLDEN = {
 # Codes a bill and a statement row share.
 SHARED = {
     "company_unresolved": ("nothing", "retry"), "unsupported_structure": ("nothing", "retry"),
-    "run_stopped": ("nothing", "retry"), "classification_uncertain": ("guess", "nothing", "retry"),
+    "classification_uncertain": ("guess", "nothing", "retry"),
+    # Stop is final, and a run's books stay as it read them: neither can be rechecked or retried.
+    "run_stopped": ("nothing",), "destination_changed": ("nothing",),
 }
 STATEMENT_ONLY = {
     "statement_layout_unknown": ("nothing", "retry"), "statement_layout_changed": ("nothing", "retry"),
@@ -54,7 +56,7 @@ class HoldMatrixTest(unittest.TestCase):
     def test_an_unknown_code_fails_closed_to_actions_that_cannot_write(self):
         self.assertEqual(holds.hold("never_heard_of_it").actions, ("nothing", "retry"))
         self.assertEqual(holds.actions(["never_heard_of_it"]), ("nothing", "retry"))
-        self.assertEqual(holds.actions([]), ("guess", "nothing", "retry"))  # Uncoded holds are manual review.
+        self.assertEqual(holds.actions([]), ("nothing", "retry"))  # A hold with no code fails closed too.
 
     def test_several_codes_keep_only_the_actions_every_code_allows(self):
         self.assertEqual(holds.actions(["supplier_missing", "classification_uncertain"]), ("nothing", "retry"))

@@ -73,6 +73,24 @@ test("a run's write saves its stored plan behind the durable local fence", async
   assert.deepEqual([result, fenced], [{ outcome: "saved", current: { guid: "g-1" } }, [true]]);
 });
 
+test("an approved supplier is created by the fixed master operation, never through a voucher import", async () => {
+  const plan = { kind: "supplier", company: "Rehearsal Infra", company_guid: "c-1", vendor: "Cabin Services", gst_supplier: null };
+  const calls = [];
+  const request = async (path) => {
+    assert.match(path, /\/jobs\/job-1\/plan\?claim_token=claim-1/);
+    return plan;
+  };
+  const inspectTallyAttention = async (given, options) => {
+    calls.push([given, options]);
+    return { company_guid: "c-1", ledgers: [], current: null };
+  };
+  const saveVoucher = async () => { throw new Error("A supplier write must not import a voucher."); };
+  const result = await executor({ request, connectors: { inspectTallyAttention, saveVoucher } })(
+    job("tally.supplier", { write_id: "w-2" }));
+  assert.deepEqual(result, { company_guid: "c-1", ledgers: [], current: null });
+  assert.deepEqual(calls, [[plan, { request: "tally-transport", createSupplier: true }]]);
+});
+
 test("a failed connection check leaves a diagnostic for the receipt", async () => {
   const recorded = [];
   const checkTally = async () => { throw Object.assign(new Error("Tally isn't open on TEST-PC."), { tallyState: "not_running" }); };

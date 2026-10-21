@@ -41,7 +41,7 @@ class Launch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     device_id: UUID
     request_key: UUID
-    operation: Literal["tally.probe", "files.refresh", "tally.save"]
+    operation: Literal["tally.probe", "files.refresh"]
     input: dict = Field(default_factory=dict)
 
 
@@ -170,14 +170,14 @@ def claim(
     },
 )
 async def finish(job_id: UUID, request: Request, device: Device, connection: Db):
-    # Bound the wire payload before JSON allocation; base64 snapshots can be
-    # larger than multipart uploads. The domain enforces decoded file limits.
+    # Bound the wire payload before JSON allocation: a folder refresh carries
+    # its files in base64. The domain enforces decoded file limits.
     chunks = []
     size = 0
     async for chunk in request.stream():
         size += len(chunk)
-        if size > 96_000_000:
-            raise HTTPException(413, "Discovery exceeds the supported transfer size.")
+        if size > 48_000_000:
+            raise HTTPException(413, "This receipt exceeds the supported transfer size.")
         chunks.append(chunk)
     try:
         body = Receipt.model_validate(json.loads(b"".join(chunks)))

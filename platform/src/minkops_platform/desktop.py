@@ -1,9 +1,9 @@
 """Server-owned desktop dispatch. No shell, raw XML or arbitrary URL authority.
 
-The companion keeps execution local; the existing tasks/event/outbox contract
-keeps observations visible to every client. Only reads are automatically
-reclaimable. Workbook saves reuse Accounts approval and byte verification;
-an interrupted save requires an explicit request and native hash recovery.
+The companion keeps execution local; the tasks/event/outbox contract keeps
+observations visible to every client. Only reads are automatically
+reclaimable: a native write whose PC stopped mid-way holds for a person
+(accounts/writes.py), and a refresh of its Tally copy is resumed by the sync.
 """
 
 import base64
@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
-from .accounts import service as accounts
+from . import files
 from .errors import ServiceError
 from .run_controls import observe_task, resolve_request
 
@@ -213,111 +213,11 @@ def public_job(row):
     }
 
 
-def enqueue_approved(connection, run, device_id, operation, write_id):
-    """Persist approved work before returning to the UI, so tray work survives
-    closing either client. Only the domain calls this with an immutable intent."""
-    owned_device(connection, run["tenant_id"], run["actor_id"], device_id)
-    payload = {"run_id": str(run["id"]), "write_id": str(write_id)}
-    connection.execute(
-        """INSERT INTO desktop_jobs
-        (tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-        (
-            run["tenant_id"],
-            device_id,
-            run["actor_id"],
-            run["task_id"],
-            operation,
-            Jsonb(payload),
-            uuid4(),
-            _hash(json.dumps(payload, sort_keys=True)),
-        ),
-    )
-
-
 def _observe(connection, job, state, summary, progress):
     if job["operation"] == "tally.sync" and state in ("completed", "failed"):
         return  # The sync's own finish or failure publishes its outcome.
-    if job["operation"] == "tally.write":
+    if job["operation"] in ("tally.write", "tally.supplier"):
         return  # The run's records own their lifecycle and progress.
-    if job["operation"].startswith("attention."):
-        return  # Attention events have their own durable lifecycle and audit.
-    if job["operation"] == "sources.discover":
-        # Discovery owns collection -> hosted mapping -> confirmation lifecycle.
-        if state in ("queued", "executing"):
-            from . import discovery
-
-            row = discovery.get_run(connection, job["tenant_id"], job["input"]["discovery_run_id"])
-            discovery._observe(
-                connection,
-                row,
-                state,
-                "Waiting for your PC."
-                if state == "queued"
-                else "Reading your selected business sources…",
-                progress,
-            )
-        elif state == "failed":
-            from . import discovery
-
-            row = discovery.get_run(connection, job["tenant_id"], job["input"]["discovery_run_id"])
-            if row["state"] != "failed":
-                discovery.fail(connection, {"tenant_id": job["tenant_id"]}, job, summary)
-        return
-    # Accounts owns its run's lifecycle. A single receipt must not complete a
-    # multi-bill run or turn a cancellation back into success.
-    if job["operation"] == "tally.save":
-        run = connection.execute(
-            "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
-            (job["tenant_id"], job["input"]["run_id"]),
-        ).fetchone()
-        from .runtime.assets import hydrate
-        hydrate(connection, run)
-        if run["state"] != "writing":
-            return
-        if state == "failed":
-            from .accounts.attention import flag
-            from .attention import audit
-            index = connection.execute('SELECT record_index FROM account_tally_writes WHERE tenant_id=%s AND id=%s',
-                (job['tenant_id'],job['input']['write_id'])).fetchone()['record_index']
-            for record in [run['result']['records'][index]]:
-                if record.get('status') == 'writing':
-                    item = flag(connection,run,record,title='Save interrupted',reopen=True)
-                    audit(connection,item,job['actor_id'],'failed',summary)
-        event = {
-            "queued": "local_waiting",
-            "executing": "local_saving",
-            "completed": "local_verified",
-            "failed": "local_failed",
-        }[state]
-        count = connection.execute(
-            "SELECT count(*) AS total,count(verified_at) AS saved FROM account_tally_writes WHERE tenant_id=%s AND run_id=%s",
-            (job["tenant_id"], job["input"]["run_id"]),
-        ).fetchone()
-        summary = {
-            "queued": summary,
-            "executing": "Saving and checking approved bill entries…",
-            "completed": f"{count['saved']} of {count['total']} destination writes checked.",
-            "failed": summary,
-        }[state]
-        connection.execute(
-            "UPDATE tasks SET summary=%s,updated_at=now() WHERE tenant_id=%s AND id=%s",
-            (summary, job["tenant_id"], job["task_id"]),
-        )
-        connection.execute(
-            "INSERT INTO task_events(tenant_id,task_id,event_type,summary,progress) VALUES (%s,%s,%s,%s,85)",
-            (job["tenant_id"], job["task_id"], event, summary),
-        )
-        connection.execute(
-            "INSERT INTO event_outbox(tenant_id,event_type,aggregate_id,payload) VALUES (%s,%s,%s,%s)",
-            (
-                job["tenant_id"],
-                "desktop." + event,
-                job["id"],
-                Jsonb({"task_id": str(job["task_id"]), "summary": summary}),
-            ),
-        )
-        return
     observe_task(
         connection,
         tenant_id=job["tenant_id"],
@@ -372,7 +272,6 @@ def _validate_input(operation, payload):
     keys = {
         "tally.probe": set(),
         "files.refresh": {"source_id"},
-        "tally.save": {"run_id", "write_id"},
     }
     if operation not in keys or set(payload) != keys[operation]:
         raise ServiceError("invalid", "This local operation is not supported.")
@@ -398,53 +297,27 @@ def launch(connection, tenant, user, body):
     )
     if previous:
         return public_job(previous)
-    run = None
     if operation == "files.refresh":
         _bound_source(connection, device, payload["source_id"])
-    elif operation == "tally.save":
-        from .accounts.tally_writes import spec
-
-        run, _ = spec(connection, device, payload)
-    if operation != "tally.probe":
         existing = connection.execute(
             """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation=%s AND input=%s
             AND state IN ('queued','executing') ORDER BY created_at DESC LIMIT 1 FOR UPDATE""",
             (device["id"], operation, Jsonb(payload)),
         ).fetchone()
         if existing:
-            if (
-                operation != "tally.save"
-                or existing["state"] == "queued"
-                or existing["lease_until"] > connection.execute("SELECT now() AS t").fetchone()["t"]
-            ):
-                _remember_request(
-                    connection, tenant["id"], body["request_key"], fingerprint, existing["id"]
-                )
-                return public_job(existing)
-            # An explicit new save request can recover an interrupted attempt.
-            # Native hash checks recognize already saved bytes; claim never
-            # automatically repeats a consequential write on lease expiry.
-            connection.execute(
-                "UPDATE desktop_jobs SET state='failed',error='Save interrupted; retry requested.' WHERE id=%s",
-                (existing["id"],),
-            )
+            # A refresh already waiting or underway answers this request too.
+            _remember_request(connection, tenant["id"], body["request_key"], fingerprint, existing["id"])
+            return public_job(existing)
     queued = connection.execute(
         "SELECT count(*) AS n FROM desktop_jobs WHERE device_id=%s AND state IN ('queued','executing')",
         (device["id"],),
     ).fetchone()["n"]
     if queued >= 10:
         raise ServiceError("conflict", "This PC already has queued work. Wait for it to finish.")
-    task = (
-        {"id": run["task_id"]}
-        if run
-        else connection.execute(
-            "INSERT INTO tasks(tenant_id,title) VALUES (%s,%s) RETURNING id",
-            (
-                tenant["id"],
-                "Check Tally connection" if operation == "tally.probe" else "Refresh local folder",
-            ),
-        ).fetchone()
-    )
+    task = connection.execute(
+        "INSERT INTO tasks(tenant_id,title) VALUES (%s,%s) RETURNING id",
+        (tenant["id"], "Check Tally connection" if operation == "tally.probe" else "Refresh local folder"),
+    ).fetchone()
     job = connection.execute(
         """INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
@@ -506,11 +379,10 @@ def claim(connection, device, report=None):
         background(connection, device)
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('tally.save','tally.write','attention.supplier','tally.sync') AND lease_until<now()))
-           AND (operation='attention.refresh' OR EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id AND t.control_state='active'))
-           ORDER BY CASE WHEN operation='tally.save' THEN
-             (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
-             ELSE '' END, created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
+           (state='executing' AND operation NOT IN ('tally.write','tally.supplier','tally.sync') AND lease_until<now()))
+           AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id
+                       AND t.control_state='active')
+           ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
         (device["id"],),
     ).fetchone()
     if not row:
@@ -548,51 +420,18 @@ def _claimed_job(connection, device, job_id, claim_token):
     return job
 
 
-def _native_plan(write, plan_version):
-    """The approved protocol-5 voucher, executed exactly as it was stored."""
-    from .accounts.vouchers import FORMAT
-
-    if plan_version < FORMAT:
-        raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then use Retry save.")
-    if write["plan"].get("format_version") != FORMAT:
-        raise ServiceError("conflict", "This approved entry uses a retired plan format. Start a new run.")
-    return write["plan"]
-
-
 def plan(connection, device, job_id, claim_token, plan_version=1):
     job = _claimed_job(connection, device, job_id, claim_token)
     from .run_controls import control_state
-    if job["operation"] != "attention.refresh" and control_state(connection, device["tenant_id"], job["task_id"]) == "stopped":
+    if control_state(connection, device["tenant_id"], job["task_id"]) == "stopped":
         raise ServiceError("conflict", "This task was stopped before the operation began.")
-    if job["state"] == "executing" and job["operation"].startswith("attention."):
-        from .attention import plan as attention_plan
-        return attention_plan(connection, device, job, plan_version=plan_version)
     if job["state"] == "executing" and job["operation"] == "tally.sync":
         from .accounts.sync import plan as sync_plan
         return sync_plan(connection, device, job)
-    if job["state"] == "executing" and job["operation"] == "tally.write":
+    if job["state"] == "executing" and job["operation"] in ("tally.write", "tally.supplier"):
         from .accounts.writes import plan as write_plan
         return write_plan(connection, device, job, plan_version)
-    if job["state"] == "executing" and job["operation"] == "sources.discover":
-        from . import discovery
-
-        if plan_version < 3 and discovery.get_run(connection, device["tenant_id"], job["input"]["discovery_run_id"])["config"]["tally"]:
-            raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then run discovery again.")
-
-        return discovery.plan(connection, device, job)
-    if job["state"] == "executing" and job["operation"] == "tally.save":
-        from .accounts.bills import recheck_target
-        from .accounts.tally_writes import spec
-
-        run, write = spec(connection, device, job["input"], underway=True)
-        recheck_target(
-            connection,
-            {"id": device["tenant_id"]},
-            {"id": device["owner_id"]},
-            run["config"]["tally_target"],
-        )
-        return _native_plan(write, plan_version)
-    raise ServiceError("conflict", "This save is no longer running.")
+    raise ServiceError("conflict", "This local task is no longer running.")
 
 
 def sync_page(connection, device, job_id, page):
@@ -646,17 +485,10 @@ def finish(connection, device, job_id, receipt):
         if len(json.dumps(diagnostic).encode()) > 16_000:
             diagnostic = {"truncated": True}
         _store_diagnostic(connection, device, diagnostic, kind="job", job_id=job["id"])
-    if job["state"] != "executing" and not (
-        job["operation"] == "tally.save"
-        and job["error"] == "Save interrupted; retry requested."
-    ):
+    if job["state"] != "executing":
         raise ServiceError("conflict", "This local task is no longer running.")
     summary = error
-    if job["operation"].startswith("attention."):
-        from .attention import accept as accept_attention
-        result = accept_attention(connection, device, job, result, error)
-        summary = "Attention item checked."
-    elif result is not None and job["operation"] == "files.refresh":
+    if result is not None and job["operation"] == "files.refresh":
         if (
             set(result) != {"files"}
             or not isinstance(result["files"], list)
@@ -677,7 +509,7 @@ def finish(connection, device, job_id, receipt):
             contents.append(_bytes(file["content"]))
             if sum(map(len, contents)) > 30_000_000:
                 raise ServiceError("invalid", "A source refresh is limited to 30 MB.")
-        accounts.upload_source(
+        files.upload_source(
             connection,
             {"id": device["tenant_id"]},
             {"id": device["owner_id"], "is_platform_admin": False},
@@ -689,25 +521,11 @@ def finish(connection, device, job_id, receipt):
         )
         result = {"source_id": str(source["id"]), "file_count": len(contents)}
         summary = f"Folder refreshed. {len(contents)} files ready."
-    elif job["operation"] == "tally.write":
+    elif job["operation"] in ("tally.write", "tally.supplier"):
         from .accounts import writes
         result = (writes.accept(connection, device, job, result) if result is not None
                   else writes.interrupted(connection, device, job, error))
         summary = "Entry saved and verified in Tally." if result and result["verified"] else "Entry needs attention."
-    elif job["operation"] == "tally.save":
-        from .accounts.tally_writes import accept
-
-        result = accept(
-            connection,
-            device,
-            job["input"],
-            result if result is not None else {"outcome": "attention", "message": error},
-        )
-        summary = (
-            "Tally bill reconciled."
-            if result["verified"]
-            else "This bill needs review; other bills continue."
-        )
     elif job["operation"] == "tally.sync":
         from .accounts import sync
         if error:
@@ -718,14 +536,6 @@ def finish(connection, device, job_id, receipt):
         else:
             result = sync.finish(connection, device, job, result)
         summary = error or "Tally copy refreshed."
-    elif job["operation"] == "sources.discover":
-        from . import discovery
-
-        if error:
-            discovery.fail(connection, device, job, error)
-        else:
-            result = discovery.collect(connection, device, job, result)
-        summary = "Source collection finished."
     elif result and not result["available"]:
         error = "Tally is not available. Open Tally and try again."
     state = "failed" if error else "completed"
@@ -734,7 +544,7 @@ def finish(connection, device, job_id, receipt):
            updated_at=now() WHERE id=%s RETURNING *""",
         (state, Jsonb(result), error, fingerprint, job_id),
     ).fetchone()
-    if job["operation"] == "tally.write":
+    if job["operation"] in ("tally.write", "tally.supplier"):
         from .accounts.writes import dispatch
         dispatch(connection, device["tenant_id"], device["id"])
     summary = (

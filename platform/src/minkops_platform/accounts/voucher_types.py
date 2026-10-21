@@ -1,4 +1,4 @@
-"""Voucher families come from discovered voucher types, never a hard-coded name.
+"""Voucher families come from the company's own voucher types, never a hard-coded name.
 
 Practices book under their own types (*Purchase GST*, *Payment - HDFC*). A
 type's base is Tally's predefined type: its RESERVEDNAME when Tally marks it
@@ -8,7 +8,7 @@ applies the same rule to live masters before every write
 and the duplicates found there always agree on a family.
 """
 
-from .client_context import text
+from .mirror import text
 
 MAX_CHAIN = 10
 

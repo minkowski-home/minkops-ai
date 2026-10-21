@@ -27,8 +27,8 @@ from jsonschema import ValidationError
 from minkops_connectors.statement import normalized, read_tables
 from minkops_platform import attention, profiles, work
 from minkops_platform.errors import ServiceError
+from minkops_platform.files import files_for
 from minkops_platform.lanes import Session, Wait
-from minkops_platform.resources import files_for
 from minkops_platform.run_controls import control_state, require_active, resolve_request
 from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
@@ -50,8 +50,8 @@ EXCEPTIONS = ("company_unresolved", "ledger_unresolved", "classification_uncerta
 # Holds a later proposal may replace: what a session concluded, never what the reader found.
 REPROPOSABLE = {*EXCEPTIONS, "statement_interpretation"}
 # Native refusals the companion names; any other unverified save holds as statement_save_held.
-SAVE_HOLDS = {"possible_existing", "uncertain_import", "company_not_open", "no_company", "duplicate_company",
-              "not_running", "port_closed", "busy", "too_many", "invalid_response", "rejected"}
+SAVE_HOLDS = {"possible_existing", "uncertain_import", "destination_changed", "company_not_open", "no_company",
+              "duplicate_company", "not_running", "port_closed", "busy", "too_many", "invalid_response", "rejected"}
 # A statement row offers these of its holds' actions; a best-guess write needs a plan the checks accepted.
 OFFERED = ("nothing", "retry", "retry_save")
 
@@ -64,8 +64,7 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
     if not file_ids or len(file_ids) != len(set(file_ids)):
         raise ServiceError("invalid", "Select each statement file once.")
     try:
-        config = resolve_run_config(definition, workflow["config_values"], body.get("config") or {},
-                                    allowed_source_ids=set(), allowed_destination_ids=set())
+        config = resolve_run_config(definition, workflow["config_values"], body.get("config") or {})
     except (ValidationError, ValueError) as error:
         raise ServiceError("invalid", "These statement settings are not valid.") from error
     mapping = config.get("branch_mapping_file_id")
@@ -786,6 +785,8 @@ def _plan(connection, run, record):
 def written(connection, run, record, write, receipt):
     """A receipt from the companion: a verified save, a verified existing voucher, or a hold."""
     outcome = receipt.get("outcome")
+    if outcome not in ("saved", "duplicate", "attention"):
+        raise ServiceError("invalid", "Invalid Tally write receipt.")
     if outcome in ("saved", "duplicate"):
         try:
             current = observed_statement(write["plan"], receipt.get("current"))
@@ -803,7 +804,7 @@ def written(connection, run, record, write, receipt):
                AND (proposal->'transfer'->>'by'=%s OR proposal->>'repeat_of'=%s) FOR UPDATE""",
             (run["id"], str(record["id"]), str(record["id"]))).fetchall():
         work.update_record(connection, follower, **follow)
-    return {"verified": outcome in ("saved", "duplicate"), "outcome": outcome}
+    return {"verified": outcome in ("saved", "duplicate"), "outcome": outcome if outcome != "attention" else "held"}
 
 
 def stopped(connection, run):

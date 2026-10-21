@@ -58,6 +58,8 @@ POLL_SECONDS = 30
 # Finished sessions are closed on this cadence; usage not reported within USAGE_WAIT stays unknown.
 CLOSE_SECONDS = 10
 USAGE_WAIT = 60
+# How long a drain waits for its finished sessions to be closed before leaving them to a successor.
+CLOSE_GRACE = 3 * USAGE_WAIT
 POOL_SIZE = 4
 # Attempts per item, and the wait before each retry, for failures worth retrying.
 ATTEMPTS = 3
@@ -176,14 +178,18 @@ class Host:
         self.wake()
 
     def settled(self, connection):
-        """True when no lane is busy and nothing is runnable: a drain may acknowledge its wake-up."""
+        """True when no lane is busy, nothing is runnable and finished sessions are closed: a drain may end.
+
+        A session that finished long ago and still could not be deleted does
+        not hold a drain open; the provider expires it on its own.
+        """
         with self.changed:
             if self.busy:
                 return False
         if work.runnable(connection, tenant_id=self.tenant_id):
             self.wake()
             return False
-        return True
+        return not work.unclosed(connection, tenant_id=self.tenant_id, limit=1, within=CLOSE_GRACE)
 
     def _held(self):
         with self.changed:

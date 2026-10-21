@@ -9,13 +9,14 @@ stored plan, and its receipt is verified against that plan.
 import hashlib
 import json
 import re
-from datetime import date
-from decimal import Decimal, InvalidOperation
+from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, uuid5
 
+from .mirror import text
+from .voucher_types import base_types
+
 FORMAT = 5
-# Purchase documents may already be booked as Journals; never enter them twice.
-BILL_FAMILIES = ["purchase", "journal"]
 NARRATION_TAG = "statement"
 
 
@@ -96,7 +97,6 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
     window = {"from": data["date"], "to": data["date"]}
     if counterpart:
         issued = date.fromisoformat(data["date"])
-        from datetime import timedelta
         window = {"from": (issued - timedelta(days=3)).isoformat(), "to": (issued + timedelta(days=3)).isoformat()}
     return {
         "format_version": FORMAT, "family": resolved.get("family") or ("payment" if amount < 0 else "receipt"),
@@ -219,112 +219,76 @@ def observed_statement(plan, current):
             "entries": _entries(current), "allocations": current["allocations"]}
 
 
-def observed_document(current, target):
-    """A v5 refresh observation of a bill as the stored observation shape.
-
-    Returns None when the report is malformed or names another document, so the
-    attention check treats it as unresolved rather than trusting the companion.
-    """
-    try:
-        current = _current(current)
-    except ValueError:
-        return None
-    duplicate = {"number": target.get("invoice_number") or "", "number_fields": ["REFERENCE"]}
-    number = _number_in(current, duplicate)
-    if number is None or normalized(current["party_ledger"]) != normalized(target.get("vendor") or ""):
-        return None
-    return {"master_id": current["master_id"], "guid": current["guid"], "date": current["date"],
-            "invoice_number": target["invoice_number"], "vendor": current["party_ledger"],
-            "voucher_type": current["voucher_type"], "entries": _entries(current), "fingerprint": current["fingerprint"]}
-
-
 # ---------------------------------------------------------------------------
-# Bill proposals (bill-entry 0.14+): the AI selects discovered identities and
-# reads values from the bill; this module binds them and enforces the rules
-# every accounting voucher must satisfy before a plan exists.
+# Bill proposals: the session reads values from the bill and selects identities
+# from the routed company's mirror; this binds them and enforces the rules every
+# accounting voucher must satisfy before a plan exists.
 
+# The families a document may be booked as. A purchase may already be a Journal, so a
+# duplicate of an invoice is looked for among both.
 KIND_FAMILIES = {"invoice": ("purchase", "journal"), "credit_note": ("debit_note",)}
 BASE_FAMILY = {"purchase": "purchase", "journal": "journal", "debit note": "debit_note"}
 PARTY_SIDE = {"purchase": "credit", "journal": "credit", "debit_note": "debit"}
 LINE_ROLES = {"expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"}
-# A printed round-off never exceeds one rupee; a posting profile may narrow it.
+# Lines that carry the bill's taxable value, as opposed to its tax and adjustments.
+TAXABLE_ROLES = {"expense", "freight", "other_charge"}
+# A printed round-off never exceeds one rupee; anything more is not rounding.
 ROUND_OFF_CAP_CENTS = 100
+# Printed amounts are rounded to the rupee at most: a computed one may differ by that.
+TOLERANCE_CENTS = 100
 
 
-def _hold(code, message):
-    from .bills import HoldReason
+class HoldReason(ValueError):
+    """A server-side hold with a stable code from the hold matrix (holds.py)."""
 
-    return HoldReason(code, message)
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 
 
 def _money(value, what):
     """Exact positive paise from a bill amount, or a coded hold."""
     if type(value) not in (int, float):
-        raise _hold("source_values_conflict", f"{what} must be a number printed on the bill.")
+        raise HoldReason("source_values_conflict", f"{what} must be a number printed on the bill.")
     cents = _cents(value)
     if cents is None or cents <= 0 or cents > 2**53 - 1:
-        raise _hold("source_values_conflict", f"{what} must be a positive amount with at most two decimal places.")
+        raise HoldReason("source_values_conflict", f"{what} must be a positive amount with at most two decimal places.")
     return cents
 
 
 class Masters:
-    """One discovered company's native masters, addressed by GUID only."""
+    """One company's pinned native masters, addressed by GUID only.
 
-    def __init__(self, company, created=()):
-        from .client_context import master_lookup, text
+    `view` is a company in the mirror's view shape (mirror.company_view);
+    `created` adds masters Minkops created since, verified by native readback.
+    """
 
-        self._text = text
+    def __init__(self, view, created=()):
         self.by_key = {}
-        for record in [*master_lookup(company)["records"], *created]:
+        for record in [*view["masters"]["records"], *created]:
             guid = text(record["data"].get("GUID"))
             if guid:
                 self.by_key.setdefault((record["type"], guid), []).append(record["data"])
         types = [d for (kind, _), found in self.by_key.items() if kind == "VOUCHERTYPE" for d in found]
-        from .voucher_types import base_types
-
         self.bases = base_types(types)
 
     def name(self, data):
-        return (self._text(data.get("@_NAME")) or self._text(data.get("NAME")) or "").strip()
+        return text(data.get("@_NAME")) or text(data.get("NAME"))
 
     def scalar(self, data, key):
-        return (self._text(data.get(key)) or "").strip()
+        return text(data.get(key))
 
     def one(self, kind, guid, code, message):
         found = self.by_key.get((kind, guid)) if isinstance(guid, str) else None
         if not found or len(found) != 1:
-            raise _hold(code, message)
+            raise HoldReason(code, message)
         return found[0]
 
     def identity(self, data):
-        return {key: self._text(data.get(key)) for key in ("GUID", "PARENT", "ALTERID")}
-
-    def under(self, parent, groups):
-        """Is a ledger's parent one of `groups`, directly or through its group chain?"""
-        chain = {self.name(d): self.scalar(d, "PARENT") for (kind, _), found in self.by_key.items()
-                 if kind == "GROUP" for d in found}
-        wanted = {g.casefold() for g in groups}
-        for _ in range(50):
-            if not parent:
-                return False
-            if parent.casefold() in wanted:
-                return True
-            parent = chain.get(parent)
-        return False
+        return {key: text(data.get(key)) for key in ("GUID", "PARENT", "ALTERID")}
 
     def family(self, voucher_type):
         return BASE_FAMILY.get(str(self.bases.get(self.name(voucher_type).casefold()) or "").casefold())
-
-
-def _company(config, target):
-    """The pinned discovery record of the company a bill was routed to."""
-    guid = target["references"]["company_guid"]
-    for source in config.get("source_catalog_snapshot", {}).get("sources", []):
-        for company in (source.get("snapshot") or {}).get("companies", []):
-            if company.get("company_guid") == guid:
-                created = [m for m in config.get("created_masters", []) if m.get("company_guid") == guid]
-                return Masters(company, created)
-    raise _hold("company_unresolved", "The routed company is missing from the pinned Source Discovery.")
 
 
 def _tax_consistent(lines):
@@ -332,232 +296,209 @@ def _tax_consistent(lines):
 
     `lines` are the bill's tax lines as dicts with "head" (cgst/sgst/igst/cess),
     "rate" (Decimal percent), "taxable_cents" and "amount_cents" (ints).
-    Raise _hold("source_values_conflict", ...) for a line that is not
-    rate × taxable within the bill's rounding, or for central and state halves
-    of the same rate and base that differ.
     """
-    from decimal import ROUND_HALF_UP
-
     halves = {}
     for line in lines:
         expected = (line["rate"] * line["taxable_cents"] / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
-        if abs(line["amount_cents"] - int(expected)) > 100:
-            raise _hold("source_values_conflict", f"A {line['head'].upper()} line does not match its printed rate and taxable value.")
+        if abs(line["amount_cents"] - int(expected)) > TOLERANCE_CENTS:
+            raise HoldReason("source_values_conflict",
+                             f"A {line['head'].upper()} line does not match its printed rate and taxable value.")
         if line["head"] in ("cgst", "sgst"):
-            halves.setdefault((line["rate"], line["taxable_cents"]), {}).setdefault(line["head"], []).append(line["amount_cents"])
+            halves.setdefault((line["rate"], line["taxable_cents"]), {}).setdefault(line["head"], []).append(
+                line["amount_cents"])
     for pair in halves.values():
         if "cgst" in pair and "sgst" in pair and sorted(pair["cgst"]) != sorted(pair["sgst"]):
-            raise _hold("source_values_conflict", "Central and state tax on the same rate and value must be equal.")
+            raise HoldReason("source_values_conflict", "Central and state tax on the same rate and value must be equal.")
+
+
+def _printed_totals(document, lines, raw):
+    """Tax-inclusive amounts: the bill's printed taxable and tax totals bind the lines that claim them.
+
+    A bill whose amount column already includes GST can balance with no tax line
+    at all, losing the input tax; its printed totals expose that.
+    """
+    for key, roles, what in (("taxable", TAXABLE_ROLES, "taxable value"), ("tax", {"tax"}, "tax")):
+        printed = document.get(key)
+        if printed is None:
+            continue
+        cents = _money(printed, f"The bill's printed {what}")
+        claimed = sum(ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] in roles)
+        if abs(claimed - cents) > TOLERANCE_CENTS:
+            raise HoldReason("source_values_conflict", (
+                f"The lines claim {claimed / 100:.2f} of {what}, but the bill prints {cents / 100:.2f}. "
+                "Each expense line must carry its taxable value, and each tax its own line."))
 
 
 class Bill:
-    """A proposal bound to discovered identities; the single source of its plan."""
+    """A proposal bound to the company's identities; the single source of its plan."""
 
-    def __init__(self, target, record, family, voucher_type, party, party_identity, lines, identities):
+    def __init__(self, company, record, family, voucher_type, party, party_identity, lines, identities):
         document = record["document"]
-        self.target, self.family, self.voucher_type, self.party = target, family, voucher_type, party
+        self.company, self.family, self.voucher_type, self.party = company, family, voucher_type, party
         self.kind, self.number, self.date = document["kind"], document["number"], document["date"]
         self.total_cents = _money(document["total"], "The bill total")
         self.lines = lines
-        self.identities = {party: party_identity, **identities}
+        self.identities = {party: party_identity, **identities} if party_identity else dict(identities)
         self.series = "credit_note" if self.kind == "credit_note" else "invoice"
         self.identity = document_identity(party, self.number, date.fromisoformat(self.date), series=self.series)
-        tax = sum(Decimal(str(ln["amount"])) for ln in record["voucher"]["lines"] if ln.get("role") == "tax")
-        self.summary = {"vendor": party, "invoice_number": self.number, "date": self.date,
-                        "total": document["total"], "tax": float(tax)}
 
-    def accounting(self):
-        """What two proposals for one document must agree on."""
-        return json.dumps([self.family, self.voucher_type["GUID"], self.date, self.lines], sort_keys=True)
+    @property
+    def destination_key(self):
+        return f"bill:{self.company['guid']}"
 
-    def native_plan(self, remote_id, operation, expected):
+    def native_plan(self, remote_id, *, number_fields=("REFERENCE",)):
         label = "credit note" if self.kind == "credit_note" else "bill"
         return {
-            "format_version": FORMAT, "family": self.family, "operation": operation,
-            "company": self.target["company"], "company_guid": self.target["references"]["company_guid"],
-            "port": self.target.get("port") or 9000, "remote_id": remote_id, "voucher_type": self.voucher_type,
+            "format_version": FORMAT, "family": self.family, "operation": "append",
+            "company": self.company["name"], "company_guid": self.company["guid"],
+            "port": self.company.get("tally_port") or 9000, "remote_id": remote_id, "voucher_type": self.voucher_type,
             "header": {"date": self.date, "reference": self.number, "party_ledger": self.party,
                        "narration": f"Minkops reviewed {label} {self.number}", "tag": None},
             "lines": self.lines,
-            "references": {"company_guid": self.target["references"]["company_guid"], "ledgers": self.identities},
-            "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice" else ["debit_note"],
-                          "party_ledger": self.party, "number": self.number,
-                          "number_fields": getattr(self, "number_fields", ["REFERENCE"]),
-                          "window": invoice_window(date.fromisoformat(self.date))},
-            "fence": "retry_after_read",
-            "expected": {"guid": expected["guid"], "fingerprint": expected["fingerprint"]} if expected else None,
+            "references": {"company_guid": self.company["guid"], "ledgers": self.identities},
+            "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice"
+                          else ["debit_note"], "party_ledger": self.party, "number": self.number,
+                          "number_fields": list(number_fields), "window": invoice_window(date.fromisoformat(self.date))},
+            "fence": "retry_after_read", "expected": None,
             "identity": {"version": 2, "series": self.series, "rule": "in_invoice_year", "hash": self.identity},
         }
 
     def preview(self):
         """What the reviewer sees will be entered, in native names."""
-        return {"company": self.target["company"], "voucher_type": self.voucher_type["NAME"], "family": self.family,
+        return {"company": self.company["name"], "voucher_type": self.voucher_type["NAME"], "family": self.family,
                 "date": self.date, "number": self.number, "party": self.party, "total": self.total_cents / 100,
-                "lines": [{"ledger": ln["ledger"], "side": ln["side"], "amount": ln["amount_cents"] / 100} for ln in self.lines]}
+                "lines": [{"ledger": ln["ledger"], "side": ln["side"], "amount": ln["amount_cents"] / 100}
+                          for ln in self.lines]}
 
 
 def _document(record):
     document, voucher = record.get("document"), record.get("voucher")
     if not isinstance(document, dict) or not isinstance(voucher, dict):
-        raise _hold("required_value_missing", "The bill needs a document and a proposed voucher.")
-    if document.get("origin") != "domestic":
-        raise _hold("identity_rule_unknown", "Only domestic supplier documents have a known invoice numbering year. Enter this bill in Tally.")
-    number = document.get("number")
-    if not isinstance(number, str) or not number.strip() or len(number) > 100:
-        raise _hold("required_value_missing", "The bill's document number is missing.")
+        raise HoldReason("required_value_missing", "The bill needs its document and a proposed voucher.")
+    missing = [key for key in ("kind", "number", "date", "total", "supplier_name", "origin")
+               if document.get(key) is None or (isinstance(document[key], str) and not document[key].strip())]
+    if missing:
+        raise HoldReason("required_value_missing", f"The bill's {', '.join(missing)} must be read from it.")
+    if not isinstance(document["number"], str) or len(document["number"]) > 100:
+        raise HoldReason("required_value_missing", "The bill's document number is missing.")
     try:
-        date.fromisoformat(document.get("date") or "")
+        date.fromisoformat(document["date"])
     except (TypeError, ValueError):
-        raise _hold("required_value_missing", "The bill's date must be a calendar date.") from None
+        raise HoldReason("required_value_missing", "The bill's date must be a calendar date.") from None
+    if document["origin"] != "domestic":
+        raise HoldReason("identity_rule_unknown",
+                         "Only domestic supplier documents have a known invoice numbering year. Enter this bill in Tally.")
     if document.get("kind") not in KIND_FAMILIES or voucher.get("family") not in KIND_FAMILIES[document["kind"]]:
-        raise _hold("classification_uncertain", "The voucher family must match the document: invoices are Purchase or Journal, supplier credit notes are Debit Notes.")
+        raise HoldReason("classification_uncertain", "The voucher family must match the document: invoices are "
+                                                     "Purchase or Journal, supplier credit notes are Debit Notes.")
     _money(document.get("total"), "The bill total")
     return document, voucher
 
 
-def summary(record, config):
-    """The document summary every consumer reads; derived, never extracted."""
-    document = record.get("document") or {}
-    vendor = document.get("supplier_name")
-    try:
-        from .client_context import select_target
+def check(record, view, company, *, created=(), until=None, assume_new_supplier=False):
+    """Bind a bill proposal to its company's pinned masters and enforce the voucher rules.
 
-        party = (record.get("voucher") or {}).get("party") or {}
-        if party.get("ledger_guid"):
-            masters = _company(config, select_target(record, config["tally_target"]))
-            vendor = masters.name(masters.one("LEDGER", party["ledger_guid"], "supplier_unresolved", ""))
-    except (ValueError, KeyError, TypeError):
-        pass
-    tax = sum(Decimal(str(ln.get("amount", 0))) for ln in (record.get("voucher") or {}).get("lines", [])
-              if isinstance(ln, dict) and ln.get("role") == "tax" and type(ln.get("amount")) in (int, float))
-    return {"vendor": vendor, "invoice_number": document.get("number"), "date": document.get("date"),
-            "total": document.get("total"), "tax": float(tax)}
-
-
-def check(record, config, *, assume_new_supplier=False):
-    """Bind a bill proposal to the routed company and enforce voucher rules.
-
-    Returns a Bill, or raises a coded HoldReason (ValueError for routing). The
-    AI chose every identity; this only proves each one is discovered, active,
-    distinct and consistent with the bill's own printed values.
+    `company` is the destination (name, guid, books_from, tally_port); `until`
+    is the last day before a year-split sibling's books begin. Returns a Bill,
+    or raises a coded HoldReason. The session chose every identity; this only
+    proves each one exists, is active and distinct, and agrees with the bill's
+    own printed values.
     """
-    from .client_context import select_target
-
-    scope = config["tally_target"]
-    target = select_target(record, scope)
     document, voucher = _document(record)
-    masters = _company(config, target)
-    books_from = target.get("books_from")
-    if books_from and document["date"] < books_from:
-        raise _hold("date_before_books", f"Bill date {document['date']} is before {target['company']}'s books begin on "
-                                         f"{books_from}; Tally cannot record it without a change to the company's books.")
-
-    if target.get("period_to") and document["date"] > target["period_to"]:
-        raise _hold("date_outside_company_period", f"Bill date {document['date']} is after {target['company']}'s books period "
-                                                   f"ends on {target['period_to']}; it belongs to the next year's company.")
+    masters = Masters(view, created)
+    books_from = company["books_from"].isoformat()
+    if document["date"] < books_from:
+        raise HoldReason("date_before_books", f"Bill date {document['date']} is before {company['name']}'s books begin on "
+                                              f"{books_from}; Tally cannot record it without a change to the company's books.")
+    if until and document["date"] > until:
+        raise HoldReason("date_outside_company_period", f"Bill date {document['date']} is after {company['name']}'s books "
+                                                        f"end on {until}; it belongs to the next year's company.")
     family = voucher["family"]
-    voucher_type = masters.one("VOUCHERTYPE", voucher.get("voucher_type_guid"), "classification_uncertain",
-                               "Select one discovered voucher type of the routed company.")
+    voucher_type = masters.one("VOUCHERTYPE", voucher.get("voucher_type_guid"), "voucher_type_unresolved",
+                               "Select one active voucher type of the routed company.")
     if masters.family(voucher_type) != family or masters.scalar(voucher_type, "ISACTIVE").casefold() == "no":
-        raise _hold("classification_uncertain", f"The voucher type must be an active {family.replace('_', ' ')} type.")
-    profile = (config.get("posting_profiles") or {}).get(target["references"]["company_guid"])
-    if profile:
-        expected = (profile.get("families") or {}).get(document["kind"]) or {}
-        if expected.get("family") != family or expected.get("voucher_type_guid") != masters.scalar(voucher_type, "GUID"):
-            raise _hold("posting_profile_miss", "This document's voucher type differs from the company's confirmed posting pattern.")
-    elif family == "purchase":
-        # Only a confirmed posting pattern authorizes a purchase voucher type.
-        raise _hold("classification_uncertain", "Purchases use the voucher type of the company's confirmed posting pattern.")
-
+        raise HoldReason("voucher_type_unresolved", f"The voucher type must be an active {family.replace('_', ' ')} type.")
     party = voucher.get("party") or {}
     if party.get("ledger_guid") is None:
         if party.get("new_supplier") is not True:
-            raise _hold("supplier_unresolved", "Supplier match is unresolved; a new supplier has not been established.")
+            raise HoldReason("supplier_unresolved", "Supplier match is unresolved; a new supplier has not been established.")
         if not assume_new_supplier:
-            raise _hold("supplier_missing", f"Supplier '{document.get('supplier_name')}' is missing from the confirmed Tally "
-                                            "ledgers. Create it, then continue this bill.")
+            raise HoldReason("supplier_missing", f"Supplier '{document.get('supplier_name')}' has no ledger in "
+                                                 f"{company['name']}. Create it, then this bill can be saved.")
         party_name, party_identity = document.get("supplier_name"), None
     else:
-        ledger = masters.one("LEDGER", party["ledger_guid"], "supplier_unresolved", "The supplier must be one discovered ledger.")
+        ledger = masters.one("LEDGER", party["ledger_guid"], "supplier_unresolved", "The supplier must be one ledger.")
         party_name, party_identity = masters.name(ledger), masters.identity(ledger)
     if not isinstance(party.get("evidence"), str) or not party["evidence"].strip():
-        raise _hold("supplier_unresolved", "The supplier selection needs evidence.")
-    if profile and party_identity and not masters.under(party_identity.get("PARENT"), profile["party_groups"]):
-        raise _hold("posting_profile_miss", f"{party_name} is outside the supplier groups of the confirmed posting pattern.")
-
+        raise HoldReason("supplier_unresolved", "The supplier selection needs evidence.")
     raw = voucher.get("lines")
     if not isinstance(raw, list) or not 1 <= len(raw) <= 39:
-        raise _hold("unsupported_structure", "A bill voucher carries 1–39 lines besides the supplier.")
+        raise HoldReason("unsupported_structure", "A bill voucher carries 1–39 lines besides the supplier.")
     lines, identities, taxes, tds, round_offs = [], {}, [], [], 0
-    pattern_tds = {t["ledger_guid"]: t for t in ((profile or {}).get("tds") or {}).get("ledgers", [])}
-    pattern_round = (profile or {}).get("round_off")
     for item in raw:
         if (not isinstance(item, dict) or item.get("role") not in LINE_ROLES or item.get("side") not in ("debit", "credit")
                 or not isinstance(item.get("evidence"), str) or not item["evidence"].strip()):
-            raise _hold("source_values_conflict", "Each voucher line needs a known role, a side and bill evidence.")
+            raise HoldReason("source_values_conflict", "Each voucher line needs a known role, a side and bill evidence.")
         cents = _money(item.get("amount"), "Each line amount")
         ledger = masters.one("LEDGER", item.get("ledger_guid"), "classification_uncertain",
-                             "Each line must select one discovered ledger of the routed company.")
+                             "Each line must select one ledger of the routed company.")
         name = masters.name(ledger)
         if name == party_name or name in identities:
-            raise _hold("classification_uncertain", "The supplier and every line need distinct ledgers.")
+            raise HoldReason("classification_uncertain", "The supplier and every line need distinct ledgers.")
         identities[name] = masters.identity(ledger)
         allocation = None
         if item.get("cost_centre_guid") or item.get("cost_category_guid"):
-            centre = masters.one("COSTCENTRE", item.get("cost_centre_guid"), "classification_uncertain", "Select one discovered cost centre.")
-            category = masters.one("COSTCATEGORY", item.get("cost_category_guid"), "classification_uncertain", "Select one discovered cost category.")
+            centre = masters.one("COSTCENTRE", item.get("cost_centre_guid"), "classification_uncertain",
+                                 "Select one cost centre.")
+            category = masters.one("COSTCATEGORY", item.get("cost_category_guid"), "classification_uncertain",
+                                   "Select one cost category.")
             if masters.scalar(centre, "CATEGORY").casefold() != masters.name(category).casefold():
-                raise _hold("classification_uncertain", "The cost centre does not belong to the selected cost category.")
+                raise HoldReason("classification_uncertain", "The cost centre does not belong to the selected cost category.")
             if masters.scalar(ledger, "ISCOSTCENTRESON").casefold() != "yes":
-                raise _hold("classification_uncertain", f"{name} must enable cost centres in Tally before allocating it.")
+                raise HoldReason("classification_uncertain", f"{name} must enable cost centres in Tally before allocating it.")
             allocation = {"category": masters.name(category), "category_guid": masters.scalar(category, "GUID"),
                           "centre": masters.name(centre), "centre_guid": masters.scalar(centre, "GUID")}
         if item["role"] == "tds":
-            if item["ledger_guid"] not in pattern_tds or item["side"] != PARTY_SIDE[family]:
-                raise _hold("classification_uncertain", "TDS deductions need this company's confirmed posting profile. Enter this bill in Tally.")
-            tds.append((pattern_tds[item["ledger_guid"]], cents))
+            rule = item.get("tds")
+            if (item["side"] != PARTY_SIDE[family] or not isinstance(rule, dict) or not isinstance(rule.get("section"), str)
+                    or type(rule.get("rate")) not in (int, float) or not 0 < rule["rate"] <= 30):
+                raise HoldReason("classification_uncertain",
+                                 "A TDS deduction needs its section and rate, and reduces what the supplier is owed.")
+            tds.append((rule, cents))
         if item["role"] == "round_off":
             round_offs += 1
-            cap = pattern_round["max_cents"] if pattern_round else ROUND_OFF_CAP_CENTS
-            if cents > cap:
-                raise _hold("source_values_conflict", "A round-off above one rupee is not a rounding difference.")
-            if pattern_round and item["ledger_guid"] != pattern_round["ledger_guid"]:
-                raise _hold("posting_profile_miss", "Round-off posts to a different ledger in the confirmed posting pattern.")
+            if cents > ROUND_OFF_CAP_CENTS:
+                raise HoldReason("source_values_conflict", "A round-off above one rupee is not a rounding difference.")
         if item["role"] == "tax":
             tax = item.get("tax")
             if (not isinstance(tax, dict) or tax.get("head") not in ("cgst", "sgst", "igst", "cess")
                     or type(tax.get("rate")) not in (int, float) or not 0 < tax["rate"] <= 100):
-                raise _hold("source_values_conflict", "Each tax line needs its tax head and printed rate.")
+                raise HoldReason("source_values_conflict", "Each tax line needs its tax head and printed rate.")
             taxes.append({"head": tax["head"], "rate": Decimal(str(tax["rate"])), "amount_cents": cents,
                           "taxable_cents": _money(tax.get("taxable"), "The taxable value")})
         lines.append(_line(name, item["side"], cents, allocation))
     if tds:
         # Deducted on the contract value, the expense lines, never on GST.
         base = sum(ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] == "expense")
-        from decimal import ROUND_HALF_UP
         for rule, cents in tds:
             expected = (Decimal(str(rule["rate"])) * base / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
-            if abs(cents - int(expected)) > 100:
-                raise _hold("source_values_conflict", f"TDS does not match {rule['section']} at {rule['rate']}% of the bill's value.")
+            if abs(cents - int(expected)) > TOLERANCE_CENTS:
+                raise HoldReason("source_values_conflict",
+                                 f"TDS does not match section {rule['section']} at {rule['rate']}% of the bill's value.")
     if round_offs > 1:
-        raise _hold("source_values_conflict", "A bill has at most one round-off line.")
+        raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
     _tax_consistent(taxes)
-    party_cents = _money(document["total"], "The bill total") - sum(cents for _, cents in tds)
-    party_line = _line(party_name, PARTY_SIDE[family], party_cents)
-    native = [party_line, *lines]
-    if sum(ln["amount_cents"] for ln in native if ln["side"] == "debit") != sum(ln["amount_cents"] for ln in native if ln["side"] == "credit"):
-        raise _hold("source_values_conflict", "The voucher lines must add up exactly to the printed total.")
+    _printed_totals(document, lines, raw)
+    # The supplier's line is computed from the total, so the other lines must reach it exactly: what they
+    # charge, less what they take off on the supplier's side. TDS only reduces what the supplier is owed.
+    total, side = _money(document["total"], "The bill total"), PARTY_SIDE[family]
+    reached = sum(ln["amount_cents"] if ln["side"] != side else -ln["amount_cents"]
+                  for ln, item in zip(lines, raw, strict=True) if item["role"] != "tds")
+    if reached != total:
+        raise HoldReason("source_values_conflict", (
+            f"The lines come to {reached / 100:.2f}, but the bill's printed total is {total / 100:.2f}. A round-off "
+            "the bill prints, of at most one rupee, is its own line; any other difference means the bill's own "
+            "figures conflict."))
+    native = [_line(party_name, side, total - sum(cents for _, cents in tds)), *lines]
     voucher_type_ref = {"NAME": masters.name(voucher_type), "GUID": masters.scalar(voucher_type, "GUID")}
-    bill = Bill(target, record, family, voucher_type_ref, party_name, party_identity, native, identities)
-    bill.number_fields = list((profile or {}).get("invoice_number", {}).get("fields") or ["REFERENCE"])
-    return bill
-
-
-def resolve(record, config, *, assume_new_supplier=False):
-    """The one gate every Tally bill decision passes: route, bind and validate.
-
-    A record without a proposed voucher (a retired fixed-field proposal) holds
-    in `check` like any incomplete proposal; nothing is written from it.
-    """
-    record["data"] = summary(record, config)
-    return check(record, config, assume_new_supplier=assume_new_supplier)
+    return Bill(company, record, family, voucher_type_ref, party_name, party_identity, native, identities)

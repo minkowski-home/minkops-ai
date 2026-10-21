@@ -108,7 +108,7 @@ export function buildGSTSupplier(plan, template) {
   if (!template || gstScalar(template.GUID) !== gst.template.guid || gstScalar(template.ALTERID) !== gst.template.alter_id ||
       gstScalar(template["@_NAME"] ?? template.NAME) !== gst.template.name ||
       typeof plan.vendor !== "string" || !plan.vendor.trim() || plan.vendor.length > 200 || /[\x00-\x1f]/.test(plan.vendor))
-    throw new Error("GST supplier template changed; refresh Source Discovery.");
+    throw new Error("The GST supplier this ledger is modelled on changed in Tally. Start a new run to create it.");
   const ledger = {"@_NAME": plan.vendor, "@_ACTION": "Create", NAME: plan.vendor, PARENT: "Sundry Creditors", ISBILLWISEON: "No"};
   const registration = list(template["LEDGSTREGDETAILS.LIST"]).filter(v => v && typeof v === "object")
     .sort((a, b) => gstScalar(b.APPLICABLEFROM).localeCompare(gstScalar(a.APPLICABLEFROM)))[0];

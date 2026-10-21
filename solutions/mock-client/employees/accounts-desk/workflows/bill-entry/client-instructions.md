@@ -2,7 +2,7 @@ This client uses Tally Purchase vouchers under the run's selected review mode.
 Only unresolved exceptions require decisions in only_exceptions mode. Use the
 selected company and the current references supplied by
 the platform; never substitute a company from an example or another client.
-Keep distinct evidenced tax components in their separate discovered tax ledgers;
+Keep distinct evidenced tax components in their separate tax ledgers;
 unsupported or ambiguous allocations need clarification. The platform's monetary
 checks and native readback remain mandatory regardless of these client instructions.
 

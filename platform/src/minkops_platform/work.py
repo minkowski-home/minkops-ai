@@ -230,13 +230,18 @@ def hand_off(connection, held):
             ([item_id for item_id, _ in held], [token for _, token in held]))
 
 
-def unclosed(connection, *, tenant_id=None, limit=20):
-    """Finished items whose provider session is still open, oldest first, with seconds since they finished."""
+def unclosed(connection, *, tenant_id=None, limit=20, within=None):
+    """Finished items whose provider session is still open, oldest first, with seconds since they finished.
+
+    `within` keeps only items that finished in the last so many seconds.
+    """
     return connection.execute(
         """SELECT id, session_id, turn_id, usage, extract(epoch FROM now()-finished_at)::float8 AS age
            FROM run_items WHERE state IN ('done','failed','cancelled') AND session_id IS NOT NULL
-               AND NOT session_closed AND (%s::uuid IS NULL OR tenant_id=%s::uuid)
-           ORDER BY finished_at LIMIT %s""", (tenant_id, tenant_id, limit)).fetchall()
+               AND NOT session_closed AND (%(tenant)s::uuid IS NULL OR tenant_id=%(tenant)s::uuid)
+               AND (%(within)s::float8 IS NULL OR finished_at > now() - make_interval(secs => %(within)s))
+           ORDER BY finished_at LIMIT %(limit)s""",
+        {"tenant": tenant_id, "within": within, "limit": limit}).fetchall()
 
 
 def closed(connection, item_id, session_id, usage):
