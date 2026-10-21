@@ -22,3 +22,7 @@ __pycache__/
 /packages/bill-entry-test-20261013/
 /packages/bill-entry-realistic-20261013/
 /packages/tally-demo-20261018/
+
+# Real client documents live in the private fixture store
+# (~/minkops-private/fixtures), never in the repository.
+/packages/sample_bills/

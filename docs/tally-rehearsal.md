@@ -33,8 +33,9 @@ Every invoice, supporting printed date, and seed voucher uses the 1st, 2nd or
 the year in Sachin Infra's display name. Only the intentional before-books bill
 uses 31 March 2026. No fixture changes a company's books date.
 
-The source complexity baseline is the two scanned invoices and accompanying
-e-way bills in `packages/sample_bills/`. Each synthetic bill includes 4–6 lines,
+The source complexity baseline is PR Infra's scanned invoices and their e-way
+bills, kept in the private fixture store; their synthetic look-alikes are in
+`packages/fixtures/synthetic/`. Each synthetic bill includes 4–6 lines,
 trade discounts, HSN/SAC references, PO/GRN/LR/DMR numbers and dates, repeated
 totals, excluded previous balances/deposits, a receipt stamp and a corroborating
 second page. Five bills per company are image-only scans with mild skew.

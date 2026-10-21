@@ -10,4 +10,4 @@ members = [
 # Development tools shared by every workspace project; production images sync
 # with --no-dev and never install them.
 [dependency-groups]
-dev = ["ruff==0.17.1"]
+dev = ["ruff==0.17.1", "pillow==12.0.0", "qrcode==8.2", "cryptography==50.0.2"]

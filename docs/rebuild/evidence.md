@@ -114,12 +114,13 @@ This section records only structure and counts. Account numbers, GSTINs, names a
   | Family | Rows |
   | --- | ---: |
   | `INF/NEFT` | 700 |
+  | `UPI` | 208 |
+  | RTGS (two formats) | 130 |
   | `MMT/IMPS` | 106 |
   | `INF/INFT` | 55 |
-  | RTGS (two formats) | about 130 |
   | `NEFT-RETURN` | 8 |
   | `BIL/ONL` (bill payments) | 6 |
-  | `UPI` | a few |
+  | Other (cash-management and clearing) | 19 |
 
   Payee names are truncated to 20 characters in RTGS, compressed in NEFT, and absent from UPI rows, which show only a payment address.
 - **NEFT returns pair deterministically.** `NEFT-RETURN-<UTR>-<name>-<reason and code>` carries the original payment's UTR: 8 of 8 matched, all on the same day.
