@@ -374,8 +374,8 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | 1. Foundation | Done | Code and tests provision the dedicated instance (`test_database_provisioning.py`); it has not been created or deployed. Client businesses, per-client access and company identity are in migration `0020` (`test_clients.py`). The run model is in migration `0021`: leased items, versioned records, idempotent decisions, commit-time wake-ups and bounded status (`test_work.py`, `test_runs_api.py`). That includes the runtime review's missing cases: confirming after the worker drained, a response lost after commit, and the same decision twice. 663 Python tests pass. |
 | 2. Sync and mirror | Done | The versioned mirror, the sync protocol with its regression and census guards, practice probes and background refresh (`test_mirror.py`, `test_sync.py`, `test_practice.py`, `test_sync_api.py`, `sync.test.js`, `jobs.test.js`). Rehearsed live through the headless companion: all five companies were found, authorised and mirrored in full in 14 s, matching Tally's own voucher counts and seven master types exactly. A created voucher arrived as a delta, a cancellation as a flag, and a deletion as a census tombstone ([evidence](evidence.md#rehearsed-on-tallyprime-edit-log-1172-21-october-2026)). Source Discovery is replaced by the sync; it is deleted with the staged bill and statement pipelines in slices 4–5, which still read it. |
 | 3. Session tool loop | Done | Tool sessions without an execution environment (`run_tool_session` in `openai_hosted.py`): every pending call is answered exactly once, including after a dropped stream or a worker restart. A lost creation is found again by its metadata, and a failed turn reports the provider's code (`test_tool_sessions.py`, against a protocol-faithful fake). Every call is validated against its contract and logged once per session and call ID (`test_tools.py`, migration `0024`). Lanes (`lanes.py`, migration `0025`): threads sharing a four-connection pool, fenced writes, one heartbeat, LISTEN wake-ups, handoff on exit, retries, and a closer that records late usage and deletes sessions (`test_lanes.py`). They run inside the existing worker; its drain acknowledges a wake-up only when no item is runnable, and the recovery sweep counts run items (`test_worker_recovery.py`). Live with `gpt-6-luna`, one bill-shaped item ran through real lanes in about 20 s; the protocol facts are in the [evidence](evidence.md#the-tool-loop-measured-live-21-october-2026). 723 Python tests pass. |
-| 4. Statement slice | In progress | |
-| 5. Bill slice | Not started | |
+| 4. Statement slice | Done | Statement entry 1.0 runs on the run model (`accounts/statement_entry.py`). Layouts are proved by balances and printed controls, with one layout session per unseen format and a date-order question that parks the sheet (`statement_layouts.py`). Chunks of up to 100 rows are routed through the desk lookups (`desk_tools.py`), and `propose` checks every row with `validated_plan`. Transfers are paired into one Contra, repeats in overlapping statements are written once, and a gap between statements raises one item (migration `0028`). Approved rows are durable `native_writes`, one `tally.write` at a time per PC, never re-sent after an interrupted save (`writes.py`, migrations `0026`–`0027`). The staged pipeline is deleted (`test_statement_entry.py`). Live, the PR Infra UAT scenarios S01–S06 behaved as specified, and a two-bank rehearsal saved and verified 10 vouchers in Tally ([evidence](evidence.md#statement-entry-rehearsed-live-21-october-2026)). 706 Python tests pass. |
+| 5. Bill slice | In progress | |
 | 6. Memory, rules and questions | Not started | |
 | 7. Bill-wise link | Not started | |
 | 8. Inventory | Not started | |
@@ -391,6 +391,11 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
   1. Split a copy of a rehearsal company in Tally's UI.
   2. Open both halves and request a sync.
   3. Expect the sibling with the new BooksFrom to raise its own "New company found" card, and the original to keep its mirror.
+- **Interrupt a save.**
+  1. Approve a statement row, and close the companion while it writes.
+  2. Reopen the companion.
+  3. Expect the row to hold as Save interrupted. Retry save then either finds the voucher in Tally (saved) or holds it
+     as an uncertain import; it never imports twice.
 - **Restore an older backup.**
   1. Back up a rehearsal company, add a voucher and sync.
   2. Restore the backup in Tally's UI and sync again.

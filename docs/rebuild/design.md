@@ -130,8 +130,10 @@ or authorises a write.
   Its states are `waiting`, `queued`, `running`, `done`, `failed` and
   `cancelled`; what a bill or row needs is its record's status.
 - `run_records` is the review unit: one bill or one statement row, with facts,
-  proposal, checks, hold code, review flags, plan and native observation. Its
-  `version` increments on every change.
+  proposal, checks, hold code, review flags, plan and native observation. A
+  record waits as `pending` until its session proposes it, then moves through
+  `proposed` or `held`, `approved`, `writing`, and `saved` or `duplicate`;
+  Do nothing makes it `deferred`. Its `version` increments on every change.
 - `record_decisions` is unique per record version. Replaying the same actor's
   same action returns the stored receipt; anything else conflicts and returns
   the receipt that won.

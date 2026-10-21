@@ -243,3 +243,40 @@ These were run on *Test Company*, one of the five synthetic rehearsal companies.
 - **Collections with `FETCH *` carry every master field the gates read.** For ledgers that means `PARENT`, `ISBILLWISEON`, `ISCOSTCENTRESON`, `PARTYGSTIN`, the bank details and the nested GST, mailing and alias lists. Voucher types carry `RESERVEDNAME`, `ISACTIVE` and `NUMBERINGMETHOD`; stock items carry their units and GST/HSN lists. Fields left at their default "No" are omitted, unlike the "List of Accounts" export.
 
 Still to rehearse: Split Company Data, and restoring an older backup. Both need Tally's UI and are listed for manual testing in the README.
+
+## Statement entry, rehearsed live (21 October 2026)
+
+These runs used the local stack: API, worker lanes, the headless companion, TallyPrime Edit Log 1.1.7.2 in Educational mode, and `gpt-6-luna`. The client business has five authorised companies. Every date is the 1st, 2nd or 31st.
+
+**A two-bank rehearsal.** Two new formats came from Pradeepraj Infra's ICICI and HDFC accounts, with 11 rows:
+
+- **Layouts.** `gpt-6-luna` declared both layouts, and the balances proved them.
+- **Routing.** It found the company and each bank ledger by account number, across all five companies. Each other row went to its supplier, customer or charges ledger, or to the other bank for the transfer.
+- **Pairing.** The transfer legs were paired through `find_transfer`, and the NEFT return was booked against the supplier it came back from.
+- **Review.** The run reached review in 75 s.
+- **Writes.** Write ready rows approved all 11 rows as 10 writes, one Contra covering both transfer legs. All 10 saved and verified within 27 s.
+- **Independent check.** An XML export from Tally found all 10 tagged vouchers.
+
+**The PR Infra UAT pack** (private store, `uat-2026-10-21`). The answer keys never entered a run.
+
+| Scenario | Expected | Observed |
+| --- | --- | --- |
+| S01 core scenarios | Each row routed or held; split charge; both identical payments kept | 9 saved and verified; the anonymous UPI held as `ledger_unresolved`; the 118 charge split 100 + CGST 9 + SGST 9; the reversal kept in both directions; both identical 1,773 payments written as distinct siblings |
+| S02 overlap | Duplicates, no extra save | 3 duplicates; no layout session needed |
+| S03 broken balance | Held sheet, never clean | The saved layout was retired; relearning was refuted three times; the sheet holds as `statement_layout_changed` |
+| S04 date order | One confirmation, then duplicates | One card; after the answer `dmy`, 2 duplicates of S01 |
+| S05A then S05 | One "Transactions missing", rows ready | One item: closed at 97,000.00 on 31 August, opens at 107,000.00 on 1 September; rows stay proposed |
+| S06 own-bank transfers | Two Contras, not four entries | 2 Contra vouchers, each covering both legs |
+
+**Usage.** Across these 8 runs, 15 sessions used 714,350 input tokens (72% cached) and 25,119 output tokens. Of 26 native writes, 21 saved and 5 reconciled as duplicates.
+
+**Found and fixed along the way:**
+
+- **Write ready rows.** It hit a version conflict when approving one transfer leg approved its partner, which the action had already read. It now reads each row as it approves it.
+- **Refutation messages.** A summary mismatch marks every row, so the message named a consequence. It now names the first broken balance, then the printed control.
+- **Balance spans.** A row held for its ledger split a statement's chain, so its span went unrecorded. Chains are now built per statement account from every proven balance.
+- **Races the tests caught:**
+  - two layout items settling at once took one item ordinal;
+  - two sheets in a new format proved at once collided on the profile version;
+  - the last chunk's settle saw itself as unfinished and never finalized the run.
+
