@@ -30,7 +30,7 @@ from minkops_platform import attention, clients, desktop, work
 from minkops_platform.errors import ServiceError
 from minkops_platform.run_controls import observe_task
 
-from . import mirror
+from . import memory, mirror
 
 PROTOCOL = 1
 BATCH = 5000
@@ -391,6 +391,7 @@ def finish(connection, device, job, result):
     for version in published:
         company = connection.execute("SELECT * FROM companies WHERE id=%s", (version["company_id"],)).fetchone()
         from .practice import probe
+        memory.revalidate(connection, company, version)
         probe(connection, company, version, job)
         mirror.collect(connection, company["id"])
     released = work.release(connection, device["tenant_id"], blocker(device["id"]))

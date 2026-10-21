@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from minkops_platform import work
-from minkops_platform.accounts import mirror, sync
+from minkops_platform.accounts import memory, mirror, sync
 from minkops_platform.errors import ServiceError
 
 pytestmark = pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is required")
@@ -168,12 +168,18 @@ def test_a_deletion_found_by_the_census_becomes_a_tombstone(pc):
     first, second = tally.voucher("2026-09-01"), tally.voucher("2026-09-02")
     company = authorised(pc, tally)
     Companion(pc["db"], pc["device"], start(pc)).run(tally)
+    learnt = {"tenant_id": pc["tenant"]["id"], "client_id": pc["client"]["id"], "company_id": company["id"],
+              "kind": "booking", "subject": "supplier"}
+    memory.record(pc["db"], **learnt, value={"voucher_type": "Payment", "ledgers": ["Bank"]},
+                  evidence={"kind": "outcome", "voucher": second}, status="confirmed")
     del tally.vouchers[second]
     tally.bump()  # Deleting moves Tally's counter, so the next sync runs.
     tally.ledger("Moved the masters counter too")
     Companion(pc["db"], pc["device"], start(pc)).run(tally)
     version = mirror.latest(pc["db"], company["id"])["version"]
     assert [v["guid"] for v in mirror.vouchers(pc["db"], company["id"], version)] == [first]
+    # Each published sync revalidates memory: a voucher deleted in Tally demotes what was learnt from it.
+    assert memory.live(pc["db"], **learnt)["status"] == "demoted"
 
 
 def test_a_census_that_disagrees_with_the_counts_never_records_a_deletion(pc):
