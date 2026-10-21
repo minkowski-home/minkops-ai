@@ -16,13 +16,16 @@ def test_read_polling_does_not_attempt_dispatch():
     async def check():
         async def reply(_):
             return Response(status_code=200)
-        with patch.dict(os.environ, WORKER_JOB_RESOURCE="test-job"):
+        with patch.dict(os.environ, WORKER_JOB_RESOURCE="test-job", DATABASE_URL="unused"):
             for method in ("GET", "HEAD", "OPTIONS"):
                 response = await private_api_cache(Request({"type": "http", "method": method,
                     "path": "/api/auth/session", "headers": []}), reply)
                 assert response.background is None
             response = await private_api_cache(Request({"type": "http", "method": "POST",
                 "path": "/api/desktop/worker/heartbeat", "headers": []}), reply)
+            assert response.background is None
+            response = await private_api_cache(Request({"type": "http", "method": "POST",
+                "path": "/api/tenants/test/accounts/runs", "headers": []}), reply)
             assert response.background is not None
     asyncio.run(check())
 
@@ -32,6 +35,7 @@ def test_request_pool_reuses_connection_and_rolls_back_failed_transaction(monkey
     monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
     close_database_pool()
     pool = database_pool()
+    assert pool.max_size == 3
     with pool.connection() as connection:
         first = connection.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
     with pytest.raises(psycopg.errors.DivisionByZero), pool.connection() as connection:

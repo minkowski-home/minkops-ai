@@ -9,6 +9,7 @@ paid-execution recovery. A private five-minute sweep recovers lost notifications
 import logging
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from threading import Lock
 from uuid import uuid4
 
 import psycopg
@@ -16,11 +17,27 @@ from psycopg.rows import dict_row
 
 log = logging.getLogger(__name__)
 RUNNER_LOCK = 481913
+_DISPATCH_LOCK = Lock()
 
 
 def dispatch(url, submit):
+    # Response background tasks can outlive Cloud Run's request concurrency
+    # accounting. Coalesce within the API process before opening a DB socket.
+    if not _DISPATCH_LOCK.acquire(blocking=False):
+        return False
+    try:
+        return _dispatch(url, submit)
+    except psycopg.Error as error:
+        log.warning('Worker dispatch pending (%s)', type(error).__name__)
+        return False
+    finally:
+        _DISPATCH_LOCK.release()
+
+
+def _dispatch(url, submit):
     token = uuid4()
-    with psycopg.connect(url, row_factory=dict_row) as c:
+    with psycopg.connect(url, row_factory=dict_row, connect_timeout=5,
+                         options='-c lock_timeout=1000') as c:
         row = c.execute("SELECT * FROM worker_wakeup FOR UPDATE").fetchone()
         if (
             row["generation"] <= row["acknowledged"]

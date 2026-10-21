@@ -20,6 +20,16 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 app = FastAPI()
 
 
+def wakes_worker(method, path, status):
+    """Only transitions that can release hosted work need a dispatch attempt."""
+    return method == 'POST' and status < 400 and (
+        path.endswith('/accounts/runs')
+        or (path.startswith('/api/desktop/worker/jobs/') and path.endswith('/finish'))
+        or ('/attention/' in path and path.endswith('/profile'))
+        or ('/attention/bills/' in path and not path.endswith('/bulk-preview'))
+        or ('/tasks/' in path and path.endswith('/control')))
+
+
 @app.middleware("http")
 async def private_api_cache(request: Request, call_next):
     response = await call_next(request)
@@ -27,8 +37,8 @@ async def private_api_cache(request: Request, call_next):
         response.headers["Cache-Control"] = "private, no-store"
     # Only committed mutations can make work runnable. Read polling must not
     # open another connection and contend on the global dispatcher lock.
-    if (os.getenv("WORKER_JOB_RESOURCE") and request.url.path.startswith('/api/')
-            and request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400):
+    if (os.getenv("WORKER_JOB_RESOURCE")
+            and wakes_worker(request.method, request.url.path, response.status_code)):
         from minkops_connectors.cloud_run import run_job
         from minkops_platform.worker_hosting import dispatch
 

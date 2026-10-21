@@ -40,7 +40,7 @@ def database_pool():
         if _pool is None or _pool_url != url or _pool.closed:
             if _pool is not None:
                 _pool.close()
-            _pool = ConnectionPool(url, min_size=0, max_size=4, max_waiting=16,
+            _pool = ConnectionPool(url, min_size=0, max_size=3, max_waiting=16,
                                    timeout=10, max_idle=30, num_workers=1, open=True,
                                    kwargs={"row_factory": dict_row, "connect_timeout": 5})
             _pool_url = url

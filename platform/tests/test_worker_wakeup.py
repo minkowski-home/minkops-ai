@@ -8,6 +8,38 @@ import psycopg
 from psycopg.rows import dict_row
 
 
+def test_dispatch_coalesces_before_allocating_another_database_connection(monkeypatch):
+    from minkops_platform import worker_hosting
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    def dispatch(*args):
+        calls.append(True)
+        entered.set()
+        assert release.wait(3)
+        return True
+    monkeypatch.setattr(worker_hosting, '_dispatch', dispatch)
+    results = []
+    thread = threading.Thread(target=lambda: results.append(worker_hosting.dispatch('unused', None)))
+    thread.start()
+    try:
+        assert entered.wait(3)
+        assert worker_hosting.dispatch('unused', None) is False
+        assert calls == [True]
+    finally:
+        release.set()
+        thread.join(3)
+    assert results == [True]
+
+
+def test_dispatch_connection_failure_releases_its_process_fence(monkeypatch):
+    from minkops_platform import worker_hosting
+    def unavailable(*args, **kwargs):
+        raise psycopg.OperationalError('connection budget temporarily unavailable')
+    monkeypatch.setattr(worker_hosting.psycopg, 'connect', unavailable)
+    assert worker_hosting.dispatch('unused', None) is False
+    assert worker_hosting.dispatch('unused', None) is False
+
+
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
 class WorkerWakeupTests(unittest.TestCase):
     def setUp(self):
