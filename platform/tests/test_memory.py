@@ -118,6 +118,13 @@ def test_rules_are_versioned_and_scoped_and_a_seed_is_applied_once(books):
                                                  company_ids=[])] == [rule["id"]]
     with pytest.raises(ServiceError, match="Only workspace admins"):
         memory.write_instruction(db, tenant, *clerk, slug, text="Book everything to suspense.")
+    # Sessions read every active rule at once, so a client keeps a bounded number of them.
+    for n in range(memory.RULES - 1):
+        memory.write_instruction(db, tenant, *admin, slug, text=f"Rule {n}.")
+    for attempt in (lambda: memory.write_instruction(db, tenant, *admin, slug, text="One rule too many."),
+                    lambda: memory.set_instruction(db, tenant, *admin, slug, sites["id"], status="active")):
+        with pytest.raises(ServiceError, match=f"already has {memory.RULES} active rules"):
+            attempt()
 
 
 def test_the_memory_page_shows_what_was_learnt_and_only_admins_disable_or_delete_it(books):

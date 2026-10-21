@@ -266,13 +266,12 @@ def remembered(call, arguments):
 
 
 def rules(call, arguments):
+    """Every active rule in scope: their text alone cannot say which matter, so none is filtered out."""
     desk = call.state
-    subjects = [subject.casefold() for subject in arguments.get("subjects") or []]
     names = {part["id"]: part["name"] for parts in desk.parts.values() for part in parts}
     return {"rules": [{"id": str(rule["id"]), "version": rule["version"], "text": rule["text"],
                        **({"company": names[rule["company_id"]]} if rule["company_id"] else {})}
-                      for rule in desk.rules(call.connection)
-                      if not subjects or any(subject in rule["text"].casefold() for subject in subjects)]}
+                      for rule in desk.rules(call.connection)]}
 
 
 def practice(call, arguments):
@@ -327,9 +326,8 @@ TOOLS = {tool.name: tool for tool in (
          "guess.", schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {
              "type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["booking", "practice"]}}},
              ["company", "subjects"]), remembered),
-    Tool("rules", "The rules people wrote for this client's work, each with its ID and version. A proposal that "
-         "follows a rule cites its ID. Give subjects to see only the rules that mention them.",
-         schema({"subjects": {**SUBJECTS, "minItems": 0}}, []), rules),
+    Tool("rules", "Every rule people wrote for this client's work in this workflow, each with its ID and version. "
+         "Read them before choosing treatment; a proposal that follows a rule cites its ID.", schema({}, []), rules),
     Tool("practice", "How a company keeps its books, as its history or a person's answer settled it, and the "
          "practice questions still open.", schema({"company": COMPANY}, ["company"]), practice),
 )}

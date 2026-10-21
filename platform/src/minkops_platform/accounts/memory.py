@@ -31,6 +31,8 @@ EVIDENCE_LIMIT = 20
 # What lookups and checks see; a disabled or retired entry is never offered.
 LIVE = ("unconfirmed", "confirmed", "demoted")
 MISSES = 3
+# Sessions read every active rule in one answer, so a client keeps at most this many per employee.
+RULES = 30
 
 
 def _event(connection, row, action, actor_id=None, detail=None, *, instruction=False):
@@ -198,11 +200,20 @@ def _version(connection, row, actor_id):
          row["status"], actor_id))
 
 
+def _room(connection, tenant_id, client_id, employee):
+    """Refuse another active rule once a client has as many as a session reads at once."""
+    if connection.execute(
+            """SELECT count(*) AS n FROM memory_instructions WHERE tenant_id=%s AND client_id=%s AND employee_key=%s
+               AND status='active'""", (tenant_id, client_id, employee)).fetchone()["n"] >= RULES:
+        raise ServiceError("conflict", f"This client already has {RULES} active rules. Disable or delete one first.")
+
+
 def _store(connection, tenant_id, client_id, *, employee, text, workflow_key, company_id, actor_id, instruction_id=None):
     text = " ".join(str(text or "").split())
     if not 1 <= len(text) <= 2000:
         raise ServiceError("invalid", "Write the rule in 1 to 2,000 characters.")
     if instruction_id is None:
+        _room(connection, tenant_id, client_id, employee)
         row = connection.execute(
             """INSERT INTO memory_instructions(tenant_id,client_id,employee_key,workflow_key,company_id,text,
                created_by,updated_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
@@ -318,6 +329,8 @@ def set_instruction(connection, tenant, user, member, slug, instruction_id, *, s
     if status not in ("active", "disabled"):
         raise ServiceError("invalid", "Choose active or disabled.")
     client = clients.require(connection, tenant, user, member, slug)
+    if status == "active":
+        _room(connection, tenant["id"], client["id"], employee)
     row = connection.execute(
         """UPDATE memory_instructions SET status=%s,version=version+1,updated_by=%s,updated_at=now()
            WHERE tenant_id=%s AND client_id=%s AND employee_key=%s AND id=%s AND status<>%s RETURNING *""",

@@ -749,7 +749,8 @@ def test_a_bill_waits_on_its_companys_open_practice_and_the_answer_releases_it(d
                                    "rules": [str(rule["id"])]})
     unknown = proposal(company, rules=["00000000-0000-4000-8000-000000000000"])
     fake = by_file(**{"stamped.pdf": [
-        [("practice", {"company": company}), ("rules", {}), ("memory", {"company": company, "subjects": ["g-sunrise"]})],
+        [("practice", {"company": company}), ("rules", {}),
+         ("memory", {"company": company, "subjects": ["g-sunrise"]})],
         [("propose", {"count": 1, "bills": [unknown]})], [("propose", {"count": 1, "bills": [stamped]})]]})
     run = launch(desk, {"stamped.pdf": B01})
     read(desk, fake, run)
