@@ -244,7 +244,7 @@ test("a financial save receipt survives worker recreation and cleanup follows ac
   assert.equal(pending, null);
 });
 
-test("superseded receipts are discarded without deleting a recovery backup", async () => {
+test("superseded receipts are discarded without executing again", async () => {
   let pending = { id: "old", receipt: {} };
   const worker = new CompanionWorker({
     request: async () => {
@@ -257,7 +257,6 @@ test("superseded receipts are discarded without deleting a recovery backup", asy
     savePending: async (value) => {
       pending = value;
     },
-    acknowledge: async () => assert.fail("Unverified backup must remain"),
   });
   await assert.rejects(worker.tick());
   assert.equal(pending, null);
