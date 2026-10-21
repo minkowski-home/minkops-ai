@@ -369,7 +369,8 @@ def _offers(connection, desk, bill, company, codes):
 
 
 def _precedent(connection, desk, company, bound, bill):
-    """Whether the client booked this supplier's bills this way before: the same voucher type and expense ledgers.
+    """Whether the client booked this supplier's bills this way before: the same voucher type and expense ledgers,
+    without stock items.
 
     A bill without one is a first: it goes to review, whatever the review mode.
     """
@@ -378,6 +379,7 @@ def _precedent(connection, desk, company, bound, bill):
     wanted = {ln["ledger"] for ln, item in zip(bound.lines[1:], bill["voucher"]["lines"], strict=True)
               if item["role"] in TAXABLE_ROLES}
     return any(row["voucher_type"] == bound.voucher_type["NAME"] and wanted <= set(row["ledgers"])
+               and not mirror.stock_lines(row["data"])
                for part in desk.parts[company["guid"]]
                for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50))
 

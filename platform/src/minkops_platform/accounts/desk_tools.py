@@ -149,11 +149,13 @@ class Desk:
     def ledger(self, connection, company, row):
         data = row["data"]
         yes = lambda field: mirror.text(data.get(field)).casefold() == "yes"  # noqa: E731
+        # A ledger's description is the client's own note on what it records.
         return {key: value for key, value in {
             "name": row["name"], "guid": row["guid"], "group": self.path(connection, company, row["parent"]),
             "aliases": row["aliases"] or None, "gstin": row["gstin"],
             "bank_account_ends": row["bank_account"][-4:] if row["bank_account"] else None, "ifsc": row["ifsc"],
             "cost_centres": yes("ISCOSTCENTRESON") or None, "bill_by_bill": yes("ISBILLWISEON") or None,
+            "description": mirror.text(data.get("DESCRIPTION"))[:300] or None,
         }.items() if value is not None}
 
 
@@ -163,11 +165,19 @@ def entries(data):
             for ledger, cents in mirror.ledger_lines(data)]
 
 
+def items(data):
+    """A voucher's first stock lines, when it was booked item-wise: item, billed quantity, amount and ledgers."""
+    return [{key: value for key, value in {
+        "item": item, "quantity": quantity or None, "amount": None if cents is None else f"{abs(cents) / 100:.2f}",
+        "ledgers": ledgers or None}.items() if value is not None}
+        for item, quantity, cents, ledgers in mirror.stock_lines(data)[:5]]
+
+
 def voucher(row):
     return {key: value for key, value in {
         "date": row["date"].isoformat(), "type": row["voucher_type"], "number": row["number"] or None,
         "reference": row["reference"] or None, "narration": row["narration"][:200] or None,
-        "entries": entries(row["data"])}.items() if value is not None}
+        "entries": entries(row["data"]), "items": items(row["data"]) or None}.items() if value is not None}
 
 
 def find_company(call, arguments):
@@ -209,11 +219,16 @@ def voucher_types(call, arguments):
 
 
 def party_history(call, arguments):
+    """Ledgers are named by GUID, as find_ledger gives them, or by name; one that is no ledger is reported."""
     desk = call.state
     company = desk.company(arguments["company"])
-    rows = mirror.ledger_history(call.connection, company["id"], company["version"], arguments["ledgers"],
-                                 limit=arguments.get("limit", 8))
-    return {"vouchers": [voucher(row) for row in rows]}
+    subjects = arguments["ledgers"]
+    found = mirror.named(call.connection, company["id"], company["version"], "LEDGER", subjects)
+    known = {row["guid"] for row in found} | {row["name_key"] for row in found}
+    unknown = [s for s in subjects if s not in known and mirror.normalized(s) not in known]
+    rows = mirror.ledger_history(call.connection, company["id"], company["version"], [row["name"] for row in found],
+                                 limit=arguments.get("limit", 8)) if found else []
+    return {"vouchers": [voucher(row) for row in rows], **({"unknown_ledgers": unknown} if unknown else {})}
 
 
 def cost_centres(call, arguments):
@@ -243,7 +258,8 @@ TOOLS = {tool.name: tool for tool in (
                                                   "items": {"enum": list(FAMILIES)}}},
                 ["company", "families"]), voucher_types),
     Tool("party_history", "The newest vouchers posting to any of these ledgers in a company, cancelled ones excluded: "
-         "how the client booked such transactions before.",
+         "how the client booked such transactions before, with the stock items of any booked item-wise. Give ledger "
+         "GUIDs as find_ledger returns them, or exact ledger names.",
          schema({"company": COMPANY, "ledgers": SUBJECTS, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
                 ["company", "ledgers"]), party_history),
     Tool("cost_centres", "Cost centres of a company matching each subject, with their categories.",

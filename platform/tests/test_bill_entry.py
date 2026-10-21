@@ -278,7 +278,8 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
 
     fake = by_file(**{"sunrise-0412.pdf": [
         [("find_company", {"subjects": [BUYER]}), ("find_ledger", {"subjects": [SUNRISE]}),
-         ("check_gstin", {"values": [SUNRISE, SUNRISE[:-1] + ("A" if SUNRISE[-1] != "A" else "B")]})],
+         ("check_gstin", {"values": [SUNRISE, SUNRISE[:-1] + ("A" if SUNRISE[-1] != "A" else "B")]}),
+         ("party_history", {"company": company, "ledgers": ["g-sunrise", "Sunrise"]})],
         misread, [("propose", {"count": 1, "bills": [proposal(company)]})]]})
     run = launch(desk, {"sunrise-0412.pdf": B01})
     [item] = items(desk, run)
@@ -297,6 +298,9 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     assert (found["companies"][0]["gstins"], found["companies"][0]["matches"]) == ([BUYER], [BUYER])
     assert [ln["name"] for ln in answers(session, "find_ledger")[0]["results"][0]["ledgers"]] == ["Sunrise Office Systems"]
     assert [r["valid"] for r in answers(session, "check_gstin")[0]["results"]] == [True, False]
+    # History is asked for by the GUIDs find_ledger gives; a subject that is no ledger is named, never dropped.
+    [history] = answers(session, "party_history")
+    assert ([v["reference"] for v in history["vouchers"]], history["unknown_ledgers"]) == (["SOS/26/0007"], ["Sunrise"])
     first, second = answers(session, "propose")
     assert first == {"bills": [{"bill": 1, "status": "rejected", "reason": (
         "The bill's text does not print 188000.00 as its total. Use the figure the bill prints.")}],
@@ -624,6 +628,48 @@ def test_a_scan_is_read_from_its_image_and_an_unreadable_file_holds_without_a_se
     assert photographed["status"] == "proposed"
     assert (damaged["status"], damaged["hold_codes"], damaged["review_reasons"]) == (
         "held", ["source_unreadable"], ["The PDF could not be opened; it may be damaged or password-protected."])
+
+
+DEPOT = gstin("37STRDP4321K1Z")
+STORES = [ledger("g-depot", "Stores Depot", "Sundry Creditors"),
+          ledger("g-spares", "Spares Purchase", "Purchase Accounts", DESCRIPTION="Spares received into the site stores.")]
+# How the client booked Stores Depot's last bill: item-wise, its stock line posting to spares.
+ITEM_WISE = {"GUID": "v-depot", "MASTERID": "6", "ALTERID": "4", "DATE": "20260801", "VOUCHERTYPENAME": "Purchase",
+             "REFERENCE": "SD/26/0101", "PARTYLEDGERNAME": "Stores Depot", "NARRATION": "Spares",
+             "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": "Stores Depot", "AMOUNT": "11800.00"},
+                                       {"LEDGERNAME": "Input CGST 9%", "AMOUNT": "-900.00"},
+                                       {"LEDGERNAME": "Input SGST 9%", "AMOUNT": "-900.00"}],
+             "ALLINVENTORYENTRIES.LIST": [{"STOCKITEMNAME": "Bucket tooth", "BILLEDQTY": "50 Nos", "AMOUNT": "-10000.00",
+                                           "ACCOUNTINGALLOCATIONS.LIST": [{"LEDGERNAME": "Spares Purchase",
+                                                                           "AMOUNT": "-10000.00"}]}]}
+
+
+def test_a_supplier_booked_item_wise_shows_its_items_and_a_plain_reading_waits_for_a_person(desk):
+    company = desk["company"]["guid"]
+    factory.books(desk["db"], desk["company"], masters(desk["company"]) + STORES, [PRIOR, ITEM_WISE])
+    plain = second_bill(company, 1)
+    plain["document"].update(number="SD/26/0150", supplier_name="Stores Depot", supplier_gstin=DEPOT)
+    plain["voucher"]["party"]["ledger_guid"] = "g-depot"
+    plain["voucher"]["lines"][0]["ledger_guid"] = "g-spares"
+    fake = by_file(**{"depot.pdf": [[("find_ledger", {"company": company, "subjects": ["Spares"]}),
+                                     ("party_history", {"company": company, "ledgers": ["g-depot"]})],
+                                    [("propose", {"count": 1, "bills": [plain]})]]})
+    bill = factory.text_pdf(invoice(supplier="Stores Depot", supplier_gstin=DEPOT, number="SD/26/0150",
+                                    day="02-Sep-2026", taxable="10,000.00", tax="900.00", total="11,800.00"))
+    run = launch(desk, {"depot.pdf": bill}, review_mode="only_exceptions")
+    read(desk, fake, run)
+    [session] = fake.created
+    # A ledger's description is the client's own note on what it records.
+    [found] = answers(session, "find_ledger")
+    assert found["results"][0]["ledgers"] == [{"name": "Spares Purchase", "guid": "g-spares", "group": "Purchase Accounts",
+                                               "description": "Spares received into the site stores."}]
+    [history] = answers(session, "party_history")
+    assert history["vouchers"][0]["items"] == [{"item": "Bucket tooth", "quantity": "50 Nos", "amount": "10000.00",
+                                                "ledgers": ["Spares Purchase"]}]
+    # Booked without the items this supplier's bills carried, the bill has no precedent: even under standing
+    # approval it waits for a person.
+    [proposed] = records(desk, run)
+    assert (proposed["status"], proposed["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
 
 
 def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the_rest(desk):

@@ -100,9 +100,18 @@ Propose the voucher this client's own practice records for the document.
   - which voucher type (`voucher_types`) records them;
   - which purchase or expense ledger each purpose and rate uses;
   - which tax ledgers each head and rate uses;
-  - whether freight, discounts or a printed round-off post to their own ledgers.
+  - whether freight, discounts or a printed round-off post to their own ledgers;
+  - whether they were booked item-wise, with stock `items`.
 
-  History suggests treatment. It never supplies amounts or taxes.
+  A ledger's `description` is the client's own note on what it records.
+  History and descriptions suggest treatment. They never supply amounts or
+  taxes.
+- **Goods.** Most bills list their goods with HSN codes, quantities and rates,
+  and that alone is no reason to hold one: book it to the purchase or expense
+  ledger the client uses for those goods. Search for that ledger by the goods
+  and their purpose too, not only through history. A bill needs stock items
+  only when the client records such purchases item-wise: this supplier's or
+  that ledger's earlier bills carry `items`.
 - **Lines.** Each line other than the supplier's has a `role` (`expense`, `tax`,
   `round_off`, `freight`, `other_charge`, `discount` or `tds`), a ledger, a side
   (as the client's vouchers of this family post it), a positive amount, an
@@ -116,9 +125,9 @@ Propose the voucher this client's own practice records for the document.
   rupee. A TDS line states its `tds: {section, rate}`.
 - **Families.** An invoice is a Purchase or Journal voucher, and a supplier's
   credit note a Debit Note.
-- **Unsupported structures.** Inventory or item-wise entries, bill-wise
-  references and foreign currency cannot be saved yet: propose
-  `unsupported_structure` and name the structure.
+- **Unsupported structures.** Stock items, bill-wise references and foreign
+  currency cannot be saved yet: propose `unsupported_structure` and name the
+  structure.
 
 ## Holding a bill
 

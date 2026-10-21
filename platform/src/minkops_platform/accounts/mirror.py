@@ -113,6 +113,19 @@ def ledger_lines(data):
             if (cents := _cents(entry.get("AMOUNT"))) is not None]
 
 
+def _inventory(data):
+    for key in ("ALLINVENTORYENTRIES.LIST", "INVENTORYENTRIES.LIST"):
+        yield from (entry for entry in _list(data.get(key)) if isinstance(entry, dict))
+
+
+def stock_lines(data):
+    """A stored voucher's stock lines as (item, billed quantity, signed cents, ledgers they post to)."""
+    return [(text(entry.get("STOCKITEMNAME")), text(entry.get("BILLEDQTY")) or text(entry.get("ACTUALQTY")),
+             _cents(entry.get("AMOUNT")),
+             [text(a.get("LEDGERNAME")) for a in _list(entry.get("ACCOUNTINGALLOCATIONS.LIST")) if isinstance(a, dict)])
+            for entry in _inventory(data)]
+
+
 def voucher_row(record):
     """Columns for one native voucher; None for a deleted one, retained or not."""
     data = compact(record)
@@ -124,9 +137,7 @@ def voucher_row(record):
         raise ValueError("A voucher needs its GUID and date.")
     issued = date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:]))
     ledgers = {text(entry.get("LEDGERNAME")) for entry in _entries(data)} | {
-        text(allocation.get("LEDGERNAME")) for item in _list(data.get("ALLINVENTORYENTRIES.LIST"))
-        if isinstance(item, dict) for allocation in _list(item.get("ACCOUNTINGALLOCATIONS.LIST"))
-        if isinstance(allocation, dict)}
+        ledger for *_, posted in stock_lines(data) for ledger in posted}
     refs = [{"ledger": text(entry.get("LEDGERNAME")), "ledger_key": normalized(text(entry.get("LEDGERNAME"))),
              "name": text(bill.get("NAME")), "bill_type": text(bill.get("BILLTYPE")),
              "amount_cents": _cents(bill.get("AMOUNT")), "date": issued}
@@ -386,6 +397,15 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
         {"c": company_id, "v": version, "types": list(types), "gstin": found.group(0) if found else None,
          "digits": digits if len(digits) >= 4 else None, "words": words, "key": normalized(subject),
          "limit": limit}).fetchall()
+
+
+def named(connection, company_id, version, kind, subjects):
+    """Masters of one type whose GUID, or whose name ignoring case and spacing, is one of these subjects."""
+    return connection.execute(
+        f"""SELECT * FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE} AND type=%(t)s
+                AND (guid = ANY(%(s)s) OR name_key = ANY(%(k)s)) ORDER BY name_key, guid""",
+        {"c": company_id, "v": version, "t": kind, "s": list(subjects),
+         "k": [normalized(subject) for subject in subjects]}).fetchall()
 
 
 def ledger_history(connection, company_id, version, ledgers, *, limit=10):
