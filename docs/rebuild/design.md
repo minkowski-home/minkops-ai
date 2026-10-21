@@ -38,7 +38,7 @@ ones until a slice deletes what it replaces.
 | --- | --- | --- |
 | platform | `clients.py` | Client businesses, per-client access, company authorisation |
 | platform | `work.py` | Runs, items, records, decisions, leases, wake-ups, small status DTOs |
-| platform | `lanes.py` | Worker lanes: claim, lease renewal, reattach, LISTEN wake-ups |
+| platform | `lanes.py` | Worker lanes: claim, lease renewal, handoff, LISTEN wake-ups, session cleanup |
 | platform | `runtime/tools.py` | MCP-shaped tool contracts, argument validation, bounded results |
 | platform | `runtime/openai_hosted.py` | Tool sessions: create, answer `requires_action`, reattach, cancel |
 | platform | `accounts/mirror.py` | Versioned mirror storage, visibility, GC and lookup queries |
@@ -127,8 +127,8 @@ or authorises a write.
   scheduling state in JSON.
 - `run_items` is the scheduling unit: one bill, one statement chunk, or one
   layout. Each row carries its state, lease, attempt and provider session IDs.
-  Its states are `waiting`, `queued`, `running`, `proposed`, `held`, `failed` and
-  `cancelled`.
+  Its states are `waiting`, `queued`, `running`, `done`, `failed` and
+  `cancelled`; what a bill or row needs is its record's status.
 - `run_records` is the review unit: one bill or one statement row, with facts,
   proposal, checks, hold code, review flags, plan and native observation. Its
   `version` increments on every change.
@@ -158,10 +158,23 @@ contracts (name, description, input schema) that accept lists of subjects.
 
 The worker answers `agent.session.requires_action` with
 `agent.session.input.tool_result`, using an idempotency key derived from the
-call ID. After a restart it answers the pending calls in
-`session.required_actions`, then reattaches to the event stream. Session
-creation carries a deterministic idempotency key and item metadata, so a retried
-create cannot start a second paid session.
+call ID. It answers only the calls a fresh `retrieve` lists as pending: a
+re-attached stream replays old `requires_action` events, and the provider
+accepts a repeated answer silently. After a restart it answers the pending
+calls, then reattaches to the event stream, which replays from the start;
+events are deduplicated by ID.
+
+A conversation-only session must be created together with its input, and
+creation is not idempotent. Before creating one the item records
+`session_requested_at`, and the session carries the item and attempt in its
+metadata. A creation whose response was lost is found again by that metadata
+in the newest-first session list; a second session is started only when none
+is found.
+
+Turn usage is recorded seconds after the turn ends. The lane finishes the item
+at once; a closer pass records the usage from the turn, then deletes the
+session. It works from the database, so a restarted worker closes what its
+predecessor left.
 
 `propose` is checked immediately. The agent gets at most two resubmissions,
 and a resubmission that changes printed facts is flagged for review. The
@@ -170,6 +183,23 @@ accepted proposal is the item's result.
 Lanes are threads sharing a small connection pool. A lane holds a connection
 only while it answers a call or records state, never while it waits on the
 model.
+
+- **Fences.** Every write a lane makes (provider IDs, tool answers, the
+  finish) is fenced by the item's lease token. A lane whose item was
+  reclaimed stops without writing or cancelling.
+- **Heartbeat.** One heartbeat renews every lease the host holds. It flags a
+  lost fence, and a stopped task, which cancels the turn. A paused task lets an
+  underway session finish.
+- **Wake-ups.** LISTEN on `minkops_work` wakes idle lanes the moment a commit
+  queues an item; a slow poll covers a lost notification.
+- **Handoff.** On exit the host expires its leases instead of releasing its
+  items, so the next worker reattaches to the same paid sessions.
+- **Retries.** Transient turn failures (rate limit, overload, server error,
+  timeout) retry with a new session after 30 s and then 120 s, at most three
+  attempts. Anything else fails only its item, with the provider's reason.
+- **Hosting.** The lanes run inside the existing worker process. Its drain
+  acknowledges the wake-up generation only when no item is runnable, and the
+  recovery sweep treats a runnable item as work.
 
 ## Writer protocol 6
 
