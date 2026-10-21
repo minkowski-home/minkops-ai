@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from minkops_platform import clients
+from minkops_platform.accounts import sync
 
 from .accounts import _call
 from .auth import Db, User, require_csrf, tenant_access
@@ -66,7 +67,8 @@ def companies(slug: str, client: str, user: User, connection: Db):
 def authorise(slug: str, company_id: UUID, body: Authorise, request: Request, user: User, connection: Db):
     require_csrf(request)
     tenant, member = tenant_access(slug, user, connection)
-    return _call(clients.authorise_company, connection, tenant, user, member, company_id, body.client)
+    # Authorising also closes the company's card and queues its first full sync.
+    return _call(sync.authorise, connection, tenant, user, member, company_id, body.client)
 
 
 @router.post("/companies/{company_id}/decline")

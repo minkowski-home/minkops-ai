@@ -230,6 +230,8 @@ def enqueue_approved(connection, run, device_id, operation, write_id):
 
 
 def _observe(connection, job, state, summary, progress):
+    if job["operation"] == "tally.sync" and state in ("completed", "failed"):
+        return  # The sync's own finish or failure publishes its outcome.
     if job["operation"] == "tally.statement":
         return  # The statement manifest/receipt owns its lifecycle and progress.
     if job["operation"].startswith("attention."):
@@ -496,7 +498,7 @@ def claim(connection, device, report=None):
     )
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('tally.save','tally.statement','attention.supplier') AND lease_until<now()))
+           (state='executing' AND operation NOT IN ('tally.save','tally.statement','attention.supplier','tally.sync') AND lease_until<now()))
            AND (operation='attention.refresh' OR EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id AND t.control_state='active'))
            ORDER BY CASE WHEN operation='tally.save' THEN
              (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
@@ -514,8 +516,8 @@ def claim(connection, device, report=None):
         connection,
         row,
         "executing",
-        "Checking Tally on your PC…"
-        if row["operation"] == "tally.probe"
+        "Checking Tally on your PC…" if row["operation"] == "tally.probe"
+        else "Reading Tally on your PC…" if row["operation"] == "tally.sync"
         else "Reading your connected folder…",
         30,
     )
@@ -557,6 +559,9 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
     if job["state"] == "executing" and job["operation"].startswith("attention."):
         from .attention import plan as attention_plan
         return attention_plan(connection, device, job, plan_version=plan_version)
+    if job["state"] == "executing" and job["operation"] == "tally.sync":
+        from .accounts.sync import plan as sync_plan
+        return sync_plan(connection, device, job)
     if job["state"] == "executing" and job["operation"] == "tally.statement":
         from .accounts.tally_writes import spec
         run, write = spec(connection, device, job["input"], underway=True)
@@ -583,6 +588,15 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
         )
         return _native_plan(write, plan_version)
     raise ServiceError("conflict", "This save is no longer running.")
+
+
+def sync_page(connection, device, job_id, page):
+    """One page of a running sync, fenced by its claim like every receipt."""
+    job = _claimed_job(connection, device, job_id, page.get("claim_token"))
+    if job["operation"] != "tally.sync" or job["state"] != "executing":
+        raise ServiceError("conflict", "This sync is no longer running.")
+    from .accounts.sync import accept
+    return accept(connection, device, job, {key: value for key, value in page.items() if key != "claim_token"})
 
 
 def _bytes(value):
@@ -688,6 +702,16 @@ def finish(connection, device, job_id, receipt):
             if result["verified"]
             else "This bill needs review; other bills continue."
         )
+    elif job["operation"] == "tally.sync":
+        from .accounts import sync
+        if error:
+            result = sync.fail(connection, device, job, error)
+        elif (not isinstance(result, dict) or result.get("protocol") != sync.PROTOCOL
+              or not isinstance(result.get("companies"), list)):
+            raise ServiceError("invalid", "Invalid sync receipt.")
+        else:
+            result = sync.finish(connection, device, job, result)
+        summary = error or "Tally copy refreshed."
     elif job["operation"] == "sources.discover":
         from . import discovery
 

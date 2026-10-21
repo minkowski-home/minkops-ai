@@ -75,8 +75,13 @@ def request(connection, tenant, user, member, device_id, *, reason="requested"):
     desktop.require_companion(device, minimum=(0, 10, 0))
     existing = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation='tally.sync' AND state IN ('queued','executing')
-           ORDER BY created_at DESC LIMIT 1""", (device_id,)).fetchone()
-    if existing:
+           ORDER BY created_at DESC LIMIT 1 FOR UPDATE""", (device_id,)).fetchone()
+    if existing and existing["state"] == "executing" and existing["lease_until"] < datetime.now(UTC):
+        # The companion stopped mid-sync: revert its builds and start afresh.
+        fail(connection, device, existing, "The previous refresh stopped before it finished.")
+        connection.execute("""UPDATE desktop_jobs SET state='failed',error='The refresh stopped before it finished.',
+                              lease_until=NULL,updated_at=now() WHERE id=%s""", (existing["id"],))
+    elif existing:
         return desktop.public_job(existing)
     task = connection.execute("INSERT INTO tasks(tenant_id,title,summary) VALUES (%s,%s,%s) RETURNING id",
                               (tenant["id"], f"Refresh Tally copy on {device['name']}", "Waiting for the PC.")).fetchone()
@@ -364,6 +369,44 @@ def fail(connection, device, job, error):
     observe_task(connection, tenant_id=device["tenant_id"], task_id=job["task_id"], run_id=job["id"], state="failed",
                  summary=str(error)[:300], progress=0, event_prefix="sync")
     return {"published": [], "abandoned": abandoned}
+
+
+def companies(connection, tenant, user, member, device_id):
+    """Companies seen on a PC, with their decision and latest mirror version.
+
+    Admins and the PC's owner see every company there; other members see only
+    authorised companies of client businesses they can reach.
+    """
+    device = connection.execute("SELECT owner_id FROM desktop_devices WHERE tenant_id=%s AND id=%s",
+                                (tenant["id"], device_id)).fetchone()
+    if not device:
+        raise ServiceError("not_found", "PC not found.")
+    everything = clients.is_admin(user, member) or device["owner_id"] == user["id"]
+    visible = None if everything else clients.visible_ids(connection, tenant, user, member)
+    rows = connection.execute(
+        """SELECT c.id,c.name,c.guid,c.books_from,c.company_number,c.status,c.client_id,cb.name AS client,
+                  c.last_seen_at,v.version,v.kind,v.published_at,v.markers
+           FROM companies c LEFT JOIN client_businesses cb ON cb.tenant_id=c.tenant_id AND cb.id=c.client_id
+           LEFT JOIN LATERAL (SELECT version,kind,published_at,markers FROM mirror_versions
+                              WHERE company_id=c.id AND state='published' ORDER BY version DESC LIMIT 1) v ON true
+           WHERE c.tenant_id=%s AND c.device_id=%s ORDER BY c.name, c.books_from""",
+        (tenant["id"], device_id)).fetchall()
+    return [row for row in rows if everything or (row["status"] == "authorised"
+                                                  and (visible is None or row["client_id"] in visible))]
+
+
+def set_port(connection, tenant, user, member, device_id, port):
+    """The port this PC's Tally serves on, carried into every later plan."""
+    device = connection.execute("SELECT * FROM desktop_devices WHERE tenant_id=%s AND id=%s FOR UPDATE",
+                                (tenant["id"], device_id)).fetchone()
+    if not device:
+        raise ServiceError("not_found", "PC not found.")
+    if device["owner_id"] != user["id"] and not clients.is_admin(user, member):
+        raise ServiceError("forbidden", "Only the PC's owner or a workspace admin can change its Tally port.")
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ServiceError("invalid", "Choose a port from 1 to 65535.")
+    connection.execute("UPDATE desktop_devices SET tally_port=%s WHERE id=%s", (port, device_id))
+    return {"device_id": str(device_id), "tally_port": port}
 
 
 def authorise(connection, tenant, user, member, company_id, client_slug):

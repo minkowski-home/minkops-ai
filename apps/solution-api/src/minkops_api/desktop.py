@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from minkops_platform import desktop
+from minkops_platform.accounts import sync
 from minkops_platform.errors import ServiceError
 
 from .auth import Db, User, database_pool, require_csrf, tenant_access
@@ -78,6 +79,31 @@ def launch(slug: str, body: Launch, request: Request, user: User, connection: Db
     require_csrf(request)
     tenant, _ = tenant_access(slug, user, connection)
     return call(desktop.launch, connection, tenant, user, body.model_dump(mode="json"))
+
+
+class DeviceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tally_port: int = Field(ge=1, le=65535)
+
+
+@router.patch("/api/tenants/{slug}/desktop/devices/{device_id}")
+def update_device(slug: str, device_id: UUID, body: DeviceSettings, request: Request, user: User, connection: Db):
+    require_csrf(request)
+    tenant, member = tenant_access(slug, user, connection)
+    return call(sync.set_port, connection, tenant, user, member, device_id, body.tally_port)
+
+
+@router.post("/api/tenants/{slug}/desktop/devices/{device_id}/sync", status_code=202)
+def request_sync(slug: str, device_id: UUID, request: Request, user: User, connection: Db):
+    require_csrf(request)
+    tenant, member = tenant_access(slug, user, connection)
+    return call(sync.request, connection, tenant, user, member, device_id)
+
+
+@router.get("/api/tenants/{slug}/desktop/devices/{device_id}/companies")
+def device_companies(slug: str, device_id: UUID, user: User, connection: Db):
+    tenant, member = tenant_access(slug, user, connection)
+    return call(sync.companies, connection, tenant, user, member, device_id)
 
 
 @router.get("/api/tenants/{slug}/desktop/sources")
@@ -170,6 +196,24 @@ async def diagnostics(request: Request, device: Device, connection: Db):
     except (ValueError, UnicodeDecodeError) as error:
         raise HTTPException(422, "Invalid diagnostics.") from error
     return call(desktop.send_diagnostics, connection, device, payload)
+
+
+@router.post("/api/desktop/worker/jobs/{job_id}/sync")
+async def sync_page(job_id: UUID, request: Request, device: Device, connection: Db):
+    """One bounded page of a running sync; resending the same page is safe."""
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > 12_000_000:
+            raise HTTPException(413, "A sync page is limited to 12 MB.")
+        chunks.append(chunk)
+    try:
+        page = json.loads(b"".join(chunks))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise HTTPException(422, "Invalid sync page.") from error
+    if not isinstance(page, dict):
+        raise HTTPException(422, "Invalid sync page.")
+    return await run_in_threadpool(call, desktop.sync_page, connection, device, job_id, page)
 
 
 @router.get("/api/desktop/worker/jobs/{job_id}/plan")
