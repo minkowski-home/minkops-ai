@@ -1233,9 +1233,7 @@ class BillEntryTests(unittest.TestCase):
             vouchers=("Purchase GST", "Purchase GST", "Purchase", "Journal"),
         )
         latest = self.client.get(f"/api/tenants/mock-tenant/discovery/latest?device_id={self.device['id']}").json()
-        offered = latest["catalog"]["sources"][0]["snapshot"]["companies"][0]["purchase_voucher_types"]
-        self.assertEqual(offered, {"default": "vt-gst", "candidates": [
-            {"name": "Purchase", "guid": "vt-p", "used": 1}, {"name": "Purchase GST", "guid": "vt-gst", "used": 2}]})
+        self.assertNotIn("purchase_voucher_types", latest["catalog"]["sources"][0]["snapshot"]["companies"][0])
         bill = self.upload_bill()
         run, _ = self.launch("bill-entry", file_ids=[bill], catalog_id=None, config={
             "discovery_id": did, "review_mode": "only_exceptions",

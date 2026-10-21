@@ -118,7 +118,6 @@ def detail(connection, row, *, include_records=True):
     # Display a derived summary without rewriting the immutable native catalog.
     if catalog:
         from .accounts.client_context import master_lookup
-        from .accounts.voucher_types import summary as voucher_summary
 
         for source in catalog.get("sources", []):
             if source["tool"] != "tally":
@@ -131,11 +130,6 @@ def detail(connection, row, *, include_records=True):
                 try:
                     lookup = master_lookup(company)
                     company["master_summary"] = lookup["summary"]
-                    # Bill Entry offers these per company; records stay server-side.
-                    company["purchase_voucher_types"] = voucher_summary(
-                        [r["data"] for r in lookup["records"] if r["type"] == "VOUCHERTYPE"],
-                        company.get("vouchers", {}).get("records", []),
-                    )
                     from .accounts.statement_routing import destination_choices
                     company['statement_options'] = destination_choices(company)
                 except ValueError as error:

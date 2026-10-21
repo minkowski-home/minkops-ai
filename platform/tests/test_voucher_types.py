@@ -1,6 +1,6 @@
-"""Purchase voucher types come from discovered masters, never a hard-coded name."""
+"""Voucher families come from discovered voucher types, never a hard-coded name."""
 
-from minkops_platform.accounts.voucher_types import base_types, candidates, summary
+from minkops_platform.accounts.voucher_types import base_types
 
 PURCHASE = {"@_NAME": "Purchase", "@_RESERVEDNAME": "Purchase", "PARENT": "Purchase", "GUID": "vt-p", "ALTERID": "1"}
 GST = {"@_NAME": "Purchase GST", "@_RESERVEDNAME": "", "PARENT": {"#text": "Purchase", "@_TYPE": "String"},
@@ -13,10 +13,6 @@ LOOP = [{"@_NAME": "Loop A", "PARENT": "Loop B", "GUID": "l1"}, {"@_NAME": "Loop
 RENAMED = {"@_NAME": "Purchases", "@_RESERVEDNAME": "Purchase", "PARENT": "Purchases", "GUID": "vt-r"}
 
 
-def voucher(kind):
-    return {"type": "VOUCHER", "data": {"VOUCHERTYPENAME": kind, "GUID": kind + str(id(kind))}}
-
-
 def test_base_type_follows_reserved_names_and_parent_chains():
     bases = base_types([PURCHASE, GST, OLD, BRANCH, ORDER, JOURNAL, *LOOP, RENAMED])
     assert bases["purchase gst"] == "Purchase"
@@ -25,19 +21,3 @@ def test_base_type_follows_reserved_names_and_parent_chains():
     assert bases["purchases"] == "Purchase"
     assert bases["journal"] == "Journal"
     assert bases["loop a"] is None and bases["loop b"] is None
-
-
-def test_candidates_are_active_purchase_types_with_observed_use():
-    found = candidates([PURCHASE, GST, OLD, BRANCH, ORDER, JOURNAL],
-                       [voucher("Purchase GST"), voucher("Purchase GST"), voucher("Purchase"), voucher("Journal")])
-    assert [(c["name"], c["used"]) for c in found] == [
-        ("Purchase", 1), ("Purchase GST", 2), ("Purchase GST Mumbai", 0)]
-    assert found[1]["identity"] == {"NAME": "Purchase GST", "GUID": "vt-g", "PARENT": "Purchase", "ALTERID": " 5"}
-
-
-def test_summary_preselects_the_most_used_type_only_without_a_tie():
-    assert summary([PURCHASE, GST], [voucher("Purchase GST")])["default"] == "vt-g"
-    assert summary([PURCHASE, GST], [voucher("Purchase GST"), voucher("Purchase")])["default"] is None
-    assert summary([PURCHASE, GST], [])["default"] is None
-    assert summary([GST, ORDER], [])["default"] == "vt-g"
-    assert summary([ORDER], [])["candidates"] == []

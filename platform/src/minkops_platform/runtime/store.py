@@ -118,14 +118,13 @@ def public_run(connection, run):
             "state", "file_ids", "catalog_id", "parent_run_id", "result", "error", "created_at", "updated_at")
     value = {key: run.get(key) for key in keys}
     config = run["config"]
-    value["config"] = {key: config[key] for key in ("file_provenance", "destination_device_id", "output_mode", "review_mode") if key in config}
+    value["config"] = {key: config[key] for key in ("file_provenance", "destination_device_id", "review_mode") if key in config}
     if config.get("tally_target"):
         target = config["tally_target"]
         value["config"]["tally_target"] = {key: target[key] for key in ("company", "company_mode", "locked_company_guid", "device_id", "discovery_id") if key in target}
         value["config"]["tally_target"]["companies"] = [
-            {key: company[key] for key in ("company", "voucher_type_error", "books_from", "period_to") if key in company}
-            | {"references": {"company_guid": company.get("references", {}).get("company_guid")},
-               "voucher_type": {"NAME": company.get("voucher_type", {}).get("NAME")}}
+            {key: company[key] for key in ("company", "books_from", "period_to") if key in company}
+            | {"references": {"company_guid": company.get("references", {}).get("company_guid")}}
             for company in target.get("companies", [])]
     # Legacy proposals have no persisted presentation controls. New validated
     # results pin those once, so repeated status reads never load their assets.
