@@ -27,7 +27,13 @@ def find_ledger(context, arguments):
     return {"ledgers": [{"name": subject, "group": "Sundry Creditors"} for subject in arguments["subjects"]]}
 
 
-TOOLS = {"find_ledger": Tool("find_ledger", "Find ledgers by name.", SUBJECTS, find_ledger)}
+# A nullable nested object, as a proposal's voucher is: an error inside it must be named, not the whole value.
+ENTRY = {"type": "object", "required": ["entry"], "additionalProperties": False, "properties": {"entry": {"anyOf": [
+    {"type": "null"}, {"type": "object", "required": ["lines"], "additionalProperties": False, "properties": {
+        "lines": {"type": "array", "items": {"type": "object", "required": ["tds"], "properties": {
+            "tds": {"type": ["object", "null"]}}}}}}]}}}
+TOOLS = {"find_ledger": Tool("find_ledger", "Find ledgers by name.", SUBJECTS, find_ledger),
+         "record": Tool("record", "Record an entry.", ENTRY, lambda context, arguments: ran.append(arguments) or {})}
 
 
 @pytest.mark.parametrize(("name", "arguments", "expected"), [
@@ -41,8 +47,9 @@ TOOLS = {"find_ledger": Tool("find_ledger", "Find ledgers by name.", SUBJECTS, f
                                                                  "allowed ('all' was unexpected)")),
     ("find_ledger", {"subjects": ["Unknown"]}, (False, "No ledger matches Unknown. Ask for the party's GSTIN instead.")),
     ("find_ledger", {"subjects": ["everything"]}, (False, "The answer is too large. Ask about fewer subjects at a time.")),
+    ("record", {"entry": {"lines": [{"amount": 1}]}}, (False, "Invalid entry/lines/0: 'tds' is a required property")),
 ], ids=["answer", "json-text", "unknown-tool", "bad-json", "not-an-object", "schema", "extra-field", "refusal",
-        "too-large"])
+        "too-large", "nested"])
 def test_the_model_is_told_exactly_why_a_call_was_refused(name, arguments, expected):
     ran.clear()
     assert tools.compute(TOOLS, None, name, arguments) == expected

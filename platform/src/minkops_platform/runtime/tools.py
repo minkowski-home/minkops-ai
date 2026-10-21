@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
 from psycopg.types.json import Jsonb
 
 log = logging.getLogger(__name__)
@@ -55,8 +56,8 @@ def compute(tools, context, name, arguments):
             return False, "Arguments must be a JSON object."
     if not isinstance(arguments, dict):
         return False, "Arguments must be a JSON object."
-    error = next(iter(sorted(Draft202012Validator(tool.input_schema).iter_errors(arguments),
-                             key=lambda e: list(e.absolute_path))), None)
+    # The most specific error: inside a nullable object it names the missing field, not the whole value.
+    error = best_match(Draft202012Validator(tool.input_schema).iter_errors(arguments))
     if error is not None:
         where = "/".join(str(part) for part in error.absolute_path) or "arguments"
         return False, f"Invalid {where}: {error.message}"[:500]
