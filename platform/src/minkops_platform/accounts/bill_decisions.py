@@ -1,19 +1,12 @@
 """Server-owned v1 eligibility for decisions over immutable bill proposals."""
 import copy
 
-from .bill_review import REASONS
 from .client_context import select_target
+from .holds import BILL, HOLDS
 
-# The matrix is a ceiling. Complete values, positive supplier evidence and the
-# pinned company/master identities can further restrict these actions.
-HANDLERS = dict.fromkeys(REASONS, ("nothing", "retry"))
-for _code in ("source_unreadable", "classification_uncertain", "manual_review", "posting_profile_miss"):
-    HANDLERS[_code] = ("guess", "nothing", "retry")
-HANDLERS["supplier_missing"] = ("supplier", "nothing", "retry")
-for _code in ("company_not_open", "no_company", "duplicate_company", "not_running", "port_closed",
-              "busy", "too_many", "invalid_response", "rejected", "save_held", "save_waiting",
-              "save_interrupted", "pc_unavailable", "save_hold"):
-    HANDLERS[_code] = ("retry_save", "nothing")
+# The matrix is a ceiling (holds.py). Complete values, positive supplier
+# evidence and the pinned company/master identities can further restrict it.
+HANDLERS = {code: hold.actions for code, hold in HOLDS.items() if BILL in hold.scopes}
 
 
 def write_blocker(run, record, *, supplier=False):

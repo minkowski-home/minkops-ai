@@ -1,26 +1,10 @@
 """Coverage, evidence and typed exceptions for bill voucher proposals."""
 
+from .holds import BILL, EXCEPTION, view
+
 # Short attention labels for coded holds: the agent's closed set of genuine
-# blockers plus deterministic server-side reasons.
-EXCEPTION_LABELS = {
-    "source_unreadable": "Unreadable bill",
-    "not_a_bill": "Not a bill",
-    "multiple_bills_unclear": "Unclear bill count",
-    "required_value_missing": "Missing bill value",
-    "source_values_conflict": "Bill values conflict",
-    "company_unresolved": "Company unclear",
-    "supplier_unresolved": "Supplier unclear",
-    "supplier_missing": "Missing supplier",
-    "classification_uncertain": "Ledger unclear",
-    "unsupported_structure": "Manual entry needed",
-    "date_before_books": "Before books begin",
-    "identity_rule_unknown": "Foreign supplier",
-    "date_outside_company_period": "Outside company year",
-    "posting_profile_miss": "Unusual posting",
-    "destination_changed": "Tally changed",
-    "voucher_type_unresolved": "Voucher type needed",
-    "extraction_failed": "Recheck bill",
-}
+# blockers plus deterministic server-side reasons (see holds.py).
+EXCEPTION_LABELS = view("label", scope=BILL, kinds=(EXCEPTION,))
 
 
 def adopt_exceptions(result):

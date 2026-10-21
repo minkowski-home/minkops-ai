@@ -10,43 +10,10 @@ import io
 from minkops_platform.errors import ServiceError
 
 from .checks import EXCEPTION_LABELS
+from .holds import BILL, view
 from .tally_writes import HOLD_TITLES
 
-REASONS = {
-    "source_unreadable": "The bill could not be read reliably.",
-    "not_a_bill": "This source does not contain a bill that can be entered.",
-    "multiple_bills_unclear": "The separate bills in this file could not be identified reliably.",
-    "required_value_missing": "A required bill value could not be confirmed from the source.",
-    "source_values_conflict": "The source contains conflicting bill values.",
-    "company_unresolved": "The destination company could not be identified reliably.",
-    "supplier_unresolved": "The supplier could not be matched to exactly one Tally ledger.",
-    "supplier_missing": "The supplier is missing from the company's confirmed Tally ledgers.",
-    "classification_uncertain": "The appropriate accounting ledger could not be confirmed.",
-    "unsupported_structure": "This bill requires accounting entries outside the supported save format.",
-    "date_before_books": "The bill date is before the company's books beginning date.",
-    "identity_rule_unknown": "A foreign supplier's invoice numbering cannot be checked for duplicates; enter it in Tally.",
-    "date_outside_company_period": "The bill date is outside the routed company's year and no single sibling company covers it.",
-    "posting_profile_miss": "This bill does not fit the company's confirmed posting pattern.",
-    "destination_changed": "The Tally destination changed after Source Discovery.",
-    "voucher_type_unresolved": "A supported voucher type must be selected for this company.",
-    "company_not_open": "The destination company must be open in Tally before this bill can be saved.",
-    "no_company": "The destination company must be open in Tally before this bill can be saved.",
-    "duplicate_company": "More than one open Tally company matches the destination identity.",
-    "not_running": "Tally must be running and connected before this bill can be saved.",
-    "port_closed": "Tally's local connection is unavailable.",
-    "busy": "Tally is busy and could not complete the save.",
-    "too_many": "Tally returned too many matching destinations to save safely.",
-    "invalid_response": "Tally's response could not be verified.",
-    "rejected": "Tally rejected this bill and its destination settings need attention.",
-    "run_stopped": "The run was stopped before this bill was saved.",
-    "save_waiting": "This bill is waiting for its destination before saving.",
-    "save_interrupted": "The save was interrupted and its destination needs reconciliation.",
-    "pc_unavailable": "The destination PC must reconnect before this bill can be saved.",
-    "save_held": "This bill could not be saved and needs attention in the destination.",
-    "human_review": "This bill was saved with a best guess and still requires human review.",
-    "extraction_failed": "The bill could not be processed and needs an explicit recheck.",
-    "manual_review": "This bill needs manual review in the original system.",
-}
+REASONS = view("reason", scope=BILL)
 TITLE_CODES = {title: code for code, title in EXCEPTION_LABELS.items()}
 TITLE_CODES.update({title: code for code, title in HOLD_TITLES.items()})
 TITLE_CODES.update({

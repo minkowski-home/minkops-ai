@@ -96,7 +96,8 @@ destination groups discovery/company choices, and Review and save groups review
 mode; each company's confirmed posting pattern sets its voucher types. Exact
 ledger/amount validation, duplicates and native readback are mandatory.
 
-The server owns the following maximum handler matrix. It further removes write
+The server owns the following maximum handler matrix, defined once in
+`platform/src/minkops_platform/accounts/holds.py` and pinned by `platform/tests/test_holds.py`. It further removes write
 actions when mandatory values, company/master identity, source evidence or
 supplier-creation prerequisites fail. Recheck appears only for an unresolved
 input; saved/rejected/writing bills and runs outside review offer no decisions.
@@ -126,7 +127,7 @@ Best guess retains its separate human-review Attention after native save.
 | `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
 | `company_not_open`, `no_company`, `duplicate_company` | Retry save, Do nothing |
 | `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response` | Retry save, Do nothing |
-| `rejected`, `save_hold`, `save_held` | Retry save, Do nothing |
+| `rejected`, `save_held` | Retry save, Do nothing |
 | `save_waiting`, `save_interrupted`, `pc_unavailable` | Retry save, Do nothing |
 
 Unknown future codes offer only Do nothing/Recheck until a handler is explicitly

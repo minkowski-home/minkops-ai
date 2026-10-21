@@ -31,7 +31,7 @@ def new_supplier(**changes):
 
 def test_matrix_is_exhaustive_and_documented():
     import re
-    assert set(EXCEPTION_LABELS) | set(HOLD_TITLES) | {"save_hold"} <= set(HANDLERS)
+    assert set(EXCEPTION_LABELS) | set(HOLD_TITLES) <= set(HANDLERS)
     docs = (REPOSITORY_ROOT / "docs/bill-entry.md").read_text()
     labels = {"guess": "Best guess write", "nothing": "Do nothing", "retry": "Recheck",
               "retry_save": "Retry save", "supplier": "Create this ledger"}

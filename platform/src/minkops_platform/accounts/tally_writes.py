@@ -10,22 +10,13 @@ from psycopg.types.json import Jsonb
 from minkops_platform.errors import ServiceError
 
 from .bills import add_note
+from .holds import BILL, NATIVE, view
 from .repository import observe, run_for
 
 PC_UNAVAILABLE = "Destination PC is unavailable. Reconnect it, then use Retry save."
 # Short labels for typed holds the companion reports before or instead of a
 # write (connectors/desktop/src/voucher.js saveVoucher). Unknown codes fall back.
-HOLD_TITLES = {
-    "company_not_open": "Open company in Tally",
-    "no_company": "Open company in Tally",
-    "duplicate_company": "Duplicate company open",
-    "not_running": "Tally unavailable",
-    "port_closed": "Tally unavailable",
-    "busy": "Tally unavailable",
-    "too_many": "Tally unavailable",
-    "invalid_response": "Tally unavailable",
-    "rejected": "Tally rejected bill",
-}
+HOLD_TITLES = view("label", scope=BILL, kinds=(NATIVE,))
 
 
 def hold_save(connection, run, record, reason, *, title=None):
