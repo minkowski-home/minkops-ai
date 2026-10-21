@@ -1,4 +1,4 @@
-# Accounts desk: Excel and Tally workflows
+# Accounts desk workflows
 
 Source discovery, Bill entry and Statement entry execute through the shared
 tenant API, durable PostgreSQL worker and OpenAI-hosted Agents API. All model calls use `gpt-6-luna`.
@@ -7,7 +7,7 @@ never included in agent files or exposed to the browser.
 
 ## Product loop and ownership
 
-1. Connect a local folder in Chrome/Edge, then select the relevant Excel files.
+1. Connect a local folder in Chrome/Edge, then select the relevant files.
    Browser directory handles stay in IndexedDB. Only supported files from the
    chosen folder are synchronized, with immutable tenant-scoped provenance.
 2. Source discovery collects workbook sheet/header/table definitions and formula
@@ -21,28 +21,23 @@ never included in agent files or exposed to the browser.
 3. Launch Bill entry with multiple PDFs/images and the confirmed catalog.
    After setup, the dashboard runs saved file selections with tenant defaults in
    one click; workflow details expose configuration and per-run overrides.
-   Codex recognizes the appropriate workbook/sheet/table from confirmed mappings
-   and bill evidence. Refresh the real workbook before selecting an Excel
-   destination; discovery projections are not writable business snapshots.
-   Tally bill runs pin a complete, confirmed version 2 package and either lock a
-   company or infer it from buyer evidence. No client filename, sheet name or invoice column schema is hardcoded
-   in the executor. Ambiguous recognition becomes an unresolved review item and
-   holds that bill while other bills continue. Confirmed concepts enable selected deterministic checks;
-   missing reference evidence stays visible rather than implying reconciliation.
+   Bill runs pin a complete, confirmed version 2 package and either lock a
+   company or infer it from buyer evidence. Codex proposes the client's own
+   voucher from that context and the bill; no ledger, voucher type or field list
+   is hardcoded in the executor. Ambiguous recognition becomes an unresolved
+   review item and holds that bill while other bills continue.
 4. Review bill identifiers and concise status with one-click decisions.
    Accounting entry/corrections happen in original systems; no values, correction
    prompts or operation choices are editable in Minkops. Members can change
    per-run options; only admins change saved tenant/employee defaults.
-5. The Excel adapter prepares only the approved destination edits. The browser
-   checks the original hash, keeps a recovery copy, saves to the existing file,
-   reads it back and submits a receipt. Only matching saved bytes complete the
-   task. Users do not have to upload a workbook again or download a replacement.
+5. The Windows companion saves each approved voucher natively in Tally, reads it
+   back and submits a receipt. Only a verified readback completes the bill.
 
 Minkops owns authorization, immutable inputs, approvals, validation and safe
 commits. OpenAI owns reasoning and its execution environment. This first web
 version synchronizes selected bytes to the API and hosted session; it is not
-fully local processing. The Windows companion implements the same approved
-write contract for granted folders, including requests started from the web.
+fully local processing. The Windows companion performs every approved native
+write, including those approved from the web.
 See [Windows setup and recovery](windows-app.md). [Source discovery](source-discovery.md)
 provides confirmed Tally context; [Bill entry](bill-entry.md) and
 [Statement entry](statement-entry.md) add reviewed native vouchers, duplicate
@@ -73,15 +68,13 @@ a persisted ID fails visibly rather than blindly replaying a charged request.
 Hosted environments are released after durable results; idle workers retry
 pending cleanup. Audit IDs and results stay in PostgreSQL.
 
-Local writes reserve each workbook, reject duplicates and changed local files,
-and serialize same-browser tabs. A disconnected receipt can be retried: an
-already matching workbook is verified without appending again. Unverified
-recovery copies remain in IndexedDB; verified writes remove them. Stopping the
-task cancels unsaved writes, releases their reservations, keeps unsaved bills in
-Attention and records the actor; it does not undo changes already saved. A late
-valid receipt is recorded without converting a stopped run into success. Held
-bills are rechecked or deferred only through Attention decisions. External workbook changes require rediscovery;
-Minkops' own verified writes can advance the confirmed catalog safely.
+Tally writes reserve each company and bill identity, so two runs cannot save the
+same bill at once. A retried save reads Tally first: a voucher that was already
+saved is verified rather than entered twice. Stopping the task cancels unsaved
+writes, releases their reservations, keeps unsaved bills in Attention and records
+the actor; it does not undo vouchers already saved. A late valid receipt is
+recorded without converting a stopped run into success. Held bills are rechecked
+or deferred only through Attention decisions.
 
 ## Local setup
 
@@ -108,37 +101,27 @@ operator settings and paused workflows.
 The mock client's workflow policy enables Tally only, so discovery and saves
 need the [Windows companion](windows-app.md) connected to a PC with the test
 companies open in Tally. The [five-company rehearsal](tally-rehearsal.md) seeds
-synthetic companies and bills for that. The Excel adapter below serves
-compositions whose policy enables Excel; its behaviour is covered by the
-database-backed API tests.
+synthetic companies and bills for that.
 
 ## Supported scope and verification
 
-The adapter supports ordinary `.xlsx` sheets and named tables without totals.
-It preserves unrelated cells, copied styles and translated formulas, but does
-not calculate formulas. Macro, pivot, slicer, ActiveX, external-link and protected
-destinations require additional adapters. Table expansion into occupied cells
-is rejected. Browser permissions and an open Chrome/Edge page are required for
-local saves; hosted extraction continues while the page is closed.
+Source discovery reads ordinary `.xlsx` sheets and named tables; Minkops never
+edits a workbook. Browser folder refreshes need permission and an open
+Chrome/Edge page; hosted extraction continues while the page is closed.
 
 Sources are limited to 100 supported files, 5 MB per file and 30 MB per refresh.
-Runs allow up to 45 files and 8 MB including workbook references, full Tally
+Runs allow up to 45 files and 8 MB including discovery workbooks, full Tally
 lookup files and bills; individual lookup files are limited to 4 MB. Oversized
 complete native discovery remains saved but visibly partial for hosted
 interpretation, blocking dependent workflows. Hosted uploads
 also enforce provider limits. Manual uploads work for bill inputs and reference
-inspection; writable destinations require a connected folder.
+inspection.
 
 Offline tests replace only the paid agent boundary and cover real database/auth,
-tenant isolation, approval, cancellation, receipt replay, schema validation,
-safe workbook updates and local commit conflicts. Run API tests with
-TEST_DATABASE_URL pointing to a PostgreSQL server role with database-creation
-permission; pytest creates and seeds its own isolated database. Historical browser
-verification ran the real hosted model before the client-context refactor:
-discovery found headers on row 4;
-three PDFs plus a scanned PNG appended four rows to the existing local register
-(16 → 20), preserved prior rows and reference files, and completed only after a
-verified browser receipt. This is local proof; no production deployment is implied.
+tenant isolation, approval, cancellation, receipt replay, schema validation and
+write reservations. Run API tests with TEST_DATABASE_URL pointing to a PostgreSQL
+server role with database-creation permission; pytest creates and seeds its own
+isolated database.
 
 Database-backed pytest runs now create and clean up their own database; see
 [isolated integration tests](../db/README.md#isolated-integration-tests). The

@@ -5,8 +5,9 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.9.0 (plan protocol 5; see its contracts below);
-0.8.1 is the latest published release. The companion works only with the
+This revision builds companion 0.9.1 (plan protocol 5; see its contracts below),
+the release recorded in `windows-release.json`. The server refuses companions
+older than 0.9.0. The companion works only with the
 companies open in the user's Tally, reports typed session states, sends
 diagnostics and updates itself. Core Tally discovery uses HTTP/XML exports and
 needs no ODBC driver. Windows 10 device testing was deferred by the owner;
@@ -20,7 +21,6 @@ compatibility is retained.
 | Discover Tally and Excel | Yes | Yes | All loaded companies, voucher period and explicitly granted folders; versioned client context |
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
-| Save approved Excel entries | Yes | Yes | Accounts approval, before/after hashes, backup, atomic replacement and saved-byte verification |
 | Save approved Tally vouchers | Yes | Yes | Confirmed company/ledger references, immutable approved plan, durable intent before import and exact readback |
 | Existing hosted workflows | Yes | Yes | Existing server and OpenAI-hosted Agents API contracts |
 
@@ -213,16 +213,15 @@ Review shows actual sheet/entry counts, bill identifiers and short status.
 One-click decisions replace accounting editors and correction prompts. Manual
 changes belong in the original tools; detailed events remain internal audit data.
 All four themes and responsive layout are shared. Accounts alone decides when
-all workbooks are verified; one native job cannot complete a multi-workbook run.
+every bill is verified; one native job cannot complete a multi-bill run.
 
 ## Verification
 
 Tests use real PostgreSQL and sessions for ownership, tenant isolation, CSRF,
 revocation, rotation, concurrent claims, request/receipt replay, invalid folder
-snapshots, approval, corrupt saved bytes, read recovery and cancellation.
-Native tests cover fixed Tally XML, limits, folder containment (Windows junctions
-and Linux symlinks), backup-before-write, external edits, already-saved recovery,
-receipt replay and IPC origin/frame isolation.
+snapshots, approval, read recovery and cancellation. Native tests cover fixed
+Tally XML, limits, folder containment (Windows junctions and Linux symlinks),
+already-saved recovery, receipt replay and IPC origin/frame isolation.
 
 For an opt-in Windows-native HTTP smoke against a disposable localhost API with
 `AUTH_DEV_MODE=1`, set `MINKOPS_SMOKE_URL=http://127.0.0.1:8117` and run
@@ -247,10 +246,6 @@ that requires creation privileges (the same guard runs on Linux). A fresh
 Windows 10/11 device matrix, screen-reader audit and signed distribution have
 not been verified.
 
-### Companion 0.8.0 contracts
-
-Plan protocol 4 adds verified Statement Entry Payment/Receipt saves and GST supplier creation. Bill Entry 0.13 requires 0.8.0 or newer for new GST-capable runs; older pinned bills retain their contracts. Statement intents are encrypted and fsynced under the app profile before import, and an uncertain import cannot be resent automatically. Statement classification now uses the hosted skill with confirmed discovery and optional client branch mapping; native authorization and readback remain independent. See [Statement Entry](statement-entry.md) for routing, balances, preview and recovery. The distributed Windows x64 installer remains an unsigned release candidate; existing unsigned-release disclosure applies.
-
 ### Companion 0.9.0 contracts
 
 Plan protocol 5 adds one native writer for every accounting voucher family:
@@ -270,10 +265,16 @@ plan's date window before deciding:
 - `counterpart` plans (a Contra's lone leg) are covered by one Minkops transfer
   already holding both lines; an untagged one holds.
 
-A `strict` fence writes the encrypted intent (same `statement-manifests`
-directory as protocol 4, so upgraded plans keep their fence) before importing;
+A `strict` fence encrypts and fsyncs the intent under the app profile
+(`statement-manifests`) before importing;
 `retry_after_read` lets a later explicit Retry save import only after a fresh
 read. Within one attempt an import is never repeated, and only an exact readback
-of every line, allocation, date and voucher type is accepted. Older plan formats
-are upgraded to v5 by the server when this companion fetches them; only bill
-plans without discovered GUIDs still use the legacy bill writer.
+of every line, allocation, date and voucher type is accepted. The server sends
+every plan exactly as approved and refuses retired formats, so a run approved
+before protocol 5 must be started again.
+
+Statement classification uses the hosted skill with confirmed discovery and
+optional client branch mapping; native authorization and readback remain
+independent. See [Statement Entry](statement-entry.md) for routing, balances,
+preview and recovery. The distributed Windows x64 installer remains an unsigned
+release candidate; existing unsigned-release disclosure applies.

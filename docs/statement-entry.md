@@ -2,10 +2,9 @@
 
 Version 0.5 uses the same managed hosted agent runtime as Bill Entry, with its
 procedure in the Statement Entry skill. The Windows companion applies and
-independently verifies approved plans. Simple Payment/Receipt rows are stored as
-plan protocol 4 and served to a 0.9.0+ companion upgraded to protocol 5; split
-lines and Contra transfers are stored as protocol 5 vouchers and need companion
-0.9.0+.
+independently verifies approved plans. Every row, from a simple Payment/Receipt
+to split lines and Contra transfers, is stored as a protocol 5 voucher and needs
+companion 0.9.0+.
 
 Select CSV/XLSX statements and the latest confirmed complete Source Discovery on
 the destination PC. Optionally select a separate CSV/XLSX branch mapping. Both
@@ -120,6 +119,8 @@ skill holds them rather than flattening their accounting.
 Apply migration `0010_statement_ai_settings.sql` before reinstalling workflows.
 It retires only the old Statement Entry ledger/strategy settings and preserves
 review/date/balance preferences, other workflows and historical run snapshots.
-Previously approved manifests can still reconcile. Unexecuted legacy statement
+Migration `0019_retire_legacy_runs.sql` stops any unfinished run still holding
+unsaved protocol 4 rows and leaves a "Run retired" attention item: verify any
+underway save in Tally, then start a new run. Unexecuted legacy statement
 runs without a pinned agent bundle require an explicit new run; the retired
 classifier is not retained as a fallback.

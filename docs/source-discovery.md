@@ -35,8 +35,7 @@ Each run has an **AI context analysis** toggle, on by default. The optional
 When off, native Tally masters/vouchers and deterministic Excel structure are
 still collected and saved, but no hosted run is dispatched. Complete results go
 directly to review and still require confirmation. Excel structure-only catalogs
-have no new semantic column mappings or Bill Entry destination catalog; they
-cannot supply a new Excel entry destination. The prior run's toggle is restored
+have no new semantic column mappings. The prior run's toggle is restored
 by setup and preserved by quick refresh. Partial/oversized collection safeguards
 and downstream input limits remain enforced. This option never samples records
 or silently reuses interpretation from an AI-enabled run.
@@ -163,8 +162,7 @@ Reduce the voucher period or hand off when masters alone exceed the budget;
 masters must never be sampled to fit. Partial company collection preserves the
 successful data but cannot authorize Bill Entry.
 
-Legacy pinned runs retain their original contract, including their old reference
-preparation path where applicable. New runs use version 2. Retry may adopt a
+Runs pin version 2. Retry may adopt a
 newer confirmed package on the same PC only if the discovered company GUID set
 is unchanged. Completed sibling entries retain their receipts and plans.
 

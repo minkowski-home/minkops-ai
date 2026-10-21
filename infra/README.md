@@ -17,9 +17,9 @@ files are supplied as tenant-scoped immutable snapshots. API credentials stay
 outside agent-readable content. Results are persisted before hosted environment
 cleanup; workers retry pending cleanup and retain session IDs for audit.
 
-The browser applies approved Excel writes through a granted local folder. This
-is a web adapter with synchronized snapshots, not fully local desktop execution.
-The registered Windows companion also reads schema metadata and reconciles
+The browser reads selected input files through a granted local folder. This is
+a web adapter with synchronized snapshots, not fully local desktop execution.
+The registered Windows companion reads schema metadata and saves and reconciles
 approved Tally writes. Business reasoning remains in OpenAI-hosted environments;
 no customer-machine Codex executor is planned.
 

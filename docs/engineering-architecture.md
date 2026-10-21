@@ -11,14 +11,13 @@ services remain appropriate for their concrete integration and control roles.
 
 OpenAI-hosted Agents API environments are the selected execution architecture.
 Self-hosted Codex executors are out of scope. Hosted sandbox
-Python execution and browser-granted local file saves do not imply an agent
+Python execution and browser-granted local file reads do not imply an agent
 running on the customer's machine. The four workflow methods and their current
 scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
 
 The Windows shell shares the web UI and adds an authenticated outbound companion
-for bounded native work: folder snapshots and approved Excel saves, Tally
-discovery, approved voucher saves with readback, and verified GST supplier
-creation. Durable device/job controls live in `platform/`; native
+for bounded native work: folder snapshots, Tally discovery, approved voucher
+saves with readback, and verified GST supplier creation. Durable device/job controls live in `platform/`; native
 filesystem/Tally adapters live in `connectors/`. The companion does not host or replace the managed AI harness.
 See [Windows app architecture and recovery](windows-app.md).
 
@@ -65,7 +64,7 @@ editable workflow preferences. A future admin UI can call the same services.
 The shared launch service pins authorized resource IDs/hashes and the complete
 execution bundle. A handler registry selects ordinary Python application
 adapters independently of workflow keys. Accounts keeps its business checks,
-catalog review, and verified Excel write mechanics. The default skill handler
+catalog review, and verified Tally write reconciliation. The default skill handler
 supports reviewed proposals; no additional employee/workflow is enabled.
 
 `workflow_runs` retains existing run rows and foreign-key relationships.

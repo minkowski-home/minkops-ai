@@ -15,20 +15,18 @@ choice per account/workflow in this browser. Multiple PCs require an explicit
 choice unless a choice was already saved. A missing or expired saved PC never
 switches automatically to another machine.
 
-Discovery is loaded for that PC only. Tally company choices and Excel destination
-catalogs come from its latest discovery; missing/incomplete discovery blocks launch.
-Dashboard Quick Run retains the same PC even when another PC has newer discovery.
-Changing the picker without launching sends Quick Run back to setup rather than
-using its older target. A later folder rebind cannot reroute an approved Excel save,
-and an explicitly PC-directed save cannot fall back to a browser folder.
+Discovery is loaded for that PC only. Tally company choices come from its latest
+discovery; missing/incomplete discovery blocks launch. Dashboard Quick Run
+retains the same PC even when another PC has newer discovery. Changing the picker
+without launching sends Quick Run back to setup rather than using its older target.
 
 Bill entry has one settings panel: its initial values are saved tenant defaults.
 Edits apply to the current run; only workspace editors can persist them with
-**Save defaults** or change workflow status. Catalog and company choices stay
-contextual under **Destination and checks**. New Tally runs honor the selected
-review mode. **Only exceptions** dispatches clean supported bills independently;
-uncertain inputs stay in Attention. **All outputs** and client-wide review policies
-retain explicit approval. Already-pinned legacy runs keep their original behavior.
+**Save defaults** or change workflow status. Company choices stay contextual
+under **Tally destination**. Runs honor the selected review mode. **Only
+exceptions** dispatches clean supported bills independently; uncertain inputs
+stay in Attention. **All outputs** and client-wide review policies retain
+explicit approval.
 
 Workflow 0.11.1 selects company/catalog-scoped master references with identity
 evidence from full Discovery, including aliases and relevant native voucher history.
@@ -49,8 +47,7 @@ absent optional values, and similarity to an existing voucher. Native
 reconciliation alone decides duplicates. Attention labels come from the code.
 Under Only exceptions, held bills are flagged in shared Attention. A file may
 contain one bill plus copies and companion documents (e-way bill, IRN
-acknowledgement, challan, PO); those corroborate a single record. Runs pinned to
-earlier versions keep their free-text contract.
+acknowledgement, challan, PO); those corroborate a single record.
 
 Workflow 0.12.1 closes three gaps found by the 39-bill paid evaluation. Supplier
 identity must come from what the bill prints; when a printed name such as a
@@ -94,11 +91,10 @@ with `MINKOPS_UI_ARTIFACTS`. Unit tests remain `npm test`.
 
 ### v1 settings and handler policy
 
-New UI launches are Tally-only. Read bills groups the input format, Tally
-destination groups discovery/company/voucher-type choices, and Review and save
-groups review mode. Exact ledger/amount validation, duplicates and native
-readback are mandatory. Excel/Both/draft and Excel-only checks are hidden in
-v1; pinned legacy runs retain their adapters and recovery contracts.
+Bills are saved only to Tally. Read bills groups the input format, Tally
+destination groups discovery/company choices, and Review and save groups review
+mode; each company's confirmed posting pattern sets its voucher types. Exact
+ledger/amount validation, duplicates and native readback are mandatory.
 
 The server owns the following maximum handler matrix. It further removes write
 actions when mandatory values, company/master identity, source evidence or
@@ -182,68 +178,65 @@ Saved and duplicate bills are excluded. Multi-bill PDFs have one row per bill;
 inputs with no proposal have one file row. The open file-level bill Attention ID
 is preferred, then the supplier ID; several bills may share that ID.
 
-1. Connect the Windows PC and grant the destination folder. Run Source discovery
-   and confirm Excel header mappings, then explicitly refresh the real workbook
-   before using it as a destination. For Tally, confirm the selected company's
-   complete version 2 context package. Each run pins company identities, full
+1. Connect the Windows PC and grant the folder holding the bills. Run Source
+   discovery and confirm the selected company's complete version 2 context
+   package. Each run pins company identities, full
    masters, recent vouchers and reviewed notes as authorized JSON inputs; Bill
    Entry has no schema search or reference collection job.
 2. Choose one locked company for the run, or let each bill route to any company
    in discovery using buyer identity and evidenced client context. The scan saves
    its company GUID and selection evidence; uncertain routing requires handoff.
-   Upload/select PDFs and images. Excel, Tally and Both remain visible configuration
-   choices. Mock-client's trusted solution policy enables only Tally for Bill entry;
-   disabled choices cannot be enabled by changing preferences or launch payloads.
-   Source discovery independently supports Excel, Tally and Both.
-   Combined Bill entry writes are reserved for a later verified adapter contract;
-   the API rejects Both rather than silently using only one destination.
-   Multiple inputs create independent durable hosted sessions under one task.
+   Upload/select PDFs and images. Multiple inputs create independent durable
+   hosted sessions under one task.
    Four worker lanes process them concurrently; a provider failure affects only
    its bill. The parent aggregates persisted proposals and unresolved inputs.
 3. Review concise bill identifiers and choose Write bill, Best guess write,
    Create this ledger (when supported), or Do nothing. Accounting corrections
-   belong in Tally/Excel; Minkops has no value editor, correction prompt or
+   belong in Tally; Minkops has no value editor, correction prompt or
    append/update selector. After external correction and discovery refresh,
    Recheck bill retries only that unresolved input. Completed sibling writes stay
    intact. Good bills can continue independently. See [shared attention](attention.md).
 4. All scans are persisted before approval. Approval commits immutable plans
    and queues serial native work grouped by company before returning.
    The tray companion can finish after the UI closes. Web and desktop use the
-   same API, review component and task state. A browser-only Excel folder still
-   needs an open page and its local permission.
+   same API, review component and task state.
 
 ## Source accuracy and recovery
 
 Business identity uses supplier, invoice number and the Indian April–March
 invoice year (`accounts/vouchers.py` `invoice_year`): supplier serials are unique
-within it, whatever financial year the buyer's books use. Excel otherwise uses complete confirmed
-business keys. IDs do not depend on a task, uploaded filename or processing order.
-Existing external rows/vouchers and backfills are checked against destination
-data, rather than relying only on prior application history.
+within it, whatever financial year the buyer's books use. IDs do not depend on a
+task, uploaded filename or processing order. Existing vouchers and backfills are
+checked against Tally, rather than relying only on prior application history.
 
-Exact duplicates produce an alert and no additional row/voucher. A different
-version is held for an explicit one-click decision. Excel corrections compare observed values
-against extraction-time values and recheck current destination bytes. Tally
-corrections compare the complete fetched voucher fingerprint, then target its
+Exact duplicates produce an alert and no additional voucher. A different version
+is held for an explicit one-click decision. Tally corrections compare the
+complete fetched voucher fingerprint, then target its
 observed original date and MASTER ID. Another intervening edit requires another
 review. Updates retain the observed voucher GUID; Tally may assign its own GUID
 on creation.
 
-Approved plans keep the format they were approved in. A protocol-5 companion
-(0.9.0+) receives each one as a v5 voucher (header plus balanced ledger lines,
-see [Windows app](windows-app.md#companion-090-contracts)) searched within the
-bill's invoice year; its receipt is verified against that upgrade and stored in
-the usual observation shape. The invoice identity hash is unchanged, so vouchers
-saved earlier keep their remote IDs and reservations. Plans without discovered
-ledger and voucher-type GUIDs keep their original writer until they drain.
+An approved plan is executed exactly as stored: a v5 voucher (header plus
+balanced ledger lines, see [Windows app](windows-app.md#companion-090-contracts))
+that a 0.9.0+ companion searches for within the bill's invoice year before
+saving. The invoice identity hash predates this format, so vouchers saved by
+earlier releases keep their remote IDs and are recognised as duplicates.
 Refresh observes bills with the same reader as the save, so a reader change is
-never mistaken for an edit made in Tally.
+never mistaken for an edit made in Tally; an Attention baseline from the retired
+reader stays pending until it is marked Done.
 
-Pending writes reserve the workbook, or the company GUID and bill identity,
-across runs and registered PCs. Confirmed Tally company/ledger identities and
-versions are rechecked natively before saving. Each write requires exact saved
-bytes or voucher/ledger/amount readback. Completion of one native job cannot
-complete a batch with pending or held bills.
+Apply migrations `0018_retire_excel_bill_destination.sql` and
+`0019_retire_legacy_runs.sql` before reinstalling Bill Entry 0.18.0. `0018`
+removes the retired `output_mode` setting so saved settings validate against the
+new schema; `0019` stops unfinished runs on retired bill contracts the way Stop
+does and leaves one "Run retired" attention item for each. Every registered PC
+needs companion 0.9.0+.
+
+Pending writes reserve the company GUID and bill identity across runs and
+registered PCs. Confirmed Tally company/ledger identities and versions are
+rechecked natively before saving. Each write requires voucher/ledger/amount
+readback. Completion of one native job cannot complete a batch with pending or
+held bills.
 
 Consequential jobs are not automatically repeated after lease expiry. Explicit
 Resume saves first reconciles the destination, handling an already applied write
@@ -251,8 +244,8 @@ without adding it again. Persisted receipts are replayed before another native
 job. A save that finished but was refused or held by its destination returns
 to review with Retry save, which re-sends the same proposal after the fix.
 Cancellation releases pending reservations and preserves applied changes.
-A late cancelled receipt records what was saved without restoring success or
-rewinding newer observed workbook bytes. Independent external writers can still
+A late cancelled receipt records what was saved without restoring success.
+Independent external writers can still
 race Tally's separate read/import calls: ambiguous matches or mismatched readback
 require reconciliation, never a claimed successful save.
 
@@ -262,13 +255,9 @@ input is resubmitted. A failure before the turn exists is ambiguous, so the
 bill stays unresolved for an explicit Recheck bill. While saves wait for the
 destination PC, the run names that PC and asks to keep Minkops running there.
 
-## Supported mapping
+## Voucher proposals
 
-Excel uses actual confirmed headers, sheet/table boundaries and types; it does
-not impose a universal invoice schema. Existing workbook protections, formulas,
-styles, hash checks, native backups and atomic replacement remain in force.
-
-From bill-entry 0.14 Tally has no fixed field list. The AI proposes the voucher
+Bill Entry imposes no fixed field list. The AI proposes the voucher
 the client's own practice records for each document: the family (an invoice is
 a Purchase or a Journal; a supplier credit note is a Debit Note), the voucher
 type, the supplier and every other line (role, ledger, side, amount, optional
@@ -277,7 +266,8 @@ the routed company's pinned discovery (`accounts/vouchers.py` `check`). The
 application only binds and proves it:
 
 - every identity belongs to the routed company, is active where that matters,
-  and every ledger is distinct; purchases use the run's chosen voucher type;
+  and every ledger is distinct; purchases use the voucher type of the company's
+  confirmed posting pattern;
 - the server computes the supplier line from the printed total, and debits must
   equal credits to the paisa;
 - each tax line is within one rupee of its own printed rate × taxable value, and
@@ -319,9 +309,7 @@ Approved bills are stored as native v5 plans (Windows companion 0.9.0+, see
 [Windows app](windows-app.md#companion-090-contracts)) and reviewed through a
 server-built preview of exactly those lines; `data` keeps only the document
 summary (supplier, number, date, total, tax) that attention, policies and exports
-read. Proposals pinned to 0.13 or earlier keep their fixed Purchase mapping and
-writer until they drain (MIN-155). This accounting voucher contract does not
-assert statutory filing readiness.
+read. This accounting voucher contract does not assert statutory filing readiness.
 
 The adapter uses bounded fixed XML exports/imports on the PC's loopback port;
 there is no renderer-supplied XML, URL, TDL or shell. Tally's documented correction
@@ -350,12 +338,12 @@ Retry save. Native rejections are classified (date, permission, voucher type,
 voucher number, ledger) into short labels; Tally's own text stays in diagnostics.
 See [the Windows companion](windows-app.md).
 
-Each run writes with a purchase voucher type pinned per company from discovered
-masters (automatic when only one is active, otherwise chosen at launch), and checks
-duplicates across every purchase-based type, including inactive ones; a matching
-Journal voucher holds. Choosing "Use one company for this run" suits practices that
-keep one Tally company per financial year. **Show details** on each proposal lists
-the company, voucher type, date, ledgers and amounts it will enter.
+Each purchase uses the voucher type of its company's confirmed posting pattern,
+and duplicates are checked across every purchase-based type, including inactive
+ones; a matching Journal voucher holds. Choosing "Use one company for this run"
+suits practices that keep one Tally company per financial year. **Show details**
+on each proposal lists the company, voucher type, date, ledgers and amounts it
+will enter.
 
 ## Verification
 
@@ -389,4 +377,4 @@ uv run --all-packages python scripts/bill_entry_fixtures.py score RUN_ID package
 
 ### GST supplier creation (0.13 / Windows 0.8)
 
-Create this ledger requires printed GSTIN, registration type, state, place of supply, address and PIN with literal page evidence, deterministic checksum/state validation, and a compatible registered supplier template in the same confirmed company. Existing GSTIN aliases, missing evidence and cross-state creation require manual handling in v1. Older pinned runs retain their prior behavior. The native callback must verify every approved statutory and mailing field before a bill is queued; an import acknowledgement alone is insufficient.
+Create this ledger requires printed GSTIN, registration type, state, place of supply, address and PIN with literal page evidence, deterministic checksum/state validation, and a compatible registered supplier template in the same confirmed company. Existing GSTIN aliases, missing evidence and cross-state creation require manual handling in v1. The native callback must verify every approved statutory and mailing field before a bill is queued; an import acknowledgement alone is insufficient.

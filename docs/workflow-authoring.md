@@ -93,7 +93,7 @@ Each selected employee has a client `binding.json` containing `workflows`:
 {
   "workflows": [
     {"key": "bill-entry", "status": "active",
-     "defaults": {"review_mode": "all_outputs", "output_mode": "excel_in_place", "input_format": "mixed"}}
+     "defaults": {"review_mode": "all_outputs", "input_format": "mixed"}}
   ]
 }
 ```
@@ -136,7 +136,7 @@ workflow `variant` descriptor under
 `solutions/<client>/employees/<employee>/workflows/<workflow>/`. For example:
 
 ```json
-{"version":"1.0.0","defaults":{"output_mode":"tally_in_place"},
+{"version":"1.0.0","defaults":{"review_mode":"only_exceptions"},
  "instructions":"client-instructions.md","resources":[]}
 ```
 
@@ -198,8 +198,8 @@ switch for which business systems its workspace uses. Workflow schemas declare
 each option's tools with `x-option-tools`. Installation then disables every
 option that needs a paused tool in the registered schema, and launches enforce
 it server-side. Mock-client currently enables Tally only, which pauses Excel
-discovery sources and Excel bill destinations. The reusable workflows keep their
-Excel/Tally choices.
+discovery sources. Source Discovery keeps its Excel/Tally choices; Bill Entry
+saves only to Tally.
 Run snapshots and deterministic threshold policies survive batch aggregation,
 review, retries, and later installation changes. Explicit approval is required
 before preparing Tally writes, which independently enforce pinned review policy.
@@ -235,8 +235,8 @@ Unsupported capability requirements fail before any paid execution.
 preserves Accounts/native contracts and existing foreign-key relationships;
 there is one run store and one hosted lifecycle. Existing HTTP routes remain
 compatible. `accounts_worker` is the existing bootstrap command over the shared
-dispatcher. Historical runs without handler bindings use the narrowly bounded
-legacy Accounts mapping; legacy unpinned queued runs still require relaunch.
+dispatcher. Migration 0019 pinned a handler binding on every historical run, so
+dispatch never infers one; legacy unpinned queued runs still require relaunch.
 
 Apply every pending migration with `db/migrate.py` before starting a new
 revision. See [database upgrades](../db/README.md). Stop workers while changing

@@ -52,8 +52,8 @@ Codex executors are out of scope.
 | Method | Current implementation | Development direction | Not introduced yet |
 | --- | --- | --- | --- |
 | REST/MCP | Preferred product direction; Accounts does not currently bind business-system MCPs to its sessions. | Let skills compose existing authorized tools; keep access and consequential-write policy enforceable. Add a binding only for a concrete workflow need. | New SaaS/Tally integrations or a general connector catalogue. |
-| Local execution | Browser-granted Excel saves and the Windows tray companion refresh selected folders, save approved Excel bytes, and save approved Tally vouchers (purchase, journal, debit note, payment, receipt and contra) through one native writer with readback. Web users can request bounded work on their connected PC. Codex Python runs in an OpenAI-hosted sandbox. | Keep native adapters bounded by explicit grants, approval and destination readback. | Customer-machine Python/terminal execution, general remote shells, or self-hosted Agents API environments. |
-| Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
+| Local execution | Browser folder grants and the Windows tray companion refresh selected input folders; the companion saves approved Tally vouchers (purchase, journal, debit note, payment, receipt and contra) through one native writer with readback. Web users can request bounded work on their connected PC. Codex Python runs in an OpenAI-hosted sandbox. | Keep native adapters bounded by explicit grants, approval and destination readback. | Customer-machine Python/terminal execution, general remote shells, or self-hosted Agents API environments. |
+| Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns no modified files; approved entries are saved natively in Tally. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey. |
 | Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
 
 The implementation provides reusable run controls and lifecycle boundaries,
@@ -111,9 +111,8 @@ that a consequential write is correct.
 The [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview)
 supplies the Codex harness for reasoning, tool use, session orchestration,
 compaction, and recovery. Accounts desk uses **OpenAI-hosted execution environments**
-with `gpt-6-luna`. Minkops persists tenant-scoped runs and approvals; the browser
-or registered Windows companion applies approved Excel changes to a granted local folder;
-the companion also saves approved Tally vouchers and verifies them by readback. See
+with `gpt-6-luna`. Minkops persists tenant-scoped runs and approvals; the registered
+Windows companion saves approved Tally vouchers and verifies them by readback. See
 [the Accounts desk guide](docs/accounts-desk.md) for contracts and recovery.
 
 Use OpenAI-provided capabilities when appropriate, including web search and

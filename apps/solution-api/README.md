@@ -26,4 +26,4 @@ See [workflow setup and recovery](../../docs/accounts-desk.md).
 
 Accounts routes own HTTP validation, authentication, CSRF and response mapping.
 Application commands and worker execution live in `minkops_platform.accounts`;
-workbook mechanics live in `minkops_connectors.excel`.
+workbook reading lives in `minkops_connectors.excel`.

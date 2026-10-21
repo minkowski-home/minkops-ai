@@ -34,8 +34,8 @@ refresh. Bill writes retain the original operator's authorization. Refresh uses
 the already granted PC and exact server-owned target, not a new resource grant.
 Missing/offline destinations and unresolved identities stay pending. Unsupported
 workflows can create attention items and use manual Done; automatic refresh needs
-a domain-specific evidence adapter. Current adapters cover Tally vouchers/masters
-and PC-bound Excel rows. A browser-only workbook requires manual Done.
+a domain-specific evidence adapter. The current adapter covers Tally vouchers
+and masters; items left from retired Excel saves require manual Done.
 Grouping and sorting happen before pagination (200 items per page). Bulk refresh
 queues at most 200 eligible pending items per click, rotating by last check;
 offline and unsupported items remain available for manual Done.
