@@ -44,6 +44,26 @@ EXECUTION_SCHEMA = {
 }
 
 
+# Tool-session workflows run without an execution environment: what they pin
+# is their model and the texts the sessions are instructed with, nothing that
+# executes. `stages` names each further kind of session beside the main one.
+SESSIONS_SCHEMA = {
+    "type": "object",
+    "required": ["model"],
+    "additionalProperties": False,
+    "properties": {
+        "model": {"type": "string", "minLength": 1},
+        "reasoning_effort": {"enum": ["low", "medium", "high"]},
+        "stages": {
+            "type": "object",
+            "maxProperties": 10,
+            "propertyNames": {"pattern": "^[a-z][a-z_]{0,30}$"},
+            "additionalProperties": {"type": "string", "minLength": 1},
+        },
+    },
+}
+
+
 def relative_path(value):
     if (
         not isinstance(value, str)
@@ -170,3 +190,21 @@ def build_snapshot(directory, metadata):
     }
     snapshot["sha256"] = digest(snapshot)
     return validate_snapshot(snapshot)
+
+
+def build_session_bundle(directory, metadata):
+    """The pinned content of a tool-session workflow: model and instruction texts.
+
+    The skill's frontmatter is checked like any skill's and then left out: the
+    session is told the procedure, not the manifest.
+    """
+    sessions = metadata["sessions"]
+    Draft202012Validator(SESSIONS_SCHEMA).validate(sessions)
+    skill = read_resource(directory, metadata["instructions"])
+    skill_manifest(skill)
+    stages = {name: read_resource(directory, path) for name, path in sorted(sessions.get("stages", {}).items())}
+    if not all(text.strip() for text in stages.values()):
+        raise ValueError("Stage instructions must not be empty.")
+    return {"format_version": 1, "key": metadata["key"], "definition_version": metadata["version"],
+            "model": sessions["model"], "reasoning_effort": sessions.get("reasoning_effort"),
+            "instructions": skill.split("---", 2)[2].strip(), "stages": stages, "variant": None}

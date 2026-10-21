@@ -14,7 +14,12 @@ from jsonschema import Draft202012Validator, FormatChecker
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
-from minkops_platform.runtime.bundles import EXECUTION_SCHEMA, build_snapshot
+from minkops_platform.runtime.bundles import (
+    EXECUTION_SCHEMA,
+    SESSIONS_SCHEMA,
+    build_session_bundle,
+    build_snapshot,
+)
 
 DESCRIPTOR_SCHEMA = {
     "type": "object",
@@ -61,6 +66,7 @@ DESCRIPTOR_SCHEMA = {
             },
         },
         "execution": EXECUTION_SCHEMA,
+        "sessions": SESSIONS_SCHEMA,
         "handler": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*$"},
         "presentation": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
         "capabilities": {
@@ -86,6 +92,8 @@ class WorkflowDefinition:
     instructions: str
     agent_output_schema: dict[str, Any] | None = None
     execution_snapshot: dict[str, Any] | None = None
+    # A tool-session workflow's pinned model and instructions (runtime.bundles).
+    session_bundle: dict[str, Any] | None = None
 
 
 def load_definition(directory: Path) -> WorkflowDefinition:
@@ -119,8 +127,11 @@ def load_definition(directory: Path) -> WorkflowDefinition:
     )
     if agent_schema is not None:
         Draft202012Validator.check_schema(agent_schema)
+    if "execution" in metadata and "sessions" in metadata:
+        raise ValueError("A workflow runs in a hosted environment or in tool sessions, not both")
     snapshot = build_snapshot(directory, metadata) if "execution" in metadata else None
-    return WorkflowDefinition(metadata, *schemas, instructions, agent_schema, snapshot)
+    bundle = build_session_bundle(directory, metadata) if "sessions" in metadata else None
+    return WorkflowDefinition(metadata, *schemas, instructions, agent_schema, snapshot, bundle)
 
 
 def resolve_run_config(

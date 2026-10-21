@@ -8,13 +8,14 @@ import json
 import re
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from jsonschema import Draft202012Validator
 from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
 from .errors import ServiceError
+from .resources import REPOSITORY_ROOT
 from .workflows import load_definition, register_workflow, validate
 
 SLUG = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -128,6 +129,8 @@ def client_variant(definition, directory, filename, solution_id):
     for field in ("name", "description"):
         if field in variant:
             metadata[field] = variant[field]
+    if definition.session_bundle is not None:
+        return _session_variant(definition, metadata, variant, directory, solution_id)
     snapshot = deepcopy(definition.execution_snapshot)
     if snapshot is None:
         raise ValueError("Client variants require a core execution bundle.")
@@ -157,6 +160,24 @@ def client_variant(definition, directory, filename, solution_id):
         instructions=instructions,
         execution_snapshot=validate_snapshot(snapshot),
     )
+
+
+def _session_variant(definition, metadata, variant, directory, solution_id):
+    """A tool-session workflow takes the client procedure as more instructions, never resources."""
+    from .runtime.bundles import read_resource
+
+    if variant.get("resources"):
+        raise ValueError("Tool-session workflows take client instructions, not resources.")
+    bundle = deepcopy(definition.session_bundle)
+    bundle["variant"] = {"solution": solution_id, "core_version": metadata["version"], "version": variant["version"]}
+    instructions = definition.instructions
+    if variant.get("instructions"):
+        addition = read_resource(directory, variant["instructions"])
+        if not addition.strip():
+            raise ValueError("Client instructions must not be empty.")
+        bundle["instructions"] += "\n\n## Client procedure\n\n" + addition.strip()
+        instructions += "\n\n## Client procedure\n\n" + addition
+    return replace(definition, metadata=metadata, instructions=instructions, session_bundle=bundle)
 
 
 def load_solution(root: Path, solution_id: str) -> Installation:
@@ -218,7 +239,9 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             if definition.metadata["owner"] != employee_key:
                 raise ValueError("Workflow must belong to its declared employee.")
             handler = definition.metadata.get("handler", "skill.proposal")
-            get_handler(handler)
+            from .work import HANDLER_MODULES
+            if handler not in HANDLER_MODULES:
+                get_handler(handler)
             policies = item.get("policies", [])
             validate_policies(policies)
             defaults = {**definition.metadata["tenant_defaults"], **item.get("defaults", {})}
@@ -332,3 +355,44 @@ def install(connection, installation: Installation, *, actor_email: str):
             )
             installed.append(key)
         return installed
+
+
+def installed_definition(binding, key):
+    """Resolve only a trusted installation's employee-owned path."""
+    relative = binding["definition"]
+    parts = PurePosixPath(relative).parts
+    if len(parts) != 3 or parts[1] != "workflows" or parts[2] != key or "\\" in relative:
+        raise ValueError("Installed workflow definition has an invalid path.")
+    root = REPOSITORY_ROOT / "employees"
+    directory = root / relative
+    if not directory.resolve().is_relative_to(root.resolve()):
+        raise ValueError("Installed workflow definition must stay inside employees.")
+    definition = load_definition(directory)
+    if binding.get("solution"):
+        composition = load_solution(REPOSITORY_ROOT, binding["solution"])
+        if key not in composition.workflows or composition.bindings[key]["definition"] != relative:
+            raise ValueError("Installed client variant differs from its composition. Reinstall explicitly.")
+        definition = composition.workflows[key]
+    if (
+        definition.metadata["owner"] != parts[0]
+        or definition.metadata.get("handler", "skill.proposal") != binding["handler"]
+        or definition.metadata.get("presentation", "proposal")
+        != binding.get("presentation", "proposal")
+        or set(definition.metadata.get("capabilities", [])) != set(binding.get("capabilities", []))
+    ):
+        raise ValueError(
+            "Installed workflow binding differs from its definition. Reinstall explicitly."
+        )
+    return definition
+
+
+def installed(connection, tenant_id, key):
+    """An active workflow of the tenant and its definition, exactly as its installation binds it."""
+    workflow = connection.execute("SELECT * FROM workflows WHERE tenant_id=%s AND key=%s AND status='active'",
+                                  (tenant_id, key)).fetchone()
+    if not workflow or not workflow["execution_binding"]:
+        raise ServiceError("conflict", "This workflow is not active.")
+    try:
+        return workflow, installed_definition(workflow["execution_binding"], key)
+    except ValueError as error:
+        raise ServiceError("conflict", str(error)) from error

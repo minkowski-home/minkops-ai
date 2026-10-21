@@ -86,7 +86,7 @@ class DispatchTests(TestCase):
         from dataclasses import replace
         from unittest.mock import patch
 
-        from minkops_platform.runtime.launch import installed_definition
+        from minkops_platform.installation import installed_definition
 
         definition = load_definition(
             REPOSITORY_ROOT / "employees/accounts-desk/workflows/bill-entry"
@@ -101,7 +101,7 @@ class DispatchTests(TestCase):
             "capabilities": ["files.snapshot"],
         }
         with (
-            patch("minkops_platform.runtime.launch.load_definition", return_value=changed),
+            patch("minkops_platform.installation.load_definition", return_value=changed),
             self.assertRaisesRegex(ValueError, "Reinstall"),
         ):
             installed_definition(binding, "bill-entry")

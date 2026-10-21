@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
 from minkops_platform import clients
+from minkops_platform.installation import installed_definition
 from minkops_platform.run_controls import owns_task, task_control
-from minkops_platform.runtime.launch import installed_definition
 
 from .desktop import call
 

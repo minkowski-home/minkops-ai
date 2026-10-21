@@ -87,7 +87,7 @@ class WorkflowArchitectureTests(unittest.TestCase):
 
     def test_renamed_existing_workflow_launches_and_validates_without_core_edits(self):
         root, key = self.temporary_definition()
-        with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
+        with patch("minkops_platform.installation.REPOSITORY_ROOT", root):
             run, _ = self.launch(key)
         self.assertNotIn('runtime_binding',run['config'])
         with psycopg.connect(URL,row_factory=dict_row) as connection:
@@ -123,7 +123,7 @@ class WorkflowArchitectureTests(unittest.TestCase):
 
     def test_default_skill_handler_completes_review_and_rejects_invalid_output(self):
         root, key = self.temporary_definition("skill.proposal")
-        with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
+        with patch("minkops_platform.installation.REPOSITORY_ROOT", root):
             run, _ = self.launch(key)
         with psycopg.connect(URL, row_factory=dict_row) as connection:
             row = connection.execute(
@@ -149,7 +149,7 @@ class WorkflowArchitectureTests(unittest.TestCase):
         root, key = self.temporary_definition("skill.proposal")
         pc = self.client.post("/api/tenants/mock-tenant/desktop/devices", headers=self.csrf,
             json={"name": "Future workflow PC", "installation_id": str(accounts.uuid.uuid4())}).json()
-        with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
+        with patch("minkops_platform.installation.REPOSITORY_ROOT", root):
             run, body = self.launch(key, destination_device_id=pc["id"])
             self.assertEqual(run["config"]["destination_device_id"], pc["id"])
             self.assertNotIn('authorized_bindings',run['config'])
@@ -173,7 +173,7 @@ class WorkflowArchitectureTests(unittest.TestCase):
         import hashlib
 
         root, key = self.temporary_definition("skill.proposal")
-        with patch("minkops_platform.runtime.launch.REPOSITORY_ROOT", root):
+        with patch("minkops_platform.installation.REPOSITORY_ROOT", root):
             run, body = self.launch(key)
             expected = {**body, "catalog_id": None, "config": {}}
             with psycopg.connect(URL) as connection:
