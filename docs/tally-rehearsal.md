@@ -3,7 +3,8 @@
 Status: all five companies seeded and reconciled against full native exports.
 Each has 59 planned masters and 50 vouchers; all 75 two-page bills are generated,
 hashed and visually checked. First saves and duplicate replays passed through
-the production adapter. This does not claim a hosted AI Bill Entry run.
+the production adapter. The rebuilt Bill entry ran live on the Pradeepraj Infra
+package on 21 October 2026; see [the rebuild evidence](rebuild/evidence.md).
 
 The fixture scripts start from the open-company contract on `staging` commit
 `1e2d18b34bda802316b9dde0c5ed43e004e7d992`. They never locate, open, close or
@@ -43,17 +44,12 @@ All documents and payment details are explicitly synthetic.
 
 ## Demo configuration and verified results
 
-Leave all five companies open and unlocked. Use **2 September–31 October 2026**
-for Source Discovery, then select the individual `bills/` folders in Bill Entry.
-This period exposes 21 vouchers per company, including the historical duplicate,
-correction baseline and one inventory purchase. Earlier history remains in Tally.
-The complete April–October verification export contains all 250 seed vouchers.
-
-The real platform context serializer produces 16 reference files totalling
-6,762,242 bytes for the recommended period. Including the largest generated bill,
-each child session fits at 7,086,014 bytes and 17 files, within the 8 MB / 45-file
-limits. All five companies with the full April–October history produce 10,349,385
-reference bytes and exceed that limit; use the recommended period for this demo.
+Leave all five companies open and unlocked, and authorise them for one client
+business. Each run asks the PC to refresh its Tally copy, which mirrors every
+master and the vouchers of the current and previous financial years, including
+the historical duplicate, the correction baseline and the inventory purchases.
+Then launch Bill entry with one company's `bills/` folder. A session reads only
+what its lookups return, so the size of a company's history never limits a run.
 
 | Company | Planned masters verified | Vouchers verified | Individual bills |
 | --- | ---: | ---: | ---: |
@@ -63,7 +59,7 @@ reference bytes and exceed that limit; use the recommended period for this demo.
 | Test Company | 59 | 50 | 15 |
 | Third Tally Company | 59 | 50 | 15 |
 
-Discovery and native saves succeeded with password-protected companies already
+Reads and native saves succeeded with password-protected companies already
 unlocked, data in three separate folders, and repeated folder-local company
 numbers. Closed-company and same-name/wrong-GUID probes were held. No product
 process-control or installation-path logic was needed. The final explicit seed
@@ -118,8 +114,10 @@ node scripts/seed_tally_demo.mjs NEW_PACKAGE
 node scripts/seed_tally_demo.mjs NEW_PACKAGE --apply
 ```
 
-The baseline is a complete `discoverClientContext` snapshot covering the live
-companies. First create one simple `MKQANos` unit in any company through Tally
+The baseline is a snapshot of the live companies in the shape the seeder records
+in an earlier package's `evidence/seeded-snapshot.json`: each company's identity,
+masters and vouchers, read with the sync connector. First create one simple
+`MKQANos` unit in any company through Tally
 (formal name `QA Pieces`, three decimal places). The seeder requires an
 exported unit created by this installation before importing inventory masters.
 It retains native fields, replaces the name, and removes native identity fields
@@ -130,10 +128,10 @@ or vouchers. Every native import records its intent and response separately;
 an uncertain import is never automatically repeated. Explicitly rerun after
 read-only reconciliation to continue a partially applied seed.
 
-The first historical purchase in each company is saved through the actual
-`saveTallyBill` protocol 3 path with pinned company, ledger and voucher-type
-references, then immediately replayed to prove duplication prevention. The
-remaining history is imported natively. Final discovery verifies every amount,
+The first historical purchase in each company is saved through the protocol 5
+writer (`saveVoucher`) with pinned company, ledger and voucher-type references,
+then replayed at once to prove duplicate prevention. The remaining history is
+imported natively. A final read with the sync connector verifies every amount,
 ledger, date and native inventory allocation. Native receipts, before/after
 snapshots and adapter proofs live under the package's top-level `evidence/`.
 

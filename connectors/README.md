@@ -12,6 +12,6 @@ in `solutions/`. Do not place credentials in employee or solution files.
 The installable `minkops_connectors` package lives in `src/`. Add adapters
 there as their concrete integrations are implemented.
 
-`minkops_connectors.excel` reads workbooks for source discovery: sheet, table,
-header and formula projections. It never edits a workbook, and it does not own
-tenant policy or workflow prompts.
+`minkops_connectors.statement` reads bank statements (CSV, and XLSX through
+`excel.open_workbook`), and `minkops_connectors.documents` renders bill pages for
+sessions. Neither edits a file, and neither owns tenant policy or workflow prompts.

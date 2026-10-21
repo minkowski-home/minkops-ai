@@ -1,13 +1,13 @@
 # Authoring and installing workflows
 
-Workflows use repository-owned skills and the managed hosted runtime. Minkops
-owns authorized inputs, durable runs, human review, independent checks, and
-verified writes. Start with an existing handler and tools; introduce custom
-Python only for a demonstrated gap or a guarantee the application must enforce.
+A workflow is a repository-owned skill run as tool sessions on the run model.
+Minkops owns authorized inputs, durable runs, every check, human review and
+verified writes; the model reads, looks things up and proposes. Start from an
+existing handler and its tools. Add Python only for a guarantee the application
+must enforce, or a lookup the session demonstrably needs.
 
-Use the shared task/run and desktop-job contracts for execution and controls.
-They provide the configurable active-processing budget for existing and future
-workflows; see [run limits and updates](run-limits-and-updates.md).
+Runs share the task controls and the configurable active-processing budget; see
+[run limits and updates](run-limits-and-updates.md).
 
 ## Repository contracts
 
@@ -17,94 +17,67 @@ employees/<employee>/
   workflows/<workflow>/
     workflow.json
     SKILL.md
-    execution-instructions.md
     tenant-config.schema.json
     run-config.schema.json
-    output.schema.json
-    agent-output.schema.json       # optional separate proposal contract
-    scripts/                      # explicitly bundled helpers, if needed
+    stages/<stage>.md             # instructions for each further kind of session
 solutions/<client>/
   solution.ts                     # console identity and optional tenant-slug mapping
   installation.json
   employees/<employee>/binding.json
+  employees/<employee>/workflows/<workflow>/variant.json   # optional client procedure
 ```
 
-`employee.json` defines `key`, `name`, `description`, `config_schema`, and
-`defaults`. See `employees/accounts-desk/employee.json` for the installed example.
-An employee is a product grouping, not another agent execution loop.
+`employee.json` defines `key`, `name`, `description`, `config_schema` and
+`defaults`; see `employees/accounts-desk/employee.json`. An employee is a product
+grouping, not another agent loop.
 
-`workflow.json` declares the owner, version, skill/schema paths, tenant/run
-defaults, and how it runs: `execution` for a hosted environment, or `sessions` for
-tool sessions (a model, an optional reasoning effort, and named stages with their
-own instructions). Three additional fields select reuse:
+`workflow.json` (validated by `platform/src/minkops_platform/workflows.py`) declares:
 
-- `handler`: `skill.proposal`, `accounts.discovery` or `accounts.bill` on hosted
-  runs; `desk.statement` on the run model (the registry in `platform/work.py`).
-- `presentation`: `proposal`, `accounts-discovery`, `accounts-bill` or `desk-review`.
-- `capabilities`: required authorized capabilities; currently `files.snapshot`.
+- `key`, `version`, `name`, `description` and `owner`, the employee it belongs to;
+- `handler`: the run handler, one key of the closed registry
+  `work.HANDLER_MODULES` (`desk.bill`, `desk.statement`). A request never names a
+  module;
+- `presentation`: the review surface for its records (`desk-review`);
+- `instructions` (the skill, with YAML `name` and `description`),
+  `tenant_config_schema` and `run_config_schema`, as paths inside the directory;
+- `tenant_defaults` and `run_defaults`;
+- `sessions`: the `model`, an optional `reasoning_effort` (`low`, `medium`,
+  `high`), and optional `stages`, each naming its own instructions. Statement
+  entry's `layout` stage is one.
 
-A client variant adds its procedure to a tool-session workflow's instructions;
-such workflows take no client resources.
+Every file is read from inside the workflow's own directory, without symlinks.
+Launching a run pins the session bundle (`runtime/bundles.py`): model, reasoning
+effort and every instruction text, with a digest. Later edits never change a run
+already launched.
 
-Workflow identity and handler identity are separate. Several definitions can
-reuse a handler with different procedures and valid configuration. Tenant keys
-must be unique. Use Accounts handlers only for their actual catalog/bill
-contracts; their specialized UI includes existing native discovery behavior.
+A handler module provides what its runs need:
 
-The default `skill.proposal` handler accepts authorized existing file snapshots,
-validates the declared output schema, waits for review, and records a completed
-result after approval. It does not perform external writes. Its product adapter
-renders primitive schema fields, file selection, and result review. Complex
-resource selection or business review requires a product adapter. No new default
-workflow or employee is installed by this refactor.
+- `launch`: validate the request and create the run, its items and records;
+- `session` and `settle`: the session an item runs, and how its outcome settles
+  the item's records (see `platform/src/minkops_platform/lanes.py`);
+- `summarize`, `detail`, `decide`, `approve_ready`, `written` and `stopped`, for
+  the runs API, decisions, native write receipts and Stop.
 
-Skills require YAML `name` and `description`. List every supporting script or
-reference in `execution.resources`; undeclared files, credentials, and expected
-evaluation answers must never enter the bundle. Hosted Python helpers can be
-ordinary Python scripts. Network access is disabled for the current runtime;
-declaring a capability or connector does not enable a business-system MCP/API.
-
-## Shared destination selection
-
-The shared workflow launcher provides **Destination PC** by default for Bill entry
-and the generic `proposal` presentation; Source Discovery uses the same picker.
-Hosted-only proposals can choose **No PC destination**. A chosen PC is destination
-context, not a claim that hosted reasoning runs on the customer's machine.
-
-Launch transport accepts an optional UUID `destination_device_id` beside `config`,
-not inside a workflow's run schema. The shared platform validates tenant, owner,
-revocation and expiration, includes the choice in request identity, and pins it in
-server-owned run configuration. An omitted/null choice preserves legacy request
-fingerprints. Client configuration cannot inject or replace that trusted field.
-Existing handlers continue hosted execution and do not gain shell/tool/write access.
-Future local-destination handlers must use the pinned PC when resolving resources
-and enforce it again at approval and execution; the field itself grants nothing.
-
-Bill Entry enforces catalog/PC agreement and per-PC folder grants. Discovery lookup
-accepts `?device_id=<UUID>` and never falls back to a different device. Legacy
-unscoped discovery reads remain available to restore the native discovery setup.
+Its tools are MCP-shaped contracts (`runtime/tools.py`): a name, a description
+and an input schema, checked before the handler runs. Tools are read-only or
+record a proposal for the run's own review, and they scope themselves to the run.
 
 ## Client composition and installation
 
-`solutions/<client>/installation.json` selects an **existing** tenant and enabled
-employee references. For example, the current mock composition is:
-
-```json
-{"tenant": "mock-tenant", "employees": ["accounts-desk"]}
-```
-
-Each selected employee has a client `binding.json` containing `workflows`:
+`solutions/<client>/installation.json` selects an **existing** tenant and its
+employees; for example, `{"tenant": "mock-tenant", "employees": ["accounts-desk"]}`.
+Each employee's `binding.json` lists its workflows:
 
 ```json
 {
   "workflows": [
-    {"key": "bill-entry", "status": "active",
-     "defaults": {"review_mode": "all_outputs", "input_format": "mixed"}}
+    {"key": "statement-entry", "status": "active"},
+    {"key": "bill-entry", "status": "active", "defaults": {"review_mode": "all_outputs", "company_mode": "infer"}}
   ]
 }
 ```
 
-First apply migrations, then validate and install through the existing uv stack:
+Apply migrations, then validate and install with the uv stack:
 
 ```sh
 uv run --all-packages python db/migrate.py
@@ -113,165 +86,68 @@ uv run --all-packages python -m minkops_api.install_workflows mock-client --acto
 uv run --all-packages python -m minkops_api.install_workflows mock-client --actor-email admin@example.com
 ```
 
-Installation is a server administrative operation using `DATABASE_URL`.
-`--actor-email` selects an existing verified tenant/platform administrator for
-authorization and audit; it is not a browser authentication mechanism. Run the
-CLI only with controlled administrative database credentials. The service is
-independent of CLI parsing so a future authenticated admin UI can call it.
+Installation is a server administrative operation on `DATABASE_URL`.
+`--actor-email` names an existing verified tenant or platform administrator for
+authorization and audit; it is not browser authentication. Validation checks
+ownership, paths, schemas, defaults and handlers. A dry run also checks the
+tenant's current state, then rolls its transaction back.
 
-Validation checks ownership, paths, schemas, defaults, handlers, and policies.
-Dry run also checks current tenant state and rolls back its entire transaction.
-Installation does not create tenants/users, grant file/device access, or provision
-connections. It preserves existing operator settings and employee/workflow
-statuses, rejects incompatible schemas atomically, and increments configuration
-versions only for schema changes. Binding status/defaults initialize new rows.
-Removing a reference does not delete tenant history or disable existing installs;
-pause a workflow through current settings when withdrawing it.
+Installation creates no tenants or users and grants no file, device or company
+access. It keeps existing operator settings and statuses, rejects incompatible
+schemas atomically, and bumps configuration versions only for schema changes.
+Binding statuses and defaults initialise new rows only. Removing a reference
+deletes no history; pause a workflow to withdraw it.
 
-The web build discovers `solutions/*/solution.ts` automatically. A new client
-manifest needs a rebuild, not a shared app registry edit. Tenant membership and
-API authorization remain the authority for access.
-If the public solution ID differs from the tenant slug, set `tenantSlug` in its
-`solution.ts` manifest to match `installation.json`; no app-level alias is needed.
+The web build discovers `solutions/*/solution.ts` automatically: a new client
+needs a rebuild, not a registry edit. If the public solution ID differs from the
+tenant slug, set `tenantSlug` in `solution.ts` to match `installation.json`.
 
-## Trusted Python extensions
+## Client procedures
 
-Core employees and workflows remain in `employees/`. A client may add an
-`employee` object with name/description/default overrides to its binding and a
-workflow `variant` descriptor under
-`solutions/<client>/employees/<employee>/workflows/<workflow>/`. For example:
+Core workflows hold only rules that generalise. A client's own procedure lives
+in a variant under `solutions/<client>/employees/<employee>/workflows/<workflow>/`,
+selected by the binding's `"variant": "variant.json"`:
 
 ```json
-{"version":"1.0.0","defaults":{"review_mode":"only_exceptions"},
- "instructions":"client-instructions.md","resources":[]}
+{"version": "1.0.0", "instructions": "client-instructions.md", "defaults": {"review_mode": "only_exceptions"}}
 ```
 
-The workflow binding selects `"variant":"variant.json"`. Client instructions
-append to core guidance; resources stay within the client's directory. Default
-precedence is core, variant, then binding; existing operator settings are preserved.
-A variant cannot replace the core handler, schemas, execution model or mandatory
-write policy. Installation validates containment and hashes the combined bundle.
-Runs pin both versions so another client or later edit cannot alter pending work.
-Reinstall older bindings to record their owning solution.
+Its instructions are appended to the core skill under "Client procedure". Its
+defaults apply over the core's, and the binding's over both. A variant may also
+rename the workflow. It never replaces the handler, schemas, tools or checks.
+Runs pin the core and variant versions with the composed text, so another
+client or a later edit cannot change pending work.
 
-Use three extension locations:
+Extensions go in three places:
 
-1. Workflow helpers under `employees/`, bundled explicitly for model execution.
-2. Application handlers and deterministic policies under `platform/`, run by
-   trusted Python independently of model compliance.
-3. External-system/file adapters under `connectors/`, reused by handlers.
+1. Procedure, in skills and client variants under `employees/` and `solutions/`.
+2. Handlers, tools and deterministic checks under `platform/`, enforced by trusted
+   Python whatever the model does.
+3. External-system and file adapters under `connectors/`, reused by handlers.
 
-Handlers are ordinary Python objects. The explicit registry is
-`platform/src/minkops_platform/runtime/handlers.py`; never import a Python module
-named by a customer request. A handler implements `prepare_launch`, `prepare`,
-`validate`, and `finish`; specialized review implements `approve`. `prepare`
-returns files, model context, and domain context. `validate` checks the proposal;
-`finish` decides review/completion using the shared store. The shared lifecycle
-owns locking, session recovery, raw-result persistence, and cleanup. A new
-handler should not recreate those controls or an agent planning loop.
-
-`prepare_launch` returns `runtime.launch.LaunchInputs`: authorized files, input
-IDs, optional catalog ID, validated selections, and optional server-owned domain
-snapshots. Snapshots cannot override runtime/selection fields. Clients cannot
-submit snapshot fields. A handler may implement `launched(connection, run)` to
-create durable domain children inside the launch transaction. Bill Entry uses
-this for independent paid sessions under one parent review task; the shared
-store excludes aggregate parents from execution and children do not update the
-parent task directly. Accounts remains an adapter over this single runtime.
-
-The shared hosted runtime reuses at most four standalone environments within a
-parent batch. Every child still creates its own conversation. PostgreSQL slots
-and advisory locks survive worker rotations and permit reuse only after the
-previous session's confirmed cleanup. Tenant, operator, task, workflow version,
-pinned bundle and resource grants bound the scope. Expired environments, failed
-runs, changed grants and the provider's 128-attachment limit rotate compute.
-Pending cleanup uses an isolated environment for new work; saved sessions only
-reconcile their existing turn and never upload or submit input again.
-
-Fresh inputs and the pinned skill bundle occupy `/workspace/runs/<run-id>/`;
-published results occupy `/workspace/outputs/<run-id>/`. The native skill points
-to the run's complete bundle. Trusted instruction paths and derived lookup-index
-references are rebound to those directories; business evidence bytes stay intact.
-Keep absolute workflow paths in the existing `/workspace/context.json`,
-`/workspace/inputs/` and `/workspace/outputs/` conventions. Existing standalone
-and legacy sessions retain those paths. Apply migration 0005 before upgrading
-workers. This removes repeated sandbox provisioning within active batches;
-Cloud Run startup, file uploads, model processing and native writes still take time.
-Review, full-batch duplicate preflight and ordered writes remain unchanged.
-
-A client's `enabled_tools` in `solutions/<id>/workflow-policy.json` is the single
-switch for which business systems its workspace uses. Workflow schemas declare
-each option's tools with `x-option-tools`. Installation then disables every
-option that needs a paused tool in the registered schema, and launches enforce
-it server-side. Mock-client currently enables Tally only, which pauses Excel
-discovery sources. Source Discovery keeps its Excel/Tally choices; Bill Entry
-saves only to Tally.
-Run snapshots and deterministic threshold policies survive batch aggregation,
-review, retries, and later installation changes. Explicit approval is required
-before preparing Tally writes, which independently enforce pinned review policy.
-
-An existing workflow can select a client policy in its trusted binding:
-
-```json
-{"key": "review-threshold", "config": {"field": "Amount", "amount": 50000}}
-```
-
-Place that object in the workflow item's `policies` array. The dormant reference
-policy requires explicit review above the threshold, rejects missing/invalid
-amounts, and runs again before preparing writes. It is exercised in tests and
-is **not enabled** for either current client. Run preferences cannot override it;
-existing runs retain their launch-time policy after installation changes.
-
-When adding another policy, register its schema and deterministic Python function
-in `platform/src/minkops_platform/workflow_policies.py`. Client files select and
-configure trusted implementations. Never treat a skill helper as enforcement of
-a mandatory client rule. For a consequential destination, enforce authorization,
-approval, idempotency, and independent destination readback in the adapter path.
+A skill is guidance: it never enforces a permission, an approval or a write.
 
 ## Runtime and compatibility
 
-Installed bindings live in `workflows.execution_binding`, separate from editable
-`config_values`. Launch resolves the installed definition, checks adapter-owned
-resources, and pins handler, policy, authorized resource IDs/hashes, the complete
-skill bundle, and definition version before queuing. Reserved runtime fields
-cannot be supplied as run configuration. New sessions use those snapshots.
-Unsupported capability requirements fail before any paid execution.
+Installed bindings live in `workflows.execution_binding`, apart from editable
+`config_values`. A launch resolves the installed definition and merges run
+defaults, tenant defaults and the run's own values
+(`workflows.resolve_run_config`), then validates them against the run schema.
+Configuration grants nothing: what a run may read or write comes from trusted
+application state. The run pins its handler, definition version, bundle digest
+and mirror versions before any item is queued.
 
-`workflow_runs` owns the existing durable rows. The updatable `account_runs` view
-preserves Accounts/native contracts and existing foreign-key relationships;
-there is one run store and one hosted lifecycle. Existing HTTP routes remain
-compatible. `accounts_worker` is the existing bootstrap command over the shared
-dispatcher. Migration 0019 pinned a handler binding on every historical run, so
-dispatch never infers one; legacy unpinned queued runs still require relaunch.
-
-Apply every pending migration with `db/migrate.py` before starting a new
-revision. See [database upgrades](../db/README.md). Stop workers while changing
-application revisions, preserve session/write records,
-and reconcile outstanding writes. An application rollback can use the retained
-Accounts view, but never run an older Accounts-only worker against new non-Accounts
-definitions. Do not drop/reverse the migration to recover an application revision.
+Apply every pending migration with `db/migrate.py` before starting a new revision
+(see [database upgrades](../db/README.md)). Stop the workers while changing
+revisions, and reconcile outstanding writes first.
 
 ## Testing a new definition
 
-Tenant defaults are stored in `workflows.config_values` and validated against
-`tenant-config.schema.json`. `resolve_run_config` merges workflow run defaults,
-tenant defaults, then per-run selections; it validates the run schema and
-caller-supplied resource scope. Configuration versions track tenant-schema
-changes, independently of workflow definition versions.
-
-`output.schema.json` and the optional agent proposal schema have separate
-roles. The generic `skill.proposal` handler validates a result against
-`output.schema.json` before review. Accounts handlers validate proposals against
-the pinned agent schema and their business checks instead; see
-[run contracts](accounts-desk.md#run-contracts-and-recovery). Structural
-validation does not prove arithmetic, evidence, approval or a successful
-destination write.
-
-Write expected outcomes outside skill bundles, then test registration, launch,
-schema/business checks, review, and recovery. Test cross-tenant resources,
-changed inputs, request replay, and any consequential write receipt. The current
-architecture tests create renamed/default definitions in temporary directories
-and remove them; no test employee/workflow remains in the product.
+Write expected outcomes outside the skill bundle, then test registration,
+launch, tool answers, the server's checks, review and recovery. Cover
+cross-tenant inputs, changed inputs, request replay and every consequential
+write receipt. Sessions are scripted with `platform/tests/fake_agents.py`, which
+calls the real tools, so the tests exercise everything after the model.
 
 ```sh
 TEST_DATABASE_URL=postgresql:///postgres AUTH_DEV_MODE=1 uv run --all-packages pytest platform/tests apps/solution-api/tests connectors/tests db/tests -q
@@ -282,10 +158,6 @@ npm --prefix apps/windows-app test
 npm --prefix apps/windows-app run build
 ```
 
-Set `TEST_DATABASE_URL` to a PostgreSQL server role with database-creation
-permission. Pytest creates, migrates, seeds and cleans up a disposable database;
-see [isolated integration tests](../db/README.md#isolated-integration-tests).
-Verify ambiguous routing, duplicates, explicit corrections, workbook preservation,
-interrupted receipts, tenant isolation and recovery without repeating paid
-execution. New business-system MCP bindings, scheduling, admin workflow creation
-UI, and customer-machine Python execution are separate work.
+Set `TEST_DATABASE_URL` to a PostgreSQL role that can create databases. Pytest
+creates, migrates, seeds and drops a disposable database of its own; see
+[isolated integration tests](../db/README.md#isolated-integration-tests).

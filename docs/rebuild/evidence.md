@@ -280,3 +280,43 @@ These runs used the local stack: API, worker lanes, the headless companion, Tall
   - two sheets in a new format proved at once collided on the profile version;
   - the last chunk's settle saw itself as unfinished and never finalized the run.
 
+## Bill entry, rehearsed live (21 October 2026)
+
+The same local stack as the statement rehearsal ran Bill entry 1.0, with four worker lanes and the headless companion. Runs used the All outputs review mode and inferred each bill's company.
+
+**The PR Infra UAT bills** (private store, `uat-2026-10-21`). The answer keys never entered a run. The deployed staged build had already saved B01–B03 into this Tally company, and created B03's supplier, so these runs exercised its repeat path.
+
+| Bill | Expected | Observed |
+| --- | --- | --- |
+| B01–B03, three files | No second voucher | All three proposed with their suppliers' history; approval found each in Tally: 3 verified duplicates |
+| B04 and B05, together | No second voucher; the revision reviewed | The two files print different versions of one bill, so both held as `source_values_conflict` |
+| B06 total off by a rupee | Held, no adjustment | `source_values_conflict`: the printed total is not the sum of the printed lines, and no round-off is printed |
+| B07 unknown buyer | Company unclear, no fallback | `company_unresolved` |
+| B08 31 March | Before books begin | `date_before_books`, held at once |
+| B09 image-only copy of B01 | Read from the image; a duplicate | Read correctly from the scan; approval found B01: a verified duplicate |
+
+Tally still holds exactly one voucher for each of these bills, the ones the staged build saved.
+
+**The synthetic package for Pradeepraj Infra** (15 bills of the [five-company rehearsal](../tally-rehearsal.md)). `scripts/bill_entry_fixtures.py` scored 15 of 15 correct, with no critical outcome:
+
+- seven new bills and the round-off bill saved and verified, in 27 s from approval;
+- the historical duplicate and the scan copy of bill 01 added nothing;
+- the changed version held, naming how Tally's voucher differs;
+- the missing supplier, the ambiguous supplier, the date before the books and the item-wise supplier held for those reasons.
+
+All 15 files were read in 4 min 10 s from launch across four lanes; a session took 54 s at the median and 129 s at most.
+
+**Create this ledger** ran on Test Company with one synthetic bill from a new Rajasthan supplier. The bill held as Missing supplier, with the printed statutory details. One decision created the ledger under Sundry Creditors. Its readback carried the GSTIN, Regular registration, state, place of supply, address and PIN. The bill was then saved as one Purchase.
+
+**Usage.** Seven bill runs used 31 sessions: 3,108,360 input tokens (79% cached) and 91,088 output tokens. That under-counts three rechecked bills, whose second attempt replaced the first's usage (noted for slice 12). Of 19 native writes, 10 saved (one of them the supplier), 7 reconciled as duplicates and 2 held.
+
+**Found and fixed along the way:**
+
+- **History lookups returned nothing.** `party_history` matched ledger names, but sessions passed the GUIDs `find_ledger` returns, so every supplier seemed to have no history. It now takes either, names any subject that is no ledger, and shows each voucher's stock items.
+- **Item lists read as inventory.** The skill told sessions to hold "item-wise entries", so ordinary invoices listing goods with HSN codes and quantities held. Only a client that books such purchases item-wise now needs stock items. Tally's "inventory values are affected" flag is no signal: every purchase head in the rehearsal companies carries it, and their history is booked to ledgers.
+- **Gaming a review note.** Told that a proposal booked unlike the supplier's history would go to review, a session rebooked a sound bill to the historical ledgers. Sessions now learn only that a proposal was accepted.
+- **A final hold recast.** After the gate held a bill for its date, the session proposed it again with a weaker exception that replaced the hold. Holds from final checks now stay for the reading.
+- **Schema errors echoed the voucher.** A line missing one field failed the voucher's nullable schema, and the answer repeated the whole voucher. Two sessions resent it unchanged and ended with no proposal. The answer now names the missing field.
+- **Correction reasons.** A bill meeting another version in Tally now says what differs: date, total, ledgers or line amounts.
+- **Rechecks kept their first start time,** inflating session timings. A new attempt now starts its own clock.
+- **The HTTP smoke test** announced a long-retired companion and plan, so the server refused its Tally check. It now sends this build's version and plan, which the companion runtime declares once.

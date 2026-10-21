@@ -5,30 +5,30 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.9.1 (plan protocol 5; see its contracts below),
-the release recorded in `windows-release.json`. The server refuses companions
-older than 0.9.0. The companion works only with the
+This revision builds companion 0.10.0 (plan protocol 5; see its contracts below);
+the last release recorded in `windows-release.json` is 0.9.1. The server refuses
+Tally work from companions older than 0.9.0. The companion works only with the
 companies open in the user's Tally, reports typed session states, sends
-diagnostics and updates itself. Core Tally discovery uses HTTP/XML exports and
-needs no ODBC driver. Windows 10 device testing was deferred by the owner;
-compatibility is retained.
+diagnostics and updates itself. Its Tally sync uses HTTP/XML exports and needs no
+ODBC driver. Windows 10 device testing was deferred by the owner; compatibility
+is retained.
 
 ## Local capabilities
 
 | Operation | Desktop | Web with a connected PC | Authority |
 | --- | --- | --- | --- |
 | Check Tally | Yes | Yes | Fixed, read-only company export to `127.0.0.1:9000` |
-| Discover Tally and Excel | Yes | Yes | All loaded companies, voucher period and explicitly granted folders; versioned client context |
+| Sync Tally books | Yes | Yes | Read-only: each authorised company's masters and vouchers into the server's mirror, in bounded pages |
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
-| Save approved Tally vouchers | Yes | Yes | Confirmed company/ledger references, immutable approved plan, durable intent before import and exact readback |
-| Existing hosted workflows | Yes | Yes | Existing server and OpenAI-hosted Agents API contracts |
+| Save approved Tally vouchers | Yes | Yes | Pinned company and ledger references, the immutable approved plan, durable intent before import and exact readback |
+| Create an approved supplier | Yes | Yes | One GST creditor a person approved, modelled on a same-company creditor and verified by readback |
 
 This version adds bounded native operations, not customer-machine agent hosting
-or a general remote shell. See [Source discovery](source-discovery.md),
-[Bill entry](bill-entry.md) and [Statement entry](statement-entry.md). Initially open Tally with its HTTP server enabled on port 9000; discovery must
-see every company the run may use. A company listing is a connection
-check, not verification of financial writes.
+or a general remote shell. See [Bill entry](bill-entry.md) and
+[Statement entry](statement-entry.md). Open Tally with its HTTP server enabled on
+port 9000, with every company a run may use loaded, so the sync sees them. A
+company listing is a connection check, not verification of financial writes.
 
 Close hides the app in its tray; **Quit Minkops** stops the companion. Queued
 manual work runs while the companion is connected, including requests from the
@@ -57,10 +57,9 @@ saving cannot be rolled back by logout or cancellation. Late domain receipts
 record what was actually applied without marking a cancelled run complete.
 
 Only read jobs are automatically reclaimed after the two-minute lease. Saves
-are not automatically dispatched twice on lease expiry. An explicit new save
-request can recover an interrupted attempt: hashes distinguish unchanged,
-already-saved and externally-edited workbooks. A persisted receipt is retried
-before further work. Domain side effects and job state commit atomically.
+are not automatically dispatched twice on lease expiry: an interrupted save holds
+until Retry save reconciles it with Tally. A persisted receipt is retried before
+further work. Domain side effects and job state commit atomically.
 
 The companion polls outbound HTTPS every four seconds. It opens no inbound
 server and needs no browser loopback exception, firewall port or router
@@ -69,9 +68,8 @@ request bounded work on an authorized connected PC.
 
 Presence is independent of job dispatch: authenticated companion traffic updates
 `last_seen_at`, and busy workers send a bounded, single-flight heartbeat without
-claiming another job or extending its lease. Dispatch and confirmed discovery
-archiving are serialized, so slow archive transfers cannot overlap each poll.
-Completion uploads have a two-minute client budget; control requests retain
+claiming another job or extending its lease. Completion uploads have a two-minute
+client budget; control requests retain
 45 seconds, and failed deliveries retain their durable receipt. Release the API
 heartbeat endpoint before rolling out a companion that calls it.
 
@@ -80,8 +78,8 @@ heartbeat endpoint before rolling out a companion that calls it.
 Tally belongs to the user. The companion never starts, closes, restarts or locates
 Tally, never handles company passwords and never chooses data folders; it works
 with the companies the user opened, from any folder (`connectors/desktop/src/tally-session.js`).
-Check connection, the discovery preflight and the check before every bill save
-share one read-only classifier, so they cannot disagree. It reads the open
+Check connection, the sync and the check before every save share one read-only
+classifier, so they cannot disagree. It reads the open
 `Company` collection and, on failure, the error cause plus a read-only process
 check, and returns one typed state whose message names the PC:
 
@@ -95,7 +93,7 @@ check, and returns one typed state whose message names the PC:
 | `invalid_response` | Unparseable or failed reply |
 
 Typed messages pass through job receipts verbatim; untyped errors keep a generic
-fallback. Before each save the company must be open and match the discovered GUID;
+fallback. Before each save the company must be open and match the synced GUID;
 session problems and native rejections (classified as date, permission, voucher
 type, voucher number or ledger) become holds with a specific attention label that
 **Retry save** clears once Tally is ready.
@@ -108,7 +106,7 @@ If Tally closed, the bill holds until it is open again. External writers can rac
 read/import; Tally offers no transaction spanning those separate requests, so
 ambiguity remains a handoff.
 
-Bill saves use the run's pinned purchase voucher type, chosen from discovered types
+Bill saves use the voucher type the approved plan names, one of the mirrored types
 whose predefined base is Purchase (`RESERVEDNAME`, else the `PARENT` chain).
 Duplicate, correction and attention reads cover every purchase-based type,
 including inactive ones, and a matching Journal voucher holds instead of being
@@ -126,14 +124,11 @@ Bill data, request XML, file contents and credentials never leave the PC.
 
 Every poll reports the companion version, hostname and whether the session is a
 Remote Desktop session. The console shows them, warns about Remote Desktop, and the
-server refuses Tally work for companions older than 0.7.0 with "Update Minkops on
+server refuses Tally work for companions older than 0.9.0 with "Update Minkops on
 *PC*". A PC that has not polled yet may queue work.
 
 `node scripts/verify_tally_session_live.mjs [port] [company] [guid]` prints the
 typed state on a Windows PC without changing Tally, for rehearsals.
-
-Versioned discovery packages are saved locally as described in
-[source discovery](source-discovery.md), alongside the authoritative server copy.
 
 ## Build and run
 
@@ -204,8 +199,9 @@ module, reinstall before building: packaged copies do not update automatically.
 ## Progress and review
 
 Task detail leads with a short status, an observed stage and a business summary.
-Discovery uses Get ready → Work → Review → Finished; bill entry adds Save;
-connection checks/refreshes have their own short stages. Events drive stages,
+Runs use Get ready → Read → Review → Save → Finished; connection checks and folder
+refreshes have their own short stages (Your PC → Check Tally or Read folder →
+Finished). Events drive stages,
 with no simulated percentage or ETA. Failures remain at the last observed
 stage. Labels and outlined icons work independently of color or animation.
 
@@ -236,10 +232,7 @@ name elements are parsed as text; malformed nested names are rejected rather
 than converted into misleading object strings.
 
 Closing the main window leaves the native worker in the tray; a web-requested
-discovery finishes there and reopening shows its result. Catalog exports fetch
-only the authorized tenant/run endpoint, use a user-selected `.json` destination,
-enforce a size bound, reject symlinks/nonregular files and write through a synced
-temporary file with atomic replacement (bounded IPC, not a Chromium download).
+sync or save finishes there, and reopening shows its result.
 
 Native suites pass on Linux and Windows; Windows skips only a file-symlink test
 that requires creation privileges (the same guard runs on Linux). A fresh
@@ -273,7 +266,12 @@ of every line, allocation, date and voucher type is accepted. The server sends
 every plan exactly as approved and refuses retired formats, so a run approved
 before protocol 5 must be started again.
 
-Statement rows arrive as `tally.write` jobs, one at a time per PC, from runs of
-the client's own statement workflow. See [Statement Entry](statement-entry.md)
+Bill and statement records arrive as `tally.write` jobs, one at a time per PC,
+from the client's runs. A `tally.supplier` job creates one approved GST creditor:
+it is imported only when no ledger has its name, so a retry after a lost
+acknowledgement reads back the ledger it created, and the server accepts it only
+when the readback carries every approved statutory and mailing value. A
+`tally.sync` job collects the books read-only, in the pages the server asks for
+(see [the rebuild design](rebuild/design.md#sync-protocol)). See [Statement Entry](statement-entry.md)
 for routing, balances, review and recovery. The distributed Windows x64 installer remains an unsigned
 release candidate; existing unsigned-release disclosure applies.

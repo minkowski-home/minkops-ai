@@ -2,22 +2,23 @@
 
 ## Current product boundary
 
-Skill-driven execution using the OpenAI-managed Codex harness and adequate
-authorized MCP/REST tools is the canonical workflow architecture. New workflows
-start with employee procedures, tool capabilities, and business contracts;
-custom implementation follows only demonstrated gaps or enforceable guarantees.
-Earlier workflow implementations live only in Git history. Existing deterministic adapters, checks, and non-agent application
-services remain appropriate for their concrete integration and control roles.
+Skill-driven tool sessions on the OpenAI Agents API are the canonical workflow
+architecture. A session reasons over its document and calls Minkops's authorized,
+read-only tools, which are MCP-shaped contracts, then proposes; Minkops checks every
+proposal, owns review and performs every write. New workflows start with employee
+procedures, tools and business contracts; custom implementation follows only
+demonstrated gaps or enforceable guarantees. Earlier workflow implementations live
+only in Git history.
 
-OpenAI-hosted Agents API environments are the selected execution architecture.
-Self-hosted Codex executors are out of scope. Hosted sandbox
-Python execution and browser-granted local file reads do not imply an agent
-running on the customer's machine. The four workflow methods and their current
-scope are described in [the product vision](../README.md#workflow-methods-and-current-scope).
+Accounts desk sessions run with no hosted environment, so nothing executes on
+OpenAI's side but the model. Self-hosted executors are out of scope, and
+browser-granted local file reads do not imply an agent running on the customer's
+machine. The four workflow methods and their current scope are described in
+[the product vision](../README.md#workflow-methods-and-current-scope).
 
 The Windows shell shares the web UI and adds an authenticated outbound companion
-for bounded native work: folder snapshots, Tally discovery, approved voucher
-saves with readback, and verified GST supplier creation. Durable device/job controls live in `platform/`; native
+for bounded native work: folder snapshots, the read-only Tally sync, approved
+voucher saves with readback, and verified GST supplier creation. Durable device/job controls live in `platform/`; native
 filesystem/Tally adapters live in `connectors/`. The companion does not host or replace the managed AI harness.
 See [Windows app architecture and recovery](windows-app.md).
 
@@ -49,7 +50,7 @@ The dashboard displays the signed-in user's name and observable work. The
 activity pane owns active tasks, attention requests, handoffs, and recent
 outcomes. Each task has a status, progress and short summary; detailed events
 stay in internal audit. The persistent [attention list](attention.md) spans all
-workflows and retains deferred and best-guess items beyond task completion.
+workflows: new companies, statement questions and gaps, and practice questions.
 The pane is adjustable on desktop. The four app themes use the locked brand
 palette in `design/tokens/` and a per-browser preference.
 
@@ -57,22 +58,20 @@ palette in `design/tokens/` and a per-browser preference.
 
 Repository-owned employee definitions and client bindings install atomically
 through the shared installation service and administrative CLI. Operator
-settings/statuses survive reinstall; incompatible schemas are rejected. Installed
-handler, presentation, policy, and capability declarations are separate from
-editable workflow preferences. A future admin UI can call the same services.
+settings/statuses survive reinstall; incompatible schemas are rejected. The
+installed handler and presentation are separate from editable workflow
+preferences. A future admin UI can call the same services.
 
-The shared launch service pins authorized resource IDs/hashes and the complete
-execution bundle. A handler registry selects ordinary Python application
-adapters independently of workflow keys. Accounts keeps its business checks,
-catalog review, and verified Tally write reconciliation. The default skill handler
-supports reviewed proposals; no additional employee/workflow is enabled.
+A launch pins the definition version, the session bundle (model, reasoning effort
+and instructions) and the mirror version of every company it reads. A closed
+registry (`work.HANDLER_MODULES`) maps pinned handler keys to ordinary Python
+modules, independently of workflow keys. Accounts keeps its business checks and
+verified Tally write reconciliation in those handlers. The worker serves lanes
+that follow each run item's session.
 
-`workflow_runs` retains existing run rows and foreign-key relationships.
-`account_runs` is an updatable compatibility view, not another execution store.
-The current worker command delegates to shared dispatch and lifecycle code.
-Skills can bundle Python helpers; mandatory client policies run independently
-in trusted Python and before writes. The current file runtime still disables
-network access and does not provision business-system MCP tools.
+`runs`, `run_items` and `run_records` hold every run. The retired pipeline's tables
+(`workflow_runs` and its kin) stay, unread, until the cut-over drops them (rebuild
+slice 13).
 
 See [workflow authoring](workflow-authoring.md) for contracts, installation,
 extension points, and migration/rollback guidance.
@@ -85,7 +84,7 @@ covers identity and membership, employees and workflows, task observations, runs
 and their native writes, desktop devices and jobs, shared attention, client
 profiles, and an event outbox. Writes to observable task state and settings
 insert outbox records in the same transaction. Accounts desk runs on a durable
-database worker and the OpenAI-hosted runtime. The app polls task state; there
+database worker whose lanes follow tool sessions. The app polls task state; there
 is no production outbox publisher or message broker yet. See [Accounts desk](accounts-desk.md) for run and write ownership.
 
 `warehouse/` is intentionally empty. It has no schema, dbt project, or
@@ -94,8 +93,8 @@ pipeline; its design is reserved for separate work.
 ## Test fixture
 
 `db/seed_demo.py` creates `mock-tenant` for manual testing, installs the
-mock-client composition (Source discovery, Statement entry and Bill entry, all
-active) and adds two example workflows in paused and planned states. It creates
+mock-client composition (Statement entry and Bill entry, both active) and adds
+two example workflows in paused and planned states. It creates
 no tasks; activity comes only from real runs. The local PR Infra tenant starts
 with zero employees and zero workflows. Local fixtures do not imply a production
 release.

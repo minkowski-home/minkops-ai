@@ -3,25 +3,24 @@
 Python tools here provision, configure, deploy, audit and recover hosting/cloud
 resources. `google_api.py` is their shared operator-only client, outside the app
 image. Keep workflow/demo operations in `scripts/`: `provision_demo.py` prepares
-the verified demo owner and installation; `verify_production.py` checks the
-reviewed synthetic bill lifecycle. These have separate responsibilities from
-cloud infrastructure and must remain opt-in.
+the verified demo owner and installation. Those have separate responsibilities
+from cloud infrastructure and must remain opt-in.
 
 `compose.yml` runs the local OLTP PostgreSQL database. The API and durable
-Accounts worker are separate processes sharing that database. OpenAI provisions
-the agent execution environment; Compose does not run a Codex executor.
+Accounts worker are separate processes sharing that database. Sessions run on
+OpenAI's Agents API with no hosted environment; Compose runs no AI executor.
 
-Accounts desk creates per-run `openai_hosted` Agents API sessions with
-`gpt-6-luna`, network access disabled, and required Python packages. Selected
-files are supplied as tenant-scoped immutable snapshots. API credentials stay
-outside agent-readable content. Results are persisted before hosted environment
-cleanup; workers retry pending cleanup and retain session IDs for audit.
+Accounts desk runs one Agents API tool session per run item, with `gpt-6-luna`
+and no hosted environment: a bill's pages arrive as images and text, and the
+session calls Minkops's read-only tools and `propose`. API credentials stay outside
+agent-readable content. A session is deleted once its usage is recorded; its tool
+calls and IDs stay for audit.
 
 The browser reads selected input files through a granted local folder. This is
 a web adapter with synchronized snapshots, not fully local desktop execution.
-The registered Windows companion reads schema metadata and saves and reconciles
-approved Tally writes. Business reasoning remains in OpenAI-hosted environments;
-no customer-machine Codex executor is planned.
+The registered Windows companion syncs the Tally books read-only, and saves and
+reconciles approved Tally writes. Business reasoning stays in the model's sessions;
+no customer-machine executor is planned.
 
 Build the production API image from the repository root:
 
@@ -38,7 +37,7 @@ operator deploy script. Audit scripts read resource metadata/metrics without
 retrieving secrets or customer database rows.
 
 See [Accounts desk setup and limits](../docs/accounts-desk.md) and OpenAI's
-[hosted environment guide](https://developers.openai.com/api/docs/guides/agents-api/environments/openai-hosted).
+[Agents API guide](https://developers.openai.com/api/docs/guides/agents-api/overview).
 
 ## Production
 

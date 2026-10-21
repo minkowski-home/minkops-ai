@@ -37,6 +37,7 @@ ones until a slice deletes what it replaces.
 | Layer | Module | Owns |
 | --- | --- | --- |
 | platform | `clients.py` | Client businesses, per-client access, company authorisation |
+| platform | `files.py` | Uploaded sources and their current files: safe paths, content checks |
 | platform | `work.py` | Runs, items, records, decisions, leases, wake-ups, small status DTOs |
 | platform | `lanes.py` | Worker lanes: claim, lease renewal, handoff, LISTEN wake-ups, session cleanup |
 | platform | `runtime/tools.py` | MCP-shaped tool contracts, argument validation, bounded results |
@@ -50,6 +51,7 @@ ones until a slice deletes what it replaces.
 | platform | `accounts/bill_entry.py` | Bill items: pages, session input, `propose` checks, plans |
 | platform | `accounts/statement_entry.py` | Statement items: layouts, chunks, pairing, `propose` checks, plans |
 | platform | `accounts/writes.py` | Native write intents, reservations and receipts for runs |
+| connectors | `documents.py` | Bill pages as bounded images, with each PDF page's text layer |
 | connectors | `desktop/src/sync.js` | Read-only incremental collection: markers, deltas, counts, census |
 | connectors | `desktop/src/voucher.js` | The native writer, protocol 6 (bill-wise and inventory added) |
 | platform | `desktop-runtime/src/jobs.js` | Companion job execution shared by Electron and the headless runner |
@@ -179,8 +181,12 @@ session. It works from the database, so a restarted worker closes what its
 predecessor left.
 
 `propose` is checked immediately. The agent gets at most two resubmissions,
-and a resubmission that changes printed facts is flagged for review. The
-accepted proposal is the item's result.
+and a resubmission that changes printed facts is flagged for review. A hold
+from a final check (a date outside the books, a missing supplier) stays for the
+rest of the reading. The session learns only whether a proposal was accepted,
+never its review notes, so it cannot rebook a sound proposal to avoid review.
+The accepted proposal is the item's result. An invalid call is answered with
+its most specific schema error.
 
 Lanes are threads sharing a small connection pool. A lane holds a connection
 only while it answers a call or records state, never while it waits on the

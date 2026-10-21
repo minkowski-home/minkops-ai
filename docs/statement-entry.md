@@ -41,8 +41,10 @@ statement's own balances (`accounts/statement_layouts.py`, reader in
   A refuted reading is explained to the session, which has two more attempts. A
   refuted reading is never stored.
 - **When only a person can decide** (the date order, or rows with no running balance),
-  one Attention card asks once. The sheet's item waits on that answer and reads the
-  rows when it is given.
+  one Attention card asks once, answered with
+  `POST /api/tenants/{tenant}/attention/{item}/decision` and its chosen `action`. The
+  sheet's item waits on that answer and reads the rows when it is given; the same
+  answer sent twice returns one receipt.
 - **A saved layout that a new statement contradicts** is retired, and the sheet's
   format is learned again.
 
@@ -131,7 +133,8 @@ An approved row becomes a durable `native_writes` intent before anything is sent
 - **Native holds.** A hold the companion reports (Tally not running, company not
   open, possible existing voucher, uncertain import) holds the row. Retry save sends
   the same plan, which the companion either finds already in Tally or refuses to
-  import twice.
+  import twice. A ledger, voucher type or cost allocation that changed in Tally after
+  the run read the books holds as `destination_changed`: start a new run for it.
 - **Interrupted saves.** A write whose PC stopped before confirming it holds as
   `save_interrupted` once that PC polls again; it is never re-sent automatically.
 

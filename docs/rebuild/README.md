@@ -105,7 +105,7 @@ These come from the original machine's assistant memory and from `AGENTS.md`:
   - Check the GSTIN check character and the books-beginning date.
   - Never sample masters.
   - Prove statements against their balances.
-  - Posting patterns are derived, confirmed, reused, and retired after three misses.
+  - Posting patterns are derived, confirmed, reused, and retired after three misses. The rebuild keeps them as memory entries, confirmed by use (Structure 5 and 7).
 - **Product principles.**
   - One-click decisions, with no value editor.
   - Done and Refresh must rest on evidence.
@@ -321,9 +321,9 @@ Each slice works end to end against a real TallyPrime company before the next on
 
 ## Reused code
 
-- **Companion:** `connectors/desktop/src/voucher.js`, `tally.js` and `tally-session.js` (the writer, Tally sessions and guards), plus `client-context.js`, whose collection becomes the sync.
+- **Companion:** `connectors/desktop/src/voucher.js`, `tally.js` and `tally-session.js` (the writer, Tally sessions and guards), plus `client-context.js`, whose collection became the sync (`sync.js`).
 - **Statement reading:** `connectors/src/minkops_connectors/statement.py`.
-- **Accounts checks** (`platform/src/minkops_platform/accounts/`): `vouchers.py`, `tally_writes.py`, `statement_layouts.py`, `validated_plan` in `statement_routing.py`, `supplier_gst.py`, and the proofs in `posting_profiles.py`.
+- **Accounts checks** (`platform/src/minkops_platform/accounts/`): `vouchers.py`, `statement_layouts.py`, `validated_plan` in `statement_routing.py` and `supplier_gst.py`. `tally_writes.py` and `posting_profiles.py` were retired with the staged pipeline; the checks of theirs that still apply live in `vouchers.py` and `writes.py`.
 - **Platform:** `attention.py`, `run_controls.py`, `desktop.py` and `runtime/openai_hosted.py`.
 - **Workflow installation:** `minkops_api.install_workflows`, with variants.
 - **Infrastructure:** `infra/provision_database.py`, `deploy_runtime.py` and `verify_database_restore.py`.
@@ -375,7 +375,7 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | 2. Sync and mirror | Done | The versioned mirror, the sync protocol with its regression and census guards, practice probes and background refresh (`test_mirror.py`, `test_sync.py`, `test_practice.py`, `test_sync_api.py`, `sync.test.js`, `jobs.test.js`). Rehearsed live through the headless companion: all five companies were found, authorised and mirrored in full in 14 s, matching Tally's own voucher counts and seven master types exactly. A created voucher arrived as a delta, a cancellation as a flag, and a deletion as a census tombstone ([evidence](evidence.md#rehearsed-on-tallyprime-edit-log-1172-21-october-2026)). Source Discovery is replaced by the sync; it is deleted with the staged bill and statement pipelines in slices 4–5, which still read it. |
 | 3. Session tool loop | Done | Tool sessions without an execution environment (`run_tool_session` in `openai_hosted.py`): every pending call is answered exactly once, including after a dropped stream or a worker restart. A lost creation is found again by its metadata, and a failed turn reports the provider's code (`test_tool_sessions.py`, against a protocol-faithful fake). Every call is validated against its contract and logged once per session and call ID (`test_tools.py`, migration `0024`). Lanes (`lanes.py`, migration `0025`): threads sharing a four-connection pool, fenced writes, one heartbeat, LISTEN wake-ups, handoff on exit, retries, and a closer that records late usage and deletes sessions (`test_lanes.py`). They run inside the existing worker; its drain acknowledges a wake-up only when no item is runnable, and the recovery sweep counts run items (`test_worker_recovery.py`). Live with `gpt-6-luna`, one bill-shaped item ran through real lanes in about 20 s; the protocol facts are in the [evidence](evidence.md#the-tool-loop-measured-live-21-october-2026). 723 Python tests pass. |
 | 4. Statement slice | Done | Statement entry 1.0 runs on the run model (`accounts/statement_entry.py`). Layouts are proved by balances and printed controls, with one layout session per unseen format and a date-order question that parks the sheet (`statement_layouts.py`). Chunks of up to 100 rows are routed through the desk lookups (`desk_tools.py`), and `propose` checks every row with `validated_plan`. Transfers are paired into one Contra, repeats in overlapping statements are written once, and a gap between statements raises one item (migration `0028`). Approved rows are durable `native_writes`, one `tally.write` at a time per PC, never re-sent after an interrupted save (`writes.py`, migrations `0026`–`0027`). The staged pipeline is deleted (`test_statement_entry.py`). Live, the PR Infra UAT scenarios S01–S06 behaved as specified, and a two-bank rehearsal saved and verified 10 vouchers in Tally ([evidence](evidence.md#statement-entry-rehearsed-live-21-october-2026)). 706 Python tests pass. |
-| 5. Bill slice | In progress | |
+| 5. Bill slice | Done | Bill entry 1.0 runs on the run model (`accounts/bill_entry.py`). One tool session per file reads every page as an image and, where the PDF has one, its text layer (`minkops_connectors/documents.py`). It routes each bill to the company it is addressed to, by any of that company's GSTINs, and proposes the client's own voucher. `propose` checks each bill at once with `vouchers.check`, whose printed taxable and tax totals expose tax-inclusive amounts. A total or round-off must be one the text layer prints. Confirmation by use: a booking unlike the supplier's history (another voucher type or ledger, or without the stock items it carried) waits for review even under standing approval, and one approval confirms it. A legible handwritten note is followed and quoted, and an unclear one holds. A bill repeated across files is written once, and differing versions all hold. Approved bills are native writes reconciled by document identity. A new supplier is created only on a person's decision and verified by readback (`tally.supplier`, migration `0029`). Source Discovery, the hosted-environment runtime and the staged bill pipeline are deleted (`test_bill_entry.py`, `test_bill_vouchers.py`). Live, the PR Infra UAT bills behaved as specified on a company that already held B01–B03, and the 15-bill synthetic package scored 15 of 15, its 8 saves verified in 27 s. Create this ledger created and verified a supplier ([evidence](evidence.md#bill-entry-rehearsed-live-21-october-2026)). 406 Python tests pass, fewer than slice 4's because the staged pipeline's tests went with it. |
 | 6. Memory, rules and questions | Not started | |
 | 7. Bill-wise link | Not started | |
 | 8. Inventory | Not started | |
@@ -385,7 +385,20 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | 12. Performance | Not started | |
 | 13. Cut-over | Not started | |
 
+**Carried into later slices:**
+
+- **Slice 6:** the `memory`, `rules` and `practice` lookups. The practice probes already run after each sync, and their cards open in Attention.
+- **Slice 10:**
+  - per-client checks on reading or acting on one task or Attention item (the lists already filter by client);
+  - the console design kit (`design/ui_kits/console`, `design/accounts.css`), which still shows the staged discovery screens.
+- **Slice 12:** usage for every attempt. A retry or a recheck replaces the previous attempt's usage today, so spend is under-counted.
+
 **For the next manual testing phase** (steps that need a person at Tally or Windows):
+
+- **A first pass of the UAT bills.** The PR Infra UAT company already holds B01–B03 and B03's supplier from the staged build.
+  1. Restore the pre-UAT backup the pack records, or a copy of the company without them.
+  2. Run B01–B03.
+  3. Expect B01 and B02 saved, and B03 held as Missing supplier with Create this ledger. After that decision, expect one new supplier with its statutory fields, and one purchase.
 
 - **Split Company Data.**
   1. Split a copy of a rehearsal company in Tally's UI.
