@@ -76,6 +76,27 @@ class InvoiceYearTest(unittest.TestCase):
                             vouchers.document_identity("Supplier", "MOCK-1", date(2026, 10, 1)))
 
 
+class StatementIdentityTest(unittest.TestCase):
+    """Re-runs and the writer's tag check depend on these exact bytes."""
+
+    def test_statement_row_identity_never_changes(self):
+        from minkops_connectors.statement import row_identity
+
+        row = {"reference": "  S123 456 ", "date": "2026-09-01", "amount_cents": -1_500_000, "balance_cents": 98_765_432}
+        self.assertEqual(row_identity(row, 1), "5e5edb759d4aac94d0447fd5cf4aa37580f90bf018ba702747267474c5838862")
+        # A repeated transaction keeps a distinct identity by its occurrence.
+        self.assertEqual(row_identity(row, 2), "0182c6e6212e016d6847faf414c9c01e26169a22e2c31ddae1cb2c8f208f6b16")
+        self.assertEqual(row_identity({**row, "reference": "s123 456"}, 1), row_identity(row, 1))
+
+    def test_narration_tokens_include_the_tenant_and_never_change(self):
+        identity = "5e5edb759d4aac94d0447fd5cf4aa37580f90bf018ba702747267474c5838862"
+        tenant = "6f1e4c9a-2b7d-4e10-9c3a-5d8b7a6f0e21"
+        key = "statement:company-guid:QA18 Bank Current"
+        self.assertEqual(vouchers.narration_token(tenant, key, identity), "3bf1ae78-bdbb-56d5-96fe-1eeb4e74fd68")
+        self.assertNotEqual(vouchers.narration_token("8a1f0d3e-0000-4000-8000-000000000001", key, identity),
+                            vouchers.narration_token(tenant, key, identity))
+
+
 class StatementVoucherTest(unittest.TestCase):
     def test_payment_keeps_its_tag_reference_and_allocation_and_lists_proven_siblings(self):
         sibling = "87654321-4321-5321-8321-cba987654321"

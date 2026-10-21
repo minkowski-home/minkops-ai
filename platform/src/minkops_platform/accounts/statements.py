@@ -8,7 +8,6 @@ import hashlib
 import json
 from collections import Counter
 from pathlib import Path
-from uuid import NAMESPACE_URL, uuid5
 
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
@@ -60,7 +59,7 @@ def native_plans(run, rows, decisions):
     """
     from datetime import date
 
-    from minkops_platform.accounts.vouchers import statement_voucher
+    from minkops_platform.accounts.vouchers import narration_token, statement_voucher
     position={(r['source_file_id'],r['sheet'],r['row']):i for i,r in enumerate(rows)}
     def held(row, reason):
         row.pop('_resolved',None)
@@ -87,14 +86,14 @@ def native_plans(run, rows, decisions):
             legs=sorted([row['identity'],other['identity']])
             identity=hashlib.sha256(json.dumps(legs).encode()).hexdigest()
             key=f"statement:{resolved['company_guid']}:contra"
-            token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{identity}"))
+            token=narration_token(run['tenant_id'],key,identity)
             debit['plan']={**statement_voucher(debit['_resolved'],remote_id=token,identity=identity,legs=legs),'destination_key':key}
             credit['duplicate_of']=rows.index(debit)
             credit['covered_by_transfer']=True
             continue
         key=f"statement:{resolved['company_guid']}:{resolved['data']['bank_ledger']}"
-        token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
-        siblings=[str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{r['identity']}")) for r in rows
+        token=narration_token(run['tenant_id'],key,row['identity'])
+        siblings=[narration_token(run['tenant_id'],key,r['identity']) for r in rows
                   if r is not row and r.get('bank_ledger')==row['bank_ledger'] and r.get('company_guid')==row['company_guid']
                   and r.get('date')==row['date'] and r.get('amount_cents')==row['amount_cents'] and r.get('identity')]
         row['plan']={**statement_voucher(resolved,remote_id=token,identity=row['identity'],distinct=siblings,

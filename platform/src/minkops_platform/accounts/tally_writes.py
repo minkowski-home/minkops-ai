@@ -2,7 +2,6 @@
 
 import copy
 import json
-from uuid import NAMESPACE_URL, uuid5
 
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
@@ -111,7 +110,7 @@ def prepare(connection, run, result, *, approved=False):
 
     if enforce_policies(run["config"], result).get("requires_review") and not approved:
         raise ValueError("Client policy requires explicit review before destination writes.")
-    from .vouchers import resolve
+    from .vouchers import narration_token, resolve
 
     seen = {}
     ordered = sorted(
@@ -161,12 +160,7 @@ def prepare(connection, run, result, *, approved=False):
                 raise ValueError(
                     "First reconcile the existing voucher before approving a correction."
                 )
-            token = str(
-                uuid5(
-                    NAMESPACE_URL,
-                    f"minkops:{run['tenant_id']}:{target['destination_key']}:{identity}",
-                )
-            )
+            token = narration_token(run["tenant_id"], target["destination_key"], identity)
             plan = bill.native_plan(token, record["operation"], record.get("current"))
             try:
                 with connection.transaction():

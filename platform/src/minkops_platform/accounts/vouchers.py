@@ -11,6 +11,7 @@ import json
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from uuid import NAMESPACE_URL, uuid5
 
 FORMAT = 5
 # Purchase documents may already be booked as Journals; never enter them twice.
@@ -46,6 +47,16 @@ def document_identity(party, number, issued, *, series="invoice"):
     if series != "invoice":
         parts = [series, *parts]
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+
+
+def narration_token(tenant_id, destination_key, identity):
+    """The remote ID a voucher carries in Tally, as `[Minkops <tag>:<token>]`.
+
+    It includes the tenant, so a fresh tenant can never mistake an earlier
+    tenant's tagged voucher for its own; the writer's same-date, same-amount
+    rule still holds such a voucher as possibly existing.
+    """
+    return str(uuid5(NAMESPACE_URL, f"minkops:{tenant_id}:{destination_key}:{identity}"))
 
 
 def _cents(value):
