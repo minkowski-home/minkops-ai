@@ -361,7 +361,9 @@ def test_an_approved_bill_is_saved_once_and_tally_holding_another_version_is_nev
     companion(desk, lambda operation, revised_plan: {"outcome": "correction", "current": existing})
     changed = record(desk, changed)
     assert (changed["status"], changed["hold_codes"]) == ("held", ["save_held"])
-    assert changed["review_reasons"] == ["Tally already has this bill with other amounts or ledgers. Review it there; "
+    # The reviewer is told what differs, so the voucher can be checked in Tally at a glance.
+    assert changed["review_reasons"] == ["Tally's voucher for SOS/26/0412 comes to 188800.00, not 189980.00, with other "
+                                         "amounts for Input CGST 9%, Input SGST 9%, Office Cabins. Review it there; "
                                          "Minkops did not add a second voucher."]
     assert changed["current"]["entries"][0] == {"ledger": "Sunrise Office Systems", "amount": 18880000}
     assert actions(changed) == ["retry_save", "nothing"]

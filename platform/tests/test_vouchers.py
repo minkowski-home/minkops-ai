@@ -156,6 +156,27 @@ class ReceiptTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             vouchers.observed_bill(self.bill, "correction", observed(self.bill, reference="MOCK-2"), identity=IDENTITY)
 
+    def test_a_correction_says_how_the_voucher_tally_already_has_differs(self):
+        def reason(**overrides):
+            current = observed(self.bill, **overrides)
+            vouchers.observed_bill(self.bill, "correction", current, identity=IDENTITY)
+            return vouchers.correction_reason(self.bill, current).removesuffix(
+                " Review it there; Minkops did not add a second voucher.")
+
+        swapped = [{"ledger": "Supplier", "amount_cents": 11800}, {"ledger": "Purchases", "amount_cents": -10000},
+                   {"ledger": "Input CGST", "amount_cents": -900}, {"ledger": "Input SGST", "amount_cents": -900}]
+        self.assertEqual(reason(lines=swapped),
+                         "Tally's voucher for MOCK-1 posts to Input CGST, Input SGST instead of CGST, SGST.")
+        larger = [{"ledger": "Supplier", "amount_cents": 12980}, {"ledger": "Purchases", "amount_cents": -11000},
+                  {"ledger": "CGST", "amount_cents": -990}, {"ledger": "SGST", "amount_cents": -990}]
+        self.assertEqual(reason(lines=larger, date="20261002"), "Tally's voucher for MOCK-1 is dated 2026-10-02; "
+                                                                "comes to 129.80, not 118.00, with other amounts for "
+                                                                "CGST, Purchases, SGST.")
+        extra = [*observed(self.bill)["lines"], {"ledger": "Round Off", "amount_cents": -1}]
+        self.assertEqual(reason(lines=extra), "Tally's voucher for MOCK-1 also posts to Round Off.")
+        allocated = [{"ledger": "Purchases", "category": "Sites", "centre": "Site 4", "amount_cents": -10000}]
+        self.assertEqual(reason(allocations=allocated), "Tally's voucher for MOCK-1 has other cost allocations.")
+
     def test_a_saved_correction_must_keep_the_voucher_it_replaced(self):
         plan = {**BILL, "operation": "update", "expected": {"guid": "a1b2c3d4-0000-4000-8000-000000000001", "fingerprint": "v5:x"}}
         with self.assertRaises(ValueError):

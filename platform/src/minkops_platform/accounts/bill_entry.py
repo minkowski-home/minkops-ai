@@ -40,7 +40,14 @@ from . import desk_tools, mirror, supplier_gst, sync, writes
 from .desk_tools import Desk, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
-from .vouchers import TAXABLE_ROLES, HoldReason, check, narration_token, observed_bill
+from .vouchers import (
+    TAXABLE_ROLES,
+    HoldReason,
+    check,
+    correction_reason,
+    narration_token,
+    observed_bill,
+)
 
 KIND = "bill"
 # A proposal and at most two resubmissions, per bill.
@@ -780,8 +787,7 @@ def written(connection, run, record, write, receipt):
         follow = {"status": "duplicate", "current": current, "hold_codes": [], "review_reasons": []}
     else:
         if outcome == "correction":
-            code, reason = "save_held", ("Tally already has this bill with other amounts or ledgers. Review it there; "
-                                         "Minkops did not add a second voucher.")
+            code, reason = "save_held", correction_reason(write["plan"], receipt["current"])
         else:
             code = receipt.get("hold") if receipt.get("hold") in SAVE_HOLDS else "save_held"
             reason = str(receipt.get("message") or "") or hold(code).reason_for(BILL)

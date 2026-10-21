@@ -9,6 +9,7 @@ stored plan, and its receipt is verified against that plan.
 import hashlib
 import json
 import re
+from collections import Counter
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, uuid5
@@ -206,6 +207,44 @@ def observed_bill(plan, outcome, current, *, identity):
     return {"master_id": current["master_id"], "guid": current["guid"], "date": current["date"],
             "invoice_number": number, "vendor": current["party_ledger"], "voucher_type": current["voucher_type"],
             "entries": _entries(current), "fingerprint": current["fingerprint"]}
+
+
+def correction_reason(plan, current):
+    """How the voucher Tally already has for this bill differs from the approved plan, for the person reviewing it.
+
+    `current` is a receipt's observed voucher that observed_bill has accepted.
+    """
+    theirs = Counter((line["ledger"], line["amount_cents"]) for line in current["lines"])
+    ours = Counter((line["ledger"], _signed(line)) for line in plan["lines"])
+    ledgers = {side: {ledger for ledger, _ in lines} for side, lines in (("theirs", theirs), ("ours", ours))}
+    there, here = sorted(ledgers["theirs"] - ledgers["ours"]), sorted(ledgers["ours"] - ledgers["theirs"])
+    party = plan["header"]["party_ledger"]
+
+    def amounts(lines, ledger):
+        return sorted(cents for name, cents in lines.elements() if name == ledger)
+
+    clauses = []
+    if current["date"] != plan["header"]["date"].replace("-", ""):
+        clauses.append(f"is dated {current['date'][:4]}-{current['date'][4:6]}-{current['date'][6:]}")
+    if there and here:
+        clauses.append(f"posts to {', '.join(there)} instead of {', '.join(here)}")
+    elif there or here:
+        clauses.append(f"also posts to {', '.join(there)}" if there else f"does not post to {', '.join(here)}")
+    total = {side: sum(abs(cents) for cents in amounts(lines, party)) for side, lines in (("theirs", theirs),
+                                                                                         ("ours", ours))}
+    changed = sorted(ledger for ledger in (ledgers["theirs"] & ledgers["ours"]) - {party}
+                     if amounts(theirs, ledger) != amounts(ours, ledger))
+    if total["theirs"] != total["ours"]:
+        clauses.append(f"comes to {total['theirs'] / 100:.2f}, not {total['ours'] / 100:.2f}"
+                       + (f", with other amounts for {', '.join(changed)}" if changed else ""))
+    elif changed:
+        clauses.append(f"has other amounts for {', '.join(changed)}")
+    if not clauses and sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != (
+            _allocations(plan)):
+        clauses.append("has other cost allocations")
+    found = (f"Tally's voucher for {plan['duplicate']['number']} {'; '.join(clauses)}." if clauses
+             else "Tally already has this bill with other amounts or ledgers.")
+    return f"{found} Review it there; Minkops did not add a second voucher."
 
 
 def observed_statement(plan, current):
