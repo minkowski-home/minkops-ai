@@ -155,7 +155,9 @@ function startWorker() {
     const response = await fetch(origin + path, {
       method: body === undefined ? "GET" : "POST",
       redirect: "error",
-      signal: AbortSignal.timeout(45000),
+      // A full discovery receipt can take longer to upload than a control
+      // request. Keep its durable retry, with presence reported independently.
+      signal: AbortSignal.timeout(path.endsWith("/finish") ? 120000 : 45000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
@@ -178,6 +180,7 @@ function startWorker() {
   };
   worker = new CompanionWorker({
     request,
+    heartbeat: () => request("/api/desktop/worker/heartbeat", {}),
     execute: async (job) => {
       if (state.device !== identity) throw new Error("PC connection changed.");
       // Minkops never starts, closes or restarts Tally; failures become typed
@@ -370,39 +373,39 @@ function startWorker() {
         join(app.getPath("userData"), "backups", `${jobId}.bin`),
       ).catch(() => {});
     },
+    afterTick: async () => {
+      if (state.device !== identity) return;
+      try {
+        const after = state.discovery_archived[identity.id];
+        const catalog = await request(
+          "/api/desktop/discovery/package" +
+            (after ? `?after_id=${after}` : ""),
+        );
+        if (catalog) {
+          await saveDiscoveryPackage(
+            join(
+              app.getPath("userData"),
+              "discovery",
+              identity.tenant,
+              "confirmed",
+            ),
+            catalog,
+          );
+          state.discovery_archived[identity.id] = catalog.run_id;
+          await persist();
+        }
+        state.discovery_archive_error = null;
+      } catch (error) {
+        state.discovery_archive_error =
+          "The local discovery copy could not be refreshed. Keep Minkops open to retry.";
+        throw error;
+      }
+    },
   });
   state.discovery_archived ??= {};
   const tick = () =>
     void worker
       .tick()
-      .then(async () => {
-        if (state.device !== identity) return;
-        try {
-          const after = state.discovery_archived[identity.id];
-          const catalog = await request(
-            "/api/desktop/discovery/package" +
-              (after ? `?after_id=${after}` : ""),
-          );
-          if (catalog) {
-            await saveDiscoveryPackage(
-              join(
-                app.getPath("userData"),
-                "discovery",
-                identity.tenant,
-                "confirmed",
-              ),
-              catalog,
-            );
-            state.discovery_archived[identity.id] = catalog.run_id;
-            await persist();
-          }
-          state.discovery_archive_error = null;
-        } catch (error) {
-          state.discovery_archive_error =
-            "The local discovery copy could not be refreshed. Keep Minkops open to retry.";
-          throw error;
-        }
-      })
       .catch((error) => {
         // No tokens, documents, paths or raw protocol responses in console logs.
         if (error.status === 401 && state.device === identity) {

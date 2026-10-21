@@ -25,7 +25,10 @@ async def private_api_cache(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "private, no-store"
-    if os.getenv("WORKER_JOB_RESOURCE") and request.url.path.startswith('/api/'):
+    # Only committed mutations can make work runnable. Read polling must not
+    # open another connection and contend on the global dispatcher lock.
+    if (os.getenv("WORKER_JOB_RESOURCE") and request.url.path.startswith('/api/')
+            and request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400):
         from minkops_connectors.cloud_run import run_job
         from minkops_platform.worker_hosting import dispatch
 

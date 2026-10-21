@@ -85,15 +85,15 @@ def register(connection, tenant, user, name, installation_id):
 
 
 def authenticate(connection, credential):
-    # Serialize credential checks and polls without blocking approved intents'
-    # foreign-key checks. Revocation and token rotation retain exclusive locks.
+    # Share the authorization fence across concurrent operations. Revocation
+    # and credential rotation still take an exclusive lock and wait for them.
     row = connection.execute(
         """SELECT d.*, t.slug, u.is_platform_admin FROM desktop_devices d
            JOIN tenants t ON t.id=d.tenant_id JOIN users u ON u.id=d.owner_id
            WHERE d.token_hash=%s AND d.revoked_at IS NULL AND d.expires_at>now()
            AND u.email_verified_at IS NOT NULL AND (u.is_platform_admin OR EXISTS
              (SELECT 1 FROM memberships m WHERE m.tenant_id=d.tenant_id AND m.user_id=d.owner_id))
-           FOR NO KEY UPDATE OF d""",
+           FOR KEY SHARE OF d""",
         (_hash(credential),),
     ).fetchone()
     if not row:
@@ -101,11 +101,23 @@ def authenticate(connection, credential):
     return row
 
 
+def touch_presence(connection, device):
+    """Record activity independently of the business transaction or job lease."""
+    connection.execute(
+        """INSERT INTO desktop_device_presence(device_id,last_seen_at) VALUES (%s,clock_timestamp())
+           ON CONFLICT (device_id) DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at
+           WHERE desktop_device_presence.last_seen_at < clock_timestamp()-interval '3 seconds'""",
+        (device["id"],),
+    )
+
+
 def devices(connection, tenant):
     return [
         public_device(row)
         for row in connection.execute(
-            "SELECT * FROM desktop_devices WHERE tenant_id=%s ORDER BY created_at", (tenant["id"],)
+            """SELECT d.*,greatest(d.last_seen_at,p.last_seen_at) AS last_seen_at
+               FROM desktop_devices d LEFT JOIN desktop_device_presence p ON p.device_id=d.id
+               WHERE d.tenant_id=%s ORDER BY d.created_at""", (tenant["id"],)
         ).fetchall()
     ]
 
@@ -271,6 +283,8 @@ def _observe(connection, job, state, summary, progress):
             "SELECT * FROM account_runs WHERE tenant_id=%s AND id=%s FOR UPDATE",
             (job["tenant_id"], job["input"]["run_id"]),
         ).fetchone()
+        from .runtime.assets import hydrate
+        hydrate(connection, run)
         if run["state"] != "writing":
             return
         if state == "failed":
@@ -334,8 +348,9 @@ def _observe(connection, job, state, summary, progress):
 
 def bindings(connection, tenant, user):
     return connection.execute(
-        """SELECT b.source_id,b.device_id,d.name,d.last_seen_at FROM desktop_source_bindings b
+        """SELECT b.source_id,b.device_id,d.name,greatest(d.last_seen_at,p.last_seen_at) AS last_seen_at FROM desktop_source_bindings b
         JOIN desktop_devices d ON d.tenant_id=b.tenant_id AND d.id=b.device_id
+        LEFT JOIN desktop_device_presence p ON p.device_id=d.id
         WHERE b.tenant_id=%s AND d.owner_id=%s AND d.revoked_at IS NULL AND d.expires_at>now()""",
         (tenant["id"], user["id"]),
     ).fetchall()
@@ -376,6 +391,8 @@ def _save_spec(connection, device, payload, *, pending=True, underway=False):
     ).fetchone()
     if not run or run["actor_id"] != device["owner_id"]:
         raise ServiceError("not_found", "Approved run not found for this account.")
+    from .runtime.assets import hydrate
+    hydrate(connection, run)
     if pending and not underway:
         from .run_controls import require_active
         require_active(connection, device["tenant_id"], run["task_id"])

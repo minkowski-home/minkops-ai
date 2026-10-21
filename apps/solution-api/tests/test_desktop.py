@@ -5,6 +5,8 @@ import os
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from unittest.mock import patch
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -16,6 +18,22 @@ URL = os.getenv("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class DesktopTests(unittest.TestCase):
+    def test_authenticated_activity_and_heartbeat_refresh_presence_without_claiming(self):
+        self.pair()
+        job, _ = self.launch()
+        for path in ("/api/desktop/discovery/package", self.worker_base + "/heartbeat"):
+            with psycopg.connect(URL) as c:
+                c.execute("UPDATE desktop_devices SET last_seen_at=now()-interval '5 minutes' WHERE id=%s", (self.device["id"],))
+            response = (self.client.get(path, headers=self.worker) if path.endswith("package")
+                        else self.client.post(path, headers=self.worker, json={}))
+            self.assertEqual(response.status_code, 200, response.text)
+            with psycopg.connect(URL) as c:
+                self.assertTrue(c.execute("SELECT last_seen_at>now()-interval '5 seconds' FROM desktop_device_presence WHERE device_id=%s", (self.device["id"],)).fetchone()[0])
+                self.assertEqual(c.execute("SELECT state FROM desktop_jobs WHERE id=%s", (job["id"],)).fetchone()[0], "queued")
+        self.assertEqual(self.client.post(self.worker_base + "/heartbeat", json={}).status_code, 401)
+        self.client.delete(self.base + f"/devices/{self.device['id']}", headers=self.csrf)
+        self.assertEqual(self.client.post(self.worker_base + "/heartbeat", headers=self.worker, json={}).status_code, 401)
+
     def test_bound_folder_refresh_validates_snapshot_and_replays_once(self):
         self.pair()
         accounts = f"/api/tenants/{self.slug}/accounts"
@@ -115,6 +133,62 @@ class DesktopTests(unittest.TestCase):
         response = self.client.delete(self.base + f"/devices/{self.device['id']}", headers=self.csrf)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.client.post('/api/desktop/worker/claim', headers=self.worker, json={}).status_code, 401)
+
+    def test_busy_authenticated_work_does_not_block_presence_or_other_authentication(self):
+        """A long receipt retains revocation fencing without serializing heartbeats."""
+        from psycopg.rows import dict_row
+
+        from minkops_platform import desktop
+
+        self.pair()
+        with psycopg.connect(URL, row_factory=dict_row) as busy:
+            desktop.authenticate(busy, self.device['credential'])
+            with psycopg.connect(URL, row_factory=dict_row) as pulse:
+                pulse.execute("SET LOCAL lock_timeout='250ms'")
+                device = desktop.authenticate(pulse, self.device['credential'])
+                desktop.touch_presence(pulse, device)
+            # The slow operation still fences revocation until its transaction ends.
+            with psycopg.connect(URL, row_factory=dict_row) as revoker:
+                revoker.execute("SET LOCAL lock_timeout='250ms'")
+                with self.assertRaises(psycopg.errors.LockNotAvailable):
+                    desktop.revoke(revoker, {'id': device['tenant_id']},
+                                   {'id': device['owner_id']}, device['id'])
+        with psycopg.connect(URL) as c:
+            self.assertTrue(c.execute(
+                "SELECT last_seen_at>now()-interval '5 seconds' FROM desktop_device_presence WHERE device_id=%s",
+                (self.device['id'],),
+            ).fetchone()[0])
+
+    def test_heartbeat_completes_while_a_receipt_is_processing(self):
+        from minkops_platform import desktop
+
+        self.pair()
+        job, _ = self.launch()
+        claim = self.client.post(self.worker_base + '/claim', headers=self.worker, json={}).json()
+        entered, release = Event(), Event()
+        finish = desktop.finish
+
+        def slow_finish(*args):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('Receipt was not released')
+            return finish(*args)
+
+        def submit():
+            with TestClient(app) as client:
+                return client.post(self.worker_base + f"/jobs/{job['id']}/finish", headers=self.worker,
+                    json={'claim_token': claim['claim_token'], 'result': {'available': True, 'companies': []}})
+
+        with patch.object(desktop, 'finish', slow_finish), ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(submit)
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertEqual(self.client.post(self.worker_base + '/heartbeat',
+                    headers=self.worker, json={}).status_code, 200)
+                self.assertFalse(pending.done(), 'The receipt must remain in progress during the pulse')
+            finally:
+                release.set()
+            self.assertEqual(pending.result(timeout=2).status_code, 200)
 
     def test_receipt_transport_rejects_malformed_and_oversized_json(self):
         self.pair()

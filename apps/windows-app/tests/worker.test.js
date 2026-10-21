@@ -3,6 +3,52 @@ import assert from "node:assert/strict";
 import { CompanionWorker } from "../../../platform/desktop-runtime/src/worker.js";
 import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 
+test("busy collection, receipt delivery and archiving keep presence without claiming another job", async () => {
+  let release, entered, pending = null, claims = 0, beats = 0, archives = 0;
+  const started = () => new Promise(resolve => { entered = resolve; });
+  const block = () => { entered(); return new Promise(resolve => { release = resolve; }); };
+  const worker = new CompanionWorker({
+    request: async path => { if (path.endsWith("/claim")) { claims++; return {id: "job", claim_token: "token"}; } await block(); },
+    execute: block,
+    pending: () => pending,
+    savePending: async value => { pending = value; },
+    heartbeat: async () => { beats++; },
+    afterTick: async () => { archives++; await block(); },
+  });
+  let ready = started();
+  const first = worker.tick();
+  for (let phase = 0; phase < 3; phase++) {
+    await ready;
+    await worker.tick();
+    assert.equal(claims, 1);
+    assert.equal(beats, phase + 1);
+    ready = started();
+    release({sources: []});
+  }
+  await first;
+  assert.equal(archives, 1);
+  assert.equal(worker.busy, false);
+  assert.equal(pending, null);
+});
+
+test("overlapping presence requests are bounded and a failed receipt stays durable", async () => {
+  let release, beats = 0, pending = {id: "job", receipt: {claim_token: "token"}};
+  const worker = new CompanionWorker({
+    request: async () => { throw new Error("offline"); },
+    execute: async () => { throw new Error("must not execute again"); },
+    pending: () => pending, savePending: async value => { pending = value; },
+    heartbeat: () => { beats++; return new Promise(resolve => { release = resolve; }); },
+  });
+  // A retry reports presence before attempting to deliver its durable receipt.
+  const first = worker.tick();
+  await worker.tick();
+  assert.equal(beats, 1);
+  release();
+  await assert.rejects(first, /offline/);
+  assert.equal(pending.id, "job");
+  assert.equal(worker.busy, false);
+});
+
 test("discovery pauses at a read boundary, renews observations, and resumes once", async () => {
   const states = ["paused", "paused", "active"];
   let waits = 0, reads = 0;

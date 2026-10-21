@@ -67,6 +67,14 @@ server and needs no browser loopback exception, firewall port or router
 forwarding. Future mobile clients can use the same server-owned tasks and
 request bounded work on an authorized connected PC.
 
+Presence is independent of job dispatch: authenticated companion traffic updates
+`last_seen_at`, and busy workers send a bounded, single-flight heartbeat without
+claiming another job or extending its lease. Dispatch and confirmed discovery
+archiving are serialized, so slow archive transfers cannot overlap each poll.
+Completion uploads have a two-minute client budget; control requests retain
+45 seconds, and failed deliveries retain their durable receipt. Release the API
+heartbeat endpoint before rolling out a companion that calls it.
+
 ## Tally session, diagnostics and uncertain writes
 
 Tally belongs to the user. The companion never starts, closes, restarts or locates

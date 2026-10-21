@@ -1,16 +1,19 @@
 """Small first-party auth layer: verified email, server sessions, tenant membership."""
 
+import atexit
 import hashlib
 import os
 import re
 import secrets
 import smtplib
 from email.message import EmailMessage
+from threading import Lock
 from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from pwdlib import PasswordHash
 from pydantic import BaseModel, EmailStr, Field
 
@@ -22,6 +25,32 @@ passwords = PasswordHash.recommended()
 # our opaque PostgreSQL session token; Google does not own user authentication.
 SESSION_COOKIE = "__session"
 LEGACY_SESSION_COOKIE = "minkops_session"
+_pool = None
+_pool_url = None
+_pool_lock = Lock()
+
+
+def database_pool():
+    """Bound request connections to the pilot DB budget and reuse warm sockets."""
+    global _pool, _pool_url
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise HTTPException(503, "Database is not configured.")
+    with _pool_lock:
+        if _pool is None or _pool_url != url or _pool.closed:
+            if _pool is not None:
+                _pool.close()
+            _pool = ConnectionPool(url, min_size=0, max_size=4, max_waiting=16,
+                                   timeout=10, max_idle=30, num_workers=1, open=True,
+                                   kwargs={"row_factory": dict_row, "connect_timeout": 5})
+            _pool_url = url
+        return _pool
+
+
+@atexit.register
+def close_database_pool():
+    if _pool is not None:
+        _pool.close()
 
 
 def session_token(request: Request) -> str:
@@ -29,10 +58,7 @@ def session_token(request: Request) -> str:
 
 
 def database():
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise HTTPException(503, "Database is not configured.")
-    with psycopg.connect(url, row_factory=dict_row) as connection:
+    with database_pool().connection() as connection:
         # Commit the deadline fence before request work: an unauthorized or
         # failed request cannot roll it back. Reuse this request's connection.
         from minkops_platform.run_limits import expire

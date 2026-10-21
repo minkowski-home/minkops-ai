@@ -6,18 +6,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from minkops_platform import desktop
 from minkops_platform.errors import ServiceError
 
-from .auth import Db, User, require_csrf, tenant_access
+from .auth import Db, User, database_pool, require_csrf, tenant_access
 
 router = APIRouter()
 
 
-def call(action, *args):
+def call(action, *args, **kwargs):
     try:
-        return action(*args)
+        return action(*args, **kwargs)
     except ServiceError as error:
         status = {
             "invalid": 422,
@@ -104,10 +105,21 @@ def worker_device(request: Request, connection: Db):
     authorization = request.headers.get("authorization", "")
     if not authorization.startswith("Bearer ") or len(authorization) > 200:
         raise HTTPException(401, "Reconnect this PC from Minkops.")
-    return call(desktop.authenticate, connection, authorization[7:])
+    device = call(desktop.authenticate, connection, authorization[7:])
+    # A short independent transaction prevents a streamed/slow receipt from
+    # withholding presence while its authorization fence remains in force.
+    with database_pool().connection() as pulse:
+        call(desktop.touch_presence, pulse, device)
+    return device
 
 
 Device = Annotated[dict, Depends(worker_device)]
+
+
+@router.post("/api/desktop/worker/heartbeat")
+def heartbeat(device: Device):
+    """Authentication records presence without claiming or extending any job."""
+    return None
 
 
 @router.post("/api/desktop/worker/claim")
@@ -145,7 +157,7 @@ async def finish(job_id: UUID, request: Request, device: Device, connection: Db)
         body = Receipt.model_validate(json.loads(b"".join(chunks)))
     except (ValueError, TypeError, UnicodeDecodeError) as error:
         raise HTTPException(422, "Invalid local task receipt.") from error
-    return call(desktop.finish, connection, device, job_id, body.model_dump(mode="json"))
+    return await run_in_threadpool(call, desktop.finish, connection, device, job_id, body.model_dump(mode="json"))
 
 
 @router.post("/api/desktop/worker/diagnostics", status_code=201)
