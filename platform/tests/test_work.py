@@ -107,7 +107,7 @@ def test_each_item_is_claimed_by_one_lane_and_fenced_by_its_lease(scope):
         assert not work.finish(db, item["id"], item["lease_token"], "failed", error_code="late")
 
 
-def test_an_expired_lease_is_reclaimed_with_its_saved_session_and_no_new_attempt(scope):
+def test_an_expired_lease_resumes_its_attempt_and_a_recheck_starts_a_new_one(scope):
     import factory
     with factory.connect() as db:
         run = launch(db, scope, [work.ItemSpec("bill", {"file_id": "a"})])
@@ -117,9 +117,18 @@ def test_an_expired_lease_is_reclaimed_with_its_saved_session_and_no_new_attempt
         again = work.claim(db, kinds=("bill",), tenant_id=scope["tenant"]["id"])
         assert again["id"] == item["id"] and again["reclaimed"]
         assert (again["session_id"], again["turn_id"], again["attempt"]) == ("sess-1", "turn-1", 1)
+        assert again["started_at"] == item["started_at"]
         assert again["lease_token"] != item["lease_token"]
         assert not work.renew(db, item["id"], item["lease_token"])  # The old lane has lost its fence.
         assert run["id"] == again["run_id"]
+        # A recheck is a new attempt: a fresh session, timed from its own start (an hour after the first here).
+        assert work.finish(db, item["id"], again["lease_token"], "done")
+        first = db.execute("UPDATE run_items SET started_at=started_at-interval '1 hour' WHERE id=%s RETURNING *",
+                           (item["id"],)).fetchone()
+        work.requeue_item(db, scope["tenant"]["id"], item["id"])
+        fresh = work.claim(db, kinds=("bill",), tenant_id=scope["tenant"]["id"])
+        assert (fresh["session_id"], fresh["attempt"]) == (None, 2)
+        assert fresh["started_at"] > first["started_at"]
 
 
 def test_paused_and_stopped_tasks_are_never_claimed(scope):

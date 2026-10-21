@@ -210,7 +210,7 @@ def retry(connection, item_id, token, *, delay, error_code, error):
     """Queue a new attempt with a fresh session after `delay` seconds, keeping why the last one failed."""
     return _fenced(connection, item_id, token,
                    "state='queued', queued_at=now()+make_interval(secs=>%s), session_id=NULL, turn_id=NULL, "
-                   "session_requested_at=NULL, session_closed=false, error_code=%s, error=%s, "
+                   "session_requested_at=NULL, session_closed=false, error_code=%s, error=%s, started_at=NULL, "
                    "lease_token=NULL, lease_until=NULL",
                    (delay, error_code, (error or "")[:400] or None))
 
@@ -262,7 +262,7 @@ def requeue_item(connection, tenant_id, item_id):
     """An explicit Recheck: a new attempt for a finished item, never a replay of a live one."""
     row = connection.execute(
         """UPDATE run_items SET state='queued', queued_at=now(), session_id=NULL, turn_id=NULL, session_closed=false,
-           session_requested_at=NULL, error_code=NULL, error=NULL, finished_at=NULL, updated_at=now()
+           session_requested_at=NULL, error_code=NULL, error=NULL, started_at=NULL, finished_at=NULL, updated_at=now()
            WHERE tenant_id=%s AND id=%s AND state IN ('done','failed') RETURNING *""",
         (tenant_id, item_id)).fetchone()
     if not row:
