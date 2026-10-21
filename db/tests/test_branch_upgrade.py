@@ -157,38 +157,44 @@ class BranchUpgradeTests(unittest.TestCase):
                     self.assertEqual(shape, self.fresh_shape)
                 if branch:
                     if pending_write:
+                        # The drain stops a retired run's unfinished intent as Stop
+                        # does: cancelled, with its approved plan untouched.
                         self.assertEqual(
                             connection.execute(
-                                "SELECT * FROM account_tally_writes WHERE id=%s",
+                                """SELECT identity,plan,destination_key,finished_at,cancelled_at IS NOT NULL
+                                FROM account_tally_writes WHERE id=%s""",
                                 (pending_write[0],),
                             ).fetchone(),
-                            pending_write,
+                            ("historical-bill", {"operation": "update", "data": {"invoice_number": "HISTORY-1", "total": 118}},
+                             "company:historical-guid", None, True),
                         )
                         # The company/bill reservation must still serialize
                         # financial intents after its FK target was renamed.
+                        intent = """INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
+                            VALUES (%s,%s,%s,'Test Company','historical-bill',0,'{}','company:historical-guid')"""
+                        connection.execute(intent, (tenant, run[0], device))
                         with (
                             self.assertRaises(psycopg.errors.UniqueViolation),
                             connection.transaction(),
                         ):
-                            connection.execute(
-                                """INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
-                                VALUES (%s,%s,%s,'Test Company','historical-bill',0,'{}','company:historical-guid')""",
-                                (tenant, run[0], device),
-                            )
+                            connection.execute(intent, (tenant, run[0], device))
                     # Added columns may change SELECT *, so compare stable state explicitly.
                     value = connection.execute(
                         "SELECT id,session_id,turn_id,state,config,result FROM workflow_runs WHERE id=%s",
                         (run[0],),
                     ).fetchone()
+                    # A run on a retired contract keeps its paid session and result.
+                    # Branches upgrading through 0019 see it failed with the binding
+                    # it used to be inferred to have; the baseline branch inserts it
+                    # after every migration has already applied.
+                    drained = branch != "baseline"
+                    config = {"review_mode": "all_outputs"}
+                    if drained:
+                        config |= {"timeout_cancel_pending": True,
+                                   "runtime_binding": {"handler": "accounts.bill", "presentation": "accounts-bill"}}
                     self.assertEqual(
                         value[1:],
-                        (
-                            "paid-session",
-                            "paid-turn",
-                            "review",
-                            {"review_mode": "all_outputs"},
-                            {"records": []},
-                        ),
+                        ("paid-session", "paid-turn", "failed" if drained else "review", config, {"records": []}),
                     )
                     for version, checksum in before:
                         self.assertEqual(

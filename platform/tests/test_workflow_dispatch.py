@@ -30,12 +30,12 @@ class DispatchTests(TestCase):
         with self.assertRaisesRegex(ValueError, "reserved"):
             execution_config(definition, {"authorized_bindings": [{"id": "invented"}]})
 
-    def test_missing_binding_only_supports_known_legacy_workflows(self):
-        self.assertEqual(
-            binding_for({"workflow_key": "bill-entry", "config": {}}).handler, "accounts.bill"
-        )
-        with self.assertRaises(ValueError):
-            binding_for({"workflow_key": "unknown", "config": {}})
+    def test_missing_binding_fails_closed(self):
+        # Migration 0019 pinned a binding on every historical run, so a run
+        # without one is corrupt rather than a legacy shape to infer.
+        for key in ("bill-entry", "source-discovery", "unknown"):
+            with self.subTest(key), self.assertRaises(ValueError):
+                binding_for({"workflow_key": key, "config": {}})
 
     def test_unknown_handler_fails_closed(self):
         from minkops_platform.runtime.application import get_handler

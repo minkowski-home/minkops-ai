@@ -134,7 +134,8 @@ def done(connection, tenant_id, user, item_id):
 
 
 def enqueue(connection, item, user, operation="attention.refresh"):
-    if item["status"] == "done" or not item["target"].get("device_id"):
+    # Only Tally items have a native destination to observe.
+    if item["status"] == "done" or item["target"].get("tool") != "tally" or not item["target"].get("device_id"):
         return False
     # A tenant member may request a read on an already granted PC; this does
     # not extend that PC's resource grants or impersonate its original owner.

@@ -91,8 +91,7 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
             binding = run["config"].get("runtime_binding", {})
             # A batch parent owns its bills' attention; its children would
             # otherwise open a second item for each bill under their own keys.
-            if run.get("parent_run_id") is None and (binding.get("handler") == "accounts.bill"
-                                                    or (not binding and run.get("workflow_key") == "bill-entry")):
+            if run.get("parent_run_id") is None and binding.get("handler") == "accounts.bill":
                 from .accounts.attention import stopped
                 stopped(connection, run, actor["id"])
             if run.get('parent_run_id') is None and binding.get('handler'):

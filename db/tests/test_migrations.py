@@ -108,6 +108,64 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual((list(migrated["properties"]), migrated["required"], version), (["review_mode"], ["review_mode"], 2))
             self.assertEqual((rows["another-workflow"][0]["output_mode"], rows["another-workflow"][2]), ("excel_in_place", 1))
 
+    def test_unfinished_work_on_retired_contracts_is_stopped_and_left_in_attention(self):
+        from psycopg.types.json import Jsonb
+
+        with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
+            sql = connection.execute
+            tenant = sql("INSERT INTO tenants(slug,name) VALUES (%s,'Drain') RETURNING id", ("drain-" + uuid4().hex,)).fetchone()[0]
+            user = sql("INSERT INTO users(email,name,password_hash) VALUES (%s,'Operator','x') RETURNING id",
+                       (uuid4().hex + "@example.test",)).fetchone()[0]
+            device = sql("INSERT INTO desktop_devices(tenant_id,owner_id,installation_id,name,token_hash) VALUES (%s,%s,%s,'PC',%s) RETURNING id",
+                         (tenant, user, uuid4(), uuid4().hex)).fetchone()[0]
+            for key in ("bill-entry", "statement-entry", "source-discovery"):
+                sql("INSERT INTO workflows(tenant_id,key,name,description,config_schema,config_values,execution_binding) VALUES (%s,%s,'W','W','{}','{}','{}')",
+                    (tenant, key))
+
+            def run(key, config, *, state="review", result=None):
+                task = sql("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Task') RETURNING id", (tenant,)).fetchone()[0]
+                return sql("""INSERT INTO workflow_runs(tenant_id,task_id,actor_id,workflow_key,definition_version,request_key,
+                    request_hash,config,file_ids,state,result) VALUES (%s,%s,%s,%s,'0.1.0',%s,'h',%s,'[]',%s,%s) RETURNING id,task_id""",
+                           (tenant, task, user, key, uuid4(), Jsonb(config), state, Jsonb(result) if result else None)).fetchone()
+
+            bound = {"runtime_binding": {"handler": "accounts.bill", "presentation": "accounts-bill"}}
+            proposals = run("bill-entry", {**bound, "tally_target": {"companies": [], "voucher_proposal_version": 1}})
+            fixed = run("bill-entry", {**bound, "tally_target": {"company": "Test", "port": 9000}}, state="writing")
+            excel = run("bill-entry", {"catalog_snapshot": {"sheets": []}})
+            older_rows = run("statement-entry", {}, result={"records": [{"status": "ready", "plan": {"format_version": 4}}]})
+            v5_rows = run("statement-entry", {}, result={"records": [{"status": "ready", "plan": {"format_version": 5}},
+                                                                      {"status": "saved", "plan": {"format_version": 4}}]})
+            history = run("source-discovery", {}, state="completed")
+            write = sql("""INSERT INTO account_tally_writes(tenant_id,run_id,device_id,company,identity,record_index,plan,destination_key)
+                VALUES (%s,%s,%s,'Test','i',0,'{"format_version":3}','company:x') RETURNING id""", (tenant, fixed[0], device)).fetchone()[0]
+            job = sql("""INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
+                VALUES (%s,%s,%s,%s,'tally.save',%s,%s,'h') RETURNING id""",
+                      (tenant, device, user, fixed[1], Jsonb({"run_id": str(fixed[0]), "write_id": str(write)}), uuid4())).fetchone()[0]
+            migration = (ROOT / "db/migrations/0019_retire_legacy_runs.sql").read_text()
+            for _ in range(2):
+                sql(migration)
+
+            def state(row):
+                return sql("""SELECT r.state, t.control_state, r.error FROM workflow_runs r JOIN tasks t ON t.id=r.task_id
+                    WHERE r.id=%s""", (row[0],)).fetchone()
+
+            for row in (proposals, v5_rows):
+                self.assertEqual(state(row)[:2], ("review", "active"))
+            retired = (fixed, excel, older_rows)
+            for row in retired:
+                self.assertEqual(state(row)[:2], ("failed", "stopped"))
+                self.assertIn("Start a new run", state(row)[2])
+            self.assertIsNotNone(sql("SELECT cancelled_at FROM account_tally_writes WHERE id=%s", (write,)).fetchone()[0])
+            self.assertEqual(sql("SELECT state FROM desktop_jobs WHERE id=%s", (job,)).fetchone()[0], "failed")
+            items = sql("SELECT event_key,label,status FROM attention_items WHERE tenant_id=%s ORDER BY event_key", (tenant,)).fetchall()
+            self.assertEqual(items, sorted((f"retired:{row[0]}", "Run retired", "pending") for row in retired))
+            self.assertEqual(sql("SELECT count(*) FROM attention_events e JOIN attention_items a ON a.id=e.item_id WHERE a.tenant_id=%s",
+                                 (tenant,)).fetchone()[0], 3)
+            self.assertEqual(sql("SELECT config->'runtime_binding' FROM workflow_runs WHERE id=%s", (history[0],)).fetchone()[0],
+                             {"handler": "accounts.discovery", "presentation": "accounts-discovery"})
+            self.assertEqual(sql("SELECT config->'runtime_binding' FROM workflow_runs WHERE id=%s", (excel[0],)).fetchone()[0],
+                             {"handler": "accounts.bill", "presentation": "accounts-bill"})
+
     def test_desktop_binding_and_dispatch_foreign_keys_prevent_cross_tenant_links(self):
         with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
             prefix = "desktop-migration-" + uuid4().hex

@@ -11,10 +11,6 @@ from dataclasses import dataclass
 from minkops_platform.workflow_policies import enforce_policies as enforce_policies
 from minkops_platform.workflow_policies import validate_policies as validate_policies
 
-LEGACY_BINDINGS = {
-    "source-discovery": {"handler": "accounts.discovery", "presentation": "accounts-discovery"},
-    "bill-entry": {"handler": "accounts.bill", "presentation": "accounts-bill"},
-}
 RESERVED = {
     "_assets",
     "_public_projection",
@@ -52,8 +48,6 @@ class Binding:
 
 def binding_for(run):
     binding = run["config"].get("runtime_binding")
-    if binding is None:
-        binding = LEGACY_BINDINGS.get(run.get("workflow_key"))
     if not binding:
         raise ValueError("Run has no installed runtime binding.")
     return Binding(binding["handler"], binding.get("presentation", "proposal"))
