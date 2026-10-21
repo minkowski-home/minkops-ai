@@ -25,7 +25,7 @@ from uuid import UUID
 from jsonschema import ValidationError
 
 from minkops_connectors.statement import normalized, read_tables
-from minkops_platform import attention, clients, profiles, work
+from minkops_platform import attention, profiles, work
 from minkops_platform.errors import ServiceError
 from minkops_platform.lanes import Session, Wait
 from minkops_platform.resources import files_for
@@ -83,16 +83,7 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
         raise ServiceError("invalid", "Statements and mappings must be CSV or XLSX. Convert legacy XLS files in Excel.")
     if sum(len(f["content"]) for f in files) > MAX_BYTES:
         raise ServiceError("invalid", "Select at most 30 MB of statements.")
-    companies = clients.companies(connection, tenant, client)
-    if not companies:
-        raise ServiceError("conflict", "Authorise this client's Tally companies before entering its statements.")
-    devices = connection.execute(
-        "SELECT * FROM desktop_devices WHERE id = ANY(%s) AND revoked_at IS NULL AND expires_at > now() ORDER BY id",
-        (list({c["device_id"] for c in companies}),)).fetchall()
-    if len(devices) != len({c["device_id"] for c in companies}):
-        raise ServiceError("conflict", "A PC holding this client's companies is no longer connected.")
-    for device in devices:
-        sync.queue(connection, device, user["id"], reason="run")
+    _, devices = desk_tools.prepare(connection, tenant, user, client)
     statements = [f for f in files if str(f["id"]) in file_ids]
     entries = statement_layouts.resolve(connection, tenant["id"], statement_layouts.sheets(statements))
     today, counters, refuted = date.today(), {}, set()
@@ -152,15 +143,6 @@ def _record(row, source, path):
 
 # --- sessions -------------------------------------------------------------------------
 
-def _bundle(connection, run):
-    return connection.execute("SELECT content FROM run_bundles WHERE tenant_id=%s AND digest=%s",
-                              (run["tenant_id"], run["bundle_digest"])).fetchone()["content"]
-
-
-def _reasoning(bundle):
-    return {"effort": bundle["reasoning_effort"]} if bundle.get("reasoning_effort") else None
-
-
 def _sheet(connection, run, source):
     """The item's sheet read again from its file, or None when the file has no such sheet."""
     file = files_for(connection, run["tenant_id"], [source["file_id"]])[0]
@@ -204,47 +186,22 @@ def _layout_session(connection, run, item):
         return None
     if profile:
         raise Wait(statement_layouts.blocker(profile["id"]))
-    bundle = _bundle(connection, run)
+    bundle = desk_tools.bundle(connection, run)
     preview = json.dumps(statement_layouts.preview_sheet(entry), ensure_ascii=False)
-    return Session(model=bundle["model"], instructions=bundle["stages"]["layout"], reasoning=_reasoning(bundle),
+    return Session(model=bundle["model"], instructions=bundle["stages"]["layout"], reasoning=desk_tools.reasoning(bundle),
                    content=[{"type": "input_text", "text": preview}], tools=LAYOUT_TOOLS,
                    state=Layout(run, item, entry))
 
 
-def _ready(connection, run):
-    """Pin the client's mirrors once every PC it uses has refreshed; until then, wait on the next one."""
-    pending = connection.execute(
-        """SELECT j.device_id FROM desktop_jobs j JOIN companies c ON c.device_id=j.device_id
-           WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised' AND j.operation='tally.sync'
-               AND j.state IN ('queued','executing') AND j.created_at <= %s ORDER BY j.device_id LIMIT 1""",
-        (run["tenant_id"], run["client_id"], run["created_at"])).fetchone()
-    if pending:
-        raise Wait(sync.blocker(pending["device_id"]))
-    run = connection.execute("SELECT * FROM runs WHERE id=%s FOR UPDATE", (run["id"],)).fetchone()
-    if not run["pins"]:
-        ids = [c["id"] for c in connection.execute(
-            "SELECT id FROM companies WHERE tenant_id=%s AND client_id=%s AND status='authorised'",
-            (run["tenant_id"], run["client_id"])).fetchall()]
-        pins = mirror.pins(connection, ids)
-        if not pins:
-            # No copy was ever published: wait for the PC's next refresh to finish.
-            device = connection.execute("SELECT device_id FROM companies WHERE id = ANY(%s) ORDER BY device_id LIMIT 1",
-                                        (ids,)).fetchone()
-            raise Wait(sync.blocker(device["device_id"]))
-        run = connection.execute("UPDATE runs SET pins=%s,updated_at=now() WHERE id=%s RETURNING *",
-                                 (json.dumps(pins), run["id"])).fetchone()
-    return run
-
-
 def _chunk_session(connection, run, item):
-    run = _ready(connection, run)
+    run = desk_tools.ready(connection, run)
     rows = connection.execute(
         "SELECT * FROM run_records WHERE item_id=%s AND kind=%s AND status='pending' ORDER BY position",
         (item["id"], ROW)).fetchall()
     if not rows:
         return None
     state = Chunk(connection, run, item)
-    source, bundle = item["source"], _bundle(connection, run)
+    source, bundle = item["source"], desk_tools.bundle(connection, run)
     lines = [json.dumps({key: value for key, value in {
         "ref": str(row["id"]), "date": row["facts"]["date"], "amount": _rupees(row["facts"]["amount_cents"]),
         "balance": _rupees(row["facts"]["balance_cents"]), "reference": row["facts"]["reference"] or None,
@@ -259,7 +216,7 @@ def _chunk_session(connection, run, item):
     tools = {**desk_tools.TOOLS, **CHUNK_TOOLS}
     if not run["config"].get("branch_mapping_file_id"):
         tools.pop("mapping")
-    return Session(model=bundle["model"], instructions=bundle["instructions"], reasoning=_reasoning(bundle),
+    return Session(model=bundle["model"], instructions=bundle["instructions"], reasoning=desk_tools.reasoning(bundle),
                    content=[{"type": "input_text", "text": text}], tools=tools, state=state)
 
 
@@ -569,13 +526,9 @@ def _settle_layout(connection, run, item, outcome):
     if not chunks:
         _hold_sheet(connection, item, path, "deferred", "statement_layout_unknown", "The sheet has no transactions.")
         return
-    waiting = connection.execute(
-        """SELECT j.device_id FROM desktop_jobs j JOIN companies c ON c.device_id=j.device_id
-           WHERE c.client_id=%s AND c.status='authorised' AND j.operation='tally.sync' AND j.state IN ('queued','executing')
-           LIMIT 1""", (run["client_id"],)).fetchone()
-    added = work.add_items(connection, run, [
-        work.ItemSpec("chunk", chunk["source"], waiting_on=sync.blocker(waiting["device_id"]) if waiting else None)
-        for chunk in chunks])
+    waiting = desk_tools.refreshing(connection, run["client_id"])
+    added = work.add_items(connection, run, [work.ItemSpec("chunk", chunk["source"], waiting_on=waiting)
+                                             for chunk in chunks])
     for added_item, chunk in zip(added, chunks, strict=True):
         work.add_records(connection, added_item, chunk["rows"])
 
