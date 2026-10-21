@@ -94,13 +94,22 @@ def recover(url, submit):
                     AND cleanup_attempt_count<10 AND coalesce(cleanup_attempt_at,'epoch')<now()-interval '1 minute'))
             ) AS needed""").fetchone()['needed']
         if not needed:
+            from .work import runnable
+            needed = runnable(c)
+        if not needed:
             return False
         c.execute("""UPDATE worker_wakeup SET generation=greatest(generation,acknowledged+1),
             lease_until=NULL,dispatch_token=NULL""")
     return dispatch(url, submit)
 
 
-def drain(url, *, max_seconds=1200, work=None, cleanup=None, lanes=None):
+def drain(url, *, max_seconds=1200, work=None, cleanup=None, lanes=None, host=None):
+    """Work until idle, then acknowledge the wake-up generation that was observed.
+
+    `host` is an entered lanes.Host whose run items must be settled too before
+    the generation is acknowledged; at the deadline it stops claiming, and the
+    caller's exit hands its sessions to the successor this drain wakes.
+    """
     from .accounts.worker import WORKER_LANES, cleanup_once, work_once
 
     work, cleanup = work or work_once, cleanup or cleanup_once
@@ -120,7 +129,7 @@ def drain(url, *, max_seconds=1200, work=None, cleanup=None, lanes=None):
             # One maintenance slot never consumes an AI proposal lane. Its
             # durable cleanup claim remains bounded independently of AI work.
             with ThreadPoolExecutor(max_workers=lanes + 1) as pool:
-                processed, released = _drain_lanes(c, pool, url, work, cleanup, lanes, deadline)
+                processed, released = _drain_lanes(c, pool, url, work, cleanup, lanes, deadline, host)
             if released:
                 return processed
             # Preserve runnable work for a successor when this bounded slice ends.
@@ -133,7 +142,7 @@ def drain(url, *, max_seconds=1200, work=None, cleanup=None, lanes=None):
                     c.execute("SELECT pg_advisory_unlock(%s)", (RUNNER_LOCK,))
 
 
-def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline):
+def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline, host):
     processed = 0
     pending = set()
     observed = None
@@ -149,6 +158,8 @@ def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline):
         # A lane can run immediately after submit. Publish the runner lease first
         # so dispatchers never observe active work without its coalescing lease.
         c.execute("UPDATE worker_wakeup SET lease_until=now()+interval '30 minutes'")
+        if host and time.monotonic() >= deadline:
+            host.stop_claiming()
         if maintenance and maintenance.done() and pending:
             maintenance.result()
             maintenance = None
@@ -188,6 +199,11 @@ def _drain_lanes(c, pool, url, work, cleanup, lanes, deadline):
                 "generation"
             ]
             if current != observed:
+                idle = False
+                continue
+            if host and not host.settled(c):
+                # Run items are still being worked: look again once the lanes go quiet.
+                host.wait_idle(10)
                 idle = False
                 continue
             c.execute(

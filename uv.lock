@@ -670,7 +670,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "minkops-connectors" },
     { name = "openai" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pyyaml" },
 ]
 
@@ -679,7 +679,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.25.0" },
     { name = "minkops-connectors", editable = "connectors" },
     { name = "openai", specifier = ">=3.19.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.3" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 

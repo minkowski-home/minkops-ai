@@ -47,6 +47,25 @@ class WorkerRecoveryTests(unittest.TestCase):
         self.assertFalse(self.recover())
         self.assertEqual(len(self.calls), 1)
 
+    def test_a_run_item_whose_wake_up_was_lost_is_recovered_but_a_waiting_one_is_not(self):
+        import factory
+        from psycopg.rows import dict_row
+
+        from minkops_platform import work
+        blocker = {'kind': 'sync', 'ref': 'pc-1'}
+        with psycopg.connect(self.url, row_factory=dict_row) as c:
+            tenant = factory.tenant(c)
+            factory.run(c, tenant, factory.client(c, tenant), factory.workflow(c, tenant), factory.user(c, tenant),
+                        [work.ItemSpec('bill', {'file_id': 'a'}, waiting_on=blocker)])
+            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL')
+        self.assertFalse(self.recover())
+        with psycopg.connect(self.url, row_factory=dict_row) as c:
+            work.release(c, tenant['id'], blocker)
+            # The release's notification and dispatch were lost.
+            c.execute('UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL')
+        self.assertTrue(self.recover())
+        self.assertEqual(len(self.calls), 1)
+
     def test_blocked_and_stopped_work_is_not_runnable(self):
         run = self.run_row({'awaits': {'profile': str(uuid4())}})
         self.assertFalse(self.recover())

@@ -108,7 +108,8 @@ _CLAIM = """
 WITH next AS (
     SELECT i.id, i.state AS previous FROM run_items i
     JOIN tasks t ON t.tenant_id=i.tenant_id AND t.id=i.task_id
-    WHERE {where} AND t.control_state='active' AND i.kind = ANY(%(kinds)s)
+    WHERE {where} AND t.control_state='active'
+        AND (%(kinds)s::text[] IS NULL OR i.kind = ANY(%(kinds)s))
         AND (%(tenant)s::uuid IS NULL OR i.tenant_id=%(tenant)s::uuid)
     ORDER BY {order} FOR UPDATE OF i SKIP LOCKED LIMIT 1)
 UPDATE run_items i SET state='running', lease_token=gen_random_uuid(),
@@ -118,20 +119,29 @@ UPDATE run_items i SET state='running', lease_token=gen_random_uuid(),
 FROM next WHERE i.id=next.id RETURNING i.*, next.previous='running' AS reclaimed"""
 
 
-def claim(connection, *, kinds, tenant_id=None, lease_seconds=LEASE_SECONDS):
-    """Lease the next runnable item of these kinds, or take over an expired lease.
+def claim(connection, *, kinds=None, tenant_id=None, lease_seconds=LEASE_SECONDS):
+    """Lease the next runnable item, optionally of these kinds, or take over an expired lease.
 
     A reclaimed item keeps its saved provider session for the new lane to
     reattach; it is the same attempt, not a new paid one. Paused and stopped
-    tasks are never claimed.
+    tasks are never claimed, and a retry waits until its time comes.
     """
-    parameters = {"kinds": list(kinds), "tenant": tenant_id, "lease": lease_seconds}
-    for where, order in (("i.state='queued'", "i.queued_at, i.id"),
+    parameters = {"kinds": list(kinds) if kinds else None, "tenant": tenant_id, "lease": lease_seconds}
+    for where, order in (("i.state='queued' AND i.queued_at <= now()", "i.queued_at, i.id"),
                          ("i.state='running' AND i.lease_until < now()", "i.lease_until, i.id")):
         row = connection.execute(_CLAIM.format(where=where, order=order), parameters).fetchone()
         if row:
             return row
     return None
+
+
+def runnable(connection, tenant_id=None):
+    """Whether any item is queued for an active task, or running anywhere, so a drain must not end."""
+    return connection.execute(
+        """SELECT EXISTS (SELECT 1 FROM run_items i JOIN tasks t ON t.tenant_id=i.tenant_id AND t.id=i.task_id
+               WHERE ((i.state='queued' AND t.control_state='active') OR i.state='running')
+                   AND (%s::uuid IS NULL OR i.tenant_id=%s::uuid)) AS runnable""",
+        (tenant_id, tenant_id)).fetchone()["runnable"]
 
 
 def _fenced(connection, item_id, token, assignments, values=()):
@@ -145,6 +155,29 @@ def renew(connection, item_id, token, lease_seconds=LEASE_SECONDS):
     return _fenced(connection, item_id, token, "lease_until=now()+make_interval(secs=>%s)", (lease_seconds,))
 
 
+def renew_all(connection, held, lease_seconds=LEASE_SECONDS):
+    """Extend every lease still held, as {item_id: its task's control state}; a missing item lost its fence."""
+    if not held:
+        return {}
+    rows = connection.execute(
+        """UPDATE run_items i SET lease_until=now()+make_interval(secs=>%s)
+           FROM unnest(%s::uuid[], %s::uuid[]) AS held(id, token), tasks t
+           WHERE i.id=held.id AND i.lease_token=held.token AND i.state='running'
+               AND t.tenant_id=i.tenant_id AND t.id=i.task_id
+           RETURNING i.id, t.control_state""",
+        (lease_seconds, [item_id for item_id, _ in held], [token for _, token in held])).fetchall()
+    return {row["id"]: row["control_state"] for row in rows}
+
+
+def request_session(connection, item_id, token):
+    """Record, before asking the provider, that this attempt may now have a session; its Unix time or None."""
+    row = connection.execute(
+        """UPDATE run_items SET session_requested_at=coalesce(session_requested_at,now()), updated_at=now()
+           WHERE id=%s AND lease_token=%s AND state='running'
+           RETURNING extract(epoch FROM session_requested_at)::float8 AS at""", (item_id, token)).fetchone()
+    return row["at"] if row else None
+
+
 def save_session(connection, item_id, token, session_id, turn_id):
     """Persist provider IDs as soon as they exist, so a restart reattaches instead of resubmitting."""
     return _fenced(connection, item_id, token, "session_id=coalesce(%s,session_id), turn_id=coalesce(%s,turn_id)",
@@ -152,12 +185,21 @@ def save_session(connection, item_id, token, session_id, turn_id):
 
 
 def finish(connection, item_id, token, state, *, error_code=None, error=None, usage=None):
-    if state not in ("done", "failed"):
-        raise ValueError("An item finishes done or failed.")
+    if state not in ("done", "failed", "cancelled"):
+        raise ValueError("An item finishes done, failed or cancelled.")
     return _fenced(connection, item_id, token,
                    "state=%s, error_code=%s, error=%s, usage=coalesce(%s,usage), finished_at=now(), "
                    "lease_token=NULL, lease_until=NULL",
                    (state, error_code, (error or "")[:400] or None, Jsonb(usage) if usage else None))
+
+
+def retry(connection, item_id, token, *, delay, error_code, error):
+    """Queue a new attempt with a fresh session after `delay` seconds, keeping why the last one failed."""
+    return _fenced(connection, item_id, token,
+                   "state='queued', queued_at=now()+make_interval(secs=>%s), session_id=NULL, turn_id=NULL, "
+                   "session_requested_at=NULL, session_closed=false, error_code=%s, error=%s, "
+                   "lease_token=NULL, lease_until=NULL",
+                   (delay, error_code, (error or "")[:400] or None))
 
 
 def wait(connection, item_id, token, waiting_on):
@@ -166,9 +208,28 @@ def wait(connection, item_id, token, waiting_on):
                    (Jsonb(waiting_on),))
 
 
-def requeue(connection, item_id, token):
-    """Give an item back, for example when a worker shuts down before its session exists."""
-    return _fenced(connection, item_id, token, "state='queued', queued_at=now(), lease_token=NULL, lease_until=NULL")
+def hand_off(connection, held):
+    """Expire these leases now so a successor resumes each item and its session at once."""
+    if held:
+        connection.execute(
+            """UPDATE run_items i SET lease_until=now() FROM unnest(%s::uuid[], %s::uuid[]) AS held(id, token)
+               WHERE i.id=held.id AND i.lease_token=held.token AND i.state='running'""",
+            ([item_id for item_id, _ in held], [token for _, token in held]))
+
+
+def unclosed(connection, *, tenant_id=None, limit=20):
+    """Finished items whose provider session is still open, oldest first, with seconds since they finished."""
+    return connection.execute(
+        """SELECT id, session_id, turn_id, usage, extract(epoch FROM now()-finished_at)::float8 AS age
+           FROM run_items WHERE state IN ('done','failed','cancelled') AND session_id IS NOT NULL
+               AND NOT session_closed AND (%s::uuid IS NULL OR tenant_id=%s::uuid)
+           ORDER BY finished_at LIMIT %s""", (tenant_id, tenant_id, limit)).fetchall()
+
+
+def closed(connection, item_id, session_id, usage):
+    """Record that the session was deleted at the provider, keeping its usage if the item had none."""
+    connection.execute("UPDATE run_items SET session_closed=true, usage=coalesce(usage,%s) WHERE id=%s AND session_id=%s",
+                       (Jsonb(usage) if usage else None, item_id, session_id))
 
 
 def release(connection, tenant_id, blocker):
@@ -183,7 +244,7 @@ def requeue_item(connection, tenant_id, item_id):
     """An explicit Recheck: a new attempt for a finished item, never a replay of a live one."""
     row = connection.execute(
         """UPDATE run_items SET state='queued', queued_at=now(), session_id=NULL, turn_id=NULL, session_closed=false,
-           error_code=NULL, error=NULL, finished_at=NULL, updated_at=now()
+           session_requested_at=NULL, error_code=NULL, error=NULL, finished_at=NULL, updated_at=now()
            WHERE tenant_id=%s AND id=%s AND state IN ('done','failed') RETURNING *""",
         (tenant_id, item_id)).fetchone()
     if not row:

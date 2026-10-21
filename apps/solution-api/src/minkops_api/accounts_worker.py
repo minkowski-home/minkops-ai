@@ -14,6 +14,8 @@ from minkops_platform.accounts.worker import (
     run_forever,
     work_once,
 )
+from minkops_platform.lanes import LANES as DESK_LANES
+from minkops_platform.lanes import Host
 
 __all__ = ["cleanup_once", "process", "work_once", "main"]
 
@@ -27,16 +29,23 @@ def main():
     )
     parser.add_argument('--lanes', type=int, choices=range(1, WORKER_LANES + 1),
                         default=WORKER_LANES, help='Concurrent runs within provisioned memory')
+    parser.add_argument('--desk-lanes', type=int, choices=range(1, 17), default=DESK_LANES,
+                        help='Concurrent bill and statement sessions')
     args = parser.parse_args()
-    if args.drain:
-        from minkops_connectors.cloud_run import run_job
-        from minkops_platform.worker_hosting import dispatch, drain
+    url = os.environ["DATABASE_URL"]
+    # Run items are served beside the existing runs, and handed to a successor on exit.
+    with Host(url, lanes=args.desk_lanes) as host:
+        if args.drain:
+            from minkops_platform.worker_hosting import drain
 
-        drain(os.environ["DATABASE_URL"], lanes=args.lanes)
-        if os.getenv("WORKER_JOB_RESOURCE"):
-            dispatch(os.environ["DATABASE_URL"], run_job)
-    else:
-        run_forever(os.environ["DATABASE_URL"], lanes=args.lanes)
+            drain(url, lanes=args.lanes, host=host)
+        else:
+            run_forever(url, lanes=args.lanes)
+    if args.drain and os.getenv("WORKER_JOB_RESOURCE"):
+        from minkops_connectors.cloud_run import run_job
+        from minkops_platform.worker_hosting import dispatch
+
+        dispatch(url, run_job)
 
 
 if __name__ == "__main__":
