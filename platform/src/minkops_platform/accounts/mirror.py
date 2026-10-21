@@ -1,0 +1,371 @@
+"""The versioned Tally mirror: storage, publication, collection and reads.
+
+One mirror per PC and company holds every master and the vouchers of its
+coverage window, as collected by the no-AI sync. Rows carry `synced_in` and
+`superseded_in`; a row is visible at version V when it was synced at or
+before V and not superseded by V. A run pins one published version per
+company and reads only rows visible at it, so later syncs can publish while
+the run is still working. Nothing is copied into runs.
+
+Native records are stored compacted (empty fields dropped) with a content
+digest, so a record fetched again unchanged is only marked seen. Callers own
+transactions.
+"""
+
+import hashlib
+import json
+import re
+from datetime import date
+
+from psycopg.types.json import Jsonb
+
+GSTIN = re.compile(r"\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b")
+_VISIBLE = "synced_in <= %(v)s AND (superseded_in IS NULL OR superseded_in > %(v)s)"
+
+
+def text(value):
+    """A native scalar as stripped text; attributes and nested lists are not scalars."""
+    if isinstance(value, dict):
+        value = value.get("#text")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def normalized(value):
+    return " ".join(str(value or "").split()).casefold()
+
+
+def compact(value):
+    """Drop empty and whitespace-only native fields; meaningful values ("No", "0") stay."""
+    if isinstance(value, dict):
+        kept = {key: compact(item) for key, item in value.items()}
+        return {key: item for key, item in kept.items() if item not in ("", {}, [], None)}
+    if isinstance(value, list):
+        kept = [compact(item) for item in value]
+        return [item for item in kept if item not in ("", {}, [], None)]
+    if isinstance(value, str):
+        return value if value.strip() else ""
+    return value
+
+
+def _digest(data):
+    return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def _list(value):
+    return value if isinstance(value, list) else [] if value is None else [value]
+
+
+def _integer(value):
+    digits = text(value)
+    return int(digits) if digits.lstrip("-").isdigit() else None
+
+
+def _cents(value):
+    from decimal import Decimal, InvalidOperation
+    try:
+        return int(Decimal(text(value) or "0") * 100)
+    except InvalidOperation:
+        return 0
+
+
+def _first_gstin(data, fields):
+    for field in fields:
+        for item in _list(data.get(field)):
+            candidates = [item] if not isinstance(item, dict) else [item.get(k) for k in ("GSTIN", "GSTREGNUMBER", "#text")]
+            for candidate in candidates:
+                found = GSTIN.search(text(candidate).upper())
+                if found:
+                    return found.group()
+    return None
+
+
+def master_row(record):
+    """Columns for one native master; None when it has no native GUID."""
+    data = compact(record["data"])
+    guid = text(data.get("GUID"))
+    if not guid:
+        return None
+    name = text(data.get("@_NAME")) or text(data.get("NAME"))
+    names = [text(n) for entry in _list(data.get("LANGUAGENAME.LIST"))
+             for n in _list((entry.get("NAME.LIST") or {}).get("NAME") if isinstance(entry, dict) else None)]
+    aliases = [n for n in dict.fromkeys(names) if n and n != name]
+    hsn = next((text(entry.get("HSNCODE")) for key in ("HSNDETAILS.LIST", "GSTDETAILS.LIST")
+                for entry in reversed(_list(data.get(key))) if isinstance(entry, dict) and text(entry.get("HSNCODE"))),
+               None)
+    bank = re.sub(r"\D", "", text(data.get("BANKDETAILS")))
+    return {"guid": guid, "type": record["type"], "name": name, "name_key": normalized(name),
+            "parent": text(data.get("PARENT")) or None, "alter_id": _integer(data.get("ALTERID")),
+            "aliases": aliases,
+            "gstin": _first_gstin(data, ("PARTYGSTIN", "LEDGSTREGDETAILS.LIST", "GSTREGNUMBER",
+                                         "GSTREGISTRATIONNUMBER", "GSTREGISTRATIONDETAILS.LIST")),
+            "bank_account": bank if len(bank) >= 6 else None, "ifsc": text(data.get("IFSCODE")) or None,
+            "hsn": hsn, "digest": _digest(data), "data": data}
+
+
+def _entries(data):
+    for key in ("ALLLEDGERENTRIES.LIST", "LEDGERENTRIES.LIST"):
+        yield from (entry for entry in _list(data.get(key)) if isinstance(entry, dict))
+
+
+def voucher_row(record):
+    """Columns for one native voucher; None for a deleted one, retained or not."""
+    data = compact(record)
+    yes = lambda field: text(data.get(field)).casefold() == "yes"  # noqa: E731
+    if yes("ISDELETED") or yes("ISDELETEDVCHRETAINED"):
+        return None
+    guid, stamp = text(data.get("GUID")), text(data.get("DATE"))
+    if not guid or not re.fullmatch(r"\d{8}", stamp):
+        raise ValueError("A voucher needs its GUID and date.")
+    issued = date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:]))
+    ledgers = {text(entry.get("LEDGERNAME")) for entry in _entries(data)} | {
+        text(allocation.get("LEDGERNAME")) for item in _list(data.get("ALLINVENTORYENTRIES.LIST"))
+        if isinstance(item, dict) for allocation in _list(item.get("ACCOUNTINGALLOCATIONS.LIST"))
+        if isinstance(allocation, dict)}
+    refs = [{"ledger": text(entry.get("LEDGERNAME")), "ledger_key": normalized(text(entry.get("LEDGERNAME"))),
+             "name": text(bill.get("NAME")), "bill_type": text(bill.get("BILLTYPE")),
+             "amount_cents": _cents(bill.get("AMOUNT")), "date": issued}
+            for entry in _entries(data) for bill in _list(entry.get("BILLALLOCATIONS.LIST"))
+            if isinstance(bill, dict) and text(bill.get("NAME"))]
+    party = text(data.get("PARTYLEDGERNAME"))
+    alter = _integer(data.get("ALTERID"))
+    if alter is None:
+        raise ValueError("A voucher needs its alteration ID.")
+    return {"guid": guid, "master_id": _integer(data.get("MASTERID")), "alter_id": alter, "date": issued,
+            "voucher_type": text(data.get("VOUCHERTYPENAME")), "number": text(data.get("VOUCHERNUMBER")),
+            "reference": text(data.get("REFERENCE")), "party_ledger": party, "party_key": normalized(party),
+            "narration": text(data.get("NARRATION")), "cancelled": yes("ISCANCELLED"), "optional": yes("ISOPTIONAL"),
+            "postdated": yes("ISPOSTDATED"), "ledgers": sorted(n for n in ledgers if n), "digest": _digest(data),
+            "data": data, "bill_refs": refs}
+
+
+# --- versions -----------------------------------------------------------------
+
+def begin(connection, company, *, kind, reason, markers, coverage, job_id=None):
+    """Open the company's next version; an abandoned version's number is never reused."""
+    return connection.execute(
+        """INSERT INTO mirror_versions(tenant_id,company_id,version,kind,reason,markers,coverage,job_id)
+           SELECT %s,%s,coalesce(max(version),0)+1,%s,%s,%s,%s,%s FROM mirror_versions WHERE company_id=%s
+           RETURNING *""",
+        (company["tenant_id"], company["id"], kind, reason[:80], Jsonb(markers), Jsonb(coverage), job_id,
+         company["id"])).fetchone()
+
+
+def building(connection, company_id):
+    return connection.execute("SELECT * FROM mirror_versions WHERE company_id=%s AND state='building'",
+                              (company_id,)).fetchone()
+
+
+def latest(connection, company_id):
+    return connection.execute(
+        "SELECT * FROM mirror_versions WHERE company_id=%s AND state='published' ORDER BY version DESC LIMIT 1",
+        (company_id,)).fetchone()
+
+
+def pins(connection, company_ids):
+    """{company_id: latest published version} for the companies that have one."""
+    rows = connection.execute(
+        """SELECT DISTINCT ON (company_id) company_id, version FROM mirror_versions
+           WHERE company_id = ANY(%s) AND state='published' ORDER BY company_id, version DESC""",
+        (list(company_ids),)).fetchall()
+    return {str(row["company_id"]): row["version"] for row in rows}
+
+
+_COLUMNS = {
+    "mirror_masters": ("guid", "type", "name", "name_key", "parent", "alter_id", "aliases", "gstin", "bank_account",
+                       "ifsc", "hsn", "digest", "data"),
+    "mirror_vouchers": ("guid", "master_id", "alter_id", "date", "voucher_type", "number", "reference", "party_ledger",
+                        "party_key", "narration", "cancelled", "optional", "postdated", "ledgers", "digest", "data"),
+}
+
+
+def _upsert(connection, version, table, rows):
+    """Supersede changed rows and insert their new content; identical ones are only seen.
+
+    Returns the counts and the rows that changed in this version.
+    """
+    v, company_id = version["version"], version["company_id"]
+    rows = list({row["guid"]: row for row in rows}.values())
+    if not rows:
+        return {"changed": 0, "unchanged": 0}, []
+    current = {row["guid"]: row for row in connection.execute(
+        f"SELECT guid,digest,synced_in FROM {table} WHERE company_id=%s AND guid=ANY(%s) AND superseded_in IS NULL",
+        (company_id, [row["guid"] for row in rows])).fetchall()}
+    seen, superseded, fresh, rebuilt = [], [], [], []
+    for row in rows:
+        existing = current.get(row["guid"])
+        if existing and existing["digest"] == row["digest"]:
+            seen.append(row["guid"])
+        elif existing and existing["synced_in"] == v:
+            rebuilt.append(row)  # Refetched within this unpublished build: replace in place.
+        else:
+            fresh.append(row)
+            if existing:
+                superseded.append(row["guid"])
+    if seen:
+        connection.execute(f"UPDATE {table} SET seen_in=%s WHERE company_id=%s AND guid=ANY(%s) AND superseded_in IS NULL",
+                           (v, company_id, seen))
+    if superseded:
+        connection.execute(f"UPDATE {table} SET superseded_in=%s WHERE company_id=%s AND guid=ANY(%s) AND superseded_in IS NULL",
+                           (v, company_id, superseded))
+    if rebuilt:
+        connection.execute(f"DELETE FROM {table} WHERE company_id=%s AND guid=ANY(%s) AND synced_in=%s",
+                           (company_id, [row["guid"] for row in rebuilt], v))
+    columns = _COLUMNS[table]
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            f"""INSERT INTO {table}(tenant_id,company_id,synced_in,seen_in,{','.join(columns)})
+                VALUES (%s,%s,%s,%s,{','.join(['%s'] * len(columns))})""",
+            [(version["tenant_id"], company_id, v, v, *(Jsonb(row[c]) if c == "data" else row[c] for c in columns))
+             for row in [*fresh, *rebuilt]])
+    return {"changed": len(fresh) + len(rebuilt), "unchanged": len(seen)}, [*fresh, *rebuilt]
+
+
+def upsert_masters(connection, version, records):
+    return _upsert(connection, version, "mirror_masters", [row for row in map(master_row, records) if row])[0]
+
+
+def upsert_vouchers(connection, version, records):
+    """Upsert live vouchers; a record Tally reports as deleted becomes a tombstone."""
+    live, deleted = [], []
+    for record in records:
+        row = voucher_row(record)
+        if row is None:
+            deleted.append(text(record.get("GUID")))
+        else:
+            live.append(row)
+    counts, changed = _upsert(connection, version, "mirror_vouchers", live)
+    v, company_id = version["version"], version["company_id"]
+    if changed:
+        guids = [row["guid"] for row in changed]
+        connection.execute("DELETE FROM mirror_bill_refs WHERE company_id=%s AND voucher_guid=ANY(%s) AND synced_in=%s",
+                           (company_id, guids, v))
+        connection.execute("""UPDATE mirror_bill_refs SET superseded_in=%s WHERE company_id=%s AND voucher_guid=ANY(%s)
+                              AND superseded_in IS NULL""", (v, company_id, guids))
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """INSERT INTO mirror_bill_refs(tenant_id,company_id,voucher_guid,synced_in,ledger,ledger_key,name,
+                   bill_type,amount_cents,date) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                [(version["tenant_id"], company_id, row["guid"], v, ref["ledger"], ref["ledger_key"], ref["name"],
+                  ref["bill_type"], ref["amount_cents"], ref["date"]) for row in changed for ref in row["bill_refs"]])
+    if deleted:
+        counts["deleted"] = tombstone(connection, version, "vouchers", [g for g in deleted if g])
+    return counts
+
+
+def tombstone(connection, version, kind, guids):
+    """Supersede rows that no longer exist in Tally; returns how many disappeared."""
+    table = {"masters": "mirror_masters", "vouchers": "mirror_vouchers"}[kind]
+    v, company_id = version["version"], version["company_id"]
+    connection.execute(f"DELETE FROM {table} WHERE company_id=%s AND guid=ANY(%s) AND synced_in=%s", (company_id, guids, v))
+    count = connection.execute(
+        f"UPDATE {table} SET superseded_in=%s WHERE company_id=%s AND guid=ANY(%s) AND superseded_in IS NULL",
+        (v, company_id, guids)).rowcount
+    if kind == "vouchers":
+        connection.execute("""UPDATE mirror_bill_refs SET superseded_in=%s WHERE company_id=%s AND voucher_guid=ANY(%s)
+                              AND superseded_in IS NULL""", (v, company_id, guids))
+    return count
+
+
+def record_counts(connection, version, counts):
+    """Store Tally's independent per-date counts {YYYY-MM-DD: n} for the census guard."""
+    connection.execute("UPDATE mirror_versions SET counts=coalesce(counts,'{}'::jsonb) || %s WHERE company_id=%s AND version=%s",
+                       (Jsonb(counts), version["company_id"], version["version"]))
+
+
+def publish(connection, version, *, stats=None, swept=False):
+    """Make a complete version visible. A full rebuild retires what it did not see;
+    vouchers dated before the coverage window leave the mirror."""
+    v, company_id = version["version"], version["company_id"]
+    if version["kind"] == "full":
+        for table in ("mirror_masters", "mirror_vouchers"):
+            unseen = connection.execute(
+                f"""UPDATE {table} SET superseded_in=%s WHERE company_id=%s AND superseded_in IS NULL
+                    AND synced_in < %s AND seen_in < %s RETURNING guid""", (v, company_id, v, v)).fetchall()
+            if table == "mirror_vouchers" and unseen:
+                connection.execute("""UPDATE mirror_bill_refs SET superseded_in=%s WHERE company_id=%s
+                    AND voucher_guid=ANY(%s) AND superseded_in IS NULL""", (v, company_id, [r["guid"] for r in unseen]))
+    early = [r["guid"] for r in connection.execute(
+        "SELECT guid FROM mirror_vouchers WHERE company_id=%s AND superseded_in IS NULL AND date < %s",
+        (company_id, version["coverage"]["from"])).fetchall()]
+    if early:
+        tombstone(connection, version, "vouchers", early)
+    return connection.execute(
+        """UPDATE mirror_versions SET state='published',published_at=now(),swept=%s,stats=stats || %s
+           WHERE company_id=%s AND version=%s AND state='building' RETURNING *""",
+        (swept, Jsonb(stats or {}), company_id, v)).fetchone()
+
+
+def abandon(connection, version, reason=None):
+    """Revert everything an unpublished version touched."""
+    v, company_id = version["version"], version["company_id"]
+    for table in ("mirror_masters", "mirror_vouchers", "mirror_bill_refs"):
+        connection.execute(f"DELETE FROM {table} WHERE company_id=%s AND synced_in=%s", (company_id, v))
+        connection.execute(f"UPDATE {table} SET superseded_in=NULL WHERE company_id=%s AND superseded_in=%s", (company_id, v))
+    for table in ("mirror_masters", "mirror_vouchers"):
+        connection.execute(f"UPDATE {table} SET seen_in=synced_in WHERE company_id=%s AND seen_in=%s", (company_id, v))
+    connection.execute("""UPDATE mirror_versions SET state='abandoned',stats=stats || %s
+                          WHERE company_id=%s AND version=%s""",
+                       (Jsonb({"abandoned": reason or "incomplete"}), company_id, v))
+
+
+def collect(connection, company_id):
+    """Delete rows no pinned or current version can see any more."""
+    floor = connection.execute(
+        """SELECT least(
+               (SELECT max(version) FROM mirror_versions WHERE company_id=%(c)s AND state='published'),
+               (SELECT min((pins->>%(k)s)::integer) FROM runs WHERE pins ? %(k)s
+                    AND state NOT IN ('completed','failed'))) AS floor""",
+        {"c": company_id, "k": str(company_id)}).fetchone()["floor"]
+    if floor is None:
+        return 0
+    return sum(connection.execute(f"DELETE FROM {table} WHERE company_id=%s AND superseded_in <= %s",
+                                  (company_id, floor)).rowcount
+               for table in ("mirror_masters", "mirror_vouchers", "mirror_bill_refs"))
+
+
+# --- reads at a pinned version -----------------------------------------------------
+
+def masters(connection, company_id, version, *, types=None, guids=None):
+    return connection.execute(
+        f"""SELECT * FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE}
+            AND (%(types)s::text[] IS NULL OR type = ANY(%(types)s))
+            AND (%(guids)s::text[] IS NULL OR guid = ANY(%(guids)s)) ORDER BY type, name_key, guid""",
+        {"c": company_id, "v": version, "types": types, "guids": guids}).fetchall()
+
+
+def vouchers(connection, company_id, version, *, date_from=None, date_to=None, guids=None, limit=None):
+    return connection.execute(
+        f"""SELECT * FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE}
+            AND (%(from)s::date IS NULL OR date >= %(from)s) AND (%(to)s::date IS NULL OR date <= %(to)s)
+            AND (%(guids)s::text[] IS NULL OR guid = ANY(%(guids)s))
+            ORDER BY date, guid LIMIT %(limit)s""",
+        {"c": company_id, "v": version, "from": date_from, "to": date_to, "guids": guids, "limit": limit}).fetchall()
+
+
+def voucher_counts(connection, company_id, version, date_from, date_to):
+    rows = connection.execute(
+        f"""SELECT date, count(*) AS n FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE}
+            AND date BETWEEN %(from)s AND %(to)s GROUP BY date""",
+        {"c": company_id, "v": version, "from": date_from, "to": date_to}).fetchall()
+    return {row["date"].isoformat(): row["n"] for row in rows}
+
+
+def bill_refs(connection, company_id, version, ledger_keys):
+    return connection.execute(
+        f"""SELECT * FROM mirror_bill_refs WHERE company_id=%(c)s AND {_VISIBLE} AND ledger_key = ANY(%(keys)s)
+            ORDER BY ledger_key, name, date""",
+        {"c": company_id, "v": version, "keys": list(ledger_keys)}).fetchall()
+
+
+def company_view(connection, company, version):
+    """The company in the shape the voucher and statement gates already read.
+
+    Equivalent to a confirmed discovery company: identity plus every master as
+    {type, data}. Only the pinned version's rows are included.
+    """
+    rows = masters(connection, company["id"], version)
+    identity = next((row["data"] for row in rows if row["type"] == "COMPANY"), {"@_NAME": company["name"],
+                                                                              "GUID": company["guid"]})
+    return {"company": company["name"], "company_guid": company["guid"], "port": company.get("port") or 9000,
+            "identity": identity, "masters": {"records": [{"type": row["type"], "data": row["data"]}
+                                                          for row in rows if row["type"] != "COMPANY"]}}
