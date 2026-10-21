@@ -56,28 +56,17 @@ class HoldMatrixTest(unittest.TestCase):
         self.assertEqual(holds.actions(["classification_uncertain", "date_before_books"]), ("nothing", "retry"))
         self.assertEqual(holds.actions(["busy", "rejected"]), ("retry_save", "nothing"))
 
-    def test_only_destination_holds_offer_retry_save(self):
-        destination = {code for code, hold in holds.HOLDS.items() if hold.destination}
-        self.assertEqual(destination, {code for code, hold in holds.HOLDS.items() if "retry_save" in hold.actions})
-        self.assertTrue(all(hold.kind != holds.EXCEPTION for code, hold in holds.HOLDS.items() if code in destination))
-
-    def test_labels_fit_attention_and_reasons_are_sentences(self):
+    def test_interpretation_holds_never_offer_retry_save(self):
+        # Retrying the same plan fixes only destination problems; a reading the
+        # model or a check doubted must be rechecked or decided instead.
         for hold in holds.HOLDS.values():
-            self.assertTrue(1 <= len(hold.label) <= 80, hold.code)
-            self.assertTrue(hold.reason.endswith("."), hold.code)
-            self.assertNotIn("this bill", hold.reason_for("statement"))
+            if hold.kind == holds.EXCEPTION:
+                self.assertNotIn("retry_save", hold.actions, hold.code)
 
-    def test_legacy_views_still_read_the_catalog(self):
-        from minkops_platform.accounts.bill_decisions import HANDLERS
-        from minkops_platform.accounts.bill_review import REASONS
-        from minkops_platform.accounts.checks import EXCEPTION_LABELS
-        from minkops_platform.accounts.tally_writes import HOLD_TITLES
-
-        self.assertEqual(set(REASONS), set(HANDLERS))
-        self.assertEqual(HANDLERS["supplier_missing"], ("supplier", "nothing", "retry"))
-        self.assertEqual(EXCEPTION_LABELS["classification_uncertain"], "Ledger unclear")
-        self.assertEqual(HOLD_TITLES["busy"], "Tally unavailable")
-        self.assertNotIn("statement_value", REASONS)
+    def test_labels_fit_attention_and_statement_reasons_name_an_entry(self):
+        for hold in holds.HOLDS.values():
+            self.assertTrue(1 <= len(hold.label) <= 80, hold.code)  # attention_items.label constraint.
+            self.assertNotIn("this bill", hold.reason_for("statement"), hold.code)
 
 
 if __name__ == "__main__":

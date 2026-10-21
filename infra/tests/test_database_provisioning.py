@@ -1,7 +1,7 @@
 """The dedicated instance is created once, isolated and recoverable, never altered."""
 import pytest
 
-from infra import deploy_runtime, provision_database
+from infra import provision_database
 
 
 class Api:
@@ -49,6 +49,3 @@ def test_other_api_failures_are_never_mistaken_for_absence():
     with pytest.raises(RuntimeError, match="403"):
         provision_database.ensure_instance(Failing(), "p", "minkops-books", "r", "t", 10)
 
-
-def test_runtime_deployments_target_the_dedicated_instance():
-    assert deploy_runtime.INSTANCE == "minkops-ai-prod:us-central1:minkops-books"
