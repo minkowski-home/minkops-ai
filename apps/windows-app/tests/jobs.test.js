@@ -1,0 +1,69 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createExecutor, uploadWithRetry } from "../../../platform/desktop-runtime/src/jobs.js";
+
+const job = (operation, input = {}) => ({ id: "job-1", claim_token: "claim-1", operation, input });
+
+function executor({ request, connectors = {}, recorded = [] }) {
+  return createExecutor({
+    connectors, request, pc: "TEST-PC", planVersion: 5, transportFor: () => "tally-transport",
+    grantFor: () => ({ root: "/granted" }), durableIntent: () => async () => true, saveDiscovery: async () => {},
+    recordDiagnostic: (j, record) => recorded.push([j.id, record]),
+  });
+}
+
+test("a sync uploads numbered pages against its own claim through the native collector", async () => {
+  const posted = [];
+  const request = async (path, body) => {
+    if (path.includes("/plan?claim_token=claim-1")) return { protocol: 1, port: 9000 };
+    posted.push([path, body]);
+    return { instructions: [] };
+  };
+  const runSync = async (plan, { request: transport, upload, pc }) => {
+    assert.deepEqual([plan.port, transport, pc], [9000, "tally-transport", "TEST-PC"]);
+    await upload("companies", { companies: [] });
+    await upload("counts", { company: "c", counts: {} });
+    return { protocol: 1, companies: [] };
+  };
+  const result = await executor({ request, connectors: { runSync } })(job("tally.sync"));
+  assert.deepEqual(result, { protocol: 1, companies: [] });
+  assert.deepEqual(posted.map(([path, body]) => [path, body.seq, body.kind, body.claim_token]), [
+    ["/api/desktop/worker/jobs/job-1/sync", 0, "companies", "claim-1"],
+    ["/api/desktop/worker/jobs/job-1/sync", 1, "counts", "claim-1"]]);
+});
+
+test("a page is resent with the same sequence after a transport failure, never after an answer", async () => {
+  const seen = [];
+  let failures = 1;
+  const send = async (page) => {
+    seen.push(page.seq);
+    if (failures-- > 0) throw new TypeError("fetch failed");
+    return { ok: true };
+  };
+  assert.deepEqual(await uploadWithRetry(send, { seq: 4 }, { wait: async () => {} }), { ok: true });
+  assert.deepEqual(seen, [4, 4]);
+  const refused = Object.assign(new Error("This sync page was already received with different content."), { status: 409 });
+  let calls = 0;
+  await assert.rejects(uploadWithRetry(async () => { calls++; throw refused; }, { seq: 5 }, { wait: async () => {} }),
+    { status: 409 });
+  assert.equal(calls, 1);
+});
+
+test("a voucher plan newer than this companion executes is refused before Tally is touched", async () => {
+  let saved = false;
+  const request = async () => ({ format_version: 6 });
+  await assert.rejects(executor({ request, connectors: { saveVoucher: async () => { saved = true; } } })(job("tally.save")),
+    /Unsupported voucher plan/);
+  assert.equal(saved, false);
+});
+
+test("a failed connection check leaves a diagnostic for the receipt", async () => {
+  const recorded = [];
+  const checkTally = async () => { throw Object.assign(new Error("Tally isn't open on TEST-PC."), { tallyState: "not_running" }); };
+  await assert.rejects(executor({ request: async () => ({}), connectors: { checkTally }, recorded })(job("tally.probe")));
+  assert.deepEqual(recorded.map(([id, r]) => [id, r.state]), [["job-1", "not_running"]]);
+});
+
+test("unknown operations are refused", async () => {
+  await assert.rejects(executor({ request: async () => ({}) })(job("shell.run")), /Unsupported local operation/);
+});

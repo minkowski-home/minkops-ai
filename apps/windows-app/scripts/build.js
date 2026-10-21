@@ -14,6 +14,7 @@ await build({
   alias: {
     "@minkops/desktop-connectors": resolve("../../connectors/desktop/src/index.js"),
     "@minkops/desktop-runtime": resolve("../../platform/desktop-runtime/src/worker.js"),
+    "@minkops/desktop-runtime/jobs": resolve("../../platform/desktop-runtime/src/jobs.js"),
   },
   nodePaths: [resolve("node_modules")],
 });
