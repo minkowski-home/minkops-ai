@@ -41,7 +41,7 @@ def test_deployment_uses_a_private_bounded_recovery_service_and_oidc_scheduler(m
     assert "--args=-m,minkops_api.accounts_worker,--drain,--lanes,4" in worker
     assert "--memory=1Gi" in worker and "--memory=512Mi" not in worker
     api = next(c for c in commands if c[:3] == ("run", "deploy", "minkops-solution-api"))
-    assert "--memory=512Mi" in api and "--concurrency=2" in api
+    assert "--memory=1Gi" in api and "--concurrency=2" in api
 
 
 def test_private_invoker_removes_public_members_without_losing_other_policy(monkeypatch):

@@ -67,11 +67,11 @@ def main(image, interest_image):
     sql_number = output("projects", "describe", "myndral-prod", "--format=value(projectNumber)")
     smtp = ",".join(f"SMTP_{key.upper()}=projects/{sql_number}/secrets/myndral-smtp-{key}:latest"
                     for key in ("host", "port", "user", "password"))
-    run("run", "deploy", "minkops-solution-api", *common, f"--image={image}",
+    run("run", "deploy", "minkops-solution-api", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-api@{PROJECT}.iam.gserviceaccount.com",
         f"--add-cloudsql-instances={INSTANCE}", "--min=0", "--max=1", "--max-instances=1",
-        # Argon2 account verification consumes memory per request. Two concurrent
-        # requests leave headroom in this 512 MiB pilot instead of risking OOMs.
+        # Full native discovery is decoded during launch/receipt validation.
+        # Bound concurrency while allowing independent companion presence.
         "--concurrency=2", "--timeout=60s", "--no-cpu-boost", "--no-invoker-iam-check",
         f"--set-secrets={database},{smtp}",
         f"--set-env-vars=AUTH_DEV_MODE=0,COOKIE_SECURE=1,MINKOPS_RUN_TIMEOUT_MINUTES=45,PUBLIC_APP_URL=https://app.minkops.com,SMTP_FROM=info@minkops.com,SMTP_EHLO_HOST=minkops.com,SMTP_STARTTLS=1,WORKER_JOB_RESOURCE={JOB}")
