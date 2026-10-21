@@ -1,4 +1,13 @@
 /** Reusable local dispatch control; adapters supply network and file effects. */
+
+// What a member is told when a job fails for a reason no connector could name.
+const FAILURES = {
+  "tally.probe": "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again.",
+  "tally.sync": "Tally could not be read on this PC. Keep Tally open with the company loaded; Minkops reads it again shortly.",
+  "tally.write": "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing.",
+  "tally.supplier": "Tally could not create this supplier. Check the company, then use Create this ledger again; an existing ledger is read back, never created twice.",
+};
+
 export class CompanionWorker {
   constructor({
     request,
@@ -8,7 +17,6 @@ export class CompanionWorker {
     acknowledge = async () => {},
     diagnosticFor = () => null,
     heartbeat = async () => {},
-    afterTick = async () => {},
   }) {
     Object.assign(this, {
       request,
@@ -18,7 +26,6 @@ export class CompanionWorker {
       acknowledge,
       diagnosticFor,
       heartbeat,
-      afterTick,
     });
     this.busy = false;
     this.beating = false;
@@ -34,13 +41,12 @@ export class CompanionWorker {
   }
   async tick() {
     // Presence must not claim another job or renew an execution lease. Keep it
-    // independent of long native reads, durable receipts and local archiving.
+    // independent of long native reads and durable receipts.
     if (this.busy) return this.reportPresence();
     this.busy = true;
     try {
       if (this.pending()) await this.reportPresence();
       await this.dispatch();
-      await this.afterTick();
     } finally {
       this.busy = false;
     }
@@ -66,11 +72,7 @@ export class CompanionWorker {
           error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
             error.userSafe && typeof error.message === "string" && error.message.trim()
               ? error.message.slice(0, 300)
-            : job.operation === "tally.probe"
-              ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
-              : ["tally.save", "tally.write"].includes(job.operation)
-                ? "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing."
-                : "The connected folder could not be read. Reconnect it and try again.",
+            : FAILURES[job.operation] ?? "The connected folder could not be read. Reconnect it and try again.",
         };
       }
       // Evidence collected while the job ran (for example a classified Tally

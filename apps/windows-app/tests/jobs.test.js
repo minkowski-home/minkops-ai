@@ -7,7 +7,7 @@ const job = (operation, input = {}) => ({ id: "job-1", claim_token: "claim-1", o
 function executor({ request, connectors = {}, recorded = [] }) {
   return createExecutor({
     connectors, request, pc: "TEST-PC", planVersion: 5, transportFor: () => "tally-transport",
-    grantFor: () => ({ root: "/granted" }), durableIntent: () => async () => true, saveDiscovery: async () => {},
+    grantFor: () => ({ root: "/granted" }), durableIntent: () => async () => true,
     recordDiagnostic: (j, record) => recorded.push([j.id, record]),
   });
 }
@@ -52,7 +52,7 @@ test("a page is resent with the same sequence after a transport failure, never a
 test("a voucher plan newer than this companion executes is refused before Tally is touched", async () => {
   let saved = false;
   const request = async () => ({ format_version: 6 });
-  await assert.rejects(executor({ request, connectors: { saveVoucher: async () => { saved = true; } } })(job("tally.save")),
+  await assert.rejects(executor({ request, connectors: { saveVoucher: async () => { saved = true; } } })(job("tally.write")),
     /Unsupported voucher plan/);
   assert.equal(saved, false);
 });
@@ -80,15 +80,15 @@ test("an approved supplier is created by the fixed master operation, never throu
     assert.match(path, /\/jobs\/job-1\/plan\?claim_token=claim-1/);
     return plan;
   };
-  const inspectTallyAttention = async (given, options) => {
+  const createSupplier = async (given, options) => {
     calls.push([given, options]);
-    return { company_guid: "c-1", ledgers: [], current: null };
+    return { company_guid: "c-1", ledgers: [] };
   };
   const saveVoucher = async () => { throw new Error("A supplier write must not import a voucher."); };
-  const result = await executor({ request, connectors: { inspectTallyAttention, saveVoucher } })(
+  const result = await executor({ request, connectors: { createSupplier, saveVoucher } })(
     job("tally.supplier", { write_id: "w-2" }));
-  assert.deepEqual(result, { company_guid: "c-1", ledgers: [], current: null });
-  assert.deepEqual(calls, [[plan, { request: "tally-transport", createSupplier: true }]]);
+  assert.deepEqual(result, { company_guid: "c-1", ledgers: [] });
+  assert.deepEqual(calls, [[plan, { request: "tally-transport" }]]);
 });
 
 test("a failed connection check leaves a diagnostic for the receipt", async () => {

@@ -1,22 +1,11 @@
 /** Native adapters only. Business approvals and task authority remain server-side. */
-import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import {
-  lstat,
-  readdir,
-  readFile,
-  realpath,
-  open,
-  rename,
-  unlink,
-} from "node:fs/promises";
-import { join, dirname, basename, sep, extname } from "node:path";
-export { inspectExcel, excelSchemaBytes } from './discovery.js';
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { join, sep } from "node:path";
 // The Windows companion's native surface. Tests import implementation modules
 // directly; only what the companion and its operator scripts call is exported.
 export { readTallyReferences } from './tally-references.js';
 export { checkTally, requireOpenCompany, readOpenCompanies, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
-export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
 
 const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;
 const EXCLUDED = new Set([
@@ -24,39 +13,6 @@ const EXCLUDED = new Set([
   "ground-truth",
   "pr-infra-sample-bills",
 ]);
-
-/** Export only to the path chosen by the native Save As dialog. No web-supplied
- * paths or folder traversal are accepted by the desktop bridge. */
-export async function saveCatalogSnapshot(path, snapshot) {
-  if (extname(path).toLowerCase() !== ".json")
-    throw new Error("Choose a JSON file.");
-  const bytes = Buffer.from(JSON.stringify(snapshot, null, 2));
-  if (bytes.length > 64_000_000)
-    throw new Error("Catalog exceeds the 64 MB export limit.");
-  try {
-    const existing = await lstat(path);
-    if (!existing.isFile() || existing.isSymbolicLink())
-      throw new Error("Choose a regular file for the catalog.");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const parent = await realpath(dirname(path));
-  const temporary = join(parent, `.minkops-export-${randomUUID()}.tmp`);
-  let handle;
-  try {
-    handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await handle.close();
-    handle = null;
-    await rename(temporary, join(parent, basename(path)));
-  } finally {
-    await handle?.close();
-    await unlink(temporary).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-  }
-}
 
 function relativeParts(path) {
   if (
@@ -149,6 +105,6 @@ export async function inventory(root) {
   return files;
 }
 
-export { inspectTallyAttention } from "./tally.js";
+export { createSupplier } from "./tally.js";
 export { saveVoucher } from "./voucher.js";
 export { runSync } from "./sync.js";

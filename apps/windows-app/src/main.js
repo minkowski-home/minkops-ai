@@ -29,17 +29,12 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   inventory,
   checkTally,
-  inspectExcel,
-  excelSchemaBytes,
-  discoverClientContext,
-  saveDiscoveryPackage,
   tallyTransport,
   tallyProcesses,
   readTallyIni,
-  inspectTallyAttention,
+  createSupplier,
   tallyCrashEvents,
   saveVoucher,
-  saveCatalogSnapshot,
   runSync,
 } from "@minkops/desktop-connectors";
 import { CompanionWorker } from "@minkops/desktop-runtime";
@@ -154,8 +149,8 @@ function startWorker() {
     const response = await fetch(origin + path, {
       method: body === undefined ? "GET" : "POST",
       redirect: "error",
-      // A full discovery receipt can take longer to upload than a control
-      // request. Keep its durable retry, with presence reported independently.
+      // A folder refresh receipt carries its files and can take longer to upload
+      // than a control request. Keep its durable retry, with presence reported independently.
       signal: AbortSignal.timeout(path.endsWith("/finish") ? 120000 : 45000),
       headers: {
         "Content-Type": "application/json",
@@ -181,8 +176,7 @@ function startWorker() {
     request,
     heartbeat: () => request("/api/desktop/worker/heartbeat", {}),
     execute: createExecutor({
-      connectors: { checkTally, inventory, inspectExcel, excelSchemaBytes, discoverClientContext,
-                    inspectTallyAttention, saveVoucher, runSync },
+      connectors: { checkTally, inventory, createSupplier, saveVoucher, runSync },
       request, pc: pcName(), planVersion: PLAN_VERSION,
       grantFor: (sourceId) => binding(identity.tenant, sourceId, { id: identity.owner_id }),
       recordDiagnostic: (job, record) => jobDiagnostics.set(job.id, record),
@@ -223,17 +217,6 @@ function startWorker() {
         } finally { await handle.close(); }
         return state.device === identity;
       },
-      saveDiscovery: (job, result) => saveDiscoveryPackage(
-        join(app.getPath("userData"), "discovery", identity.tenant, "collected"),
-        {
-          format_version: "2",
-          run_id: job.input.discovery_run_id,
-          device_id: identity.id,
-          sources: result.sources,
-          partial: result.sources.some((s) => s.status !== "ready" || s.snapshot?.partial),
-          context_notes: [],
-        },
-      ),
     }),
     diagnosticFor: (job, receipt) => {
       recentJobs.unshift({
@@ -255,36 +238,7 @@ function startWorker() {
         await persist();
       }
     },
-    afterTick: async () => {
-      if (state.device !== identity) return;
-      try {
-        const after = state.discovery_archived[identity.id];
-        const catalog = await request(
-          "/api/desktop/discovery/package" +
-            (after ? `?after_id=${after}` : ""),
-        );
-        if (catalog) {
-          await saveDiscoveryPackage(
-            join(
-              app.getPath("userData"),
-              "discovery",
-              identity.tenant,
-              "confirmed",
-            ),
-            catalog,
-          );
-          state.discovery_archived[identity.id] = catalog.run_id;
-          await persist();
-        }
-        state.discovery_archive_error = null;
-      } catch (error) {
-        state.discovery_archive_error =
-          "The local discovery copy could not be refreshed. Keep Minkops open to retry.";
-        throw error;
-      }
-    },
   });
-  state.discovery_archived ??= {};
   const tick = () =>
     void worker
       .tick()
@@ -383,28 +337,6 @@ function handle(channel, operation) {
 }
 
 function setupBridge() {
-  handle("desktop:save-catalog", async ({ tenant, discoveryId }) => {
-    await profile(tenant);
-    if (!uuid(discoveryId)) throw new Error("Choose a valid source catalog.");
-    const catalog = await (
-      await cloud(
-        `/api/tenants/${tenant}/discovery/runs/${discoveryId}/catalog.json`,
-      )
-    ).json();
-    if (!catalog || !Array.isArray(catalog.sources))
-      throw new Error("Source catalog is unavailable.");
-    const selected = await dialog.showSaveDialog(window, {
-      title: "Save source catalog",
-      defaultPath: join(
-        app.getPath("documents"),
-        `minkops-sources-${discoveryId}.json`,
-      ),
-      filters: [{ name: "JSON source catalog", extensions: ["json"] }],
-    });
-    if (selected.canceled || !selected.filePath) return false;
-    await saveCatalogSnapshot(selected.filePath, catalog);
-    return true;
-  });
   handle("desktop:send-diagnostics", () => sendDiagnostics());
   handle("desktop:check-updates", () => updates?.check());
   handle("desktop:install-update", () => updates?.requestInstall() ?? false);
@@ -412,7 +344,6 @@ function setupBridge() {
     await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
   });
   handle("desktop:status", async () => ({
-    discovery_archive_error: state.discovery_archive_error ?? null,
     version: app.getVersion(),
     update,
     name: hostname(),
@@ -476,7 +407,7 @@ function setupBridge() {
   });
   handle(
     "desktop:pick-folder",
-    async ({ tenant, sourceId, schemaOnly = false }) => {
+    async ({ tenant, sourceId }) => {
       const user = await profile(tenant);
       if (state.device?.tenant !== tenant || state.device?.owner_id !== user.id)
         throw new Error(
@@ -496,23 +427,7 @@ function setupBridge() {
           user.id,
         );
       }
-      let files = await inventory(root);
-      if (schemaOnly === true) {
-        files = await Promise.all(
-          files
-            .filter((f) => /\.xlsx$/i.test(f.path))
-            .map(async (file) => ({
-              path: file.path,
-              content: (
-                await excelSchemaBytes(Buffer.from(file.content, "base64"))
-              ).toString("base64"),
-            })),
-        );
-        if (!files.length)
-          throw new Error(
-            "Choose a folder containing supported Excel workbooks.",
-          );
-      }
+      const files = await inventory(root);
       const grantId = randomUUID();
       pendingGrants.set(grantId, {
         root,

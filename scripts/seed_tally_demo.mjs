@@ -11,8 +11,9 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 // Reuse the connector's declared dependency; fixtures need no root install.
 const { XMLParser, XMLBuilder } = createRequire(new URL("../connectors/desktop/package.json", import.meta.url))("fast-xml-parser");
-import { discoverClientContext, requireOpenCompany, readTallyReferences,
+import { requireOpenCompany, readTallyReferences,
   saveVoucher, tallyTransport, tallyProcesses } from "../connectors/desktop/src/index.js";
+import { MASTER_TYPES, readCompanies, readMasters, readVouchers } from "../connectors/desktop/src/sync.js";
 
 const parser = new XMLParser({ignoreAttributes:false,parseTagValue:false,trimValues:true});
 const scalar = value => typeof value === "object" && value !== null ? value["#text"] : value;
@@ -153,10 +154,17 @@ async function main() {
   const config = {port:9000,period:{from:"2026-04-01",to:"2026-10-31"}};
   const diagnostics = [];
   const request = tallyTransport({diagnose: async event => diagnostics.push(event)});
+  // The sync's own readers: every master of each mirrored type, and the period's vouchers, per open company.
   const discover = async () => {
-    const snapshot = await discoverClientContext(config,{request});
-    assert.equal(snapshot.partial,false,"Complete discovery required");
-    return snapshot;
+    const companies = [];
+    for (const open of await readCompanies({port:config.port,request})) {
+      const masters = [];
+      for (const type of MASTER_TYPES) masters.push(...await readMasters({port:config.port,company:open.name,type,request}));
+      const vouchers = await readVouchers({port:config.port,company:open.name,...config.period,request});
+      companies.push({company:open.name,company_guid:open.guid,masters:{records:masters,count:masters.length},
+        vouchers:{records:vouchers.map(data=>({data})),count:vouchers.length}});
+    }
+    return {companies};
   };
   const started = await discover();
   const nativeUnit = started.companies.flatMap(c=>c.masters.records)

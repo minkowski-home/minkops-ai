@@ -14,7 +14,7 @@ import { mkdir, open, readFile, writeFile, rename } from "node:fs/promises";
 import { hostname, homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { checkTally, inspectTallyAttention, runSync, saveVoucher, tallyTransport } from "../connectors/desktop/src/index.js";
+import { checkTally, createSupplier, runSync, saveVoucher, tallyTransport } from "../connectors/desktop/src/index.js";
 import { CompanionWorker } from "../platform/desktop-runtime/src/worker.js";
 import { createExecutor } from "../platform/desktop-runtime/src/jobs.js";
 
@@ -70,10 +70,9 @@ async function run() {
   };
   const intents = join(ROOT, "intents");
   const execute = createExecutor({
-    connectors: { checkTally, inspectTallyAttention, saveVoucher, runSync }, request, pc, planVersion: PLAN_VERSION,
+    connectors: { checkTally, createSupplier, saveVoucher, runSync }, request, pc, planVersion: PLAN_VERSION,
     transportFor: () => tallyTransport({ pc }),
     grantFor: () => { throw new Error("Folder grants are not available headless."); },
-    saveDiscovery: async () => { throw new Error("Source Discovery is not available headless."); },
     // One fsynced file per remote ID: once written, that voucher is never imported again.
     durableIntent: (job) => async (intent) => {
       await mkdir(intents, { recursive: true, mode: 0o700 });

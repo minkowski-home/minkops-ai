@@ -1,8 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import ExcelJS from "exceljs";
-import JSZip from "jszip";
-import { inspectExcel } from "../src/discovery.js";
 import { readTallyReferences } from "../src/tally-references.js";
 
 test('allocation verification fetches and retains the native enablement and category fields', async () => {
@@ -41,71 +38,7 @@ test("typed Tally reference identities become exact strings and malformed wrappe
   }
 });
 
-test("Excel inspection accepts absolute package table relationships produced by openpyxl", async () => {
-  const w = new ExcelJS.Workbook();
-  w.addWorksheet("Bills").addTable({
-    name: "Purchases",
-    ref: "B5",
-    columns: [{ name: "Invoice" }, { name: "Amount" }],
-    rows: [["00018", 1180]],
-  });
-  const original = Buffer.from(await w.xlsx.writeBuffer());
-  const zip = await JSZip.loadAsync(original);
-  const path = "xl/worksheets/_rels/sheet1.xml.rels";
-  const rels = await zip.file(path).async("string");
-  assert.ok(rels.includes('Target="../tables/table1.xml"'));
-  zip.file(
-    path,
-    rels.replace(
-      'Target="../tables/table1.xml"',
-      'Target="/xl/tables/table1.xml"',
-    ),
-  );
-  const absolute = await zip.generateAsync({ type: "nodebuffer" });
-  const unchanged = Buffer.from(absolute);
-  assert.deepEqual(await inspectExcel(absolute), await inspectExcel(original));
-  assert.deepEqual(
-    absolute,
-    unchanged,
-    "inspection must not change uploaded workbook bytes",
-  );
-});
-
-test("local Excel inspection preserves off-row headers, named tables, formulas and identifiers", async () => {
-  const w = new ExcelJS.Workbook();
-  const s = w.addWorksheet("Purchases");
-  s.getCell("A1").value = "Purchase register";
-  s.addTable({
-    name: "Bills",
-    ref: "A5",
-    headerRow: true,
-    columns: [{ name: "Invoice" }, { name: "Vendor" }, { name: "Total" }],
-    rows: [["00017", "Minkops supplier", 118]],
-  });
-  s.getCell("D6").value = { formula: "C6*2", result: 236 };
-  const result = await inspectExcel(
-    Buffer.from(await w.xlsx.writeBuffer()),
-  );
-  assert.equal(result.sheets[0].tables[0].name, "Bills");
-  assert.equal(result.sheets[0].tables[0].header_row, 5);
-  assert.deepEqual(result.sheets[0].tables[0].columns, [
-    "Invoice",
-    "Vendor",
-    "Total",
-  ]);
-  assert.ok(!result.sheets[0].preview.some(r => r.values.includes("00017")));
-  assert.deepEqual(result.sheets[0].reference_rows, []);
-  assert.deepEqual(result.sheets[0].formulas, [
-    { cell: "D6", formula: "C6*2" },
-  ]);
-  assert.ok(
-    (
-      await inspectExcel(Buffer.from(await w.xlsx.writeBuffer()))
-    ).sheets[0].preview.every((r) => r.row <= 10),
-  );
-});
-
-test("Tally workflow references scope company, exclude unrelated values, and isolate failed categories", async () => {
+test("Tally references scope the company, exclude unrelated values, and isolate failed categories", async () => {
   const sent = [];
   const result = await readTallyReferences(
     {
@@ -152,7 +85,7 @@ test("Tally workflow references scope company, exclude unrelated values, and iso
   );
 });
 
-test("Tally discovery refuses unopened companies and never falls back to the active company", async () => {
+test("Tally references refuse unopened companies and never fall back to the active company", async () => {
   let calls = 0;
   await assert.rejects(
     readTallyReferences(

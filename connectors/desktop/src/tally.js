@@ -1,8 +1,7 @@
-/** Bounded Tally attention operations: observe a bill with the voucher
- * writer's reader, and create a verified supplier master on explicit consent.
+/** Create the supplier ledger a person approved for a bill, verified by reading it back.
  * Raw XML/TDL, endpoints and actions never come from the renderer. */
 import { XMLBuilder } from "fast-xml-parser";
-import { tallyExchange as exchange, readVouchers, voucherFamilies, documentMatches, observedVoucher } from "./voucher.js";
+import { tallyExchange as exchange } from "./voucher.js";
 import { readTallyReferences } from "./tally-references.js";
 import { requireOpenCompany } from "./tally-session.js";
 
@@ -24,16 +23,17 @@ const norm = (v) => String(v).trim().toLowerCase();
 /** A failure with one user action, safe to show verbatim (see worker.js). */
 const actionable = (message) => Object.assign(new Error(message), { userSafe: true });
 
-/** Fixed native attention operations. Renderer cannot supply XML or endpoints. */
-export async function inspectTallyAttention(plan, {request = fetch, createSupplier = false} = {}) {
-  const snapshot = await readTallyReferences({company: plan.company, port: plan.port, categories: ["company", "ledgers", "voucher_types"]}, {request});
+/** The ledger is imported only when no ledger has its name, so a retry after a lost
+ * acknowledgement reads the one it created instead of creating a second. */
+export async function createSupplier(plan, {request = fetch} = {}) {
+  const snapshot = await readTallyReferences({company: plan.company, port: plan.port, categories: ["company", "ledgers"]}, {request});
   const companies = snapshot.collections.find(c => c.category === "company")?.records ?? [];
   if (companies.length !== 1 || text(companies[0].GUID) !== plan.company_guid)
     throw new Error("Tally company changed.");
   let ledgers = snapshot.collections.find(c => c.category === "ledgers")?.records ?? [];
   const matches = ledgers.filter(m => norm(text(m["@_NAME"] ?? m.NAME)) === norm(plan.vendor));
   if (matches.length > 1) throw new Error("Supplier ledger identity is ambiguous.");
-  if (createSupplier && !matches.length) {
+  if (!matches.length) {
     if (typeof plan.vendor !== "string" || !plan.vendor.trim() || plan.vendor.length > 200 || /[\x00-\x1f]/.test(plan.vendor))
       throw new Error("Invalid supplier name.");
     let ledger = `<LEDGER NAME="${xml(plan.vendor)}" ACTION="Create"><NAME>${xml(plan.vendor)}</NAME><PARENT>Sundry Creditors</PARENT><ISBILLWISEON>No</ISBILLWISEON></LEDGER>`;
@@ -59,18 +59,7 @@ export async function inspectTallyAttention(plan, {request = fetch, createSuppli
     {request, identity: ledgers.find(master => text(master["@_NAME"] ?? master.NAME) === plan.vendor)}) : null;
   if (plan.gst_supplier && !verifyGSTSupplier(supplier, plan.gst_supplier))
     throw actionable("Supplier GST details need review in Tally. The bill has not been queued for saving.");
-  let current = null;
-  if (plan.document) {
-    // The same window, number fields and reader as the voucher writer, so a
-    // refresh fingerprint is comparable with the saved one.
-    const {window, number_fields, families} = plan.document;
-    const live = voucherFamilies(snapshot.collections.find(c => c.category === "voucher_types")?.records ?? []);
-    const familyOf = v => live.family.get(v.voucher_type.toLowerCase()) ?? null;
-    const found = (await readVouchers({company: plan.company, port: plan.port, window}, {request})).filter(v =>
-      families.includes(familyOf(v)) && documentMatches(v, {party_ledger: plan.vendor, number: plan.invoice_number, number_fields}));
-    current = found.length === 1 ? observedVoucher(found[0], familyOf(found[0])) : null;
-  }
-  return {company_guid: plan.company_guid, ledgers, current, ...(supplier ? {supplier} : {})};
+  return {company_guid: plan.company_guid, ledgers, ...(supplier ? {supplier} : {})};
 }
 
 const gstScalar = value => String(text(value) ?? "").trim();

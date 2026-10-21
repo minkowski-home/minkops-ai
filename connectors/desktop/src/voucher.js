@@ -259,13 +259,13 @@ function containsToken(haystack, needle) {
 }
 const FIELD_VALUE = {REFERENCE: v => v.reference, VOUCHERNUMBER: v => v.number};
 /** Party plus document number in the client's configured number fields. */
-export function documentMatches(voucher, duplicate) {
+function documentMatches(voucher, duplicate) {
   return norm(voucher.party_ledger) === norm(duplicate.party_ledger) && duplicate.number_fields.some(field =>
     field === 'NARRATION' ? containsToken(voucher.narration, duplicate.number) : norm(FIELD_VALUE[field](voucher)) === norm(duplicate.number));
 }
 
 /** The observed voucher as receipts and attention observations report it. */
-export function observedVoucher(v, family) {
+function observedVoucher(v, family) {
   return {guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family,
     reference: v.reference, number: v.number, narration: v.narration, party_ledger: v.party_ledger, tag: v.tag,
     lines: v.entries, allocations: v.allocations, fingerprint: v.fingerprint};

@@ -58,6 +58,7 @@ class FileSourceTests(unittest.TestCase):
             "an executable": [("setup.exe", b"MZ")],
             "a PDF that is not one": [("bill.pdf", b"<html>")],
             "an image that is not one": [("scan.png", PDF)],
+            "a workbook that is not one": [("statement.xlsx", b"PK\x03\x04 not a workbook")],
             "an empty file": [("bill.pdf", b"")],
             "a path given twice": [("bill.pdf", PDF), ("bill.pdf", PDF)],
         }

@@ -5,8 +5,6 @@ contextBridge.exposeInMainWorld(
   "minkopsDesktop",
   Object.freeze({
     version: 1,
-    schemaOnlyFolders: true,
-    discoveryPackages: true,
     openTallyDiagnostics: () => ipcRenderer.invoke("desktop:tally-diagnostics"),
     sendDiagnostics: () => ipcRenderer.invoke("desktop:send-diagnostics"),
     status: () => ipcRenderer.invoke("desktop:status"),
@@ -14,9 +12,7 @@ contextBridge.exposeInMainWorld(
     restartForUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     connect: (tenant) => ipcRenderer.invoke("desktop:connect", tenant),
     disconnect: () => ipcRenderer.invoke("desktop:disconnect"),
-    saveCatalog: (tenant, discoveryId) => ipcRenderer.invoke("desktop:save-catalog", {tenant, discoveryId}),
-    pickFolder: (tenant, sourceId, schemaOnly = false) =>
-      ipcRenderer.invoke("desktop:pick-folder", { tenant, sourceId, schemaOnly }),
+    pickFolder: (tenant, sourceId) => ipcRenderer.invoke("desktop:pick-folder", { tenant, sourceId }),
     bindFolder: (tenant, sourceId, grantId) =>
       ipcRenderer.invoke("desktop:bind-folder", { tenant, sourceId, grantId }),
     refreshFolder: (tenant, sourceId) =>
