@@ -312,10 +312,10 @@ def select_target(record, target):
 
 
 # Catalogs stamped with this format deliver records without empty values.
-CONTEXT_RECORD_FORMAT = "1"
+CONTEXT_RECORD_FORMAT = "2"
 
 
-def compact_record(value):
+def compact_record(value, *, whitespace=False):
     """Drop empty strings, nulls and empty containers; keep every list position.
 
     Native exports repeat hundreds of empty tags per voucher, roughly half of
@@ -324,10 +324,12 @@ def compact_record(value):
     False and "No" are kept: they carry meaning.
     """
     if isinstance(value, dict):
-        kept = {key: compact_record(item) for key, item in value.items()}
+        kept = {key: compact_record(item, whitespace=whitespace) for key, item in value.items()}
         return {key: item for key, item in kept.items() if item not in ("", None, [], {})}
     if isinstance(value, list):
-        return [compact_record(item) for item in value]
+        return [compact_record(item, whitespace=whitespace) for item in value]
+    if whitespace and isinstance(value, str) and not value.strip():
+        return ""
     return value
 
 
@@ -364,7 +366,7 @@ def _record_chunks(records, compact, limit=3_500_000):
     chunk, size = [], 2
     for record in records:
         if compact:
-            record = compact_record(record)
+            record = compact_record(record, whitespace=compact == "2")
         length = len(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()) + 2
         if chunk and size + length > limit:
             yield chunk
@@ -384,7 +386,10 @@ def context_assets(catalog, *, companies=None, voucher_budget=None, supplier_gst
     File IDs and bytes derive only from the immutable server-owned catalog, so
     only catalogs stamped with the compact format change delivered bytes.
     """
-    compact = catalog.get("context_record_format") == CONTEXT_RECORD_FORMAT
+    # Earlier runs retain their exact authorized file bytes. Version 2 also
+    # removes XML indentation, without trimming meaningful text or list slots.
+    compact = catalog.get("context_record_format")
+    compact = compact if compact in ("1", "2") else False
     if catalog.get("format_version") != "2":
         return [], copy.deepcopy(catalog)
     if catalog.get("master_lookup_version") not in (None, "1"):

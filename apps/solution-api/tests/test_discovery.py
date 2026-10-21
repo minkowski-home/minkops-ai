@@ -65,7 +65,7 @@ class DiscoveryTests(unittest.TestCase):
                               (current["id"],)).fetchone()
         self.assertIsNone(saved["mapping_run_id"])
         # New catalogs deliver compact records; the stored export stays complete.
-        self.assertEqual(saved["catalog"]["context_record_format"], "1")
+        self.assertEqual(saved["catalog"]["context_record_format"], "2")
         company = saved["catalog"]["sources"][0]["snapshot"]["companies"][0]
         self.assertEqual(company["masters"], {"status": "ready", "count": 0, "records": []})
         self.assertEqual(company["vouchers"], {"status": "ready", "count": 0, "records": []})

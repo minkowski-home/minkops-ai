@@ -49,9 +49,10 @@ def private_invoker(service, identity):
 
 
 def main(image, interest_image):
-    common = (f"--project={PROJECT}", f"--region={REGION}", "--cpu=1", "--memory=512Mi")
+    scope = (f"--project={PROJECT}", f"--region={REGION}", "--cpu=1")
+    common = (*scope, "--memory=512Mi")
     database = "DATABASE_URL=minkops-database-url:1,OPENAI_API_KEY=minkops-openai-key:1"
-    run("run", "jobs", "deploy", "minkops-worker", *common, f"--image={image}",
+    run("run", "jobs", "deploy", "minkops-worker", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-worker@{PROJECT}.iam.gserviceaccount.com",
         f"--set-cloudsql-instances={INSTANCE}", "--command=python",
         "--args=-m,minkops_api.accounts_worker,--drain,--lanes,4", "--tasks=1", "--parallelism=1",

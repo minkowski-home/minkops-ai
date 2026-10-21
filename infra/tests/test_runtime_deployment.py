@@ -39,6 +39,7 @@ def test_deployment_uses_a_private_bounded_recovery_service_and_oidc_scheduler(m
     assert not any("oauth" in a or "run.googleapis.com" in a for a in scheduler)
     worker = next(c for c in commands if c[:4] == ("run", "jobs", "deploy", "minkops-worker"))
     assert "--args=-m,minkops_api.accounts_worker,--drain,--lanes,4" in worker
+    assert "--memory=1Gi" in worker and "--memory=512Mi" not in worker
     api = next(c for c in commands if c[:3] == ("run", "deploy", "minkops-solution-api"))
     assert "--memory=512Mi" in api and "--concurrency=2" in api
 

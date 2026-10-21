@@ -88,6 +88,24 @@ class DirectoryTest(unittest.TestCase):
 
 
 class ScopedAssetsTest(unittest.TestCase):
+    def test_posting_child_pins_only_routed_company_without_copying_other_native_records(self):
+        class Uncopyable(dict):
+            def __deepcopy__(self, memo):
+                raise AssertionError('Unrelated company evidence was copied')
+        a, b = company('A', 'a'), Uncopyable(company('B', 'b'))
+        whole = catalog(a, b)
+        whole['sources'][0]['snapshot']['company_scope'] = [
+            {'company_guid': 'a'}, {'company_guid': 'b'}]
+        config = {'source_catalog_snapshot': whole, 'tally_target': {'companies': [
+            {'references': {'company_guid': 'a'}}, {'references': {'company_guid': 'b'}}]}}
+        child = company_scope.scoped_config(config, 'a')
+        observed = child['source_catalog_snapshot']['sources'][0]['snapshot']
+        self.assertEqual(observed['companies'], [a])
+        self.assertEqual(observed['company_scope'], [{'company_guid': 'a'}])
+        self.assertEqual(len(whole['sources'][0]['snapshot']['companies']), 2)
+        self.assertEqual(context_assets(whole, companies=['a'])[0],
+                         context_assets(child['source_catalog_snapshot'], companies=['a'])[0])
+
     def test_one_company_is_delivered_with_its_supplier_history_first_when_over_budget(self):
         whole = catalog(company("A", "a", vouchers=40, padding=20_000, supplier_gstin="27AAACA0000A1Z5"),
                         company("B", "b", vouchers=40, padding=20_000))

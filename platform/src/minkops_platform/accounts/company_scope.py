@@ -96,7 +96,25 @@ def assets_for(config, bill_bytes):
 
 def scoped_config(config, guid, triage=None):
     """A posting child's config: one routed company, plus what triage observed."""
-    child = copy.deepcopy(config)
+    catalog = config.get("source_catalog_snapshot")
+    scoped = config
+    if catalog:
+        sources = []
+        for source in catalog.get("sources", []):
+            snapshot = source.get("snapshot", {})
+            if source.get("tool") != "tally" or "companies" not in snapshot:
+                sources.append(source)
+                continue
+            snapshot = {**snapshot, "companies": [c for c in snapshot["companies"]
+                                                    if c.get("company_guid") == guid]}
+            if "company_scope" in snapshot:
+                snapshot["company_scope"] = [c for c in snapshot["company_scope"]
+                                             if c.get("company_guid") == guid]
+            sources.append({**source, "snapshot": snapshot})
+        # Filter before copying: four posting lanes must not each decode and
+        # retain every open company's native records after routing is settled.
+        scoped = {**config, "source_catalog_snapshot": {**catalog, "sources": sources}}
+    child = copy.deepcopy(scoped)
     child["company_scope"] = [guid]
     child["tally_target"]["companies"] = [c for c in child["tally_target"]["companies"]
                                           if c["references"]["company_guid"] == guid]

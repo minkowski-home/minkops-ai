@@ -3,7 +3,7 @@
 Cloud notifications may be lost or duplicated. PostgreSQL remains authoritative:
 generation checks prevent a finishing job from consuming a later notification,
 and a runner lock bounds overlap. The existing per-run locks/session IDs retain
-paid-execution recovery. An hourly sweep recovers failed notifications/crashes.
+paid-execution recovery. A private five-minute sweep recovers lost notifications/crashes.
 """
 
 import logging

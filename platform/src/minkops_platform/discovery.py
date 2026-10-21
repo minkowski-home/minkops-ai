@@ -53,6 +53,10 @@ def workflow_context(connection, tenant_id, run_id, tools):
     catalog = copy.deepcopy(require_ready(connection, tenant_id, run_id, tools))
     catalog["sources"] = [s for s in catalog["sources"] if s["tool"] in tools]
     catalog["master_lookup_version"] = "1"
+    from .accounts.client_context import CONTEXT_RECORD_FORMAT
+    # Delivery encoding is pinned on each new consuming run; native evidence
+    # and the confirmed upstream catalog remain unchanged.
+    catalog["context_record_format"] = CONTEXT_RECORD_FORMAT
     return catalog
 
 

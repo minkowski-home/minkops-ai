@@ -360,3 +360,24 @@ def test_compact_record_format_drops_empty_values_but_keeps_offsets_and_meaning(
     assert data["ALLOCATIONS.LIST"] == [{"AMOUNT": "0"}, {}]
     assert len(masters) == len(json.loads(next(
         f for f in before if f["path"] == "company-0-masters-lookup-v1-0.json")["content"]))
+
+
+def test_format_two_removes_xml_indentation_without_changing_older_pinned_bytes():
+    import json
+
+    native = snapshot()
+    data = native['companies'][0]['masters']['records'][0]['data']
+    data.update({'#text': '\n   \n ', 'NARRATION': '  Invoice text  ', 'FLAG': False,
+                 'LINES': [{'#text': '\n  ', 'AMOUNT': 0}, {}]})
+    base = {'run_id': 'run', 'format_version': '2', 'master_lookup_version': '1',
+            'sources': [{'tool': 'tally', 'snapshot': native}]}
+    old = context_assets({**base, 'context_record_format': '1'})[0]
+    new = context_assets({**base, 'context_record_format': '2'})[0]
+    def master(files):
+        return json.loads(next(f['content'] for f in files if '-masters-' in f['path']))[0]['data']
+    assert master(old)['#text'] == data['#text']
+    assert '#text' not in master(new)
+    assert master(new)['NARRATION'] == '  Invoice text  '
+    assert master(new)['FLAG'] is False
+    assert master(new)['LINES'] == [{'AMOUNT': 0}, {}]
+    assert data['#text'] == '\n   \n '
