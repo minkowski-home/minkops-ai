@@ -380,6 +380,50 @@
                     }
                   }
                 }
+              },
+              "summary": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "column",
+                    "starts_with",
+                    "value_column"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "opening",
+                        "closing",
+                        "debit",
+                        "credit"
+                      ]
+                    },
+                    "column": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "starts_with": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "value_column": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "account_column": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    }
+                  }
+                }
               }
             }
           },

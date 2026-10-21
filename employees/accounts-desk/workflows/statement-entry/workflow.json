@@ -1,6 +1,6 @@
 {
   "key": "statement-entry",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "Statement entry",
   "description": "Interpret statement transactions using Source Discovery and enter reviewed, verified Payment and Receipt vouchers.",
   "owner": "accounts-desk",

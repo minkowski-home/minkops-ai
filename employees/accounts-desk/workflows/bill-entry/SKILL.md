@@ -54,6 +54,14 @@ vouchers and context notes. Do not discover schema or fetch reference lists
 yourself. History supplies candidates and practice, never replacement amounts or
 tax evidence.
 
+For a routed Tally bill, first read config.posting_profiles[company_guid]. Apply
+the confirmed pattern's covered conventions to the current bill and verify the
+relevant discovered GUIDs, source facts and supported structure. Retrieve only
+relevant master candidates through the index. Use targeted independent history
+for an uncovered or contradictory case; do not rederive the whole confirmed
+practice for every bill. A pattern does not override contradictory buyer/GST
+evidence, ambiguous expense classification or unsupported inventory allocations.
+
 Use master_lookup_path when supplied: its company-scoped type/GUID/name index
 points to candidate records by file path and zero-based offset. Native statutory
 and default definitions remain available but are not supplier accounts. Never

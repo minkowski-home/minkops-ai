@@ -306,6 +306,15 @@ groups still hold, so routine master edits never ask again. Concurrent runs
 share one derivation; a failed derivation releases the company so its bills
 hold and the next run derives again.
 
+Bill Entry 0.17 explicitly applies the pinned confirmed pattern before searching
+history. For a covered document the session verifies current bill facts,
+relevant native master identities and the rule's scope, rather than deriving
+the same practice again. Only uncovered or contradictory cases require targeted
+history work. An absent or vague practice statement is not evidence for expense
+classification or accounting-only treatment; ambiguous accounts and required
+inventory allocations still hold. This changes the procedure, not the model or
+execution environment. Existing runs retain their original pinned bundle.
+
 Approved bills are stored as native v5 plans (Windows companion 0.9.0+, see
 [Windows app](windows-app.md#companion-090-contracts)) and reviewed through a
 server-built preview of exactly those lines; `data` keeps only the document

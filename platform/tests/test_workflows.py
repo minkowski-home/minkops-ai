@@ -37,6 +37,23 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertEqual(self.definition(key).metadata["owner"], "accounts-desk")
             self.resolve(key)
 
+    def test_bill_bundle_reuses_confirmed_practice_without_skipping_current_bill_proof(self):
+        """Guidance is pinned with the run; the live benchmark tests its effect."""
+        snapshot = self.definition("bill-entry").execution_snapshot
+        procedure = snapshot["files"][snapshot["execution"]["instructions"]]
+        skill = snapshot["files"]["SKILL.md"]
+        for text in (procedure, skill):
+            self.assertIn("config.posting_profiles[company_guid]", text)
+            self.assertIn("uncovered or contradictory", text)
+            self.assertIn("current bill", text)
+        self.assertIn("inventory allocations", procedure)
+        self.assertIn("classification_uncertain", procedure)
+        self.assertIn("same supplier, invoice reference and financial year", procedure)
+        self.assertEqual(snapshot["execution"], {
+            "environment": "openai_hosted", "model": "gpt-6-luna",
+            "python_packages": ["openpyxl", "pymupdf"], "instructions": "execution-instructions.md",
+            "resources": [], "result_path": "/workspace/outputs/result.json"})
+
     def test_run_override_does_not_change_defaults_or_other_runs(self):
         selections = {**self.examples["source-discovery"], "max_files": 3}
         resolved = self.resolve("source-discovery", selections)

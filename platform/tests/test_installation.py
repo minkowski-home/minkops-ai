@@ -42,10 +42,12 @@ class SolutionDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_solution(REPOSITORY_ROOT, "../employees")
 
-    def test_pr_infra_enables_skill_interpreted_statements_without_ledger_defaults(self):
+    def test_pr_infra_enables_all_accounts_workflows_without_ledger_defaults(self):
         installation = load_solution(REPOSITORY_ROOT, "pr-infra")
         self.assertEqual([e.metadata['key'] for e in installation.employees], ['accounts-desk'])
-        self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry'})
+        self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry', 'bill-entry'})
+        self.assertEqual(installation.bindings['bill-entry']['defaults']['output_mode'], 'tally_in_place')
+        self.assertEqual(installation.bindings['bill-entry']['defaults']['review_mode'], 'all_outputs')
         self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
         self.assertEqual(installation.workflows['statement-entry'].execution_snapshot['execution']['model'],'gpt-6-luna')
 

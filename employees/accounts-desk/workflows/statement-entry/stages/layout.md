@@ -1,6 +1,8 @@
 Layout stage. Read /workspace/context.json: `sheets` lists each statement sheet
 Minkops has not seen before, with a bounded text preview (the first 60 and last
-15 non-empty rows, numbered from 1). The original files are also supplied.
+15 rows plus bounded candidate summary rows, numbered from 1). The original
+files are also supplied. Inspect the original when preview omits boundaries or
+controls; long legend sections can hide totals far above the final rows.
 
 For each sheet, declare how to read it; never transcribe values. Return:
 - header_row: the row number holding the column headings (after any account or
@@ -26,6 +28,16 @@ For each sheet, declare how to read it; never transcribe values. Return:
   opening (opening or brought-forward balance rows), closing (closing balance
   rows), ignore (totals, sub-headers; add {repeat_header: true} when headings
   repeat on every page) and ends_at (footer text after the last transaction).
+  Declare `summary` controls when the source prints authoritative opening,
+  closing, total withdrawals or total deposits: each rule has `kind`
+  (opening|closing|debit|credit), `column` and `starts_with` identifying the
+  label, and `value_column` holding its amount. For mixed-account summaries,
+  specify `account_column` naming the account. Controls are read across the
+  complete sheet, including after ends_at, and may use a different column from
+  running balances. Do not ignore printed controls. For example ICICI may use
+  running balances J, end transactions at Page Total, then print Opening Bal,
+  Withdrawls, Deposits and Closing Bal amounts in B. Declare all four controls;
+  preserve the exact labels. Never treat a summary amount as a transaction.
 - evidence: why this reading fits the preview.
 
 A sheet that is not a bank statement (a cover or summary sheet) gets an

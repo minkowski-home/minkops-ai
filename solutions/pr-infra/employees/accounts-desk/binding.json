@@ -1,1 +1,7 @@
-{"workflows":[{"key":"source-discovery","status":"active"},{"key":"statement-entry","status":"active"}]}
+{
+  "workflows": [
+    {"key": "source-discovery", "status": "active"},
+    {"key": "statement-entry", "status": "active"},
+    {"key": "bill-entry", "status": "active", "defaults": {"output_mode": "tally_in_place", "review_mode": "all_outputs", "company_mode": "infer"}}
+  ]
+}

@@ -1,6 +1,6 @@
 # Statement entry
 
-Version 0.4 uses the same managed hosted agent runtime as Bill Entry, with its
+Version 0.5 uses the same managed hosted agent runtime as Bill Entry, with its
 procedure in the Statement Entry skill. The Windows companion applies and
 independently verifies approved plans. Simple Payment/Receipt rows are stored as
 plan protocol 4 and served to a 0.9.0+ companion upgraded to protocol 5; split
@@ -47,7 +47,8 @@ order, amount as signed, debit/credit or amount plus a Dr/Cr-style indicator,
 running balance, reference, narration, an account column when one sheet mixes
 banks, a client routing hint such as Branch, row order and opening, closing,
 total or footer rows. A new format's sheets go to one layout session (bounded
-previews of the first 60 and last 15 rows); the AI declares the reading, never
+previews of the first 60 and last 15 rows plus up to 30 candidate summary rows);
+the AI declares the reading, never
 values. Code applies it to the real file and proves it per account: every
 running balance must equal the previous one plus the signed transaction (single
 rows use an implied opening), closing rows must match, and date order must be
@@ -60,10 +61,28 @@ sheet holds. Tenant date-order and opening-balance settings are retired
 (migration `0013`). Uncached formulas hold; legacy XLS requires conversion in
 Excel. Limits are 10,000 rows and 100 columns.
 
+Layouts can declare independent `rows.summary` controls for printed opening,
+closing, total withdrawals (`debit`) and deposits (`credit`). Each rule names
+the label's `column`/`starts_with` and a separate `value_column`; mixed-account
+controls can declare `account_column`. They are checked across the complete
+sheet, even after the transaction table's `ends_at` marker. This supports exports
+whose running balances are in J but summary amounts are in B after Page Total.
+Every declared control must be readable, unique per account/kind and equal the
+canonical transaction chain/totals. A missing, repeated, uncached or conflicting
+control holds the sheet and cannot be overridden by a layout confirmation. Old
+layouts without summary rules retain their existing chain checks.
+
 Each account's opening and closing balance are found from the chain itself. When
 a new statement for a bank ledger opens at a different balance from the
 previous statement's close, one **Transactions missing** item names both; no row
 is held.
+
+`scripts/pr_infra_acceptance.py verify PACKAGE --statement FILE` provides an
+offline check of the generated nine-bill pack and the unchanged ICICI source
+statement using an explicit test layout with all four footer controls. Its
+`score` command grades exported run results in the initial, follow-up and
+exception phases without starting a paid session or writing data. Fixture files
+and answer keys remain outside the repository and must never enter model inputs.
 
 ## Preview, writes and recovery
 
