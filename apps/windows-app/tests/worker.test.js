@@ -360,7 +360,7 @@ test("a typed Tally state reaches the user verbatim instead of a generic guess",
   const typed = Object.assign(new Error("Tally isn't open on PRAHLAD-GADHWAL. Open it and your companies, then try again."), {
     userSafe: true, tallyState: "not_running",
   });
-  for (const operation of ["tally.probe", "tally.references", "tally.save", "sources.discover"])
+  for (const operation of ["tally.probe", "tally.save", "sources.discover"])
     assert.equal((await failedReceipt(operation, typed)).error, typed.message);
   const long = Object.assign(new Error("x".repeat(400)), { userSafe: true });
   assert.equal((await failedReceipt("tally.probe", long)).error.length, 300);

@@ -1,16 +1,9 @@
-"""Replay and score Bill Entry runs against labelled local fixture packages.
+"""Score Bill Entry runs against labelled local fixture packages.
 
 A fixture package holds `bills/*.pdf` and `evidence/expected-bills.json`, whose
-answers never reach a model. Two commands, both against DATABASE_URL:
+answers never reach a model. Against DATABASE_URL:
 
   score RUN_ID PACKAGE...   Grade a finished run per input and print totals.
-  replay RUN_ID PACKAGE...  Process the run's queued bills with the expected
-                            answer instead of a hosted session.
-
-Replay exercises everything after extraction: output validation, master
-selection, aggregation, attention, review mode and the companion's native
-read-first save. Stop the normal worker first, so no paid session claims the
-same run. Unrelated queued runs are never touched.
 
 Educational Tally only accepts vouchers dated the 1st, 2nd or 31st. A bill held
 solely because Tally refused its date is scored as passing.
@@ -20,7 +13,6 @@ import argparse
 import json
 import os
 import sys
-import time
 from collections import Counter
 from decimal import Decimal
 from pathlib import Path
@@ -64,97 +56,6 @@ def load_expected(packages):
 
 def money(value):
     return Decimal(str(value)).quantize(Decimal("0.01"))
-
-
-# --- replay -----------------------------------------------------------------
-
-
-def replay_output(bill, file_id, target):
-    """The output a correct agent returns for this bill under the 0.12 contract."""
-    company = next(c for c in target["companies"] if c["references"]["company_guid"] == bill["company_guid"])
-    refs = {master["identity"]["GUID"]: ref for ref, master in company["ledger_refs"].items()}
-
-    def pick(guid, basis):
-        return {"ref": refs[guid], "evidence": basis} if guid else {"ref": None, "evidence": basis}
-
-    case = bill.get("case", "")
-    data = {"invoice_number": bill["invoice_number"], "vendor": None, "date": bill["date"],
-            "purchase_ledger": None, "subtotal": float(bill["subtotal"]), "tax": float(bill["tax"]),
-            "tax_ledger": None, "total": float(bill["total"]), "cost_code": None}
-    record = {
-        "source_file_id": file_id, "destination_file_id": target["discovery_id"], "sheet": "Purchase",
-        "table": None, "operation": "append", "data": data, "exceptions": [], "notes": [],
-        "company_guid": bill["company_guid"],
-        "company_evidence": f"Buyer printed as {bill.get('printed_buyer') or bill['company']}.",
-        "master_refs": {
-            "vendor": pick(bill["vendor_guid"], "Supplier name and identifiers match this master."),
-            "purchase_ledger": pick(bill["purchase_guid"], "Bill purpose matches independent history."),
-            "tax_ledger": None,
-        },
-    }
-    if Decimal(bill["tax"]):
-        record["tax_allocations"] = [
-            {"ref": refs[line["guid"]], "amount": float(line["amount"]), "evidence": f"Printed {line['label']}."}
-            for line in bill["tax_allocations"]]
-    created = next((ref for ref, master in company["ledger_refs"].items()
-                    if case == "missing_supplier" and master["name"] == bill["supplier"]), None)
-    if created:
-        # On a rerun after Create this ledger, the supplier is an existing master.
-        record["master_refs"]["vendor"] = {"ref": created, "evidence": "Printed supplier matches this master."}
-    elif case == "missing_supplier":
-        data["vendor"] = bill["supplier"]
-        record["master_refs"]["vendor"] = {"ref": None, "new_supplier": True,
-                                           "evidence": "No discovered ledger matches the printed supplier."}
-        record["exceptions"].append({"code": "supplier_missing", "detail": "Printed supplier has no ledger."})
-    elif case == "ambiguous_supplier":
-        record["exceptions"].append({"code": "supplier_unresolved",
-                                     "detail": "Printed name matches two supplier ledgers."})
-    elif case == "separate_round_off":
-        record["exceptions"].append({"code": "unsupported_structure",
-                                     "detail": f"Separate printed round-off of {bill['round_off']}."})
-    elif case == "inventory_required":
-        record["exceptions"].append({"code": "unsupported_structure",
-                                     "detail": "Supplier history and bill require native stock allocations."})
-    # Ledger fields are filled from master_refs but still quote the bill text.
-    printed = {"vendor": bill.get("printed_supplier") or bill.get("printed_vendor") or bill.get("supplier")
-               or bill.get("vendor"),
-               "purchase_ledger": bill["lines"][0]["description"] if bill.get("lines") else None}
-    record["evidence"] = [{"field": field, "page": 1, "quote": str(value)}
-                          for field, value in {**data, **printed}.items() if value is not None]
-    return {"records": [record], "exceptions": [], "notes": [], "unresolved": []}
-
-
-def replay(run_id, expected):
-    from minkops_platform.accounts.batch import reconcile_once
-    from minkops_platform.accounts.worker import process
-    from minkops_platform.runtime import lifecycle
-    from minkops_platform.runtime.store import WorkflowRunStore
-
-    class RunOnly(WorkflowRunStore):
-        """Claims only this run and its children."""
-        def candidates(self, connection):
-            return [r for r in super().candidates(connection)
-                    if run_id in (str(r["id"]), str(r.get("parent_run_id")))]
-
-    def executor(key, files, context, on_event, **_):
-        selected = context["config"]["file_ids"]
-        source = next(f for f in files if str(f["id"]) in selected)
-        bill = expected.get(source["sha256"])
-        if bill is None:
-            raise ValueError(f"No expected answer for {source['path']}.")
-        return replay_output(bill, str(source["id"]), context["config"]["tally_target"])
-
-    store = RunOnly()
-    while True:
-        reconcile_once(DATABASE)
-        worked = lifecycle.work_once(DATABASE, store, lambda c, r: process(c, r, executor=executor))
-        with psycopg.connect(DATABASE, row_factory=dict_row) as connection:
-            state = connection.execute("SELECT state FROM account_runs WHERE id=%s", (run_id,)).fetchone()["state"]
-        if not worked and state not in ("queued", "executing"):
-            print(f"Run {run_id} is {state}.")
-            return
-        if not worked:
-            time.sleep(1)
 
 
 # --- score ------------------------------------------------------------------
@@ -203,13 +104,21 @@ def grade(bill, records, issue, deferred, rerun, dry=False):
 
 
 def compare(bill, record):
+    """Mismatches between a proposal's document summary and native lines and its label."""
     data, problems = record["data"], []
-    for field in ("invoice_number", "date", "vendor", "purchase_ledger"):
+    for field in ("invoice_number", "date", "vendor"):
         if data.get(field) != bill.get(field):
             problems.append(f"{field} {data.get(field)!r} != {bill.get(field)!r}")
-    for field in ("subtotal", "tax", "total"):
+    for field in ("tax", "total"):
         if data.get(field) is None or money(data[field]) != money(bill[field]):
             problems.append(f"{field} {data.get(field)} != {bill[field]}")
+    # The labelled purchase and tax lines are exactly the voucher's debit lines.
+    debits = {line["ledger"]: money(line["amount"]) for line in (record.get("preview") or {}).get("lines", [])
+              if line["side"] == "debit"}
+    expected = {bill["purchase_ledger"]: money(bill["subtotal"]),
+                **{line["ledger"]: money(line["amount"]) for line in bill["tax_allocations"]}}
+    if debits != expected:
+        problems.append(f"debit lines {debits} != {expected}")
     if record.get("company_guid") not in (None, bill["company_guid"]):
         problems.append("company")
     entries = (record.get("current") or {}).get("entries")
@@ -261,17 +170,13 @@ def score(run_id, expected, rerun, dry=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("score", "replay"))
+    parser.add_argument("command", choices=("score",))
     parser.add_argument("run_id")
     parser.add_argument("packages", nargs="+")
     parser.add_argument("--rerun", action="store_true", help="Inputs were already saved; expect duplicates.")
     parser.add_argument("--dry", action="store_true", help="All outputs run: grade proposals before saving.")
     args = parser.parse_args()
-    expected = load_expected(args.packages)
-    if args.command == "replay":
-        replay(args.run_id, expected)
-        return 0
-    return score(args.run_id, expected, args.rerun, args.dry)
+    return score(args.run_id, load_expected(args.packages), args.rerun, args.dry)
 
 
 if __name__ == "__main__":

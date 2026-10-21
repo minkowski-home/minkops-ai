@@ -54,7 +54,6 @@ def prepare_automatic(connection, run, result):
     from minkops_platform.workflow_policies import enforce_policies
 
     if (run["config"].get("review_mode") != "only_exceptions"
-            or run["config"].get("tally_target", {}).get("master_selection_version") != 1
             or enforce_policies(run["config"], result).get("requires_review")
             or result.get("findings")
             or control_state(connection, run["tenant_id"], run["task_id"]) != "active"):

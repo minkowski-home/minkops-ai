@@ -171,12 +171,8 @@ def decide(connection, tenant, user, run_id, file_id, action, proposal=None):
             # proposal must establish one, with evidence, and be otherwise valid.
             if not selected or not supported_write(run, record, supplier=True):
                 raise ValueError("Supplier creation needs a supported bill and a positively new supplier.")
-            if "voucher" in record:
-                from .vouchers import summary
-                record["data"] = summary(record, run["config"])
-            elif scope.get("master_selection_version") == 1:
-                from .master_selection import resolve_masters
-                resolve_masters(record, selected, required=True, allow_split=scope.get("tax_allocation_version") == 1)
+            from .vouchers import summary
+            record["data"] = summary(record, run["config"])
             from .supplier_gst import creation_plan
             gst_supplier = creation_plan(run, record, selected)
             item = flag(connection, run, record, title="Missing supplier", kind="supplier", actor=user["id"])
@@ -364,24 +360,14 @@ def supplier_created(connection, item, job, observation):
     if master.get("PARENT") != "Sundry Creditors" or not master.get("GUID"):
         raise ServiceError("invalid", "Supplier definition needs review.")
     for record in eligible:
-        selected = select_target(record, run["config"]["tally_target"])
-        selected["ledgers"] = list(dict.fromkeys([*selected["ledgers"], target["vendor"]]))
-        selected["references"]["ledgers"][target["vendor"]] = {k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}
         record["data"]["vendor"] = target["vendor"]
-        if "voucher" in record:
-            # The verified native master joins this run's pinned company view.
-            created = {"company_guid": target["company_guid"], "type": "LEDGER",
-                       "data": {"NAME": target["vendor"], **{k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}}}
-            if created not in run["config"].setdefault("created_masters", []):
-                run["config"]["created_masters"].append(created)
-            record["voucher"]["party"] = {"ledger_guid": master["GUID"], "new_supplier": False,
-                                          "evidence": "Explicit supplier creation verified by native readback."}
-        elif run["config"]["tally_target"].get("master_selection_version") == 1:
-            from .master_selection import ledger_reference
-            identity = selected["references"]["ledgers"][target["vendor"]]
-            ref = ledger_reference(selected, target["vendor"], identity)
-            selected["ledger_refs"][ref] = {"name": target["vendor"], "identity": identity}
-            record["master_refs"]["vendor"] = {"ref": ref, "evidence": "Explicit supplier creation verified by native readback."}
+        # The verified native master joins this run's pinned company view.
+        created = {"company_guid": target["company_guid"], "type": "LEDGER",
+                   "data": {"NAME": target["vendor"], **{k: master.get(k) for k in ("GUID", "PARENT", "ALTERID")}}}
+        if created not in run["config"].setdefault("created_masters", []):
+            run["config"]["created_masters"].append(created)
+        record["voucher"]["party"] = {"ledger_guid": master["GUID"], "new_supplier": False,
+                                      "evidence": "Explicit supplier creation verified by native readback."}
         record["decision"] = "approve"
         sibling = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s FOR UPDATE",
             (run["tenant_id"], f"bill:{run['id']}:{record['source_file_id']}:supplier")).fetchone()

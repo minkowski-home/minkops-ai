@@ -10,13 +10,23 @@ from minkops_platform.accounts.tally_writes import HOLD_TITLES
 from minkops_platform.resources import REPOSITORY_ROOT
 
 
-def example():
-    record = {"source_file_id": "file", "findings": [], "evidence": [{"field": "vendor", "quote": "Supplier"}],
-              "data": {"invoice_number": "T-1", "vendor": "Supplier", "date": "2026-10-02", "subtotal": 100,
-                       "tax": 18, "tax_ledger": "Tax", "total": 118, "purchase_ledger": "Purchases", "cost_code": None}}
-    run = {"state": "review", "config": {"tally_target": {"discovery_id": "d", "company": "Test Company",
-           "ledgers": ["Supplier", "Purchases", "Tax"]}}, "result": {"records": [record], "unresolved": []}}
+def example(**changes):
+    from test_bill_vouchers import config, proposal
+
+    record = proposal(**changes)
+    record["source_file_id"] = "file"
+    record["evidence"].append({"field": "supplier", "quote": "ACME CEMENT"})
+    run = {"state": "review", "config": config(), "result": {"records": [record], "unresolved": []}}
     return run, record
+
+
+def new_supplier(**changes):
+    """An untaxed bill from a positively new supplier: creation needs no GST details."""
+    from test_bill_vouchers import line
+
+    return example(**{"voucher.party": {"ledger_guid": None, "new_supplier": True, "evidence": "No ledger has this name."},
+                      "document.total": 1000.00, "voucher.lines": [line("expense", "Electricity", "debit", 1000.00)],
+                      **changes})
 
 
 def test_matrix_is_exhaustive_and_documented():
@@ -57,25 +67,23 @@ def test_mandatory_values_are_checked_before_offering_a_write_without_mutating_p
     before = copy.deepcopy(run)
     assert "guess" in allowed_actions(run, record)
     assert run == before
-    record["data"]["total"] = 1000
+    record["document"]["total"] = 1000
     assert "guess" not in allowed_actions(run, record)
 
 
 def test_recheck_only_applies_to_unresolved_inputs_and_supplier_needs_positive_identity():
-    run, record = example()
+    run, record = new_supplier()
     record["exception_codes"] = ["supplier_missing"]
-    record["data"].update(vendor="New supplier", tax=0, tax_ledger=None, total=100)
     assert allowed_actions(run, record) == ["supplier", "nothing"]
     run["result"]["unresolved"] = [{"source_file_id": "file", "code": "supplier_missing"}]
     assert allowed_actions(run, record) == ["supplier", "nothing", "retry"]
-    record["master_refs"] = {"vendor": {"new_supplier": False}}
+    record["voucher"]["party"]["new_supplier"] = False
     assert "supplier" not in allowed_actions(run, record)
 
 
 def test_public_result_explains_a_blocked_creation_without_mutating_the_proposal():
-    run, record = example()
+    run, record = example(**{"voucher.party": {"ledger_guid": None, "new_supplier": True, "evidence": "No ledger has this name."}})
     record["exception_codes"] = ["supplier_missing"]
-    record["data"].update(vendor="New supplier")
     before = copy.deepcopy(run)
     public = public_result(run)["records"][0]
     assert "supplier" not in public["allowed_actions"]

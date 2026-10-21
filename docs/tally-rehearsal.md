@@ -93,9 +93,7 @@ allocations was compared with the plan.
 | 15 | Scan of bill 01 | Together, 01 and 15 produce exactly one save |
 
 `scripts/bill_entry_fixtures.py score RUN_ID PACKAGE` supports these cases.
-Use `--rerun` after resolving decisions and saving new bills. Replay bypasses
-extraction and paid sessions; it is an adapter/workflow check, not an AI score.
-Do not run a paid worker and replay against the same run concurrently.
+Use `--rerun` after resolving decisions and saving new bills.
 
 Each company receives 59 fixture masters (QA18 names, alphabetic MKQA unit symbols): creditor and purchase
 groups; ten suppliers (including two ambiguous names); seven purchase heads;

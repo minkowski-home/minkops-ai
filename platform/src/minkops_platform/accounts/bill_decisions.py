@@ -28,27 +28,14 @@ def write_blocker(run, record, *, supplier=False):
 
         if supplier:
             selected = select_target(candidate, scope)
-            if "voucher" in candidate:
-                party = candidate["voucher"]["party"]
-                vendor = candidate["document"].get("supplier_name")
-                if (party.get("ledger_guid") is not None or party.get("new_supplier") is not True
-                        or not any(e.get("field") == "supplier" and e.get("quote", "").strip()
-                                   for e in candidate.get("evidence", []))):
-                    raise ValueError("Creating this ledger requires a positively identified new supplier and printed evidence.")
-            else:
-                if scope.get("master_selection_version") == 1:
-                    from .master_selection import resolve_masters
-                    resolve_masters(candidate, selected, required=True, allow_split=scope.get("tax_allocation_version") == 1)
-                vendor = candidate["data"]["vendor"]
-                refs = candidate.get("master_refs")
-                if (vendor in selected["ledgers"]
-                        or (refs is not None and refs.get("vendor", {}).get("new_supplier") is not True)
-                        or not any(e.get("field") == "vendor" and e.get("quote", "").strip() for e in candidate.get("evidence", []))):
-                    raise ValueError("Creating this ledger requires a positively identified new supplier and printed evidence.")
+            party = candidate["voucher"]["party"]
+            if (party.get("ledger_guid") is not None or party.get("new_supplier") is not True
+                    or not any(e.get("field") == "supplier" and e.get("quote", "").strip()
+                               for e in candidate.get("evidence", []))):
+                raise ValueError("Creating this ledger requires a positively identified new supplier and printed evidence.")
             from .supplier_gst import creation_plan
-            if "voucher" in candidate:
-                from .vouchers import summary
-                candidate["data"] = summary(candidate, run["config"])
+            from .vouchers import summary
+            candidate["data"] = summary(candidate, run["config"])
             creation_plan(run, candidate, selected)
         resolve(candidate, run["config"], assume_new_supplier=supplier)
         return None

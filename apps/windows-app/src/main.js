@@ -33,7 +33,6 @@ import {
   checkTally,
   inspectExcel,
   excelSchemaBytes,
-  readTallyReferences,
   discoverClientContext,
   saveDiscoveryPackage,
   tallyTransport,
@@ -285,12 +284,6 @@ function startWorker() {
           return {content: file.content};
         }
         return inspectTallyAttention(plan, {request: tallyRequest, createSupplier: job.operation === "attention.supplier"});
-      }
-      if (job.operation === "tally.references") {
-        const plan = await request(
-          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
-        );
-        return readTallyReferences(plan, { request: tallyRequest });
       }
       // An encrypted, fsynced intent per remote ID: once written, no later
       // attempt may import that voucher again. Upgraded statement plans keep

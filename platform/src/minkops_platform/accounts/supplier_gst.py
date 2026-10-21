@@ -145,8 +145,6 @@ def creation_plan(run, record, selected):
         if record["data"].get("tax"):
             raise ValueError("GST supplier details are missing.")
         return None
-    if run["config"].get("tally_target", {}).get("supplier_creation_version") != 1:
-        raise ValueError("This pinned workflow does not support GST supplier creation.")
     guid = selected["references"]["company_guid"]
     companies = [company for source in run["config"].get("source_catalog_snapshot", {}).get("sources", [])
                  if source.get("tool") == "tally" for company in source.get("snapshot", {}).get("companies", [])

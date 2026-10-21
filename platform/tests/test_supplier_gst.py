@@ -78,7 +78,7 @@ def creation_fixture():
     template = {"type": "LEDGER", "data": {"@_NAME": "Existing registered supplier", "GUID": "template-guid", "ALTERID": "12",
                 "PARENT": "Sundry Creditors", "PARTYGSTIN": "27AAPFU0939F1ZV", "GSTREGISTRATIONTYPE": "Regular"}}
     selected = {"references": {"company_guid": "company"}}
-    run = {"config": {"tally_target": {"supplier_creation_version": 1}, "source_catalog_snapshot": {"sources": [
+    run = {"config": {"tally_target": {}, "source_catalog_snapshot": {"sources": [
         {"tool": "tally", "snapshot": {"companies": [{"company_guid": "company", "identity": {"STATENAME": "Maharashtra"},
           "masters": {"records": [template]}}]}}]}}}
     return creation_plan, run, candidate, selected
@@ -92,12 +92,10 @@ def test_creation_requires_same_company_registered_template_and_matching_full_di
     with pytest.raises(ValueError, match="template"): create(run, record, selected)
 
 
-def test_existing_gstin_under_another_name_blocks_creation_and_legacy_pins_stay_off():
+def test_existing_gstin_under_another_name_blocks_creation():
     create, run, record, selected = creation_fixture()
     record["supplier_details"] = details()
     with pytest.raises(ValueError, match="already carries"): create(run, record, selected)
-    run["config"]["tally_target"].pop("supplier_creation_version")
-    with pytest.raises(ValueError, match="pinned"): create(run, record, selected)
 
 
 def test_gst_readback_rejects_lost_registration_state_address_or_pin():

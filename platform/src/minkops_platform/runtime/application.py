@@ -31,7 +31,6 @@ RESERVED = {
     "tally_target",
     "statement_context",
     "statement_device_id",
-    "tally_context_job_id",
     "batch",
     "retry_file_id",
     "superseded",

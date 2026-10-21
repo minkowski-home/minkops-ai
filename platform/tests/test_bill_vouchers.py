@@ -48,12 +48,13 @@ def config(*companies):
     companies = companies or (company(),)
     snapshot = {"format_version": "2", "period": {"from": "2026-04-01", "to": "2026-10-31"}, "companies": list(companies)}
     targets = targets_from_snapshot(snapshot, "device", "discovery")
-    for target in targets:
-        pinned = next(c for c in target["purchase_voucher_types"] if c["name"] == "Purchase GST")
-        target["voucher_type"] = pinned["identity"]
-    return {"tally_target": {"device_id": "device", "discovery_id": "discovery", "companies": targets,
-                             "company_mode": "infer", "locked_company_guid": None},
-            "source_catalog_snapshot": {"sources": [{"tool": "tally", "key": "tally", "snapshot": snapshot}]}}
+    settings = {"tally_target": {"device_id": "device", "discovery_id": "discovery", "companies": targets,
+                                 "company_mode": "infer", "locked_company_guid": None},
+                "source_catalog_snapshot": {"sources": [{"tool": "tally", "key": "tally", "snapshot": snapshot}]}}
+    if any(c["company_guid"] == "company" for c in companies):
+        # A posting session always runs with its company's confirmed pattern.
+        settings["posting_profiles"] = {"company": {"id": "p", "version": 1, **pattern()}}
+    return settings
 
 
 def line(role, ledger, side, amount, *, tax=None, centre=None):
@@ -140,7 +141,9 @@ class ResolvedBillTest(unittest.TestCase):
                               "voucher.lines": [line("expense", "Electricity", "debit", 1000.00),
                                                 line("tax", "Input CGST 9%", "debit", 90.00, tax={"head": "cgst", "rate": 9, "taxable": 1000.00}),
                                                 line("tax", "Input SGST 9%", "debit", 90.00, tax={"head": "sgst", "rate": 9, "taxable": 1000.00})]})
-        bill = vouchers.check(journal, config())
+        bill = vouchers.check(journal, with_pattern(pattern(families={
+            "invoice": {"family": "journal", "voucher_type_guid": "vt-journal"},
+            "credit_note": {"family": "debit_note", "voucher_type_guid": "vt-debit-note"}})))
         self.assertEqual((bill.family, bill.native_plan("12345678-1234-5234-8234-123456789abc", "append", None)["duplicate"]["families"]),
                          ("journal", ["purchase", "journal"]))
         note = proposal(**{"document.kind": "credit_note", "voucher.family": "debit_note", "voucher.voucher_type_guid": "vt-debit-note"})
@@ -179,7 +182,14 @@ class ResolvedBillTest(unittest.TestCase):
         record = proposal(**{"document.total": 6355.00})
         record["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 40.00))
         with self.assertRaises(HoldReason) as held:
-            vouchers.check(record, config())
+            vouchers.check(record, with_pattern(pattern(tds=None)))
+        self.assertEqual(held.exception.code, "classification_uncertain")
+
+    def test_a_purchase_without_a_confirmed_pattern_holds(self):
+        settings = config()
+        settings.pop("posting_profiles")
+        with self.assertRaises(HoldReason) as held:
+            vouchers.check(proposal(), settings)
         self.assertEqual(held.exception.code, "classification_uncertain")
 
     def test_new_suppliers_foreign_documents_and_dates_before_the_books_hold_with_their_reasons(self):

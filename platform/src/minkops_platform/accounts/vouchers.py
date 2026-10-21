@@ -76,39 +76,6 @@ def _pinned(ledgers, lines):
     return {name: {k: v[k] for k in ("GUID", "PARENT", "ALTERID") if v.get(k) is not None} for name, v in found.items()}
 
 
-def _bill(plan, identity):
-    data, refs = plan.get("data") or {}, plan.get("references") or {}
-    voucher_type = refs.get("voucher_type") or {}
-    if data.get("cost_code") or not refs.get("company_guid") or not voucher_type.get("GUID"):
-        return None
-    taxes = plan.get("tax_allocations")
-    if taxes is None:
-        taxes = [{"ledger": data.get("tax_ledger"), "amount": data["tax"]}] if data.get("tax") else []
-    lines = [_line(data.get("vendor"), "credit", _cents(data.get("total"))),
-             _line(data.get("purchase_ledger"), "debit", _cents(data.get("subtotal"))),
-             *(_line(t.get("ledger"), "debit", _cents(t.get("amount"))) for t in taxes)]
-    if any(not isinstance(ln["ledger"], str) or not ln["amount_cents"] or ln["amount_cents"] < 0 for ln in lines):
-        return None
-    ledgers = _pinned(refs.get("ledgers"), lines)
-    if ledgers is None:
-        return None
-    issued = date.fromisoformat(data["date"])
-    number = data["invoice_number"]
-    expected = plan.get("expected")
-    return {
-        "family": "purchase", "fence": "retry_after_read",
-        "voucher_type": {"NAME": voucher_type["NAME"], "GUID": voucher_type["GUID"]},
-        "company_guid": refs["company_guid"],
-        "header": {"date": data["date"], "reference": number, "party_ledger": data["vendor"],
-                   "narration": f"Minkops reviewed bill {number}", "tag": None},
-        "lines": lines, "references": {"company_guid": refs["company_guid"], "ledgers": ledgers},
-        "duplicate": {"strategy": "document", "families": BILL_FAMILIES, "party_ledger": data["vendor"],
-                      "number": number, "number_fields": ["REFERENCE"], "window": invoice_window(issued)},
-        "expected": {"guid": expected["guid"], "fingerprint": expected["fingerprint"]} if expected else None,
-        "identity": {"version": 2, "series": "invoice", "rule": "in_invoice_year", "hash": identity},
-    }
-
-
 def _statement(plan, identity, distinct):
     data, refs, allocation = plan["data"], plan.get("references") or {}, plan.get("allocation")
     amount = data.get("amount_cents")
@@ -187,12 +154,7 @@ def upgrade(plan, *, identity, distinct=()):
     version = plan.get("format_version", 1)
     if version == FORMAT:
         return plan
-    if version in (1, 2, 3) and "data" in plan and "invoice_number" in plan["data"]:
-        body = _bill(plan, identity)
-    elif version == 4:
-        body = _statement(plan, identity, distinct)
-    else:
-        body = None
+    body = _statement(plan, identity, distinct) if version == 4 else None
     if body is None:
         return None
     return {"format_version": FORMAT, "operation": plan.get("operation", "append"), "company": plan["company"],
@@ -547,10 +509,8 @@ def check(record, config, *, assume_new_supplier=False):
         if expected.get("family") != family or expected.get("voucher_type_guid") != masters.scalar(voucher_type, "GUID"):
             raise _hold("posting_profile_miss", "This document's voucher type differs from the company's confirmed posting pattern.")
     elif family == "purchase":
-        if target.get("voucher_type_error"):
-            raise _hold("voucher_type_unresolved", target["voucher_type_error"])
-        if (target.get("voucher_type") or {}).get("GUID") != masters.scalar(voucher_type, "GUID"):
-            raise _hold("classification_uncertain", "Purchases use the voucher type chosen for this run.")
+        # Only a confirmed posting pattern authorizes a purchase voucher type.
+        raise _hold("classification_uncertain", "Purchases use the voucher type of the company's confirmed posting pattern.")
 
     party = voucher.get("party") or {}
     if party.get("ledger_guid") is None:
@@ -636,64 +596,11 @@ def check(record, config, *, assume_new_supplier=False):
     return bill
 
 
-class LegacyBill:
-    """A proposal pinned to bill-entry 0.13 or earlier (fixed purchase fields).
-
-    Its validation and plan formats are retained unchanged until those runs
-    drain (MIN-155); new runs never reach this class.
-    """
-
-    def __init__(self, record, config, *, assume_new_supplier=False):
-        from .bills import validate_tally
-        from .client_context import select_target
-        from .master_selection import resolve_masters
-
-        scope = config["tally_target"]
-        self.target = select_target(record, scope)
-        resolve_masters(record, self.target, required=scope.get("master_selection_version") == 1,
-                        allow_split=scope.get("tax_allocation_version") == 1)
-        checked = self.target
-        if assume_new_supplier:
-            checked = {**self.target, "ledgers": [*self.target["ledgers"], record["data"].get("vendor")]}
-        self.record = record
-        self.identity = validate_tally(record["data"], checked, record.get("tax_allocations"))
-        self.summary = record["data"]
-
-    def _taxes(self):
-        from .bills import allocation_entries
-
-        return sorted(allocation_entries(self.record["data"], self.record.get("tax_allocations")), key=lambda t: t["ledger"])
-
-    def accounting(self):
-        return json.dumps([self.record["data"], self._taxes()], sort_keys=True, default=str)
-
-    def native_plan(self, remote_id, operation, expected):
-        from .bills import allocation_entries
-
-        target, record = self.target, self.record
-        plan = {"company": target["company"], "port": target["port"], "data": record["data"], "remote_id": remote_id,
-                "operation": operation, "expected": expected if operation == "update" else None,
-                "discovery_id": target["discovery_id"], "references": target.get("references")}
-        if record.get("tax_allocations") is not None:
-            plan.update(format_version=2, tax_allocations=allocation_entries(record["data"], record["tax_allocations"]))
-        if target.get("voucher_type"):
-            plan["references"] = {**plan["references"], "voucher_type": target["voucher_type"]}
-            plan["format_version"] = 3
-        return plan
-
-    def preview(self):
-        data = self.record["data"]
-        lines = [{"ledger": data.get("vendor"), "side": "credit", "amount": data.get("total")},
-                 {"ledger": data.get("purchase_ledger"), "side": "debit", "amount": data.get("subtotal")}]
-        lines += [{"ledger": t["ledger"], "side": "debit", "amount": t["amount"]} for t in self._taxes()]
-        return {"company": self.target.get("company"), "voucher_type": (self.target.get("voucher_type") or {}).get("NAME", "Purchase"),
-                "family": "purchase", "date": data.get("date"), "number": data.get("invoice_number"),
-                "party": data.get("vendor"), "total": data.get("total"), "lines": lines}
-
-
 def resolve(record, config, *, assume_new_supplier=False):
-    """The one gate every Tally bill decision passes: route, bind and validate."""
-    if "voucher" in record:
-        record["data"] = summary(record, config)
-        return check(record, config, assume_new_supplier=assume_new_supplier)
-    return LegacyBill(record, config, assume_new_supplier=assume_new_supplier)
+    """The one gate every Tally bill decision passes: route, bind and validate.
+
+    A record without a proposed voucher (a retired fixed-field proposal) holds
+    in `check` like any incomplete proposal; nothing is written from it.
+    """
+    record["data"] = summary(record, config)
+    return check(record, config, assume_new_supplier=assume_new_supplier)

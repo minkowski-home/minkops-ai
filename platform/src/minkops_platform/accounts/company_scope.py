@@ -65,14 +65,13 @@ def annotate(target, catalog):
 
 def needs_triage(config):
     target = config.get("tally_target") or {}
-    return (target.get("voucher_proposal_version") == 1 and target.get("company_mode") == "infer"
-            and len(target.get("companies", [])) > 1)
+    return target.get("company_mode") == "infer" and len(target.get("companies", [])) > 1
 
 
 def fixed_scope(config):
     """The single company a run can only ever enter, when routing is not needed."""
     target = config.get("tally_target") or {}
-    if target.get("voucher_proposal_version") != 1 or needs_triage(config):
+    if not target or needs_triage(config):
         return None
     if target.get("company_mode") == "locked":
         return [target["locked_company_guid"]]

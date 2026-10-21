@@ -17,7 +17,7 @@ from minkops_platform.runtime.launch import LaunchInputs
 from minkops_platform.solution_policy import validate_destination
 from minkops_platform.workflows import resolve_run_config
 
-from .bills import tally_mapping, tally_target
+from .bills import tally_target
 from .catalog import validate_catalog
 from .checks import check_records, populate_entry_ids
 from .repository import catalog_contents, files_for, resolve_catalog
@@ -74,11 +74,14 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
             discovery_id = selections.get("discovery_id")
             if not discovery_id:
                 raise ServiceError("invalid", "Confirm Tally source discovery first.")
+            # The agent proposes the client's own voucher (bill-entry 0.14+).
+            if tuple(map(int, definition.metadata["version"].split("."))) < (0, 14, 0):
+                raise ServiceError("conflict", "This Bill Entry version is retired. Reinstall the workflow, then launch again.")
             target = tally_target(connection, tenant, user, discovery_id)
             from minkops_platform import desktop
 
             desktop.require_companion(
-                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]))
+                desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 9, 0))
             from minkops_platform.discovery import workflow_context
 
             source_context = workflow_context(
@@ -87,23 +90,8 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                 discovery_id,
                 ["tally"],
             )
-            # From bill-entry 0.14 the AI proposes vouchers; there is no fixed sheet.
-            proposals = tuple(map(int, definition.metadata["version"].split("."))) >= (0, 14, 0)
-            catalog_snapshot = {"sheets": []} if proposals else tally_mapping(discovery_id)
-            if "companies" not in target:
-                raise ServiceError(
-                    "conflict",
-                    "Refresh Source Discovery to collect complete company context before a new bill run.",
-                )
+            catalog_snapshot = {"sheets": []}
             target["company_mode"] = selections.get("company_mode", "infer")
-            target["master_selection_version"] = 1
-            target["tax_allocation_version"] = 1
-            if tuple(map(int, definition.metadata["version"].split("."))) >= (0, 13, 0):
-                desktop.require_companion(desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 8, 0))
-                target["supplier_creation_version"] = 1
-            if proposals:
-                desktop.require_companion(desktop.owned_device(connection, tenant["id"], user["id"], target["device_id"]), minimum=(0, 9, 0))
-                target["voucher_proposal_version"] = 1
             target["locked_company_guid"] = selections.get("locked_company_guid")
             if target["company_mode"] == "locked":
                 from .client_context import select_target
@@ -114,15 +102,6 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
                     raise ServiceError("invalid", str(error)) from error
             elif target["locked_company_guid"] is not None:
                 raise ServiceError("invalid", "Automatic company selection cannot lock a company.")
-            from .voucher_types import apply_choices
-
-            # Proposal runs take each company's voucher types from its confirmed
-            # posting pattern; only older pinned contracts choose one at launch.
-            if not proposals:
-                try:
-                    apply_choices(target, selections.get("purchase_voucher_types") or {})
-                except ValueError as error:
-                    raise ServiceError("invalid", str(error)) from error
             references = []
             selections.update(
                 {
@@ -228,8 +207,8 @@ def prepare_launch(connection, tenant, user, body, workflow, definition):
         ] = source_context
         from .client_context import context_assets
 
-        target = snapshots.get("tally_target") or {}
-        if is_bill and target.get("voucher_proposal_version") == 1:
+        target = snapshots.get("tally_target")
+        if is_bill and target:
             # Sessions receive one routed company's evidence, never every company's.
             from .company_scope import annotate, assets_for, fixed_scope
 
@@ -367,15 +346,9 @@ class BillHandler(AccountsHandler):
                 "result": public_result(run)}
 
     def launched(self, connection, run):
-        if run["config"].get("tally_target", {}).get("schema_only"):
-            from .bills import queue_tally_context
-
-            queue_tally_context(connection, run)
-            return
         from .company_scope import needs_triage
 
-        if (len(run["file_ids"]) == 1 and run["config"].get("company_scope")
-                and run["config"]["tally_target"].get("voucher_proposal_version") == 1):
+        if len(run["file_ids"]) == 1 and run["config"].get("company_scope"):
             # A single bill posts in this run itself, with its company's pattern.
             from .posting_profiles import attach
 
@@ -390,15 +363,6 @@ class BillHandler(AccountsHandler):
             create_children(connection, run)
 
     def prepare(self, connection, run):
-        if run["config"].get("tally_context_job_id"):
-            job = connection.execute(
-                "SELECT state,error FROM desktop_jobs WHERE tenant_id=%s AND id=%s",
-                (run["tenant_id"], run["config"]["tally_context_job_id"]),
-            ).fetchone()
-            if not job or job["state"] != "completed":
-                raise ValueError(
-                    "Tally references could not be prepared. Check the connected PC and relaunch this bill."
-                )
         files = files_for(connection, run["tenant_id"], run["file_ids"])
         context = {"config": run["config"], "definition_version": run["definition_version"]}
         if run["config"].get("stage") == "posting_profile":
@@ -464,7 +428,7 @@ class BillHandler(AccountsHandler):
             raise ValueError(
                 "Agent proposals must append by default; edits require explicit review."
             )
-        if run["config"].get("tally_target", {}).get("voucher_proposal_version") == 1:
+        if run["config"].get("tally_target"):
             from .bills import capture_tally_findings
             from .checks import check_voucher_records
 
@@ -472,23 +436,17 @@ class BillHandler(AccountsHandler):
                 raise ValueError("Tally proposals must state the document and its voucher.")
             check_voucher_records(result, run["file_ids"])
             return capture_tally_findings(result, run["config"])
-        if run["config"].get("tally_target"):
-            from .bills import capture_tally_findings
-
-            capture_tally_findings(result, run["config"])
         result = populate_entry_ids(result, context["catalog"], run["id"])
         result = check_records(
             result,
             context["catalog"],
             run["file_ids"],
             contents,
-            [] if run["config"].get("tally_target") else run["config"]["checks"],
+            run["config"]["checks"],
         )
-        if not run["config"].get("tally_target"):
-            from .bills import capture_excel_state
+        from .bills import capture_excel_state
 
-            capture_excel_state(result, context["catalog"], contents)
-        return result
+        return capture_excel_state(result, context["catalog"], contents)
 
     def finish(self, connection, store, run, context, domain, result):
         from minkops_platform.run_controls import control_state

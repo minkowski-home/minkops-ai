@@ -6,12 +6,8 @@ keys remain authoritative for backfills and externally created records.
 
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from uuid import uuid4
-
-from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
-from minkops_platform.runtime.assets import config_json
 
 
 class HoldReason(ValueError):
@@ -131,41 +127,11 @@ def capture_excel_state(result, catalog, contents):
     return result
 
 
-# Legacy contract for proposals pinned to bill-entry 0.13 or earlier only; new
-# runs propose N-line vouchers (vouchers.check). Delete with MIN-155.
-TALLY_COLUMNS = [
-    ("invoice_number", "string", True),
-    ("vendor", "string", True),
-    ("date", "string", True),
-    ("purchase_ledger", "string", True),
-    ("subtotal", "number", True),
-    ("tax", "number", True),
-    ("tax_ledger", "string", False),
-    ("total", "number", True),
-    ("cost_code", "string", False),
-]
-
-
-def tally_mapping(catalog_id):
-    return {
-        "sheets": [
-            {
-                "file_id": str(catalog_id),
-                "sheet": "Purchase",
-                "table": None,
-                "role": "destination",
-                "header_row": 1,
-                "key_columns": ["vendor", "invoice_number", "date"],
-                "columns": [
-                    {"name": name, "concept": name, "type": kind, "required": required}
-                    for name, kind, required in TALLY_COLUMNS
-                ],
-            }
-        ]
-    }
+COMPANY_CONTEXT_REQUIRED = "Refresh Source Discovery to collect complete company context before a new bill run."
 
 
 def tally_target(connection, tenant, user, discovery_id):
+    """The run's destination: every company of one confirmed Source Discovery."""
     from minkops_platform import desktop, discovery
 
     catalog = discovery.require_ready(connection, tenant["id"], discovery_id, ["tally"])
@@ -174,223 +140,28 @@ def tally_target(connection, tenant, user, discovery_id):
         raise ServiceError("forbidden", "Use source discovery confirmed by your account.")
     desktop.owned_device(connection, tenant["id"], user["id"], row["device_id"])
     source = next(s["snapshot"] for s in catalog["sources"] if s["tool"] == "tally")
-    if "companies" in source:
-        from .client_context import targets_from_snapshot
+    if "companies" not in source:
+        raise ServiceError("conflict", COMPANY_CONTEXT_REQUIRED)
+    from .client_context import targets_from_snapshot
 
-        return {
-            "device_id": str(row["device_id"]),
-            "discovery_id": str(discovery_id),
-            "companies": targets_from_snapshot(source, row["device_id"], discovery_id),
-            "company_mode": "infer",
-            "locked_company_guid": None,
-        }
-    if "schema_tables" in source:
-        # Metadata is reusable context, not a supplier directory. Bill Entry
-        # collects its own bounded references through the registered PC.
-        return {
-            "device_id": str(row["device_id"]),
-            "company": source["company"],
-            "port": source["port"],
-            "discovery_id": str(discovery_id),
-            "schema_only": True,
-        }
-    return target_from_references(source, row["device_id"], discovery_id)
-
-
-def target_from_references(source, device_id, discovery_id, vouchers=()):
-    required = {"company", "ledgers", "voucher_types"}
-    collections = {c["category"]: c for c in source["collections"]}
-    if any(k not in collections or collections[k]["status"] != "ready" for k in required):
-        raise ServiceError(
-            "conflict", "Discover company, ledgers and voucher types before bill entry."
-        )
-
-    def name(record):
-        value = record.get("@_NAME", record.get("NAME"))
-        return value.get("#text") if isinstance(value, dict) else value
-
-    ledgers = [name(r) for r in collections["ledgers"]["records"]]
-    companies = collections["company"]["records"]
-    if len(companies) != 1:
-        raise ServiceError("conflict", "Discover exactly one selected company before bill entry.")
-    company_guid = companies[0].get("GUID")
-    if company_guid is not None and (not isinstance(company_guid, str) or not company_guid.strip()):
-        raise ServiceError("conflict", "Refresh the company's observed identity before bill entry.")
-    ledger_versions = {
-        name(r): {k: r.get(k) for k in ("GUID", "PARENT", "ALTERID")}
-        for r in collections["ledgers"]["records"]
-    }
-    from .voucher_types import candidates
-
-    target = {
-        "device_id": str(device_id),
-        "company": source["company"],
-        "destination_key": f"company:{company_guid}"
-        if company_guid
-        else f"device:{device_id}:{source['company']}",
-        "port": source["port"],
-        "ledgers": ledgers,
-        "discovery_id": str(discovery_id),
-        "references": {"company_guid": company_guid, "ledgers": ledger_versions},
-        # Chosen per run (voucher_types.apply_choices); never assumed to be "Purchase".
-        "purchase_voucher_types": candidates(collections["voucher_types"]["records"], vouchers),
-    }
-    from .master_selection import ledger_reference
-
-    target["ledger_refs"] = {
-        ledger_reference(target, name(r), {"GUID": r.get("GUID")}): {
-            "name": name(r), "identity": {k: r.get(k) for k in ("GUID", "PARENT", "ALTERID")}
-        }
-        for r in collections["ledgers"]["records"]
-    }
-    return target
-
-
-def queue_tally_context(connection, run):
-    target = run["config"]["tally_target"]
-    job = connection.execute(
-        """INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
-        VALUES (%s,%s,%s,%s,'tally.references',%s,%s,%s) RETURNING id""",
-        (
-            run["tenant_id"],
-            target["device_id"],
-            run["actor_id"],
-            run["task_id"],
-            Jsonb({"run_id": str(run["id"])}),
-            uuid4(),
-            str(run["request_hash"]),
-        ),
-    ).fetchone()
-    connection.execute(
-        "UPDATE workflow_runs SET config=config || %s WHERE id=%s",
-        (Jsonb({"tally_context_job_id": str(job["id"])}), run["id"]),
-    )
-
-
-def context_plan(connection, device, job):
-    from .repository import run_for
-
-    run = run_for(connection, device["tenant_id"], job["input"]["run_id"])
-    target = run["config"]["tally_target"]
-    if (
-        str(target["device_id"]) != str(device["id"])
-        or run["actor_id"] != device["owner_id"]
-        or run["state"] != "queued"
-    ):
-        raise ServiceError("conflict", "This workflow is no longer preparing its source context.")
-    tally_target(
-        connection, {"id": device["tenant_id"]}, {"id": device["owner_id"]}, target["discovery_id"]
-    )
     return {
-        "company": target["company"],
-        "port": target["port"],
-        "categories": ["company", "ledgers", "voucher_types"],
+        "device_id": str(row["device_id"]),
+        "discovery_id": str(discovery_id),
+        "companies": targets_from_snapshot(source, row["device_id"], discovery_id),
+        "company_mode": "infer",
+        "locked_company_guid": None,
     }
-
-
-def accept_context(connection, device, job, result):
-    from .batch import create_children
-    from .repository import run_for
-
-    plan = context_plan(connection, device, job)
-    validate_references(result, plan)
-    run = run_for(connection, device["tenant_id"], job["input"]["run_id"], True)
-    target = target_from_references(
-        result, device["id"], run["config"]["tally_target"]["discovery_id"]
-    )
-    expected_guid = run["config"]["tally_target"].get("expected_company_guid")
-    if expected_guid and target["references"]["company_guid"] != expected_guid:
-        raise ServiceError(
-            "conflict",
-            "The Tally company identity changed. Start a new bill run after checking the company.",
-        )
-    from .voucher_types import pin
-
-    try:
-        # This older single-company path has no launch choice: one type or a clear stop.
-        target["voucher_type"] = pin(target, target["purchase_voucher_types"], None)
-    except ValueError as error:
-        raise ServiceError("conflict", str(error)) from error
-    run["config"]["tally_target"] = target
-    connection.execute(
-        "UPDATE workflow_runs SET config=%s WHERE id=%s", (config_json(connection, run["tenant_id"], run["config"]), run["id"])
-    )
-    if run.get("parent_run_id"):
-        connection.execute(
-            "UPDATE workflow_runs SET config=config || %s WHERE tenant_id=%s AND id=%s",
-            (Jsonb({"tally_target": target}), run["tenant_id"], run["parent_run_id"]),
-        )
-    if len(run["file_ids"]) > 1:
-        create_children(connection, run)
-    return {"references_prepared": True}
-
-
-def validate_references(snapshot, plan):
-    """Validate bounded destination identities for already-pinned legacy bill jobs.
-
-    This compatibility path cannot launch Source Discovery or accept full records.
-    New bills use confirmed client context and recheck identities before writing.
-    """
-    if (
-        not isinstance(snapshot, dict)
-        or set(snapshot) != {"company", "port", "collections"}
-        or snapshot["company"] != plan["company"]
-        or snapshot["port"] != plan["port"]
-        or not isinstance(snapshot["collections"], list)
-    ):
-        raise ServiceError("invalid", "Tally returned a different destination scope.")
-    seen = []
-    for collection in snapshot["collections"]:
-        if not isinstance(collection, dict):
-            raise ServiceError("invalid", "Invalid destination references.")
-        seen.append(collection.get("category"))
-        if collection.get("status") == "unavailable":
-            if (
-                set(collection) != {"category", "status", "error"}
-                or not isinstance(collection["error"], str)
-                or not 1 <= len(collection["error"]) <= 300
-            ):
-                raise ServiceError("invalid", "Invalid destination reference error.")
-        elif (
-            collection.get("status") != "ready"
-            or set(collection) != {"category", "status", "count", "fields", "records"}
-            or type(collection["count"]) is not int
-            or not 0 <= collection["count"] <= 10000
-            or not isinstance(collection["fields"], list)
-            or any(not isinstance(f, str) for f in collection["fields"])
-            or not isinstance(collection["records"], list)
-            or len(collection["records"]) != collection["count"]
-            or any(
-                not isinstance(r, dict)
-                or any(
-                    k not in {"@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE"}
-                    or not isinstance(v, str)
-                    for k, v in r.items()
-                )
-                for r in collection["records"]
-            )
-        ):
-            raise ServiceError("invalid", "Invalid destination reference records.")
-    if len(seen) != len(set(seen)) or set(seen) != set(plan["categories"]):
-        raise ServiceError("invalid", "Tally omitted destination reference categories.")
 
 
 def recheck_target(connection, tenant, user, current):
-    if "companies" in current:
-        from minkops_platform import desktop
+    if "companies" not in current:
+        raise ServiceError("conflict", COMPANY_CONTEXT_REQUIRED)
+    from minkops_platform import desktop
 
-        desktop.owned_device(connection, tenant["id"], user["id"], current["device_id"])
-        # The approved snapshot stays pinned. The native adapter rechecks exact
-        # company/master versions and duplicates immediately before each write.
-        return current
-    discovered = tally_target(connection, tenant, user, current["discovery_id"])
-    if discovered.get("schema_only"):
-        if any(discovered[key] != current[key] for key in ("company", "port", "device_id")):
-            raise ServiceError(
-                "conflict", "Tally source identity changed. Refresh source discovery."
-            )
-        return current
-    return discovered
+    desktop.owned_device(connection, tenant["id"], user["id"], current["device_id"])
+    # The approved snapshot stays pinned. The native adapter rechecks exact
+    # company/master versions and duplicates immediately before each write.
+    return current
 
 
 def allocation_entries(data, allocations=None):
@@ -420,63 +191,6 @@ def allocation_entries(data, allocations=None):
     return result
 
 
-def validate_tally(data, target, allocations=None):
-    from .catalog import validate_data
-
-    if target.get("voucher_type_error"):
-        # Only this company's bills wait; the run's other companies continue.
-        raise HoldReason("voucher_type_unresolved", target["voucher_type_error"])
-
-    validate_data(tally_mapping(target["discovery_id"])["sheets"][0], data)
-    identity = business_identity(data)
-    try:
-        values = [Decimal(str(data[k])) for k in ("subtotal", "tax", "total")]
-        if (
-            any(
-                not v.is_finite() or v < 0 or v.as_tuple().exponent < -2 or v * 100 > 2**53 - 1
-                for v in values
-            )
-            or values[2] <= 0
-        ):
-            raise HoldReason(
-                "source_values_conflict",
-                "Amounts must be positive money values with at most two decimal places.",
-            )
-        if values[0] + values[1] != values[2]:
-            raise HoldReason("source_values_conflict", "Subtotal plus tax must equal total exactly.")
-    except (InvalidOperation, TypeError, KeyError) as error:
-        raise HoldReason("source_values_conflict", "Invalid bill amounts.") from error
-    taxes = allocation_entries(data, allocations)
-    for key in ("vendor", "purchase_ledger"):
-        if data.get(key) not in target["ledgers"]:
-            if key == "vendor":
-                raise HoldReason(
-                    "supplier_missing",
-                    f"Supplier '{data.get(key)}' is missing from the confirmed Tally ledgers. "
-                    "Add or map the supplier, refresh Source discovery, then continue this bill.",
-                )
-            raise HoldReason("classification_uncertain", f"{key} must match a discovered ledger exactly.")
-    if any(line["ledger"] not in target["ledgers"] for line in taxes):
-        raise HoldReason("classification_uncertain", "Tax allocations must match discovered ledgers exactly.")
-    selected = [data["vendor"], data["purchase_ledger"], *(line["ledger"] for line in taxes)]
-    if len(set(selected)) != len(selected):
-        raise HoldReason("classification_uncertain", "Supplier, purchase and tax allocations require distinct ledgers.")
-    if data.get("cost_code"):
-        raise HoldReason(
-            "unsupported_structure",
-            "Cost allocations require a supported mapping; leave this bill for review.",
-        )
-    books_from = target.get("books_from")
-    if books_from and data["date"] < books_from:
-        # Tally refuses vouchers before its books begin. Never move the source date.
-        raise HoldReason(
-            "date_before_books",
-            f"Bill date {data['date']} is before {target['company']}'s books begin on "
-            f"{books_from}; Tally cannot record it without a change to the company's books.",
-        )
-    return identity
-
-
 def capture_tally_findings(result, config):
     """Hold invalid proposals before approval, preserving independent siblings.
 
@@ -489,13 +203,11 @@ def capture_tally_findings(result, config):
     target = config["tally_target"]
     unresolved = result.setdefault("unresolved", [])
     for record in result["records"]:
-        if "voucher" in record:
-            record["data"] = summary(record, config)
+        record["data"] = summary(record, config)
         try:
             selected = select_target(record, target)
-            if "companies" in target:
-                record["company_guid"] = selected["references"]["company_guid"]
-                record["company_name"] = selected["company"]
+            record["company_guid"] = selected["references"]["company_guid"]
+            record["company_name"] = selected["company"]
             record["preview"] = resolve(record, config).preview()
         except ValueError as error:
             note_hold(record, error)
@@ -512,53 +224,18 @@ def refreshed_tally_target(connection, tenant, user, current):
     Never reroute a held bill to a different company or device. A pending or
     failed refresh must be confirmed before a new paid extraction can start.
     """
-    if "companies" in current:
-        latest = connection.execute(
-            "SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config->>'depth'='client_context' ORDER BY created_at DESC LIMIT 1",
-            (tenant["id"], user["id"], current["device_id"]),
-        ).fetchone()
-        updated = tally_target(
-            connection, tenant, user, latest["id"] if latest else current["discovery_id"]
-        )
-        if {c["destination_key"] for c in current["companies"]} != {
-            c["destination_key"] for c in updated.get("companies", [])
-        }:
-            raise ServiceError("conflict", "Company scope changed. Start a new bill run.")
-        # The run's voucher type choice per company survives a master refresh.
-        pinned = {c["destination_key"]: c for c in current["companies"]}
-        for company in updated["companies"]:
-            for key in ("voucher_type", "voucher_type_error"):
-                if key in pinned[company["destination_key"]]:
-                    company[key] = pinned[company["destination_key"]][key]
-        return {
-            **updated,
-            "company_mode": current["company_mode"],
-            "locked_company_guid": current["locked_company_guid"],
-            **({"master_selection_version": 1} if current.get("master_selection_version") == 1 else {}),
-            **({"tax_allocation_version": 1} if current.get("tax_allocation_version") == 1 else {}),
-            **({"supplier_creation_version": 1} if current.get("supplier_creation_version") == 1 else {}),
-            **({"voucher_proposal_version": 1} if current.get("voucher_proposal_version") == 1 else {}),
-            **({"voucher_type_version": 1} if current.get("voucher_type_version") == 1 else {}),
-        }
+    if "companies" not in current:
+        raise ServiceError("conflict", COMPANY_CONTEXT_REQUIRED)
     latest = connection.execute(
-        """SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
-        AND device_id=%s AND config->'tally'->>'company'=%s
-        ORDER BY created_at DESC LIMIT 1""",
-        (tenant["id"], user["id"], current["device_id"], current["company"]),
+        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s AND config->>'depth'='client_context' ORDER BY created_at DESC LIMIT 1",
+        (tenant["id"], user["id"], current["device_id"]),
     ).fetchone()
-    target = tally_target(
+    updated = tally_target(
         connection, tenant, user, latest["id"] if latest else current["discovery_id"]
     )
-    if target.get("schema_only"):
-        if any(target[k] != current[k] for k in ("company", "port", "device_id")):
-            raise ServiceError(
-                "conflict",
-                "The Tally company identity changed. Start a new bill run after checking the company.",
-            )
-        return {**target, "expected_company_guid": current["references"]["company_guid"]}
-    if target["destination_key"] != current["destination_key"]:
-        raise ServiceError(
-            "conflict",
-            "The Tally company identity changed. Start a new bill run after checking the company.",
-        )
-    return target
+    if {c["destination_key"] for c in current["companies"]} != {
+        c["destination_key"] for c in updated["companies"]
+    }:
+        raise ServiceError("conflict", "Company scope changed. Start a new bill run.")
+    return {**updated, "company_mode": current["company_mode"],
+            "locked_company_guid": current["locked_company_guid"]}

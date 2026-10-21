@@ -175,7 +175,7 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     "UPDATE account_runs SET config=%s WHERE id=%s",
                     (config_json(connection, run["tenant_id"], run["config"]), run["id"]),
                 )
-            if (tally or {}).get("voucher_proposal_version") == 1:
+            if tally:
                 # Voucher proposals are bound and checked in prepare(); coverage only here.
                 from .checks import check_voucher_records
                 checked = check_voucher_records(reviewed, run["file_ids"])
@@ -198,7 +198,7 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                     catalog,
                     run["file_ids"],
                     contents,
-                    [] if tally else run["config"]["checks"],
+                    run["config"]["checks"],
                 )
             if (checked["findings"] or any(r["findings"] for r in checked["records"])) and not body[
                 "acknowledge_findings"

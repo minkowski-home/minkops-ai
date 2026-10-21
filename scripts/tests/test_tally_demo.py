@@ -110,15 +110,16 @@ class TallyDemoTests(unittest.TestCase):
             evidence.mkdir()
             (evidence / "expected-bills.json").write_text(json.dumps([bill]))
             expected = load_expected([directory])["sample-hash"]
+        lines = [{"ledger": bill["purchase_ledger"], "side": "debit", "amount": bill["subtotal"]},
+                 *({"ledger": t["ledger"], "side": "debit", "amount": t["amount"]} for t in bill["tax_allocations"])]
         record = {
             "company_guid": bill["company_guid"],
-            "data": {
-                key: bill[key]
-                for key in ("invoice_number", "date", "purchase_ledger", "subtotal", "tax", "total")
-            },
+            "data": {key: bill[key] for key in ("invoice_number", "date", "tax", "total")} | {"vendor": bill["supplier"]},
+            "preview": {"lines": [{"ledger": bill["supplier"], "side": "credit", "amount": bill["total"]}, *lines]},
         }
-        record["data"]["vendor"] = bill["supplier"]
         self.assertEqual(compare(expected, record), [])
+        record["preview"]["lines"][1]["ledger"] = "Another Purchase"
+        self.assertTrue(compare(expected, record))
 
 
 if __name__ == "__main__":

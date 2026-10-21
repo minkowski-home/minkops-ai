@@ -48,7 +48,6 @@ def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=
     config.pop("batch", None)
     config.pop("retry_file_id", None)
     config.pop("retry_file_ids", None)
-    config.pop("tally_context_job_id", None)
     # Provider receipts belong to a particular run, including retry children.
     for field in ("hosted_workspace", "hosted_session_closed", "cleanup_attempt_at", "cleanup_attempt_count", "timeout_cancel_pending"):
         config.pop(field, None)
@@ -66,7 +65,7 @@ def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=
         config["agent_output_schema"] = run["config"].get("agent_output_schema")
     if config.get("company_scope") and config.get("source_catalog_snapshot"):
         _bind_scoped_assets(connection, run, config, file_ids)
-    if not stage and config.get("company_scope") and config.get("tally_target", {}).get("voucher_proposal_version") == 1:
+    if not stage and config.get("company_scope") and config.get("tally_target"):
         # A posting session uses its company's confirmed pattern, or waits for it.
         from .posting_profiles import attach
 
@@ -136,18 +135,16 @@ def resolve_bill(connection, tenant, user, run_id, file_id, reject):
         )
         complete_run(connection, run, defer_input(run["result"], file_id))
     else:
-        original_target = run["config"].get("tally_target")
-        if original_target:
+        if run["config"].get("tally_target"):
             from .bills import refreshed_tally_target
 
             run["config"]["tally_target"] = refreshed_tally_target(
                 connection, tenant, user, run["config"]["tally_target"]
             )
-            if not run["config"]["tally_target"].get("schema_only"):
-                connection.execute(
-                    "UPDATE account_runs SET config=%s WHERE id=%s",
-                    (config_json(connection, run["tenant_id"], run["config"]), run_id),
-                )
+            connection.execute(
+                "UPDATE account_runs SET config=%s WHERE id=%s",
+                (config_json(connection, run["tenant_id"], run["config"]), run_id),
+            )
         connection.execute(
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",
             (tenant["id"], run_id, Jsonb([file_id])),
@@ -161,50 +158,8 @@ def resolve_bill(connection, tenant, user, run_id, file_id, reject):
             from .company_scope import annotate
             annotate(run["config"]["tally_target"], run["config"]["source_catalog_snapshot"])
             create_children(connection, run, [file_id])
-            child = None
         else:
-            child = create_child(connection, run, file_id)
-        if child and "companies" in child["config"].get("tally_target", {}) and not child["config"].get("company_scope"):
-            from ..discovery import workflow_context
-            from .client_context import context_assets
-
-            catalog = workflow_context(
-                connection, tenant["id"], child["config"]["tally_target"]["discovery_id"], ["tally"]
-            )
-            child["config"]["source_catalog_snapshot"] = catalog
-            assets, _ = context_assets(catalog)
-            # Only this continuation gets newer evidence; completed siblings retain
-            # their original snapshot and verified company destinations.
-            child["config"]["authorized_bindings"] = [
-                b
-                for b in child["config"]["authorized_bindings"]
-                if not b["resource_id"].startswith("discovery-")
-            ] + [
-                {"capability": "files.snapshot", "resource_id": a["id"], "sha256": a["sha256"]}
-                for a in assets
-            ]
-            connection.execute(
-                "UPDATE account_runs SET config=%s WHERE id=%s",
-                (Jsonb(child["config"]), child["id"]),
-            )
-        if child and child["config"].get("tally_target", {}).get("schema_only"):
-            from ..discovery import workflow_context
-            from .bills import queue_tally_context
-
-            # A continuation pins the refreshed catalog independently of siblings.
-            child["config"]["source_catalog_snapshot"] = workflow_context(
-                connection,
-                tenant["id"],
-                child["config"]["tally_target"]["discovery_id"],
-                ["tally"],
-                tally_categories=["company", "ledgers", "voucher_types"],
-            )
-            connection.execute(
-                "UPDATE account_runs SET config=%s WHERE id=%s",
-                (Jsonb(child["config"]), child["id"]),
-            )
-            queue_tally_context(connection, child)
-            run["config"]["tally_target"] = original_target
+            create_child(connection, run, file_id)
         connection.execute(
             "UPDATE account_runs SET config=(config-'retry_file_ids') || jsonb_build_object('batch',true,'retry_file_id',%s::text) WHERE id=%s",
             (file_id, run_id),
@@ -221,7 +176,6 @@ def resolve_bill(connection, tenant, user, run_id, file_id, reject):
 
 def recheck_many(connection, tenant, user, run, file_ids):
     """Refresh discovery once, then enqueue independent children atomically."""
-    from .bills import queue_tally_context
     resolve_bill(connection, tenant, user, run["id"], file_ids[0], False)
     template = connection.execute("""SELECT config FROM account_runs WHERE tenant_id=%s
         AND parent_run_id=%s AND file_ids @> %s AND NOT coalesce((config->>'superseded')::boolean,false)
@@ -235,9 +189,7 @@ def recheck_many(connection, tenant, user, run, file_ids):
         if needs_triage(parent["config"]):
             create_children(connection, parent, [file_id])
             continue
-        child = create_child(connection, parent, file_id)
-        if child["config"].get("tally_target", {}).get("schema_only"):
-            queue_tally_context(connection, child)
+        create_child(connection, parent, file_id)
     connection.execute("UPDATE account_runs SET config=config || %s WHERE tenant_id=%s AND id=%s",
         (Jsonb({"retry_file_ids": file_ids}), tenant["id"], run["id"]))
 

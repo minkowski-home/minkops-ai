@@ -234,45 +234,26 @@ def master_lookup(company):
 
 
 def targets_from_snapshot(snapshot, device_id, discovery_id):
+    """One write destination per discovered company, addressed by its native GUID.
+
+    Masters stay in the evidence files; vouchers bind them by GUID at check time.
+    """
     targets = []
     for company in snapshot["companies"]:
         if company["status"] != "ready":
             raise ValueError("Complete discovery before Bill Entry.")
-        masters = master_lookup(company)["records"]
-        collections = []
-        for category, kind in [
-            ("company", "COMPANY"),
-            ("ledgers", "LEDGER"),
-            ("voucher_types", "VOUCHERTYPE"),
-        ]:
-            records = (
-                [company["identity"]]
-                if category == "company"
-                else [r["data"] for r in masters if r["type"] == kind]
-            )
-            # Write checks need stable scalar identity, while full definitions
-            # stay in evidence files. RESERVEDNAME and ISACTIVE classify voucher types.
-            records = [
-                {
-                    k: text(v)
-                    for k, v in r.items()
-                    if k in ("@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE")
-                }
-                for r in records
-            ]
-            collections.append({"category": category, "status": "ready", "records": records})
-        from .bills import target_from_references
-
-        target = target_from_references(
-            {
-                "company": company["company"],
-                "port": company["port"],
-                "collections": collections,
-            },
-            device_id,
-            discovery_id,
-            vouchers=company["vouchers"]["records"],
-        )
+        # Conflicting native identities fail here, before any paid session.
+        master_lookup(company)
+        guid = company["company_guid"]
+        target = {
+            "device_id": str(device_id),
+            "company": company["company"],
+            # Remote IDs and pending-write reservations derive from this key.
+            "destination_key": f"company:{guid}",
+            "port": company["port"],
+            "discovery_id": str(discovery_id),
+            "references": {"company_guid": guid},
+        }
         books_from = books_beginning(company["identity"])
         if books_from:
             target["books_from"] = books_from

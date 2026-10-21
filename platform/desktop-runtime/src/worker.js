@@ -66,7 +66,7 @@ export class CompanionWorker {
           error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
             error.userSafe && typeof error.message === "string" && error.message.trim()
               ? error.message.slice(0, 300)
-            : ["tally.probe", "tally.references"].includes(job.operation)
+            : job.operation === "tally.probe"
               ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
               : ["tally.save", "tally.statement"].includes(job.operation)
                 ? "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing."
