@@ -30,7 +30,6 @@ from psycopg.rows import dict_row
 ATTENTION_CODES = {
     "ambiguous_supplier": {"supplier_unresolved", "company_unresolved", "classification_uncertain"},
     "missing_supplier": {"supplier_missing"},
-    "separate_round_off": {"unsupported_structure", "source_values_conflict", "classification_uncertain"},
     "before_books": {"date_before_books"},
     "inventory_required": {"unsupported_structure"},
     # Two files holding both versions hold together; one meeting the saved version is held at its save.

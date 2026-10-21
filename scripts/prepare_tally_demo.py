@@ -344,7 +344,8 @@ def build_company(source, ordinal):
             f"{len(bills) + 1:02d}",
             f"{PREFIX}/{code}/{case.upper()}/001",
             case=case,
-            expected="attention",
+            # A printed round-off of at most a rupee is booked on its own line, never folded into a purchase.
+            expected="create" if case == "separate_round_off" else "attention",
         )
         bill["scan"] = case == "ambiguous_supplier"
         if case == "missing_supplier":

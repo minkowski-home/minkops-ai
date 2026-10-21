@@ -88,7 +88,7 @@ allocations was compared with the plan.
 | 09 | Changed version of a historical bill | Correction held for a decision |
 | 10 | Absent supplier | Create-this-ledger decision; deliberately unseeded |
 | 11 | Printed `QA18 Pioneer` fits two supplier masters | Supplier unclear; no write |
-| 12 | Separate round-off allocation | Unsupported structure; no flattened write |
+| 12 | Printed round-off of 0.37 | One save, the round-off on its own line; never folded into the purchase |
 | 13 | 31 March invoice before books begin | Before books begin; preserve the source date |
 | 14 | Supplier's inventory practice and stock receipt | Manual entry; no flattened inventory |
 | 15 | Scan of bill 01 | Together, 01 and 15 produce exactly one save |
