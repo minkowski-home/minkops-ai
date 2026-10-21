@@ -531,6 +531,23 @@ class DiscoveryTests(unittest.TestCase):
         download = self.client.get(self.discovery + f"/runs/{run['id']}/catalog.json").json()
         self.assertIn("records", download["sources"][0]["snapshot"]["companies"][0]["masters"])
 
+    def test_public_poll_projection_is_cached_and_invalidated_when_catalog_changes(self):
+        run, _ = self.start(ai_context=False)
+        self.collect(run)
+        path = self.discovery + f"/runs/{run['id']}"
+        first = self.client.get(path).json()
+        with psycopg.connect(URL, row_factory=dict_row) as c:
+            row = c.execute("SELECT public_catalog,catalog_version,company_scope FROM discovery_runs WHERE id=%s",
+                            (run['id'],)).fetchone()
+            self.assertEqual(row['public_catalog'], first['catalog'])
+            self.assertEqual(row['company_scope'], {'test-guid': 'Test'})
+            c.execute("UPDATE discovery_runs SET catalog=jsonb_set(catalog,'{sources,0,snapshot,companies,0,company}', '\"Renamed\"') WHERE id=%s", (run['id'],))
+            changed = c.execute("SELECT public_catalog,catalog_version FROM discovery_runs WHERE id=%s", (run['id'],)).fetchone()
+            self.assertIsNone(changed['public_catalog'])
+            self.assertGreater(changed['catalog_version'], row['catalog_version'])
+        second = self.client.get(path).json()
+        self.assertEqual(second['catalog']['sources'][0]['snapshot']['companies'][0]['company'], 'Renamed')
+
     def test_confirmation_and_unchanged_refresh_reuse_review_with_idempotence(self):
         run, body = self.start()
         self.assertEqual(

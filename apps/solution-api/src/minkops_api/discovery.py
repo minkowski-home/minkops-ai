@@ -48,22 +48,22 @@ def launch(slug: str, body: Launch, request: Request, user: User, connection: Db
 def task(slug: str, task_id: UUID, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
     row = connection.execute(
-        "SELECT * FROM discovery_runs WHERE tenant_id=%s AND task_id=%s", (tenant["id"], task_id)
+        "SELECT id FROM discovery_runs WHERE tenant_id=%s AND task_id=%s", (tenant["id"], task_id)
     ).fetchone()
-    return discovery.detail(connection, row, include_records=False) if row else None
+    return discovery.public_detail(connection, tenant["id"], row['id']) if row else None
 
 
 @router.get("/api/tenants/{slug}/discovery/latest")
 def latest(slug: str, user: User, connection: Db, device_id: UUID | None = None):
     tenant, _ = tenant_access(slug, user, connection)
-    row = call(discovery.latest_run, connection, tenant, user, device_id)
-    return discovery.detail(connection, row, include_records=False) if row else None
+    row = call(discovery.latest_run, connection, tenant, user, device_id, ids_only=True)
+    return discovery.public_detail(connection, tenant['id'], row['id']) if row else None
 
 
 @router.get("/api/tenants/{slug}/discovery/runs/{run_id}")
 def detail(slug: str, run_id: UUID, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
-    return discovery.detail(connection, call(discovery.get_run, connection, tenant["id"], run_id), include_records=False)
+    return call(discovery.public_detail, connection, tenant["id"], run_id)
 
 
 @router.post("/api/tenants/{slug}/discovery/runs/{run_id}/confirm")

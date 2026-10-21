@@ -24,14 +24,14 @@ from .run_controls import control_state, observe_task, require_active, resolve_r
 from .runtime.environments import SESSION_BYTE_LIMIT, SESSION_FILE_LIMIT
 
 
-def latest_run(connection, tenant, user, device_id=None):
+def latest_run(connection, tenant, user, device_id=None, *, ids_only=False):
     """Scope discovery to an explicit, owned PC without falling back to another PC."""
     if device_id is not None:
         from .desktop import owned_device
 
         owned_device(connection, tenant["id"], user["id"], device_id)
     return connection.execute(
-        """SELECT * FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
+        f"""SELECT {'id' if ids_only else '*'} FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s
         AND (%s::uuid IS NULL OR device_id=%s::uuid) ORDER BY created_at DESC LIMIT 1""",
         (tenant["id"], user["id"], device_id, device_id),
     ).fetchone()
@@ -65,6 +65,26 @@ def get_run(connection, tenant_id, run_id, lock=False):
     if not row:
         raise ServiceError("not_found", "Discovery run not found.")
     return row
+
+
+def public_detail(connection, tenant_id, run_id):
+    """Read small cached display data; native evidence remains server-side."""
+    row = connection.execute("""SELECT id,tenant_id,actor_id,device_id,task_id,mapping_run_id,
+        config,observations,state,confirmed_at,created_at,public_catalog AS catalog,catalog_version
+        FROM discovery_runs WHERE tenant_id=%s AND id=%s""", (tenant_id, run_id)).fetchone()
+    if not row:
+        raise ServiceError('not_found', 'Discovery run not found.')
+    if row['catalog'] is not None:
+        return detail(connection, row, include_records=False)
+    full = get_run(connection, tenant_id, run_id)
+    projected = detail(connection, full, include_records=False)
+    if full['catalog'] is not None:
+        # A concurrent collection may have advanced the evidence while this
+        # projection was built. Never cache a display for the wrong version.
+        connection.execute("""UPDATE discovery_runs SET public_catalog=%s
+            WHERE tenant_id=%s AND id=%s AND catalog_version=%s""",
+            (Jsonb(projected['catalog']), tenant_id, run_id, full['catalog_version']))
+    return projected
 
 
 def detail(connection, row, *, include_records=True):
@@ -102,6 +122,8 @@ def detail(connection, row, *, include_records=True):
             for company in source.get("snapshot", {}).get("companies", []):
                 if company.get("masters", {}).get("status") != "ready":
                     continue
+                if 'master_summary' in company and 'records' not in company.get('masters', {}):
+                    continue  # A pinned public projection already has these derived choices.
                 try:
                     lookup = master_lookup(company)
                     company["master_summary"] = lookup["summary"]
@@ -170,13 +192,13 @@ def scope_changes(connection, row):
     if not current:
         return None
     previous = connection.execute(
-        """SELECT catalog FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s
+        """SELECT company_scope FROM discovery_runs WHERE tenant_id=%s AND actor_id=%s AND device_id=%s
         AND confirmed_at IS NOT NULL AND id<>%s AND created_at<%s ORDER BY created_at DESC LIMIT 1""",
         (row["tenant_id"], row["actor_id"], row["device_id"], row["id"], row["created_at"]),
     ).fetchone()
     if not previous:
         return None
-    before = _tally_companies(previous["catalog"])
+    before = previous['company_scope']
 
     def listed(guids, names):
         return sorted(({"company": names[g], "company_guid": g} for g in guids), key=lambda c: c["company"])

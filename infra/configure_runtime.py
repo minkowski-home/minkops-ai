@@ -50,7 +50,7 @@ def main():
                 f"--member=serviceAccount:{identities[name]}", "--role=roles/cloudsql.client")
     state = json.loads((Path.home() / ".local/state/minkops-deployment/database.json").read_text())
     for name, user, password, recipients, options in (
-        ("minkops-database-url", "minkops_app", state["runtime_password"], [identities["api"], identities["worker"]], ""),
+        ("minkops-database-url", "minkops_app", state["runtime_password"], [identities["api"], identities["worker"], identities["ops"]], ""),
         ("minkops-migration-url", "minkops_migrate", state["migration_password"], [identities["ops"]], "-c role=minkops_owner"),
     ):
         value = make_conninfo(host=f"/cloudsql/{INSTANCE}", dbname="minkops", user=user,

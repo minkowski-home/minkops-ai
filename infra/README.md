@@ -31,8 +31,9 @@ docker run --rm minkops-solution:review python -m minkops_api.install_workflows 
 ```
 
 The same image runs `python -m minkops_api.accounts_worker --drain` as a bounded
-Cloud Run Job. Transactional generations coalesce immediate wakes and an hourly
-Scheduler recovers lost dispatches. Hosting sites are assigned by the explicit
+Cloud Run Job. Transactional generations coalesce immediate wakes and a five-minute
+Scheduler calls an IAM-private recovery service. It checks durable eligibility
+before dispatching; idle ticks do not start worker executions. Hosting sites are assigned by the explicit
 operator deploy script. Audit scripts read resource metadata/metrics without
 retrieving secrets or customer database rows.
 
@@ -50,13 +51,18 @@ of truth for these settings; the table summarises them.
 | Console | Firebase Hosting `minkops-ai-console`: app.minkops.com |
 | API | Cloud Run `minkops-solution-api`: min 0 / max 1, 1 CPU / 512 MiB, concurrency 2 (Argon2 verification memory), 60 s |
 | Interest form | Cloud Run `minkops-interest-api`: min 0 / max 1, 1 CPU / 512 MiB, concurrency 8, 30 s |
-| Worker | Cloud Run Job `minkops-worker`: one task, one lane, no retries, 1 CPU / 512 MiB; the 60-minute task timeout leaves the 45-minute active-processing budget time to stop and reconcile |
-| Recovery | Scheduler `minkops-worker-recovery`: hourly, ops identity, no retries |
+| Worker | Cloud Run Job `minkops-worker`: one task, four bounded lanes, no retries, 1 CPU / 512 MiB; the 60-minute task timeout leaves the 45-minute active-processing budget time to stop and reconcile |
+| Recovery service | IAM-private Cloud Run `minkops-operations`: min 0 / max 1, 1 CPU / 256 MiB, concurrency 1, runtime database secret only, 60 s |
+| Recovery schedule | Scheduler `minkops-worker-recovery`: every five minutes, OIDC using ops identity, service URL audience, no retries; calls `/reconcile`, never the raw worker-job API |
 | Database | Isolated `minkops` PostgreSQL 16 database on the shared Cloud SQL instance `myndral-prod:us-central1:myndral-db` |
 
 Each service has its own service account and per-secret IAM. Only the two public
 HTTP services disable the Cloud Run invoker check; the application still enforces
-sessions, tenants and CSRF. The worker Job stays IAM-private. Production sets
+sessions, tenants and CSRF. The worker Job and recovery service stay IAM-private.
+The recovery deployment explicitly enables invoker IAM, removes public service
+principals and grants its scheduler identity scoped service invocation. Its
+database connection uses the runtime role, and it receives no model key.
+Production sets
 `AUTH_DEV_MODE=0` and secure cookies, and API responses are private, no-store.
 
 Database roles are separate from Myndral's: runtime `minkops_app` (16 connections,
@@ -65,10 +71,28 @@ no DDL), `minkops_owner` (NOLOGIN, owns the schema) and `minkops_migrate`
 disposable database with `verify_database_restore.py`, using PostgreSQL 16 client
 tools to match production; never restore over the shared instance as a test.
 
-Cost controls: a CAD 15/month project budget alerts at 50%, 80% and 100%, and a
-CAD 10/month Cloud Run spend cap applies to Cloud Run only, after an enforcement
-delay. Neither is a universal hard stop; check actual spend before larger
-rollouts. `artifact-cleanup.json` deletes builds older than 30 days and keeps
+Cost envelope: **CAD 20/month including Minkops' share of shared SQL**. Reserve
+CAD 8 for half the fixed SQL footprint (two products share it), target CAD 10 for
+Minkops-exclusive resources, and retain CAD 2 of contingency. The current
+31-day base SQL allocation is about CAD 6.74 before allocated backups/network:
+half of 744 hours at CAD 0.014874825/hour plus 10 GiB at CAD 0.2408305/GiB-month.
+These are the Google catalog's CAD rates on 21 October 2026; review allocation,
+FX, backups, storage growth and actual billing monthly. Myndral's other charges
+are outside the Minkops envelope. A second SQL instance is not provisioned merely
+to bypass inefficient queries; benchmark the corrected paths first.
+
+`bootstrap_hosting.py` updates the existing project alert to CAD 10 and the
+Cloud Run-only gross spend cap to CAD 6, leaving room for Hosting, artifacts,
+secrets and logs inside the exclusive target. Project alerts trigger at 50%,
+80% and 100%. The recovery check does not start idle worker jobs. These controls
+are conservative operating limits, **not a provider-guaranteed CAD 20 hard stop**:
+Google's spend-cap enforcement is delayed, excludes persistent SQL/storage, and
+the Budgets API does not expose actual accrued spend. Before paid rollouts,
+check the billing report and retain the contingency; do not silently increase a
+limit or purchase more capacity when it would breach this envelope. See
+[Google spend-cap limitations](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+and [Cloud SQL pricing](https://cloud.google.com/sql/pricing).
+`artifact-cleanup.json` deletes builds older than 30 days and keeps
 the three newest versions; Hosting retains two releases per site and logs are
 kept for 30 days.
 
