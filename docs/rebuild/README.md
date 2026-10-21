@@ -371,8 +371,8 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | Slice | State | Evidence |
 | --- | --- | --- |
 | 0. Acceptance harness | Done | One closed hold matrix pinned by a golden test (`test_holds.py`). Golden bill, statement-row and narration-token identities (`test_vouchers.py`). Synthetic look-alikes of the PR Infra statement and bills, with private-file structure checks (`test_synthetic_fixtures.py`). The five-company rehearsal is verified live (`scripts/rehearsal_status.mjs`). The runtime review's missing tests land with slice 1's decision path, and scorer timing with slice 5's bill runs. |
-| 1. Foundation | In progress | |
-| 2. Sync and mirror | Not started | |
+| 1. Foundation | Done | Code and tests provision the dedicated instance (`test_database_provisioning.py`); it has not been created or deployed. Client businesses, per-client access and company identity are in migration `0020` (`test_clients.py`). The run model is in migration `0021`: leased items, versioned records, idempotent decisions, commit-time wake-ups and bounded status (`test_work.py`, `test_runs_api.py`). That includes the runtime review's missing cases: confirming after the worker drained, a response lost after commit, and the same decision twice. 663 Python tests pass. |
+| 2. Sync and mirror | In progress | |
 | 3. Session tool loop | Not started | |
 | 4. Statement slice | Not started | |
 | 5. Bill slice | Not started | |
