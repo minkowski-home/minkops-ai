@@ -14,7 +14,7 @@ on from another machine. The evidence behind each decision is in
 - **`platform/workflow-reliability` is left untouched and will most likely be discarded.**
   - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
-- **No rebuild code exists yet.** Start with slice 0 below.
+- **The build is under way.** [Progress](#progress) records each slice's state and evidence; [design.md](design.md) maps the modules, tables and protocols.
 
 ## Continue on Windows
 
@@ -349,3 +349,28 @@ Each slice works end to end against a real TallyPrime company before the next on
 ## Pending (doesn't block starting)
 
 - A PR Infra statement covering the March 2026 payments for the two sample bills. It is the fixture for the bill-to-payment link in slice 7.
+
+## Progress
+
+Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.2 in Educational mode, from 21 October 2026. The baseline before any rebuild commit: 617 Python tests plus 413 subtests on PostgreSQL 16.15, 108 companion tests, 51 web tests, with lint, ruff and both builds clean.
+
+| Slice | State | Evidence |
+| --- | --- | --- |
+| 0. Acceptance harness | In progress | |
+| 1. Foundation | Not started | |
+| 2. Sync and mirror | Not started | |
+| 3. Session tool loop | Not started | |
+| 4. Statement slice | Not started | |
+| 5. Bill slice | Not started | |
+| 6. Memory, rules and questions | Not started | |
+| 7. Bill-wise link | Not started | |
+| 8. Inventory | Not started | |
+| 9. E-invoice QR | Not started | |
+| 10. Review surface | Not started | |
+| 11. Hosted Tally | Not started | |
+| 12. Performance | Not started | |
+| 13. Cut-over | Not started | |
+
+**For the next manual testing phase** (steps that need a person at Tally or Windows):
+
+- None yet.
