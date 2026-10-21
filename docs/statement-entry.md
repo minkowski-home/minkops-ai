@@ -1,126 +1,148 @@
 # Statement entry
 
-Version 0.5 uses the same managed hosted agent runtime as Bill Entry, with its
-procedure in the Statement Entry skill. The Windows companion applies and
-independently verifies approved plans. Every row, from a simple Payment/Receipt
-to split lines and Contra transfers, is stored as a protocol 5 voucher and needs
-companion 0.9.0+.
+Statement entry 1.0 reads CSV and XLSX bank statements for one client business and
+saves reviewed rows as verified Payment, Receipt and Contra vouchers in that client's
+Tally companies. It runs on the run model (`platform/work.py`) and tool sessions
+(`runtime/openai_hosted.py`), through the handler in
+`platform/src/minkops_platform/accounts/statement_entry.py`. Writes need companion
+0.10.0 or later.
 
-Select CSV/XLSX statements and the latest confirmed complete Source Discovery on
-the destination PC. Optionally select a separate CSV/XLSX branch mapping. Both
-mock-client and PR Infra use this shared workflow. There are no fixed bank or
-Other-side ledger settings, client-specific ledger names or branch-routing rules.
+## Launch
 
-## Input and routing
+`POST /api/tenants/{tenant}/clients/{client}/runs` with `workflow: "statement-entry"`, the
+statement file IDs and an optional `branch_mapping_file_id`:
 
-Branch is a client business label, **not a bank branch**, and has no predefined
-relationship to a company, ledger, group or cost centre. The agent receives all
-canonical transaction rows as JSON, the original source files, the complete
-indexed discovery evidence (masters, period vouchers and confirmed notes), and
-the optional mapping file. It interprets narration, references, account headers,
-branch conventions and relevant independent accounting history to select the
-company, bank, counter ledger, voucher type and any supported cost allocation.
-Mapping layouts are interpreted by the skill; they do not introduce Python
-matching rules. An unfamiliar branch label or absent mapping alone cannot
-invalidate an otherwise evidenced classification. Genuinely ambiguous company,
-bank, ledger or client conventions hold the affected row with a plain reason.
+- The client's authorised companies are the destination scope. A run needs at least
+  one, and every PC holding them must still be connected.
+- Each of those PCs is asked to refresh its Tally copy. Rows wait for that refresh
+  before they are routed, and the run then pins one mirror version per company.
+- A repeated request key returns the same run; the same key with other selections
+  conflicts.
+- Limits: 30 MB of files, 10,000 rows and 100 columns per sheet. Legacy XLS needs
+  conversion in Excel.
 
-The application binds selected GUIDs to the pinned company's discovered records;
-it never picks an accounting destination. It independently validates the bank's
-Bank Accounts ancestry, books beginning date, distinct ledgers, active
-Payment/Receipt type and supported cost-centre/category relationships. It retains
-every source row, holds missing interpretations, rejects foreign or repeated row
-references, and cannot accept model-supplied replacement financial values.
+## Layouts
 
-One hosted session interprets the selected statements together so it can reuse
-evidence across rows. Indexed discovery files retain full records; they are not
-dumped into every transaction's prompt or sampled. Hosted input limits are 45
-files and 8 MB including discovery and transaction JSON; reduce the statement
-scope or voucher period when exceeded. Discovery itself still collects only
-unlocked companies already open in the running Tally instance, identified by
-GUID regardless of installation location or data directories/drives.
+Each bank format is read through a layout learned once and proved against the
+statement's own balances (`accounts/statement_layouts.py`, reader in
+`connectors/src/minkops_connectors/statement.py`):
 
-CSV (UTF-8 BOM or Windows-1252; comma, semicolon or tab) and XLSX are read
-through a **layout** learned once per bank format: header row, date column and
-order, amount as signed, debit/credit or amount plus a Dr/Cr-style indicator,
-running balance, reference, narration, an account column when one sheet mixes
-banks, a client routing hint such as Branch, row order and opening, closing,
-total or footer rows. A new format's sheets go to one layout session (bounded
-previews of the first 60 and last 15 rows plus up to 30 candidate summary rows);
-the AI declares the reading, never
-values. Code applies it to the real file and proves it per account: every
-running balance must equal the previous one plus the signed transaction (single
-rows use an implied opening), closing rows must match, and date order must be
-forced by the dates themselves (a day above 12, or the other reading falling
-after the upload). A proven layout is saved and reused by its header signature
-after any preamble, with no AI call. Otherwise one Attention card asks which date
-order, or to confirm sample rows when there is no balance to check; the run
-waits for that answer. A layout the balances refute is never saved, and its
-sheet holds. Tenant date-order and opening-balance settings are retired
-(migration `0013`). Uncached formulas hold; legacy XLS requires conversion in
-Excel. Limits are 10,000 rows and 100 columns.
+- **A known format** is matched by its header row, after any preamble, and read with
+  no AI session.
+- **An unseen format** gets a `layout` item. Its session sees a bounded preview of the
+  sheet (the first 60 and last 15 rows plus candidate summary rows) and declares the
+  reading with `propose_layout`. Minkops applies the reading to the whole sheet and
+  answers at once:
+  - every running balance must equal the previous one plus the transaction;
+  - declared summary controls (opening, closing, total withdrawals and deposits) must
+    match, wherever they sit in the sheet;
+  - the dates must settle their own day-month order.
 
-Layouts can declare independent `rows.summary` controls for printed opening,
-closing, total withdrawals (`debit`) and deposits (`credit`). Each rule names
-the label's `column`/`starts_with` and a separate `value_column`; mixed-account
-controls can declare `account_column`. They are checked across the complete
-sheet, even after the transaction table's `ends_at` marker. This supports exports
-whose running balances are in J but summary amounts are in B after Page Total.
-Every declared control must be readable, unique per account/kind and equal the
-canonical transaction chain/totals. A missing, repeated, uncached or conflicting
-control holds the sheet and cannot be overridden by a layout confirmation. Old
-layouts without summary rules retain their existing chain checks.
+  A refuted reading is explained to the session, which has two more attempts. A
+  refuted reading is never stored.
+- **When only a person can decide** (the date order, or rows with no running balance),
+  one Attention card asks once. The sheet's item waits on that answer and reads the
+  rows when it is given.
+- **A saved layout that a new statement contradicts** is retired, and the sheet's
+  format is learned again.
 
-Each account's opening and closing balance are found from the chain itself. When
-a new statement for a bank ledger opens at a different balance from the
-previous statement's close, one **Transactions missing** item names both; no row
-is held.
+The layout also names the cells that identify the account (account number, bank,
+IFSC), so the rows can be matched to the right bank ledger.
 
-`scripts/pr_infra_acceptance.py verify PACKAGE --statement FILE` provides an
-offline check of the generated nine-bill pack and the unchanged ICICI source
-statement using an explicit test layout with all four footer controls. Its
-`score` command grades exported run results in the initial, follow-up and
-exception phases without starting a paid session or writing data. Fixture files
-and answer keys remain outside the repository and must never enter model inputs.
+## Routing
 
-## Preview, writes and recovery
+Rows become records, chunked into items of up to 100 rows. Each chunk is routed in its
+own session with the lookup tools:
 
-The preview shows per-branch counts, payments, receipts, dates and check results,
-plus each proposed bank/counter ledger and its interpretation evidence. Exceptions
-come first, saved/duplicate rows collapse, and large lists paginate. Write ready
-rows approves immutable plans. Only exceptions mode provides standing
-authorization for eligible rows. One file summary appears in Attention; details
-stay in the task and shared spreadsheet-safe CSV export. Export waits until
-processing/saves settle. Saved setup and dashboard quick runs retain statements
-and the optional mapping across refreshed file IDs; a missing saved mapping
-requires an explicit new selection rather than silently omitting it.
+| Tool | What it answers |
+| --- | --- |
+| `find_company` | The client's companies in scope, with their GSTINs |
+| `find_ledger` | Ledgers by name, alias, GSTIN or bank account number (a masked number matches by its last digits) |
+| `voucher_types` | Active Payment, Receipt and Contra types |
+| `party_history` | How the client booked similar transactions before |
+| `cost_centres` | Cost centres with their categories |
+| `find_transfer` | Rows in the run that could be the other leg of a transfer |
+| `pair_return` | For a returned payment's UTR, the original in the run or in Tally |
+| `mapping` | Rows of the client's mapping file that mention a label |
+| `propose` | One proposal per row, checked as it arrives |
 
-Identity combines bank reference, date, signed amount/direction, running balance and occurrence number; destination identity also includes tenant, company GUID and bank ledger. Overlaps therefore reconcile without dropping two real identical transactions. Native tags use stable UUID5 identities in narration. Any other voucher on the same date with the same bank amount holds as a possible existing entry, including one tagged by Minkops for a different identity, unless it is a sibling row of the same run (proven distinct by the run's balance chain). Protocol-5 companions receive every approved row as a v5 voucher; a row without pinned identities is refused rather than written by the retired statement writer. Conflicting overlap routing holds every affected proposal before dispatch.
+`propose` checks each row against the pinned company with `validated_plan`:
 
-Every approved voucher intent is persisted before the first import. The companion serializes work and writes an encrypted, fsynced local attempt fence before importing one voucher. It rechecks company/master identities, reads first and verifies date, type, both ledger amounts, tag and any cost allocations afterward. A timeout permits reads only; a subsequent retry cannot resend that uncertain intent. Retry save checks reconcile technical holds; possible existing or unresolved imports may require manual handling in Tally. Pause prevents new dispatch; Stop preserves verified facts and cancels remaining plans. Late receipts remain truthful without resuming stopped work.
+- the bank ledger is under Bank Accounts;
+- the voucher type is an active type of the right family;
+- the ledgers are distinct;
+- cost centres belong to their category;
+- split lines add up exactly to the bank amount;
+- the date is on or after the books' beginning.
 
-Native date collections use calendar components because Tally can coerce typed
-date variables or numeric date conversions differently. Returned dates are
-independently checked.
+A rejected row is told why and can be resubmitted twice. The model may instead hold
+a row with a coded exception:
 
-From statement-entry 0.4 one bank line may post to several ledgers (`lines`,
-for example bank charges and the GST on them, or TDS), adding up exactly to the
-bank amount; such rows, and transfers, are stored as native v5 vouchers
-(companion 0.9.0+). A transfer between the client's own bank or cash accounts is
-a **Contra**. When both legs are in the run (opposite signs, equal amount, each
-naming the other's bank, within three days) the leg where money leaves writes
-one Contra and the other leg is covered by it; mismatched legs hold as
-`statement_transfer_unpaired`. A lone leg first looks for the transfer its other
-leg may already have entered: one Minkops Contra with both lines settles it, an
-untagged match holds as possibly existing. Bill-wise allocations, split cost
-allocations, undo and master creation remain outside the write contract; the
-skill holds them rather than flattening their accounting.
+- `company_unresolved`;
+- `ledger_unresolved`;
+- `classification_uncertain`;
+- `branch_unresolved`;
+- `unsupported_structure`.
 
-Apply migration `0010_statement_ai_settings.sql` before reinstalling workflows.
-It retires only the old Statement Entry ledger/strategy settings and preserves
-review/date/balance preferences, other workflows and historical run snapshots.
-Migration `0019_retire_legacy_runs.sql` stops any unfinished run still holding
-unsaved protocol 4 rows and leaves a "Run retired" attention item: verify any
-underway save in Tally, then start a new run. Unexecuted legacy statement
-runs without a pinned agent bundle require an explicit new run; the retired
-classifier is not retained as a fallback.
+Facts are immutable: a proposal chooses identities, never amounts, dates or
+references, and a row the reader held (unreadable value, broken balance, summary
+mismatch, uncached formula) cannot be cleared by a proposal. A routing hint such as a
+Branch column is a client label, not a bank branch; its meaning comes from the
+client's mapping or the evidence.
+
+When a chunk ends, any row it did not propose holds as `statement_interpretation`.
+When the last item settles:
+
+- **Transfers.** Legs that name each other become one Contra, written by the leg
+  where money leaves; legs that do not mirror each other hold as
+  `statement_transfer_unpaired`. A lone leg first looks in Tally for the transfer
+  its other leg may already have entered.
+- **Overlapping statements.** A transaction in two of them is written once. If the
+  two route it differently, both hold as `statement_conflict`.
+- **Gaps.** When a statement opens at a different balance from where the previous
+  one for that bank ledger closed, one "Transactions missing" item names both; no
+  row is held.
+- **Standing approval.** With review mode `only_exceptions`, every clean proposal is
+  approved; the exceptions wait for review.
+
+## Review and writes
+
+The runs API serves:
+
+- a small status DTO;
+- pages of record summaries;
+- each record's detail;
+- idempotent decisions per record version: `approve`, `nothing` (Do nothing),
+  `retry` (Recheck the row in a new attempt of its chunk) and `retry_save`;
+- `POST .../runs/{run}/approve`, which approves every ready row that needs no review.
+
+Approving a transfer leg, or a row repeated in another statement, approves the one
+row that writes it.
+
+An approved row becomes a durable `native_writes` intent before anything is sent
+(`accounts/writes.py`):
+
+- **One write at a time.** A pending intent reserves its destination identity, so no
+  other run can write the same transaction until it is verified or released. Each
+  PC gets one `tally.write` job at a time, in approval order.
+- **Readback.** The companion fences each import locally by the voucher's remote ID,
+  writes the v5 voucher and reads it back; the server checks that readback
+  exactly against the plan.
+- **Native holds.** A hold the companion reports (Tally not running, company not
+  open, possible existing voucher, uncertain import) holds the row. Retry save sends
+  the same plan, which the companion either finds already in Tally or refuses to
+  import twice.
+- **Interrupted saves.** A write whose PC stopped before confirming it holds as
+  `save_interrupted` once that PC polls again; it is never re-sent automatically.
+
+Identity combines the bank reference, date, signed amount, running balance and
+occurrence number, so overlaps reconcile without dropping two real identical
+transactions. The voucher's narration tag is a UUID5 of the tenant, company, bank
+ledger and that identity.
+
+Pause stops new writes from being dispatched. Stop is final:
+
+- unstarted items are cancelled;
+- unsaved rows hold as `run_stopped`;
+- writes no PC has started are withdrawn;
+- a write already underway still reports its receipt.

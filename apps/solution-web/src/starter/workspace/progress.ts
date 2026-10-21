@@ -43,7 +43,6 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
         extracted: 1,
         routing: 1,
         learning_pattern: 1,
-        learning_layout: 1,
         awaiting_input: 1,
         reading: 1,
         recovering: 1,
@@ -82,7 +81,7 @@ export function progressView(task: Observation, mode: ProgressMode = "bill-entry
       : finished
         ? "Finished and checked"
         : (event === "awaiting_input" ? "Waiting for your confirmation" : event === "routing" ? "Choosing companies"
-          : event === "learning_pattern" ? "Learning the posting pattern" : event === "learning_layout" ? "Learning the statement layout" : event === "recovering" ? "Recovering processing"
+          : event === "learning_pattern" ? "Learning the posting pattern" : event === "recovering" ? "Recovering processing"
           : localLabels[event ?? ""] ??
           (task.status === "attention"
             ? "Ready for your review"

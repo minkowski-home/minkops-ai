@@ -289,7 +289,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
   // Subscribe to the same read used by the result panel, without a second poll.
   // This keeps the main checkpoint and the displayed blockers consistent.
   const observation = useRead<Run | null>(scope, `/api/tenants/${workspace.tenant.slug}/accounts/tasks/${id}/run`, {
-    enabled: presentation === "accounts-bill" || presentation === "accounts-statement",
+    enabled: presentation === "accounts-bill",
   });
   if (error && !detail) return <section className="route-screen">
     <h2>Task unavailable</h2><p role="alert">{error}</p>

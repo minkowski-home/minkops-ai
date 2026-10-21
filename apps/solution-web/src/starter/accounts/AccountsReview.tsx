@@ -12,7 +12,6 @@ import type { BillResult, Catalog, Run } from "./types";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { progressView } from "../workspace/progress";
-import {StatementReview} from './Statements';
 import { useRead } from "../useRead";
 import { reads } from "../readCache";
 import type { WorkflowPresentation } from "../workflows/presentation";
@@ -27,7 +26,7 @@ const ACTION_LABELS: Record<BillAction, string> = {
 
 function RunContext({ run, route }: { run: Run; route: string }) {
   const labels: Record<string, string> = { queued: "Queued for processing", routing: "Choosing the company for each bill",
-    learning_pattern: "Learning the company posting pattern", learning_layout: "Learning the statement layout", awaiting_input: "Waiting for your confirmation",
+    learning_pattern: "Learning the company posting pattern", awaiting_input: "Waiting for your confirmation",
     reading: "Reading and checking bills", review: "Reading finished; ready for review", writing: "Saving and checking",
     completed: "Finished", failed: "Needs attention", paused: "Paused", stopped: "Stopped" };
   return <>
@@ -102,7 +101,6 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
       : "";
     if (
       run?.state === "writing" &&
-      run.workflow_key !== "statement-entry" &&
       controlState === "active" && !loadError &&
       key &&
       key !== attempted.current &&
@@ -161,11 +159,6 @@ function RunReview({ tenant, taskId, controlState = "active" }: { tenant: string
   }
   if (!run) return loadError ? <RetryMessage onRetry={() => void refresh()}>Could not refresh task. Retrying automatically.</RetryMessage>
     : loading ? <LoadingIndicator>Loading workflow results…</LoadingIndicator> : null;
-  if (run.workflow_key === 'statement-entry') return <>
-    <RunContext run={run} route={`/${workspaceId ?? tenant}`} />
-    {loadError && <RetryMessage onRetry={() => void refresh()}>Could not refresh task. Showing the last received results; retrying automatically.</RetryMessage>}
-    <StatementReview tenant={tenant} run={run} onChanged={changed} blocked={controlState !== 'active' || Boolean(loadError)} />
-  </>;
   const discovery = run.workflow_key === "source-discovery";
   const ownsRun = run.actor_id === user?.id;
   const result = run.result as BillResult | null;

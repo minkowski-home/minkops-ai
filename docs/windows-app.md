@@ -273,8 +273,7 @@ of every line, allocation, date and voucher type is accepted. The server sends
 every plan exactly as approved and refuses retired formats, so a run approved
 before protocol 5 must be started again.
 
-Statement classification uses the hosted skill with confirmed discovery and
-optional client branch mapping; native authorization and readback remain
-independent. See [Statement Entry](statement-entry.md) for routing, balances,
-preview and recovery. The distributed Windows x64 installer remains an unsigned
+Statement rows arrive as `tally.write` jobs, one at a time per PC, from runs of
+the client's own statement workflow. See [Statement Entry](statement-entry.md)
+for routing, balances, review and recovery. The distributed Windows x64 installer remains an unsigned
 release candidate; existing unsigned-release disclosure applies.

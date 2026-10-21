@@ -34,11 +34,17 @@ solutions/<client>/
 An employee is a product grouping, not another agent execution loop.
 
 `workflow.json` declares the owner, version, skill/schema paths, tenant/run
-defaults, and hosted execution settings. Three additional fields select reuse:
+defaults, and how it runs: `execution` for a hosted environment, or `sessions` for
+tool sessions (a model, an optional reasoning effort, and named stages with their
+own instructions). Three additional fields select reuse:
 
-- `handler`: `skill.proposal`, `accounts.discovery`, `accounts.bill`, or `accounts.statement`.
-- `presentation`: `proposal`, `accounts-discovery`, `accounts-bill`, or `accounts-statement`.
+- `handler`: `skill.proposal`, `accounts.discovery` or `accounts.bill` on hosted
+  runs; `desk.statement` on the run model (the registry in `platform/work.py`).
+- `presentation`: `proposal`, `accounts-discovery`, `accounts-bill` or `desk-review`.
 - `capabilities`: required authorized capabilities; currently `files.snapshot`.
+
+A client variant adds its procedure to a tool-session workflow's instructions;
+such workflows take no client resources.
 
 Workflow identity and handler identity are separate. Several definitions can
 reuse a handler with different procedures and valid configuration. Tenant keys
