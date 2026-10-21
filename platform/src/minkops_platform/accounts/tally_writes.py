@@ -1,5 +1,6 @@
 """Approved Tally intents, native receipts and per-bill handoffs."""
 
+import copy
 import json
 from uuid import NAMESPACE_URL, uuid5
 
@@ -75,6 +76,46 @@ def prepare_automatic(connection, run, result):
     return True
 
 
+def reuse_verified_source(connection, run, record):
+    """Retain known accounting for identical bytes, never authorize an overwrite.
+
+    A fresh classifier can choose another plausible ledger for an already saved
+    PDF. Source hash, document, company, operator and destination must all agree
+    with a verified native receipt. The normal resolver and native comparison
+    still run; a changed/deleted voucher is not declared duplicate from history.
+    Explicit corrections and uncertain proposals never use this path.
+    """
+    if (record.get('operation') != 'append' or not record.get('voucher')
+            or record.get('exception_codes') or record.get('findings')):
+        return
+    source = next((f for f in run['config'].get('file_provenance', [])
+                   if f['id'] == record['source_file_id']), None)
+    scope = run['config'].get('tally_target')
+    if not source or not scope:
+        return
+    previous = connection.execute('''SELECT r.id AS run_id,r.result->'records'->w.record_index AS record
+        FROM account_tally_writes w JOIN workflow_runs r ON r.tenant_id=w.tenant_id AND r.id=w.run_id
+        JOIN account_files f ON f.tenant_id=r.tenant_id
+            AND f.id=(r.result->'records'->w.record_index->>'source_file_id')::uuid
+        WHERE w.tenant_id=%s AND r.actor_id=%s AND w.device_id=%s
+            AND w.plan->>'company_guid'=%s AND f.sha256=%s
+            AND r.workflow_key='bill-entry' AND w.plan->>'format_version'='5'
+            AND w.verified_at IS NOT NULL AND w.cancelled_at IS NULL AND w.outcome IN ('saved','duplicate')
+            AND r.result->'records'->w.record_index->'current'->>'guid'=w.receipt->'current'->>'guid'
+        ORDER BY w.verified_at DESC LIMIT 1''',
+        (run['tenant_id'], run['actor_id'], scope['device_id'], record.get('company_guid'), source['sha256'])).fetchone()
+    if not previous:
+        return
+    prior = previous['record']
+    if (prior.get('document') != record.get('document') or not prior.get('voucher')
+            or prior.get('exception_codes') or prior.get('findings')
+            or prior['voucher'].get('family') != record['voucher'].get('family')):
+        return
+    record['voucher'] = copy.deepcopy(prior['voucher'])
+    record['verified_source_reused_from'] = str(previous['run_id'])
+    add_note(record, 'Identical source bytes already have verified accounting; the existing Tally voucher will be checked again.')
+
+
 def prepare(connection, run, result, *, approved=False):
     from minkops_platform.workflow_policies import enforce_policies
 
@@ -93,6 +134,7 @@ def prepare(connection, run, result, *, approved=False):
         if record.get("status") in ("saved", "duplicate", "rejected", "writing") or record.get("decision") in ("hold", "reject"):
             continue
         try:
+            reuse_verified_source(connection, run, record)
             bill = resolve(record, run["config"])
             candidates[index] = bill
             groups.setdefault((bill.target["destination_key"], bill.identity), []).append(index)
