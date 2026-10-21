@@ -42,6 +42,12 @@ class SolutionDefinitionTests(unittest.TestCase):
         self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
         self.assertEqual(installation.workflows['statement-entry'].session_bundle['model'], 'gpt-6-luna')
         self.assertEqual(installation.bindings['statement-entry']['handler'], 'desk.statement')
+        # The client's own procedure is added to both workflows, and the rule it agreed is seeded into memory.
+        for key in ('bill-entry', 'statement-entry'):
+            self.assertIn('## Client procedure', installation.workflows[key].session_bundle['instructions'])
+        self.assertEqual(installation.client, {'slug': 'pr-infra', 'name': 'PR Infra'})
+        self.assertEqual([(r['key'], r['workflow']) for r in installation.rules['accounts-desk']],
+                         [('neft-returns', 'statement-entry')])
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
@@ -53,6 +59,18 @@ class InstallationDatabaseTests(unittest.TestCase):
         self.connection.execute("""INSERT INTO users(email,name,password_hash,email_verified_at,is_platform_admin)
             VALUES ('installer@example.com','Installer','unused',now(),true) ON CONFLICT DO NOTHING""")
         return replace(load_solution(REPOSITORY_ROOT, "mock-client"), tenant_slug="mock")
+
+    def test_a_clients_business_is_created_and_its_agreed_rules_seeded_once(self):
+        self.composition()
+        composition = replace(load_solution(REPOSITORY_ROOT, "pr-infra"), tenant_slug="mock")
+        for _ in range(2):
+            install(self.connection, composition, actor_email="installer@example.com")
+        client = self.connection.execute(
+            "SELECT id, name FROM client_businesses WHERE tenant_id=%s AND slug='pr-infra'", (self.tenant,)).fetchone()
+        self.assertEqual(client[1], "PR Infra")
+        rules = self.connection.execute(
+            "SELECT workflow_key, status FROM memory_instructions WHERE client_id=%s", (client[0],)).fetchall()
+        self.assertEqual(rules, [("statement-entry", "active")])
 
     def test_repeat_install_preserves_employee_and_workflow_settings_and_status(self):
         composition = self.composition()

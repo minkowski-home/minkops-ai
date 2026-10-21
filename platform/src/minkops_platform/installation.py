@@ -7,7 +7,7 @@ identity/membership, grants no file/tool access, and preserves operator settings
 import json
 import re
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 from jsonschema import Draft202012Validator
@@ -59,6 +59,20 @@ BINDING_SCHEMA = {
                 },
             },
         },
+        # Rules the client agreed, seeded once into the employee's memory for the solution's client business.
+        "rules": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["key", "text"],
+                "additionalProperties": False,
+                "properties": {
+                    "key": {"type": "string", "pattern": SLUG.pattern},
+                    "workflow": {"type": "string", "pattern": SLUG.pattern},
+                    "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+                },
+            },
+        },
     },
 }
 
@@ -89,6 +103,9 @@ class Installation:
     employees: list
     workflows: dict
     bindings: dict
+    # The solution's own client business in the tenant, and each employee's rules to seed for it.
+    client: dict | None = None
+    rules: dict = field(default_factory=dict)
 
 
 def client_variant(definition, directory, filename, solution_id):
@@ -119,9 +136,9 @@ def client_variant(definition, directory, filename, solution_id):
     metadata = deepcopy(definition.metadata)
     metadata["tenant_defaults"] = {**metadata["tenant_defaults"], **variant.get("defaults", {})}
     validate(definition.tenant_schema, metadata["tenant_defaults"])
-    for field in ("name", "description"):
-        if field in variant:
-            metadata[field] = variant[field]
+    for key in ("name", "description"):
+        if key in variant:
+            metadata[key] = variant[key]
     bundle = deepcopy(definition.session_bundle)
     bundle["variant"] = {"solution": solution_id, "core_version": metadata["version"], "version": variant["version"]}
     instructions = definition.instructions
@@ -145,6 +162,15 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             "required": ["tenant", "employees"],
             "properties": {
                 "tenant": {"type": "string", "pattern": SLUG.pattern},
+                "client": {
+                    "type": "object",
+                    "required": ["slug", "name"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "slug": {"type": "string", "pattern": SLUG.pattern},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                    },
+                },
                 "employees": {
                     "type": "array",
                     "uniqueItems": True,
@@ -155,7 +181,7 @@ def load_solution(root: Path, solution_id: str) -> Installation:
         },
         manifest,
     )
-    employees, workflows, bindings = [], {}, {}
+    employees, workflows, bindings, rules = [], {}, {}, {}
     for employee_key in manifest["employees"]:
         directory = owned_directory(root / "employees", employee_key)
         metadata = read_json(directory / "employee.json")
@@ -203,7 +229,14 @@ def load_solution(root: Path, solution_id: str) -> Installation:
                 "handler": handler,
                 "presentation": definition.metadata.get("presentation"),
             }
-    return Installation(manifest["tenant"], employees, workflows, bindings)
+        if binding.get("rules"):
+            if "client" not in manifest:
+                raise ValueError("Seeded rules need the solution's client business in installation.json.")
+            known = {item["key"] for item in binding["workflows"]}
+            if any(rule.get("workflow") not in (None, *known) for rule in binding["rules"]):
+                raise ValueError("A seeded rule must name one of its employee's workflows.")
+            rules[employee_key] = binding["rules"]
+    return Installation(manifest["tenant"], employees, workflows, bindings, manifest.get("client"), rules)
 
 
 def register_employee(connection, tenant_id, definition):
@@ -290,6 +323,14 @@ def install(connection, installation: Installation, *, actor_email: str):
                 ),
             )
             installed.append(key)
+        if installation.client:
+            from . import clients
+            from .accounts import memory
+
+            # Both run on this installation's dict-row cursor, whatever the caller's connection returns.
+            client = clients.ensure(cursor, tenant, installation.client["slug"], installation.client["name"])
+            for employee_key, seeds in installation.rules.items():
+                memory.seed(cursor, tenant["id"], client["id"], seeds, employee=employee_key)
         return installed
 
 
