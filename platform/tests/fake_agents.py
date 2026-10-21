@@ -33,8 +33,9 @@ class Usage(Obj):
 class Script:
     """What the model does: rounds of (tool name, arguments) calls, then an ending.
 
-    A round may be a callable that receives the answers so far and returns the
-    next round's calls, so a test can script a model that reacts to answers.
+    A round may be a callable that receives the answers so far and the session
+    (its content included) and returns the next round's calls, so a test can
+    script a model that reacts to what it was given and told.
     """
 
     def __init__(self, *rounds, ending="completed", error_code=None, usage_on_event=False, usage_after=0):
@@ -81,7 +82,7 @@ class _Session:
     def advance(self):
         if self.round < len(self.script.rounds):
             calls = self.script.rounds[self.round]
-            calls = calls(list(self.answers)) if callable(calls) else calls
+            calls = calls(list(self.answers), self) if callable(calls) else calls
             if calls:
                 for name, arguments in calls:
                     call = Obj(type="function_call", call_id=f"call_{next(self.fake.ids)}", turn_id=self.turn.id,

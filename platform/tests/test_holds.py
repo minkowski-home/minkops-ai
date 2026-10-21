@@ -12,11 +12,9 @@ BILL, STATEMENT, BOTH = {"bill"}, {"statement"}, {"bill", "statement"}
 GOLDEN = {
     ("nothing", "retry"): (BILL, [
         "not_a_bill", "multiple_bills_unclear", "required_value_missing", "source_values_conflict",
-        "company_unresolved", "supplier_unresolved", "unsupported_structure", "date_before_books",
-        "identity_rule_unknown", "date_outside_company_period", "destination_changed", "voucher_type_unresolved",
-        "extraction_failed", "run_stopped", "human_review"]),
-    ("guess", "nothing", "retry"): (BILL, [
-        "source_unreadable", "classification_uncertain", "posting_profile_miss", "manual_review"]),
+        "supplier_unresolved", "date_before_books", "identity_rule_unknown", "date_outside_company_period",
+        "destination_changed", "voucher_type_unresolved", "extraction_failed", "human_review"]),
+    ("guess", "nothing", "retry"): (BILL, ["source_unreadable", "posting_profile_miss", "manual_review"]),
     ("supplier", "nothing", "retry"): (BILL, ["supplier_missing"]),
     ("retry_save", "nothing"): (BOTH, [
         "company_not_open", "no_company", "duplicate_company", "not_running", "port_closed", "busy", "too_many",
@@ -26,9 +24,15 @@ GOLDEN = {
         "statement_closing", "statement_summary", "statement_formula", "statement_conflict", "possible_existing",
         "uncertain_import"]),
 }
+# Codes a bill and a statement row share.
+SHARED = {
+    "company_unresolved": ("nothing", "retry"), "unsupported_structure": ("nothing", "retry"),
+    "run_stopped": ("nothing", "retry"), "classification_uncertain": ("guess", "nothing", "retry"),
+}
 STATEMENT_ONLY = {
     "statement_layout_unknown": ("nothing", "retry"), "statement_layout_changed": ("nothing", "retry"),
     "statement_transfer_unpaired": ("nothing", "retry"), "statement_interpretation": ("guess", "nothing", "retry"),
+    "ledger_unresolved": ("guess", "nothing", "retry"), "branch_unresolved": ("guess", "nothing", "retry"),
     "statement_save_waiting": ("retry_save", "nothing"), "statement_save_held": ("retry_save", "nothing"),
 }
 
@@ -37,6 +41,7 @@ class HoldMatrixTest(unittest.TestCase):
     def test_every_code_has_exactly_its_golden_actions_and_scope(self):
         expected = {code: (actions, scopes) for actions, (scopes, codes) in GOLDEN.items() for code in codes}
         expected.update({code: (actions, STATEMENT) for code, actions in STATEMENT_ONLY.items()})
+        expected.update({code: (actions, BOTH) for code, actions in SHARED.items()})
         actual = {code: (hold.actions, set(hold.scopes)) for code, hold in holds.HOLDS.items()}
         self.assertEqual(actual, expected)
 
@@ -66,7 +71,8 @@ class HoldMatrixTest(unittest.TestCase):
     def test_labels_fit_attention_and_statement_reasons_name_an_entry(self):
         for hold in holds.HOLDS.values():
             self.assertTrue(1 <= len(hold.label) <= 80, hold.code)  # attention_items.label constraint.
-            self.assertNotIn("this bill", hold.reason_for("statement"), hold.code)
+            self.assertNotIn("bill", hold.reason_for("statement").casefold() if "statement" in hold.scopes else "",
+                             hold.code)
 
 
 if __name__ == "__main__":

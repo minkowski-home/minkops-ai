@@ -23,9 +23,9 @@ from .run_controls import observe_task
 
 LEASE_SECONDS = 300
 ITEM_STATES = ("waiting", "queued", "running", "done", "failed", "cancelled")
-RECORD_STATUSES = ("proposed", "held", "approved", "writing", "saved", "duplicate", "deferred")
-# Records that still need a person, the destination, or both.
-UNSETTLED = ("proposed", "held", "approved", "writing")
+RECORD_STATUSES = ("pending", "proposed", "held", "approved", "writing", "saved", "duplicate", "deferred")
+# Records that still need their session, a person, the destination, or both.
+UNSETTLED = ("pending", "proposed", "held", "approved", "writing")
 TASK_STATE = {"preparing": "queued", "running": "executing", "review": "review", "writing": "writing",
               "completed": "completed", "failed": "failed"}
 
@@ -65,16 +65,29 @@ def launch(connection, *, tenant_id, client_id, workflow, handler, definition_ve
         (tenant_id, client_id, task["id"], workflow["id"], workflow["key"], handler,
          definition_version, bundle_digest, actor_id, request_key, request_hash, Jsonb(config),
          "preparing" if waiting else "running")).fetchone()
-    with connection.cursor() as cursor:
-        cursor.executemany(
-            """INSERT INTO run_items(tenant_id,run_id,task_id,ordinal,kind,source,state,waiting_on,queued_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN NULL ELSE now() END)""",
-            [(tenant_id, run["id"], task["id"], ordinal, spec.kind, Jsonb(spec.source),
-              "waiting" if spec.waiting_on else "queued", Jsonb(spec.waiting_on) if spec.waiting_on else None,
-              bool(spec.waiting_on)) for ordinal, spec in enumerate(items)])
+    add_items(connection, run, items)
     observe_task(connection, tenant_id=tenant_id, task_id=task["id"], run_id=run["id"], state="queued",
                  summary="Getting ready." if waiting else "Queued.", progress=0, event_prefix="run")
     return run
+
+
+def add_items(connection, run, items):
+    """Append items to a run, queued or waiting; their ordinals follow the run's last item.
+
+    The run row is locked first: two items settling at once both add items.
+    """
+    connection.execute("SELECT 1 FROM runs WHERE id=%s FOR UPDATE", (run["id"],))
+    start = connection.execute("SELECT coalesce(max(ordinal)+1,0) AS next FROM run_items WHERE run_id=%s",
+                               (run["id"],)).fetchone()["next"]
+    return connection.execute(
+        """INSERT INTO run_items(tenant_id,run_id,task_id,ordinal,kind,source,state,waiting_on,queued_at)
+           SELECT %s,%s,%s,%s+n-1,kind,source,state,waiting_on,CASE WHEN state='queued' THEN now() END
+           FROM unnest(%s::text[],%s::jsonb[],%s::text[],%s::jsonb[]) WITH ORDINALITY
+               AS item(kind,source,state,waiting_on,n)
+           RETURNING *""",
+        (run["tenant_id"], run["id"], run["task_id"], start, [spec.kind for spec in items],
+         [Jsonb(spec.source) for spec in items], ["waiting" if spec.waiting_on else "queued" for spec in items],
+         [Jsonb(spec.waiting_on) if spec.waiting_on else None for spec in items])).fetchall()
 
 
 # The closed registry of workflow handlers: pinned handler keys to fixed module
@@ -395,7 +408,8 @@ def refresh(connection, tenant_id, run_id, *, describe=None):
     active = items["queued"] + items["running"]
     if active or items["waiting"]:
         waiting_only_on_sync = not active and all(b["kind"] == "sync" for b in counts["blockers"])
-        state = "preparing" if waiting_only_on_sync and not any(records[s] for s in RECORD_STATUSES) else "running"
+        started = any(records[s] for s in RECORD_STATUSES if s != "pending")
+        state = "preparing" if waiting_only_on_sync and not started else "running"
     elif records["writing"]:
         state = "writing"
     elif any(records[s] for s in ("proposed", "held", "approved")):

@@ -40,8 +40,10 @@ class Hold:
         return "retry_save" in self.actions
 
     def reason_for(self, scope):
-        """Destination sentences name a bill; a statement row is an entry."""
-        return self.reason.replace("this bill", "this entry") if scope == STATEMENT else self.reason
+        """Sentences name a bill; for a statement row they name an entry."""
+        if scope != STATEMENT:
+            return self.reason
+        return self.reason.replace("this bill", "this entry").replace("This bill", "This entry")
 
 
 def _holds(scopes, actions, entries):
@@ -51,6 +53,12 @@ def _holds(scopes, actions, entries):
 _INTERPRETATION = ("guess", "nothing", "retry")
 _DESTINATION = ("retry_save", "nothing")
 _CATALOG = [
+    *_holds((BILL, STATEMENT), NON_WRITING, [
+        ("company_unresolved", EXCEPTION, "Company unclear", "The destination company could not be identified reliably."),
+        ("unsupported_structure", EXCEPTION, "Manual entry needed",
+         "This bill requires accounting entries outside the supported save format."),
+        ("run_stopped", LIFECYCLE, "Run stopped", "The run was stopped before this bill was saved."),
+    ]),
     *_holds((BILL,), NON_WRITING, [
         ("not_a_bill", EXCEPTION, "Not a bill", "This source does not contain a bill that can be entered."),
         ("multiple_bills_unclear", EXCEPTION, "Unclear bill count",
@@ -58,11 +66,8 @@ _CATALOG = [
         ("required_value_missing", EXCEPTION, "Missing bill value",
          "A required bill value could not be confirmed from the source."),
         ("source_values_conflict", EXCEPTION, "Bill values conflict", "The source contains conflicting bill values."),
-        ("company_unresolved", EXCEPTION, "Company unclear", "The destination company could not be identified reliably."),
         ("supplier_unresolved", EXCEPTION, "Supplier unclear",
          "The supplier could not be matched to exactly one Tally ledger."),
-        ("unsupported_structure", EXCEPTION, "Manual entry needed",
-         "This bill requires accounting entries outside the supported save format."),
         ("date_before_books", EXCEPTION, "Before books begin",
          "The bill date is before the company's books beginning date."),
         ("identity_rule_unknown", EXCEPTION, "Foreign supplier",
@@ -73,14 +78,15 @@ _CATALOG = [
         ("voucher_type_unresolved", EXCEPTION, "Voucher type needed",
          "A supported voucher type must be selected for this company."),
         ("extraction_failed", EXCEPTION, "Recheck bill", "The bill could not be processed and needs an explicit recheck."),
-        ("run_stopped", LIFECYCLE, "Run stopped", "The run was stopped before this bill was saved."),
         ("human_review", LIFECYCLE, "Review written bill",
          "This bill was saved with a best guess and still requires human review."),
     ]),
-    *_holds((BILL,), _INTERPRETATION, [
-        ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
+    *_holds((BILL, STATEMENT), _INTERPRETATION, [
         ("classification_uncertain", EXCEPTION, "Ledger unclear",
          "The appropriate accounting ledger could not be confirmed."),
+    ]),
+    *_holds((BILL,), _INTERPRETATION, [
+        ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
         ("posting_profile_miss", EXCEPTION, "Unusual posting",
          "This bill does not fit the company's confirmed posting pattern."),
         ("manual_review", LIFECYCLE, "Needs review", "This bill needs manual review in the original system."),
@@ -139,6 +145,10 @@ _CATALOG = [
     ]),
     *_holds((STATEMENT,), _INTERPRETATION, [
         ("statement_interpretation", EXCEPTION, "Ledger unclear", "The ledger for this transaction could not be confirmed."),
+        ("ledger_unresolved", EXCEPTION, "Other side unclear",
+         "The other side of this transaction could not be matched to exactly one Tally ledger."),
+        ("branch_unresolved", EXCEPTION, "Routing label unclear",
+         "The client's routing label on this row could not be interpreted."),
     ]),
     *_holds((STATEMENT,), _DESTINATION, [
         ("statement_save_waiting", LIFECYCLE, "Save waiting", "Another approved run is reconciling this transaction."),

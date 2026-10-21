@@ -21,7 +21,9 @@ A handler (work.HANDLER_MODULES) provides:
   It runs again when an item is resumed, so anything it records must be
   idempotent;
 - `settle(connection, run, item, outcome)`: in the transaction that finishes
-  the item, settle its records from what the session proposed or why it failed;
+  the item, settle its records from what the session proposed or why it failed.
+  It may raise Wait to park the item until a blocker is released, and it runs
+  again when the item resumes;
 - optionally `describe(state, items, records)`, the task summary for work.refresh.
 """
 
@@ -390,13 +392,21 @@ class Host:
         self._finish(item, lease, "failed", Outcome(error=message), run, handler, error_code=code)
 
     def _finish(self, item, lease, state, outcome, run=None, handler=None, *, error_code=None):
-        """Finish the item and settle its records in one fenced transaction; the closer ends its session."""
+        """Settle the item's records and finish it in one fenced transaction; the closer ends its session.
+
+        A handler that still needs something before the item is complete (a
+        member's answer) raises Wait from settle, and the item parks instead.
+        """
         with self.pool.connection() as connection:
             run = run or work.get_run(connection, item["tenant_id"], item["run_id"])
             handler = handler or self.resolve(run)
-            if not work.finish(connection, item["id"], lease.token, state, error_code=error_code,
-                               error=outcome.error, usage=outcome.usage):
+            try:
+                handler.settle(connection, run, item, outcome)
+                fenced = work.finish(connection, item["id"], lease.token, state, error_code=error_code,
+                                     error=outcome.error, usage=outcome.usage)
+            except Wait as parked:
+                fenced = work.wait(connection, item["id"], lease.token, parked.blocker)
+            if not fenced:
                 connection.rollback()
                 raise Superseded()
-            handler.settle(connection, run, item, outcome)
             work.refresh(connection, item["tenant_id"], item["run_id"], describe=getattr(handler, "describe", None))

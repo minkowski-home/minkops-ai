@@ -141,7 +141,7 @@ def test_a_released_blocker_wakes_idle_lanes_at_once(desk):
     # Poll rarely: only the committed release's notification can start the item in time.
     with host(desk, fake, poll_seconds=60) as lanes_:
         until(lambda: items(desk, run)[0]["state"] == "waiting")
-        assert lanes_.settled(desk["db"])  # nothing runnable while the item waits
+        until(lambda: lanes_.settled(desk["db"]))  # nothing runnable while the item waits
         assert work.release(desk["db"], desk["tenant"]["id"], BLOCKER) == 1
         desk["db"].commit()
         until(lambda: items(desk, run)[0]["state"] == "done", timeout=5)
@@ -150,7 +150,7 @@ def test_a_released_blocker_wakes_idle_lanes_at_once(desk):
 def test_a_successor_resumes_the_session_its_predecessor_left(desk):
     first = None
 
-    def leave_after_lookup(answers):
+    def leave_after_lookup(answers, session):
         first.leave()
         return PROPOSE
 
@@ -175,7 +175,7 @@ def test_a_successor_resumes_the_session_its_predecessor_left(desk):
 
 
 def test_a_lane_whose_item_was_reclaimed_stops_without_writing_or_cancelling(desk):
-    def reclaim_elsewhere(answers):
+    def reclaim_elsewhere(answers, session):
         with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as other:
             other.execute("UPDATE run_items SET lease_token=gen_random_uuid() WHERE run_id=%s", (run["id"],))
         return PROPOSE
@@ -194,7 +194,7 @@ def test_a_lane_whose_item_was_reclaimed_stops_without_writing_or_cancelling(des
 
 
 def test_stopping_the_task_cancels_its_running_session(desk):
-    def stop_task(answers):
+    def stop_task(answers, session):
         with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as other:
             other.execute("UPDATE tasks SET control_state='stopped' WHERE id=%s", (run["task_id"],))
         stopper.beat()
