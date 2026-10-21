@@ -58,6 +58,20 @@ cd ../solution-web; npm ci; npm test; npm run lint; npm run build
 
 **Baseline on this branch** (macOS, 21 October 2026): 617 Python tests, plus 413 subtests; 108 companion tests; 51 web tests; ruff, lint and both builds clean. The Playwright browser tests, a live companion run against Tally, and a production restore rehearsal have not been run.
 
+**Working from WSL 2** (how this build was done): keep the checkout on the Linux filesystem, which keeps LF endings, and run TallyPrime on Windows. The companion's adapters address Tally at `127.0.0.1`, so relay it into WSL first:
+
+```bash
+python3 scripts/wsl_tally_forward.py
+```
+
+Then check that the five rehearsal companies are open with their pinned GUIDs:
+
+```bash
+node scripts/rehearsal_status.mjs
+```
+
+PostgreSQL 16 can run from PGDG packages extracted into the user's home without root; Node 24 can run from the official tarball. Package the Windows installer from a Windows-local copy, because WSL symlinks break the packaging tools.
+
 **Sample client files are not in git.** One ICICI statement for September 2026 and two scanned March 2026 bills were shared on 21 October; copy them to the Windows machine yourself. Keep real files in a private, encrypted fixture store, and commit only synthetic look-alikes.
 
 ## Working agreements
@@ -356,8 +370,8 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 
 | Slice | State | Evidence |
 | --- | --- | --- |
-| 0. Acceptance harness | In progress | |
-| 1. Foundation | Not started | |
+| 0. Acceptance harness | Done | One closed hold matrix pinned by a golden test (`test_holds.py`). Golden bill, statement-row and narration-token identities (`test_vouchers.py`). Synthetic look-alikes of the PR Infra statement and bills, with private-file structure checks (`test_synthetic_fixtures.py`). The five-company rehearsal is verified live (`scripts/rehearsal_status.mjs`). The runtime review's missing tests land with slice 1's decision path, and scorer timing with slice 5's bill runs. |
+| 1. Foundation | In progress | |
 | 2. Sync and mirror | Not started | |
 | 3. Session tool loop | Not started | |
 | 4. Statement slice | Not started | |
