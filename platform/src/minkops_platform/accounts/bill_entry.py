@@ -303,6 +303,9 @@ def _facts(record, document, company):
 def _propose_one(connection, desk, record, bill):
     run, document = desk.run, bill["document"] or {}
     earlier = record["checks"] or {}
+    if earlier.get("final"):
+        # Only a person's recheck reads a bill held by a final check again.
+        return {"status": "held", "code": record["hold_codes"][0], "reason": record["review_reasons"][0]}
     submissions = earlier.get("submissions", 0) + 1
     if submissions > ATTEMPTS:
         return {"status": "refused", "reason": "No more resubmissions for this bill; it waits for review."}
@@ -329,7 +332,7 @@ def _propose_one(connection, desk, record, bill):
     except HoldReason as refusal:
         if refusal.code in FINAL or submissions >= ATTEMPTS:
             return _hold(connection, desk, record, bill, company, refusal.code, str(refusal), facts=facts,
-                         checks=checks, review=review)
+                         checks={**checks, "final": refusal.code in FINAL}, review=review)
         work.update_record(connection, record, status="pending", hold_codes=[], review_reasons=[], facts=facts,
                            company_id=company["id"] if company else None, proposal={"bill": bill},
                            checks={**checks, "code": refusal.code, "error": str(refusal)[:300]})
@@ -338,7 +341,8 @@ def _propose_one(connection, desk, record, bill):
         review.append(UNPRECEDENTED)
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review, facts=facts,
                        company_id=company["id"], checks=checks, proposal=_proposal(bill, bound))
-    return {"status": "accepted", **({"review": review} if review else {})}
+    # Review notes are for the person approving: told of one, a session would rebook a sound bill to avoid it.
+    return {"status": "accepted"}
 
 
 def _proposal(bill, bound, **extra):

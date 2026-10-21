@@ -494,6 +494,9 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
                    "exception": {"code": "company_unresolved", "detail": "The buyer is none of the client's companies."}}
     unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
     early = proposal(company, **{"document.date": "2026-03-31"})
+    # Told the date is before the books begin, the model tries to hold the bill for something weaker.
+    reframed = proposal(company, **{"document.date": "2026-03-31"},
+                        exception={"code": "classification_uncertain", "detail": "How to book a bill outside the books?"})
     unbalanced = proposal(company, **{"document.number": "SOS/26/0413", "document.date": "2026-09-02",
                                       "document.total": 188801.0})
     # Told the lines fall a rupee short, the model invents a round-off: no round-off line prints one.
@@ -502,7 +505,8 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
     conflict = {**unbalanced, "exception": {"code": "source_values_conflict", "detail": "Total is 188,801.00."}}
     fake = by_file(**{"unaddressed.pdf": [[("propose", {"count": 1, "bills": [unaddressed]})]],
                       "unsure.pdf": [[("propose", {"count": 1, "bills": [unsure]})]],
-                      "early.pdf": [[("propose", {"count": 1, "bills": [early]})]],
+                      "early.pdf": [[("propose", {"count": 1, "bills": [early]})],
+                                    [("propose", {"count": 1, "bills": [reframed]})]],
                       "unbalanced.pdf": [[("propose", {"count": 1, "bills": [unbalanced]})],
                                          [("propose", {"count": 1, "bills": [invented]})],
                                          [("propose", {"count": 1, "bills": [conflict]})]]})
@@ -513,8 +517,10 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
         ["company_unresolved"], ["The buyer is none of the client's companies."], ["nothing", "retry"])
     # A complete candidate held for its treatment may be written as a best guess; the gate has checked it.
     assert (guessable["hold_codes"], actions(guessable)) == (["classification_uncertain"], ["guess", "nothing", "retry"])
-    # A date before the books begin holds at once: no resubmission can change a printed date.
+    # A date before the books begin holds at once: no resubmission can change a printed date, nor recast the hold.
     assert (before_books["hold_codes"], before_books["checks"]["submissions"]) == (["date_before_books"], 1)
+    session = next(s for s in fake.created if header(s)["file"] == "early.pdf")
+    assert answers(session, "propose")[1]["bills"][0]["status"] == "held"
     session = next(s for s in fake.created if header(s)["file"] == "unbalanced.pdf")
     refusals = [result["bills"][0] for result in answers(session, "propose")]
     assert refusals[0]["reason"].startswith("The lines come to 188800.00, but the bill's printed total is 188801.00.")
@@ -684,6 +690,10 @@ def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the
     usual, unprecedented = records(desk, run)
     assert usual["status"] == "writing"
     assert (unprecedented["status"], unprecedented["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
+    # The note is the reviewer's: the session only learns its bill was accepted, so it never bends a sound
+    # proposal to avoid review.
+    session = next(s for s in fake.created if header(s)["file"] == "first-time.pdf")
+    assert answers(session, "propose") == [{"bills": [{"bill": 1, "status": "accepted"}]}]
     # Stop withdraws the write no PC has started, and every unsaved bill holds; Stop is final.
     db = desk["db"]
     task = work.get_run(db, desk["tenant"]["id"], run["id"])["task_id"]
