@@ -7,6 +7,8 @@
  * outcome goes back as a receipt.
  */
 const PAGE_RETRIES = [1000, 3000, 10000, 30000];
+/** The voucher plan protocol this runtime executes; the companion tells the server, which sends no newer plan. */
+export const PLAN_VERSION = 5;
 
 /** Send one sync page, retrying only transport failures with the same sequence. */
 export async function uploadWithRetry(send, page, { wait = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
@@ -22,7 +24,7 @@ export async function uploadWithRetry(send, page, { wait = (ms) => new Promise((
 }
 
 export function createExecutor({ connectors, request, pc, grantFor, durableIntent, transportFor,
-                                 recordDiagnostic = () => {}, planVersion }) {
+                                 recordDiagnostic = () => {}, planVersion = PLAN_VERSION }) {
   const plan = (job) => request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
   return async function execute(job) {
     // Minkops never starts, closes or restarts Tally; failures become typed

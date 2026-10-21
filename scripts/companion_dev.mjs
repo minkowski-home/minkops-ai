@@ -16,12 +16,11 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { checkTally, createSupplier, runSync, saveVoucher, tallyTransport } from "../connectors/desktop/src/index.js";
 import { CompanionWorker } from "../platform/desktop-runtime/src/worker.js";
-import { createExecutor } from "../platform/desktop-runtime/src/jobs.js";
+import { createExecutor, PLAN_VERSION } from "../platform/desktop-runtime/src/jobs.js";
 
 const ROOT = process.env.MINKOPS_COMPANION_DIR ?? join(homedir(), ".local/state/minkops-dev/companion");
 const STATE = join(ROOT, "state.json");
 const VERSION = JSON.parse(await readFile(new URL("../apps/windows-app/package.json", import.meta.url), "utf8")).version;
-const PLAN_VERSION = 5;
 const pc = `${hostname().slice(0, 70)}-HEADLESS`;
 
 async function load() {
@@ -70,7 +69,7 @@ async function run() {
   };
   const intents = join(ROOT, "intents");
   const execute = createExecutor({
-    connectors: { checkTally, createSupplier, saveVoucher, runSync }, request, pc, planVersion: PLAN_VERSION,
+    connectors: { checkTally, createSupplier, saveVoucher, runSync }, request, pc,
     transportFor: () => tallyTransport({ pc }),
     grantFor: () => { throw new Error("Folder grants are not available headless."); },
     // One fsynced file per remote ID: once written, that voucher is never imported again.

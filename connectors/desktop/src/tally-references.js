@@ -1,4 +1,4 @@
-/** Fixed, bounded identity reads for destination verification and legacy pinned writes. */
+/** Fixed, bounded master reads: a write's destination check and a created supplier's readback. */
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { boundedText, readOpenCompanies, TallyUnavailable } from "./tally-session.js";
 

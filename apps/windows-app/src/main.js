@@ -38,7 +38,7 @@ import {
   runSync,
 } from "@minkops/desktop-connectors";
 import { CompanionWorker } from "@minkops/desktop-runtime";
-import { createExecutor } from "@minkops/desktop-runtime/jobs";
+import { createExecutor, PLAN_VERSION } from "@minkops/desktop-runtime/jobs";
 import electronUpdater from "electron-updater";
 import { startUpdates } from "./updater.js";
 import {
@@ -49,7 +49,6 @@ import {
 
 const localDemo = process.argv.includes("--local-demo");
 // Voucher plan protocol this companion executes; the server serves nothing newer.
-const PLAN_VERSION = 5;
 const origin = trustedOrigin(
   process.env.MINKOPS_APP_URL ||
     (localDemo ? "http://127.0.0.1:3018" : "https://app.minkops.com"),
@@ -177,7 +176,7 @@ function startWorker() {
     heartbeat: () => request("/api/desktop/worker/heartbeat", {}),
     execute: createExecutor({
       connectors: { checkTally, inventory, createSupplier, saveVoucher, runSync },
-      request, pc: pcName(), planVersion: PLAN_VERSION,
+      request, pc: pcName(),
       grantFor: (sourceId) => binding(identity.tenant, sourceId, { id: identity.owner_id }),
       recordDiagnostic: (job, record) => jobDiagnostics.set(job.id, record),
       transportFor: (job) => tallyTransport({
