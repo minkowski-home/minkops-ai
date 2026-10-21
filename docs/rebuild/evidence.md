@@ -61,7 +61,34 @@ These files are under `.venv/.../openai/types/beta`:
 - **Passing tools to a session.** `agents/session_create_params.py` takes them as `tools`.
 - **Pausing for a tool call.** `agent_session_requires_action_event.py` emits `agent.session.requires_action`. `AgentSession` has `required_actions` and a `requires_action` status, so pending calls survive a worker restart.
 - **Answering a tool call.** `agent_session_input_param.py` defines `agent.session.input.tool_result`, with `call_id`, `success` and `turn_id`.
-- **What the adapter does today.** `platform/src/minkops_platform/runtime/openai_hosted.py` calls `sessions.create(agent, environment, input, stream=True)`, passes no tools, and re-attaches to a dropped stream up to three times.
+- **What the adapter did before slice 3.** `platform/src/minkops_platform/runtime/openai_hosted.py` called `sessions.create(agent, environment, input, stream=True)`, passed no tools, and re-attached to a dropped stream up to three times. That hosted-environment path (`execute`) still serves the old runs until cut-over. Tool sessions (`run_tool_session`) sit beside it.
+- **Errors inside a stream.** `_streaming.py` raises an SSE `error` event as a plain `APIError` instead of yielding it. Transport failures arrive as `APIConnectionError` or `APITimeoutError`. The driver treats all three as an interrupted stream and reads the session's own state on the next attachment.
+
+### The tool loop, measured live (21 October 2026)
+
+These were measured with `gpt-6-luna` through the installed SDK, using tiny prompts:
+
+- **A session needs no execution environment.** With `environment: {"type": "none"}` and function tools, a turn runs as follows:
+  1. `created` and `turn.created`;
+  2. `turn.item.added` with a `function_call`;
+  3. `requires_action`, waiting for the answer;
+  4. the answer, sent as `agent.session.input.tool_result` through `sessions.events.create`;
+  5. `turn.completed`, then `idle`.
+- **A pending call survives a dropped stream.** After the worker stopped reading at the first function call, `sessions.retrieve` reported `requires_action`, with the call in `required_actions`. Answering it and re-attaching with `sessions.events.stream` continued the turn to completion. The re-attached stream re-delivers items already seen, so answers must be deduplicated by call ID.
+- **Session creation is not idempotent.** A second `sessions.create` carrying the same `Idempotency-Key` header started a new session.
+- **Input comes with creation.** Creating a conversation-only session without input is refused with 400 "conversation-only sessions currently require initial input". The SDK's two-step `sessions.stream` helper therefore does not apply.
+- **A lost creation can be found again.** A session waiting on a call is listed by `sessions.list(order="desc", limit=100)` with its metadata; 100 is the largest page. So a creation whose response was lost is found by its item metadata, never by creating another session.
+- **Images read from data URLs.** A scanned page sent as an `input_image` data URL was read correctly: the model returned the synthetic bill's invoice number.
+- **Usage comes late.** Neither `turn.completed` nor its `turn` carried usage. The turn's own record reported it 4.4 s later, and the session's soon after.
+- **A repeated answer is accepted silently.** After a call was answered, sending its `tool_result` again was accepted with no error and no new turn, with the same idempotency key or a new one. So the driver answers only what `retrieve` lists as pending.
+- **Sessions linger, then expire.** A completed conversation-only session was still listed five minutes later. Sessions from the morning's probes were gone (404) by the afternoon.
+- **Each model call carries the agent's base instructions.** They are about 7,800 tokens, mostly cached after the first call. A one-call reply used 7,828 tokens; a bill-shaped turn with two tool calls (three model calls) used 23,846 input and 87 output tokens.
+- **The lanes work end to end.** One bill-shaped item ran through real lanes on PostgreSQL with `gpt-6-luna`:
+  - both calls were logged and the proposal recorded;
+  - the run moved to review;
+  - the closer recorded the usage and deleted the session.
+
+  The session took about 20 s.
 
 ### Identity and duplicates
 
