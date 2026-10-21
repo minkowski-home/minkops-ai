@@ -65,6 +65,17 @@ database connection uses the runtime role, and it receives no model key.
 Production sets
 `AUTH_DEV_MODE=0` and secure cookies, and API responses are private, no-store.
 
+The rebuild's fresh start moves Minkops to its own Cloud SQL instance,
+`minkops-ai-prod:us-central1:minkops-books` (PostgreSQL 16, zonal, encrypted
+connections only, daily backups with point-in-time recovery, deletion
+protection). It isolates client books, including the Tally mirror, from other
+products and gives the worker lanes connection headroom; it is not a speed
+fix. Create it once with `provision_database.py --create-instance --tier <tier>`:
+the tier is the operator's recorded cost decision, and this instance replaces
+Minkops' half of the shared SQL allocation below, so revise the envelope
+before creating it. The parked pre-rebuild build still deploys to the shared
+instance from its tag.
+
 Database roles are separate from Myndral's: runtime `minkops_app` (16 connections,
 no DDL), `minkops_owner` (NOLOGIN, owns the schema) and `minkops_migrate`
 (migrations only). Test a restore by loading a logical backup into a new
@@ -103,8 +114,10 @@ are no service-account keys. Use `uv sync --frozen --all-packages`, Node 24 with
 `npm ci`, gcloud, Docker and the Cloud SQL Auth Proxy.
 
 1. `bootstrap_hosting.py` creates the budgets and Hosting sites (initial setup).
-2. `provision_database.py` through a loopback proxy creates roles, the database,
-   migrations and runtime grants (initial setup), then `verify_database_restore.py`.
+2. `provision_database.py --create-instance --tier <tier>` creates the dedicated
+   instance once. Then, through a loopback proxy to it, `provision_database.py`
+   creates roles, the database, migrations and runtime grants (initial setup),
+   then `verify_database_restore.py`.
 3. `configure_runtime.py` sets named Secret Manager versions and scoped IAM. Rotate
    a secret by adding a version and updating both the API and worker references.
 4. Build and push images tagged with a reviewed commit, record the previous

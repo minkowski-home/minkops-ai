@@ -8,7 +8,9 @@ from pathlib import Path
 
 PROJECT = "minkops-ai-prod"
 REGION = "us-central1"
-INSTANCE = "myndral-prod:us-central1:myndral-db"
+# The rebuild runs on its own instance (provision_database.py --create-instance).
+# The parked pre-rebuild build keeps deploying to the shared one from its tag.
+INSTANCE = f"{PROJECT}:{REGION}:minkops-books"
 JOB = f"projects/{PROJECT}/locations/{REGION}/jobs/minkops-worker"
 
 
