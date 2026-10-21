@@ -197,11 +197,9 @@ def recheck_many(connection, tenant, user, run, file_ids):
 def reconcile_once(url):
     with psycopg.connect(url, row_factory=dict_row) as connection:
         from .posting_profiles import sweep
-        from .statement_layouts import sweep as sweep_layouts
 
         with connection.transaction():
             sweep(connection)
-            sweep_layouts(connection)
         parents = connection.execute("""SELECT id,tenant_id FROM workflow_runs WHERE
             is_batch AND state IN ('queued','executing')
             AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=workflow_runs.tenant_id AND t.id=workflow_runs.task_id AND t.control_state='active')

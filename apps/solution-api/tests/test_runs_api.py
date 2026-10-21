@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -113,3 +114,32 @@ class RunsApiTests(unittest.TestCase):
         self.assertEqual(conflict.status_code, 409)
         self.assertEqual(conflict.json()["detail"]["receipt"]["status"], "deferred")
         self.assertEqual(client.post(route, json=body).status_code, 403)  # No CSRF token.
+
+    def test_an_installed_workflow_launches_for_a_granted_client_and_a_replay_returns_the_same_run(self):
+        import factory
+        from psycopg.types.json import Jsonb
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            flow = factory.workflow(db, self.tenant, key="statement-entry")
+            db.execute("""UPDATE workflows SET status='active', config_values=%s, execution_binding=%s WHERE id=%s""",
+                       (Jsonb({"review_mode": "all_outputs"}), Jsonb({
+                           "definition": "accounts-desk/workflows/statement-entry", "handler": "desk.statement",
+                           "presentation": "desk-review", "capabilities": ["files.snapshot"], "policies": []}),
+                        flow["id"]))
+            device = factory.device(db, self.tenant, self.admin)
+            factory.company(db, self.tenant, device, self.granted)
+            [statement] = factory.upload(db, self.tenant, self.member, {"bank.csv": b"Date,Amount,Balance\n"})
+        client, csrf = self.login(self.member)
+        body = {"workflow": "statement-entry", "file_ids": [str(statement["id"])], "request_key": str(uuid4())}
+        launched = client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf, json=body)
+        self.assertEqual(launched.status_code, 200, launched.text)
+        self.assertEqual(launched.json()["items"]["queued"], 1)  # one sheet, in a format still to be learned
+        again = client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf, json=body)
+        self.assertEqual(again.json()["run"]["id"], launched.json()["run"]["id"])
+        changed = client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf, json={**body, "config": {
+            "review_mode": "only_exceptions"}})
+        self.assertEqual(changed.status_code, 409)
+        # A client the member cannot reach cannot be launched for, and a missing workflow is not installed.
+        self.assertEqual(client.post(self.base(self.other["slug"]) + "/runs", headers=csrf, json=body).status_code, 403)
+        self.assertEqual(client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf,
+                                     json={**body, "workflow": "bill-entry", "request_key": str(uuid4())}).status_code,
+                         409)

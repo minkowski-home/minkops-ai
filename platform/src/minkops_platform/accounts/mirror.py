@@ -107,6 +107,12 @@ def _entries(data):
         yield from (entry for entry in _list(data.get(key)) if isinstance(entry, dict))
 
 
+def ledger_lines(data):
+    """A stored voucher's ledger lines as (ledger, signed cents); Tally signs debits negative."""
+    return [(text(entry.get("LEDGERNAME")), cents) for entry in _entries(data)
+            if (cents := _cents(entry.get("AMOUNT"))) is not None]
+
+
 def voucher_row(record):
     """Columns for one native voucher; None for a deleted one, retained or not."""
     data = compact(record)
@@ -355,6 +361,50 @@ def bill_refs(connection, company_id, version, ledger_keys):
         f"""SELECT * FROM mirror_bill_refs WHERE company_id=%(c)s AND {_VISIBLE} AND ledger_key = ANY(%(keys)s)
             ORDER BY ledger_key, name, date""",
         {"c": company_id, "v": version, "keys": list(ledger_keys)}).fetchall()
+
+
+def search_masters(connection, company_id, version, types, subject, *, limit=8):
+    """Masters of these types matching one subject: by GSTIN, bank account number, or every word of a name.
+
+    A statement often masks an account number ("XXXXXX1234"), so its digits
+    match the end of a ledger's account number. Names match on all words,
+    in the name or any alias; an exact name sorts first.
+    """
+    digits = re.sub(r"\D", "", subject)
+    found = GSTIN.search(subject.upper())
+    words = [word for word in normalized(subject).split() if len(word) > 1][:8]
+    if not (found or len(digits) >= 4 or words):
+        return []
+    return connection.execute(
+        f"""SELECT * FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE} AND type = ANY(%(types)s) AND (
+                gstin = %(gstin)s
+                OR (%(digits)s::text IS NOT NULL AND bank_account LIKE '%%' || %(digits)s)
+                OR (cardinality(%(words)s::text[]) > 0 AND NOT EXISTS (
+                    SELECT 1 FROM unnest(%(words)s::text[]) AS word
+                    WHERE position(word IN name_key || ' ' || lower(array_to_string(aliases, ' '))) = 0)))
+            ORDER BY (name_key = %(key)s) DESC, length(name), guid LIMIT %(limit)s""",
+        {"c": company_id, "v": version, "types": list(types), "gstin": found.group(0) if found else None,
+         "digits": digits if len(digits) >= 4 else None, "words": words, "key": normalized(subject),
+         "limit": limit}).fetchall()
+
+
+def ledger_history(connection, company_id, version, ledgers, *, limit=10):
+    """The newest vouchers that post to any of these ledgers, cancelled and optional ones excluded."""
+    return connection.execute(
+        f"""SELECT * FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE} AND ledgers && %(ledgers)s::text[]
+                AND NOT cancelled AND NOT optional ORDER BY date DESC, guid LIMIT %(limit)s""",
+        {"c": company_id, "v": version, "ledgers": list(ledgers), "limit": limit}).fetchall()
+
+
+def vouchers_mentioning(connection, company_id, version, needle, date_from, date_to, *, limit=10):
+    """Vouchers in a date window whose reference or narration contains this text, such as a UTR."""
+    return connection.execute(
+        f"""SELECT * FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE} AND date BETWEEN %(from)s AND %(to)s
+                AND NOT cancelled AND (position(%(needle)s IN upper(reference)) > 0
+                                       OR position(%(needle)s IN upper(narration)) > 0)
+            ORDER BY date DESC, guid LIMIT %(limit)s""",
+        {"c": company_id, "v": version, "needle": needle.upper(), "from": date_from, "to": date_to,
+         "limit": limit}).fetchall()
 
 
 def company_view(connection, company, version):

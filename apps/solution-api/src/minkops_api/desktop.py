@@ -41,7 +41,7 @@ class Launch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     device_id: UUID
     request_key: UUID
-    operation: Literal["tally.probe", "files.refresh", "tally.save", "tally.statement"]
+    operation: Literal["tally.probe", "files.refresh", "tally.save"]
     input: dict = Field(default_factory=dict)
 
 

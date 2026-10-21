@@ -49,6 +49,29 @@ class ClientVariantTests(TestCase):
             self.assertNotIn("Client A:", core)
             self.assertEqual(installed.bindings[key]["solution"], "client-a")
 
+    def test_a_session_workflow_takes_the_client_procedure_as_instructions_and_no_resources(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            shutil.copytree(REPOSITORY_ROOT / "employees", root / "employees")
+            shutil.copytree(REPOSITORY_ROOT / "solutions/mock-client", root / "solutions/client-a")
+            directory = root / "solutions/client-a/employees/accounts-desk"
+            binding = json.loads((directory / "binding.json").read_text())
+            entry = next(w for w in binding["workflows"] if w["key"] == "statement-entry")
+            entry["variant"] = "variant.json"
+            (directory / "binding.json").write_text(json.dumps(binding))
+            variant_dir = directory / "workflows/statement-entry"
+            variant_dir.mkdir(parents=True)
+            (variant_dir / "client.md").write_text("Client A: book both legs of a NEFT return.")
+            (variant_dir / "variant.json").write_text(json.dumps({"version": "1.2.0", "instructions": "client.md"}))
+            bundle = load_solution(root, "client-a").workflows["statement-entry"].session_bundle
+            self.assertTrue(bundle["instructions"].endswith(
+                "## Client procedure\n\nClient A: book both legs of a NEFT return."))
+            self.assertEqual(bundle["variant"], {"solution": "client-a", "core_version": "1.0.0", "version": "1.2.0"})
+            self.assertNotIn("---", bundle["instructions"].split("\n", 1)[0])  # the skill manifest is not sent
+            (variant_dir / "variant.json").write_text(json.dumps({"version": "1.2.0", "resources": ["client.md"]}))
+            with self.assertRaisesRegex(ValueError, "client instructions, not resources"):
+                load_solution(root, "client-a")
+
     def test_variant_cannot_replace_handlers_schemas_or_escape_its_client_layer(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

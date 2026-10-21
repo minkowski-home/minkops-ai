@@ -74,7 +74,7 @@ export function createExecutor({ connectors, request, pc, grantFor, durableInten
     if (job.operation === "attention.refresh" || job.operation === "attention.supplier")
       return connectors.inspectTallyAttention(await plan(job),
         { request: tallyRequest, createSupplier: job.operation === "attention.supplier" });
-    if (job.operation === "tally.write" || job.operation === "tally.statement" || job.operation === "tally.save") {
+    if (job.operation === "tally.write" || job.operation === "tally.save") {
       const voucher = await plan(job);
       if (voucher.format_version > planVersion) throw new Error("Unsupported voucher plan.");
       return connectors.saveVoucher(voucher, { request: tallyRequest, beforeImport: durableIntent(job), pc,

@@ -34,8 +34,10 @@ def require_active(connection, tenant_id, task_id):
 def owns_task(connection, tenant_id, task_id, actor_id):
     owners = connection.execute("""SELECT actor_id FROM workflow_runs WHERE tenant_id=%s AND task_id=%s
         UNION SELECT actor_id FROM discovery_runs WHERE tenant_id=%s AND task_id=%s
-        UNION SELECT actor_id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s AND operation NOT LIKE 'attention.%%'""",
-        (tenant_id, task_id, tenant_id, task_id, tenant_id, task_id)).fetchall()
+        UNION SELECT actor_id FROM runs WHERE tenant_id=%s AND task_id=%s
+        UNION SELECT actor_id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s AND operation NOT LIKE 'attention.%%'
+            AND operation <> 'tally.write'""",
+        (tenant_id, task_id, tenant_id, task_id, tenant_id, task_id, tenant_id, task_id)).fetchall()
     return bool(owners) and all(str(row["actor_id"]) == str(actor_id) for row in owners)
 
 
@@ -99,8 +101,25 @@ def _task_control(connection, tenant_id, user, task_id, action, *, timeout_minut
                 on_stop = getattr(get_handler(binding['handler']), 'on_stop', None)
                 if on_stop:
                     on_stop(connection, run, actor)
+    # Runs of the run model own their stop: items, rows and pending writes. A run
+    # whose handler this version no longer has still stops its unstarted items.
+    from . import work
+    if action == "stop":
+        for run in connection.execute("SELECT * FROM runs WHERE tenant_id=%s AND task_id=%s ORDER BY id FOR UPDATE",
+                                      (tenant_id, task_id)).fetchall():
+            try:
+                stopped = getattr(work.handler_for(run), "stopped", None)
+            except ServiceError:
+                stopped = None
+            if stopped:
+                stopped(connection, run)
+            else:
+                work.cancel(connection, tenant_id, run["id"])
     task = connection.execute("UPDATE tasks SET control_state=%s,updated_at=now() WHERE tenant_id=%s AND id=%s RETURNING *",
                               (target, tenant_id, task_id)).fetchone()
+    if action == "resume":
+        from .accounts.writes import resume
+        resume(connection, tenant_id, task_id)  # their PCs pick up pending writes again
     if action == "resume":
         from .runtime.application import binding_for, get_handler
         for run in runs:

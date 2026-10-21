@@ -75,6 +75,15 @@ def _transition(connection, profile, status, **fields):
     ).fetchone()
 
 
+def update_payload(connection, profile, payload):
+    """Amend a proposed profile before it is confirmed, such as with a member's answer."""
+    if profile["status"] != "proposed":
+        raise ValueError("Only a proposed profile can be amended.")
+    return connection.execute(
+        "UPDATE client_profiles SET payload=%s,updated_at=now() WHERE tenant_id=%s AND id=%s RETURNING *",
+        (Jsonb(payload), profile["tenant_id"], profile["id"])).fetchone()
+
+
 def propose(connection, profile, payload, *, derivation_run_id=None):
     if profile["status"] != "deriving":
         raise ValueError("Only a deriving profile can be proposed.")

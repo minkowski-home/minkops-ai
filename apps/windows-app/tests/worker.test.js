@@ -348,8 +348,8 @@ async function failedReceipt(operation, error) {
   return finished[0];
 }
 
-test("statement failures direct reconciliation to Tally without folder instructions", async () => {
-  const receipt = await failedReceipt("tally.statement", new Error("private error"));
+test("write failures direct reconciliation to Tally without folder instructions", async () => {
+  const receipt = await failedReceipt("tally.write", new Error("private error"));
   assert.match(receipt.error, /Tally/);
   assert.match(receipt.error, /Retry save/);
   assert.doesNotMatch(receipt.error, /folder|private/);

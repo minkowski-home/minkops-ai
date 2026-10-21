@@ -40,7 +40,9 @@ class SolutionDefinitionTests(unittest.TestCase):
         self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry', 'bill-entry'})
         self.assertEqual(installation.bindings['bill-entry']['defaults']['review_mode'], 'all_outputs')
         self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
-        self.assertEqual(installation.workflows['statement-entry'].execution_snapshot['execution']['model'],'gpt-6-luna')
+        statement = installation.workflows['statement-entry']
+        self.assertEqual((statement.session_bundle['model'], statement.execution_snapshot), ('gpt-6-luna', None))
+        self.assertEqual(installation.bindings['statement-entry']['handler'], 'desk.statement')
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")

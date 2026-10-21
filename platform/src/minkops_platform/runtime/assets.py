@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 from minkops_platform.errors import ServiceError
 
 FIELDS = ('execution_snapshot', 'instructions_snapshot', 'agent_output_schema',
-          'source_catalog_snapshot', 'catalog_snapshot', 'local_discovery_snapshot', 'statement_context')
+          'source_catalog_snapshot', 'catalog_snapshot', 'local_discovery_snapshot')
 
 
 def config_json(connection, tenant_id, config):

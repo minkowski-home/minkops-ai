@@ -1,30 +1,36 @@
-"""Statement layouts: inferred once per bank format, proven by balances, reused.
+"""Statement layouts: declared once per bank format, proven by balances, reused.
 
 A layout is identified by its header row (cells and positions), so a statement
-from the same bank export matches it after any preamble. The layout stage
-proposes one for each unseen sheet; this module applies it to the real file and
-activates it only when the running balances prove the amounts and the dates
-prove their order. Otherwise a member answers one question (which date order)
-or confirms sample rows once. Known layouts parse with no AI call at all.
+from the same bank export matches it after any preamble. A layout session
+declares one for an unseen sheet; this module applies it to the real file and
+keeps it only when the running balances prove the amounts and the dates prove
+their order. When they cannot, a member answers one question (which date
+order) or confirms sample rows once, and the sheet's run item waits for that
+answer. Known layouts read with no AI call at all.
 """
 
-from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from psycopg.types.json import Jsonb
-
 from minkops_connectors.statement import (
     apply_layout,
+    cell_text,
     header_signature,
     preview,
     read_tables,
     signatures,
 )
-from minkops_platform import attention, profiles
+from minkops_platform import attention, profiles, work
 from minkops_platform.errors import ServiceError
 
 KIND = "statement_layout"
+BROKEN = ("statement_balance", "statement_closing", "statement_summary")
+DETAIL_KINDS = ("account_number", "bank", "ifsc", "holder", "period")
+
+
+def blocker(profile_id):
+    """What a sheet's layout item waits on until a member answers its question."""
+    return {"kind": "layout", "ref": str(profile_id)}
 
 
 def sheets(files):
@@ -42,17 +48,16 @@ def sheets(files):
     return found
 
 
-def resolve(connection, tenant_id, files):
+def resolve(connection, tenant_id, entries):
     """Attach each sheet's live layout (by header signature) and where its header sits."""
-    entries = sheets(files)
     candidates = [(entry, signatures(entry["table"])) for entry in entries if "table" in entry]
     keys = {sig for _, found in candidates for sig in found}
     live = connection.execute(
         "SELECT * FROM client_profiles WHERE tenant_id=%s AND kind=%s AND scope_key=ANY(%s) AND status IN ('proposed','active')",
         (tenant_id, KIND, list(keys))).fetchall() if keys else []
     by_signature = {p["scope_key"]: p for p in live}
-    # The same bank header can occur in several files or sheets in one run.
-    # Bind each occurrence independently rather than retaining only the last.
+    # The same bank header can occur in several files or sheets of one run;
+    # each occurrence binds on its own.
     for entry, found in candidates:
         for signature, index in sorted(found.items(), key=lambda pair: pair[1]):
             if signature in by_signature:
@@ -61,127 +66,99 @@ def resolve(connection, tenant_id, files):
     return entries
 
 
-def parse(entries, *, today, changed_files=()):
-    """Canonical rows for every sheet; unknown or unproven layouts hold their sheet."""
-    rows, occurrences = [], {}
-    for entry in entries:
-        file = entry["file"]
-        base = {"source_file_id": str(file["id"]), "source_file": file["path"]}
-        if entry.get("error"):
-            rows.append({**base, "row": 0, "sheet": "", "code": "statement_format", "status": "held",
-                         "reason": "Use a readable CSV or XLSX statement; convert legacy XLS files in Excel."})
-            continue
-        profile = entry.get("profile")
-        if not profile or profile["status"] != "active":
-            changed = str(file["id"]) in changed_files
-            rows.append({**base, "row": 0, "sheet": entry["sheet"], "status": "held",
-                         "code": "statement_layout_changed" if changed else "statement_layout_unknown" if not profile else "statement_layout_unconfirmed",
-                         "reason": "This statement's layout changed and could not be verified. Check the original file." if changed
-                         else "Minkops could not read this sheet's layout." if not profile
-                         else "This statement layout is waiting for one confirmation in Attention."})
-            continue
-        counter = occurrences.setdefault(str(file["id"]), Counter())
-        parsed, _ = apply_layout(entry["table"], profile["payload"], entry["header_index"], sheet=entry["sheet"],
-                                 formulas=entry["formulas"], occurrences=counter, today=today)
-        for row in parsed:
-            row.update(base, status="held" if row.get("code") else "ready")
-            rows.append(row)
-    if len(rows) > 10000:
-        raise ValueError("Select at most 10,000 transaction rows in one run.")
-    return rows
+def read(entry, layout, header_index, *, today, occurrences=None):
+    """The sheet's canonical rows and proof through this layout, and the account details it declares."""
+    rows, proof = apply_layout(entry["table"], layout, header_index, sheet=entry["sheet"],
+                               formulas=entry["formulas"], occurrences=occurrences, today=today)
+    details = {}
+    for spec in layout.get("details") or []:
+        cells = entry["table"][spec["row"] - 1] if spec["row"] <= len(entry["table"]) else ()
+        value = cell_text(cells[spec["column"] - 1]) if spec["column"] <= len(cells) else ""
+        if value:
+            details[spec["kind"]] = value[:120]
+    return rows, proof, details
 
 
-def recheck(connection, run, files):
-    """Refuted saved layouts get one new reading at launch, never a retry loop."""
-    entries = resolve(connection, run["tenant_id"], files)
-    refuted = {}
-    for entry in entries:
-        profile = entry.get("profile")
-        if not profile or profile["status"] != "active" or not profile["payload"]["columns"].get("balance"):
-            continue
-        rows, proof = apply_layout(entry["table"], profile["payload"], entry["header_index"],
-                                   sheet=entry["sheet"], formulas=entry["formulas"], today=today_for(run))
-        if not proof["amounts"] and any(r.get("code") in ("statement_balance", "statement_closing", "statement_summary") for r in rows):
-            refuted[str(profile["id"])] = profile
-    for profile in refuted.values():
-        profiles.invalidate(connection, profile, "A new statement refuted the saved balance-chain reading.")
-    changed = [str(e["file"]["id"]) for e in entries if str(e.get("profile", {}).get("id")) in refuted]
-    if changed:
-        connection.execute("UPDATE workflow_runs SET config=config || %s WHERE id=%s",
-                           (Jsonb({"layout_changed_files": sorted(set(changed))}), run["id"]))
-    return resolve(connection, run["tenant_id"], files) if changed else entries
+def refuted(rows, proof):
+    """The balances disprove this reading: some running balance or control does not chain."""
+    return not proof["amounts"] and any(r.get("code") in BROKEN for r in rows)
 
 
-def preview_sheets(connection, tenant_id, files):
-    """The new sheets a layout session must read, as bounded text previews."""
-    return [{"source_file_id": str(e["file"]["id"]), "path": e["file"]["path"], "sheet": e["sheet"],
-             "preview": preview(e["table"])}
-            for e in resolve(connection, tenant_id, files) if "table" in e and "profile" not in e]
-
-
-def sweep(connection):
-    """Resume statement runs whose layout session failed; their sheets then hold."""
-    for row in connection.execute(
-            """SELECT DISTINCT tenant_id FROM workflow_runs WHERE state='queued' AND blocked
-                AND (awaited_layout_run_id IS NOT NULL OR config->'awaits' ? 'layouts')""").fetchall():
-        release(connection, row["tenant_id"])
-
-
-def _payload(spec, table):
+def payload(spec, table):
+    """A declared layout as stored: the reading, and the header it is recognised by."""
     header = table[spec["header_row"] - 1]
-    return {k: spec[k] for k in ("columns", "row_order", "rows", "evidence")} | {
-        "header": [str(c or "") for c in header], "signature": header_signature(header)}
+    return {key: spec[key] for key in ("columns", "row_order", "rows", "evidence")} | {
+        "details": spec.get("details") or [], "header": [str(c or "") for c in header],
+        "signature": header_signature(header)}
 
 
-def learn(connection, run, result, files, *, today):
-    """Store each proposed layout that proves out; ask once when it cannot."""
-    entries = {(str(e["file"]["id"]), e["sheet"]): e for e in sheets(files) if "table" in e}
-    for spec in result.get("layouts", []):
-        entry = entries.get((spec["source_file_id"], spec["sheet"]))
-        if entry is None or spec["header_row"] > len(entry["table"]):
-            continue
-        payload = _payload(spec, entry["table"])
-        try:
-            rows, proof = apply_layout(entry["table"], payload, spec["header_row"] - 1, sheet=entry["sheet"],
-                                       formulas=entry["formulas"], today=today)
-        except (ValueError, KeyError, TypeError, IndexError):
-            continue
-        broken = any(r.get("code") in ("statement_balance", "statement_closing", "statement_summary") for r in rows)
-        if broken and not proof["amounts"]:
-            continue  # The balances refute this reading; the sheet holds instead.
-        if profiles.current(connection, run["tenant_id"], KIND, payload["signature"]):
-            continue  # Another run already learned (or is confirming) this format.
-        # Ask about the printed date, before our proposed interpretation. An ISO
-        # date here would hide the very ambiguity the member is deciding.
-        ambiguous = [str(entry["table"][r["row"] - 1][payload["columns"]["date"]["column"] - 1])
-                     for r in rows if not r.get("code")][:1]
-        question = None if proof["date_order"] else "date_order"
-        if not proof["amounts"]:
-            question = "sample"
-        status = "active" if question is None else "proposed"
-        profile = profiles.create(connection, run["tenant_id"], KIND, payload["signature"],
-                                  {**payload, "proof": proof, "question": question}, status=status,
-                                  actor=run["actor_id"] if status == "active" else None,
-                                  provenance={"run_id": str(run["id"]), "file": entry["file"]["path"]})
-        if question:
-            _card(connection, run, profile, entry["file"]["path"], question, proof, ambiguous)
-    release(connection, run["tenant_id"], finished=str(run["id"]))
+def _refutation(rows):
+    """The first cause a reader can act on: a broken chain, then a printed control, before their consequences.
+
+    A summary mismatch marks every transaction too; those marks say nothing about where the reading fails.
+    """
+    chain = [r for r in rows if r.get("code") == "statement_balance"]
+    controls = [r for r in rows if r.get("code") in BROKEN and "amount_cents" not in r and "identity" not in r]
+    first = (chain or controls or [r for r in rows if r.get("code") in BROKEN])[0]
+    return f"Row {first['row']}: {first['reason']}"
 
 
-def _card(connection, run, profile, path, question, proof, ambiguous):
+def preview_sheet(entry):
+    return {"file": entry["file"]["path"], "sheet": entry["sheet"], "rows": preview(entry["table"])}
+
+
+def prove(connection, tenant_id, entry, spec, *, today, actor, provenance):
+    """Keep a declared layout the balances prove, ask once when they cannot decide, refuse what they refute.
+
+    Returns {"status": "active" | "question" | "known", "profile"} or
+    {"status": "refuted", "reason"} with a reason the layout session can act on.
+    """
+    if spec["header_row"] > len(entry["table"]):
+        return {"status": "refuted", "reason": "The header row is beyond the end of the sheet."}
+    stored = payload(spec, entry["table"])
+    try:
+        rows, proof, _ = read(entry, stored, spec["header_row"] - 1, today=today)
+    except (ValueError, KeyError, TypeError, IndexError) as error:
+        return {"status": "refuted", "reason": f"The layout cannot be applied: {error or 'a column is missing'}."}
+    if refuted(rows, proof):
+        return {"status": "refuted", "reason": _refutation(rows)}
+    if not any(not r.get("code") for r in rows):
+        return {"status": "refuted", "reason": "No transaction reads through this layout."}
+    # Two sheets in one new format can be proven at once: the second finds the first.
+    connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                       (f"{KIND}:{tenant_id}:{stored['signature']}",))
+    existing = profiles.current(connection, tenant_id, KIND, stored["signature"])
+    if existing:
+        return {"status": "known", "profile": existing}  # another run learned this format meanwhile
+    question = "sample" if not proof["amounts"] else None if proof["date_order"] else "date_order"
+    profile = profiles.create(connection, tenant_id, KIND, stored["signature"],
+                              {**stored, "proof": proof, "question": question},
+                              status="proposed" if question else "active",
+                              actor=None if question else actor, provenance=provenance)
+    if question is None:
+        return {"status": "active", "profile": profile}
+    # Ask about the printed date, not our reading of it: an ISO date would
+    # hide the very ambiguity the member is deciding.
+    date_column = stored["columns"]["date"]["column"]
+    printed = [cell_text(entry["table"][r["row"] - 1][date_column - 1]) for r in rows if not r.get("code")][:1]
+    return {"status": "question", "profile": profile, "question": question, "proof": proof, "printed": printed}
+
+
+def ask(connection, run, profile, path, question, proof, printed):
+    """One Attention card per layout question; the sheet's item waits on it."""
     if question == "date_order":
         title, actions = "Choose date order", ["dmy", "mdy"]
-        prompt = (f"Dates such as {ambiguous[0] if ambiguous else 'these'} could be day-first or month-first.")
+        prompt = f"Dates such as {printed[0] if printed else 'these'} could be day-first or month-first."
     else:
         title, actions = "Confirm statement layout", ["confirm", "nothing"]
         prompt = "These rows could not be checked against running balances. Confirm Minkops reads them correctly."
-    attention.record(connection, run, f"layout:{profile['id']}", path, title, kind="layout", target={
+    return attention.record(connection, run, f"layout:{profile['id']}", path, title, kind="layout", target={
         "profile_id": str(profile["id"]), "question": question, "prompt": prompt, "actions": actions,
         "samples": proof["samples"]})
 
 
 def decide(connection, tenant, user, item, action):
-    """Answer a layout card: a date order, or confirm/decline sample rows."""
+    """Answer a layout card, then release every sheet waiting on it."""
     profile = profiles.get(connection, tenant["id"], item["target"]["profile_id"], lock=True)
     if profile is None or profile["status"] != "proposed":
         raise ServiceError("conflict", "This statement layout is no longer awaiting a decision.")
@@ -192,43 +169,18 @@ def decide(connection, tenant, user, item, action):
         outcome = "superseded"
     else:
         if action in ("dmy", "mdy"):
-            payload = {**profile["payload"], "columns": {**profile["payload"]["columns"],
-                       "date": {**profile["payload"]["columns"]["date"], "order": action}}, "question": None}
-            connection.execute("UPDATE client_profiles SET payload=%s WHERE id=%s", (Jsonb(payload), profile["id"]))
-            profile = {**profile, "payload": payload}
+            columns = profile["payload"]["columns"]
+            profile = profiles.update_payload(connection, profile, {
+                **profile["payload"], "question": None,
+                "columns": {**columns, "date": {**columns["date"], "order": action}}})
         profiles.confirm(connection, profile, user["id"])
         outcome = "active"
     attention.audit(connection, item, user["id"], "confirmed" if outcome == "active" else "deferred",
                     f"Statement layout {'confirmed' if outcome == 'active' else 'not confirmed'}.")
     connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
                        (user["id"], item["id"]))
-    release(connection, tenant["id"])
+    work.release(connection, tenant["id"], blocker(profile["id"]))
     return {"status": outcome}
-
-
-def release(connection, tenant_id, *, finished=None):
-    """Statement runs waiting on layouts resume once none of their formats is still being decided."""
-    waiting = connection.execute(
-        """SELECT r.id,r.awaited_layout_run_id,r.config#>'{awaits,layouts}' AS layout_profiles
-        FROM workflow_runs r WHERE r.tenant_id=%s AND r.state='queued' AND r.blocked
-        AND (r.awaited_layout_run_id IS NOT NULL OR r.config->'awaits' ? 'layouts')""", (tenant_id,)).fetchall()
-    for run in waiting:
-        pending_profiles = run["layout_profiles"] or []
-        if pending_profiles and connection.execute("""SELECT 1 FROM client_profiles WHERE tenant_id=%s
-            AND id=ANY(%s::uuid[]) AND status='proposed' LIMIT 1""", (tenant_id, pending_profiles)).fetchone():
-            continue
-        child = (connection.execute("SELECT state,id FROM workflow_runs WHERE tenant_id=%s AND id=%s::uuid",
-                                    (tenant_id, run["awaited_layout_run_id"])).fetchone()
-                 if run["awaited_layout_run_id"] else None)
-        if child and child["state"] not in ("review", "failed") and str(child["id"]) != finished:
-            continue
-        pending = connection.execute(
-            """SELECT 1 FROM client_profiles WHERE tenant_id=%s AND kind=%s AND status='proposed'
-            AND provenance->>'run_id'=%s LIMIT 1""", (tenant_id, KIND, str(child["id"]) if child else "")).fetchone()
-        if pending:
-            continue
-        from minkops_platform.runtime.dependencies import release_run
-        release_run(connection, tenant_id, run["id"], {"layouts_attempted": True})
 
 
 def today_for(run):

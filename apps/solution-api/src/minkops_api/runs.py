@@ -9,12 +9,19 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from minkops_platform import clients, work
+from minkops_platform import clients, installation, work
 
 from .accounts import _call
 from .auth import Db, User, require_csrf, tenant_access
 
 router = APIRouter(prefix="/api/tenants/{slug}/clients/{client}")
+
+
+class Launch(BaseModel):
+    workflow: str = Field(pattern="^[a-z][a-z0-9-]{0,60}$")
+    file_ids: list[UUID] = Field(min_length=1, max_length=50)
+    config: dict = Field(default_factory=dict)
+    request_key: UUID
 
 
 class Decision(BaseModel):
@@ -34,6 +41,27 @@ def run_of(connection, tenant, found, run_id):
     if run["client_id"] != found["id"]:
         raise HTTPException(404, "Run not found.")
     return run
+
+
+@router.post("/runs")
+def launch(slug: str, client: str, body: Launch, request: Request, user: User, connection: Db):
+    """Start a run of an installed workflow for this client; a repeated request key returns the same run."""
+    require_csrf(request)
+    tenant, _, found = scoped(connection, slug, client, user)
+    workflow, definition = _call(installation.installed, connection, tenant["id"], body.workflow)
+    handler = _call(work.handler_for, {"handler": workflow["execution_binding"]["handler"]})
+    run = _call(lambda: handler.launch(connection, tenant=tenant, user=user, client=found, workflow=workflow,
+                                       definition=definition, body=body.model_dump(mode="json")))
+    return work.status(connection, tenant["id"], run["id"])
+
+
+@router.post("/runs/{run_id}/approve")
+def approve(slug: str, client: str, run_id: UUID, request: Request, user: User, connection: Db):
+    """Write ready rows: approve every proposal of the run that needs no review."""
+    require_csrf(request)
+    tenant, _, found = scoped(connection, slug, client, user)
+    run = run_of(connection, tenant, found, run_id)
+    return _call(lambda: work.handler_for(run).approve_ready(connection, run, user["id"]))
 
 
 @router.get("/runs/{run_id}/status")

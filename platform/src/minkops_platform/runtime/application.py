@@ -25,8 +25,6 @@ RESERVED = {
     "local_discovery_snapshot",
     "source_catalog_snapshot",
     "tally_target",
-    "statement_context",
-    "statement_device_id",
     "batch",
     "retry_file_id",
     "superseded",

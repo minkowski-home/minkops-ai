@@ -73,28 +73,34 @@ def request(connection, tenant, user, member, device_id, *, reason="requested"):
         raise ServiceError("not_found", "This PC is not connected to the workspace.")
     if device["owner_id"] != user["id"] and not clients.is_admin(user, member):
         raise ServiceError("forbidden", "Only the PC's owner or a workspace admin can refresh its Tally copy.")
+    return desktop.public_job(queue(connection, device, user["id"], reason=reason))
+
+
+def queue(connection, device, actor_id, *, reason):
+    """The PC's queued or running sync, or a new one; callers have authorised the request."""
     desktop.require_companion(device, minimum=(0, 10, 0))
     existing = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation='tally.sync' AND state IN ('queued','executing')
-           ORDER BY created_at DESC LIMIT 1 FOR UPDATE""", (device_id,)).fetchone()
+           ORDER BY created_at DESC LIMIT 1 FOR UPDATE""", (device["id"],)).fetchone()
     if existing and existing["state"] == "executing" and existing["lease_until"] < datetime.now(UTC):
         # The companion stopped mid-sync: revert its builds and start afresh.
         fail(connection, device, existing, "The previous refresh stopped before it finished.")
         connection.execute("""UPDATE desktop_jobs SET state='failed',error='The refresh stopped before it finished.',
                               lease_until=NULL,updated_at=now() WHERE id=%s""", (existing["id"],))
     elif existing:
-        return desktop.public_job(existing)
+        return existing
     task = connection.execute("INSERT INTO tasks(tenant_id,title,summary) VALUES (%s,%s,%s) RETURNING id",
-                              (tenant["id"], f"Refresh Tally copy on {device['name']}", "Waiting for the PC.")).fetchone()
+                              (device["tenant_id"], f"Refresh Tally copy on {device['name']}",
+                               "Waiting for the PC.")).fetchone()
     payload = {"reason": reason[:40]}
     job = connection.execute(
         """INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
            VALUES (%s,%s,%s,%s,'tally.sync',%s,%s,%s) RETURNING *""",
-        (tenant["id"], device_id, user["id"], task["id"], Jsonb(payload), uuid4(),
+        (device["tenant_id"], device["id"], actor_id, task["id"], Jsonb(payload), uuid4(),
          hashlib.sha256(json.dumps(payload).encode()).hexdigest())).fetchone()
-    observe_task(connection, tenant_id=tenant["id"], task_id=task["id"], run_id=job["id"], state="queued",
+    observe_task(connection, tenant_id=device["tenant_id"], task_id=task["id"], run_id=job["id"], state="queued",
                  summary=f"Waiting for {device['name']}.", progress=0, event_prefix="sync")
-    return desktop.public_job(job)
+    return job
 
 
 def background(connection, device, *, now=None):

@@ -88,3 +88,24 @@ def run(connection, tenant_row, client_row, workflow_row, actor, items, *, key=N
                        bundle={"instructions": "Read the bill.", "tools": ["propose"]}, actor_id=actor["id"],
                        request_key=key or uuid4(), request_hash="h", config={"review_mode": "all_outputs"},
                        title="Bill entry", items=items)
+
+
+def books(connection, company, masters, vouchers=()):
+    """Publish one full mirror version of a company's books: native masters and vouchers."""
+    from minkops_platform.accounts import mirror
+    version = mirror.begin(connection, company, kind="full", reason="test", markers={"alt_mst_id": 1, "alt_vch_id": 1},
+                           coverage={"from": "2026-04-01", "to": "2027-03-31"})
+    mirror.upsert_masters(connection, version, list(masters))
+    mirror.upsert_vouchers(connection, version, list(vouchers))
+    return mirror.publish(connection, version)
+
+
+def upload(connection, tenant_row, actor, files):
+    """Files in one uploaded source, as {name: bytes}; returns their rows in order."""
+    import hashlib
+    source = connection.execute("INSERT INTO account_sources(tenant_id,actor_id,label) VALUES (%s,%s,'Uploads') RETURNING id",
+                                (tenant_row["id"], actor["id"])).fetchone()
+    return [connection.execute(
+        """INSERT INTO account_files(tenant_id,source_id,path,sha256,content) VALUES (%s,%s,%s,%s,%s) RETURNING *""",
+        (tenant_row["id"], source["id"], name, hashlib.sha256(content).hexdigest(), content)).fetchone()
+        for name, content in files.items()]

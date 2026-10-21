@@ -1,17 +1,15 @@
 # Statement entry
 
 Reads CSV/XLSX bank statements through a layout learned once per bank format and
-proved against running balances, routes each line to confirmed ledgers using
-pinned discovery, and saves reviewed, verified Payment, Receipt and Contra
-vouchers (including lines split across several ledgers).
+proved against the running balances. Each chunk of rows is routed to the client
+business's Tally ledgers in its own tool session, and reviewed rows are saved as
+verified Payment, Receipt and Contra vouchers, including lines split across
+several ledgers.
 
-- `workflow.json` declares the handler (`accounts.statement`), configuration,
-  the hosted execution bundle (`gpt-6-luna`) and the `layout` stage.
-- `SKILL.md` and `execution-instructions.md` guide classification;
-  `stages/layout.md` declares how a new statement format is read.
-- `agent-output.schema.json` and `stages/layout.schema.json` validate hosted
-  proposals. `output.schema.json` is the descriptor's generic result contract;
-  Accounts does not validate against it.
+- `workflow.json` declares the handler (`desk.statement`), its configuration and
+  the sessions it runs (`gpt-6-luna`, with the `layout` stage).
+- `SKILL.md` is the procedure for routing rows; `stages/layout.md` declares how a
+  new statement format is read.
 
-See [Statement entry](../../../../docs/statement-entry.md) for layouts,
-routing, preview, writes and recovery.
+See [Statement entry](../../../../docs/statement-entry.md) for layouts, routing,
+review, writes and recovery.
