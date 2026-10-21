@@ -313,7 +313,7 @@ class StatementTests(unittest.TestCase):
         updated=self.client.get(self.base+f"/runs/{run['id']}").json()
         self.assertEqual([r['status'] for r in updated['result']['records']],['saved','saved','held'])
         saved=updated['result']['records'][0]['current']
-        self.assertEqual((saved['allocation'],saved['fingerprint'][:3],len(saved['entries'])),(None,'v5:',2))
+        self.assertEqual((saved['allocations'],saved['fingerprint'][:3],len(saved['entries'])),([],'v5:',2))
 
     def test_private_ai_preview_manifest_serial_receipts_and_csv(self):
         run=self.ready()

@@ -274,18 +274,12 @@ class StatementHandler(AccountsHandler):
                 continue
             try:
                 resolved=validated_plan(row,companies(run['config']['statement_context']),proposal)
-                key=f"statement:{resolved['company_guid']}:{resolved['data']['bank_ledger']}"
-                token=str(uuid5(NAMESPACE_URL,f"minkops:{run['tenant_id']}:{key}:{row['identity']}"))
                 row.update(company=resolved['company'],company_guid=resolved['company_guid'],
                     bank_ledger=resolved['data']['bank_ledger'],counter_ledger=resolved['data']['counter_ledger'],
                     interpretation=proposal['evidence'])
-                if resolved['family']=='contra' or resolved['lines']:
-                    row['_resolved']=resolved  # Native v5 voucher, built once pairs are known.
-                    if resolved['lines']:
-                        row['counter_ledger']=' + '.join(line['ledger'] for line in resolved['lines'])
-                else:
-                    row['plan']={**{k:v for k,v in resolved.items() if k not in ('family','lines')},
-                        'format_version':4,'remote_id':token,'operation':'append','destination_key':key}
+                row['_resolved']=resolved  # Its v5 voucher is built once transfer pairs are known.
+                if resolved['lines']:
+                    row['counter_ledger']=' + '.join(line['ledger'] for line in resolved['lines'])
             except ValueError as error:
                 row.update(code='statement_interpretation',reason=str(error),status='held')
         native_plans(run,rows,decisions)
@@ -297,10 +291,7 @@ class StatementHandler(AccountsHandler):
         for indexes in groups.values():
             def accounting(index):
                 plan=result['records'][index]['plan']
-                if plan['format_version']==5:
-                    return json.dumps([plan['family'],plan['header']['date'],plan['lines'],plan['voucher_type']],sort_keys=True)
-                data=plan['data']
-                return json.dumps([data['date'],data['amount_cents'],data['bank_ledger'],data['counter_ledger'],plan['voucher_type'],plan['allocation']],sort_keys=True)
+                return json.dumps([plan['family'],plan['header']['date'],plan['lines'],plan['voucher_type']],sort_keys=True)
             if len({accounting(i) for i in indexes})>1:
                 for i in indexes: result['records'][i].update(status='held',code='statement_conflict',reason='Overlapping files route the same bank transaction differently. Correct the sources before saving.')
             else:
@@ -376,30 +367,17 @@ def accept(connection, device, payload, receipt):
         raise ServiceError('invalid','Invalid statement receipt.')
     outcome=receipt['outcome']
     plan=write['plan']
-    data=plan.get('data')
     raw=receipt
     verified=outcome in ('saved','duplicate')
-    if verified and isinstance(receipt.get('current'),dict) and 'lines' in receipt['current']:
-        # Protocol 5: verify against the upgraded plan, store the row's usual observation.
-        from .vouchers import observed_statement, upgrade
-        upgraded=upgrade(plan,identity=write['identity'])
+    if verified:
+        # Verify against the exact protocol-5 plan this companion was served.
+        from .vouchers import FORMAT, observed_statement
         try:
-            if upgraded is None or receipt.get('company_guid')!=plan['company_guid']: raise ValueError('Native statement readback differs from the approved manifest.')
-            receipt={**receipt,'current':observed_statement(upgraded,plan,receipt['current'])}
+            if plan.get('format_version')!=FORMAT or receipt.get('company_guid')!=plan['company_guid']:
+                raise ValueError('Native statement readback differs from the approved manifest.')
+            receipt={**receipt,'current':observed_statement(plan,receipt.get('current'))}
         except ValueError as error:
             raise ServiceError('invalid',str(error)) from error
-    elif verified:
-        current=receipt.get('current',{})
-        if (not isinstance(current,dict) or not isinstance(current.get('entries'),list)
-            or any(not isinstance(e,dict) or set(e)!={'ledger','amount'} or type(e['amount']) is not int or not isinstance(e['ledger'],str) for e in current['entries'])):
-            raise ServiceError('invalid','Invalid native statement entries.')
-        expected=sorted([{'ledger':data['bank_ledger'],'amount':-data['amount_cents']},
-            {'ledger':data['counter_ledger'],'amount':data['amount_cents']}],key=lambda e:e['ledger'])
-        if (receipt.get('company_guid')!=plan['company_guid'] or current.get('tag')!=plan['remote_id']
-            or current.get('date')!=data['date'].replace('-','') or current.get('voucher_type')!=plan['voucher_type']['NAME']
-            or not isinstance(current.get('guid'),str) or not current['guid'] or not current.get('fingerprint')
-            or current.get('allocation')!=plan.get('allocation') or current.get('entries')!=expected):
-            raise ServiceError('invalid','Native statement readback differs from the approved manifest.')
     result=copy.deepcopy(run['result'])
     row=result['records'][write['record_index']]
     row['status']=outcome if verified else 'held'

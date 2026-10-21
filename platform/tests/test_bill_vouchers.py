@@ -107,7 +107,6 @@ class ResolvedBillTest(unittest.TestCase):
         self.assertEqual(plan["duplicate"]["families"], ["purchase", "journal"])
         self.assertEqual(plan["duplicate"]["window"], {"from": "2026-04-01", "to": "2027-03-31"})
         self.assertEqual(plan["references"]["ledgers"]["Freight Inward"], {"GUID": guid("Freight Inward"), "PARENT": "Direct Expenses", "ALTERID": "5"})
-        self.assertIs(vouchers.upgrade(plan, identity=bill.identity), plan)
 
     def test_a_printed_round_off_balances_the_bill_within_one_rupee(self):
         rounded = proposal(**{"document.total": 6355.40})

@@ -1,11 +1,9 @@
 """Accounting vouchers at the native boundary (plan protocol 5).
 
 A v5 plan is the one contract every voucher family shares: a header and
-balanced ledger lines (connectors/desktop/src/voucher.js writes it). Stored
-plans keep the format they were approved in; a protocol-5 companion receives
-them upgraded here, and its receipts are verified against that upgrade and
-returned in the observation shape the stored run already uses. Upgrading is
-lossless or refused: a plan without pinned native identities is served as is.
+balanced ledger lines (connectors/desktop/src/voucher.js writes it). Bills and
+statement rows are planned in it directly, a companion executes exactly the
+stored plan, and its receipt is verified against that plan.
 """
 
 import hashlib
@@ -68,42 +66,6 @@ def _signed(line):
     return line["amount_cents"] if line["side"] == "credit" else -line["amount_cents"]
 
 
-def _pinned(ledgers, lines):
-    """Every line ledger must carry its discovered GUID; protocol 5 rechecks it."""
-    found = {line["ledger"]: (ledgers or {}).get(line["ledger"]) for line in lines}
-    if any(not isinstance(v, dict) or not v.get("GUID") for v in found.values()):
-        return None
-    return {name: {k: v[k] for k in ("GUID", "PARENT", "ALTERID") if v.get(k) is not None} for name, v in found.items()}
-
-
-def _statement(plan, identity, distinct):
-    data, refs, allocation = plan["data"], plan.get("references") or {}, plan.get("allocation")
-    amount = data.get("amount_cents")
-    if type(amount) is not int or not amount or not refs.get("company_guid") or not plan.get("voucher_type", {}).get("GUID"):
-        return None
-    bank_side, counter_side = ("credit", "debit") if amount < 0 else ("debit", "credit")
-    if allocation is not None:
-        allocation = {k: allocation.get(k) for k in ("category", "category_guid", "centre", "centre_guid")}
-    lines = [_line(data["bank_ledger"], bank_side, abs(amount)), _line(data["counter_ledger"], counter_side, abs(amount), allocation)]
-    ledgers = _pinned(refs.get("ledgers"), lines)
-    if ledgers is None:
-        return None
-    return {
-        "family": "payment" if amount < 0 else "receipt", "fence": "strict",
-        "voucher_type": {"NAME": plan["voucher_type"]["NAME"], "GUID": plan["voucher_type"]["GUID"]},
-        "company_guid": plan["company_guid"],
-        # Statement vouchers have always used the source reference, else their remote ID.
-        "header": {"date": data["date"], "reference": data.get("reference") or plan["remote_id"], "party_ledger": None,
-                   "narration": str(data.get("narration") or "")[:500], "tag": NARRATION_TAG},
-        "lines": lines, "references": {"company_guid": refs["company_guid"], "ledgers": ledgers},
-        "duplicate": {"strategy": "tag", "window": {"from": data["date"], "to": data["date"]},
-                      "match": {"ledger": data["bank_ledger"], "side": bank_side, "amount_cents": abs(amount)},
-                      "distinct": sorted(set(distinct))},
-        "expected": None,
-        "identity": {"version": 2, "series": "statement", "rule": "statement_row", "hash": identity},
-    }
-
-
 def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart=False, legs=None):
     """A native v5 Payment, Receipt or Contra from a routed statement row.
 
@@ -143,22 +105,6 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
         "identity": {"version": 2, "series": "statement", "rule": "statement_row" if not legs else "transfer_pair",
                      "hash": identity, **({"legs": legs} if legs else {})},
     }
-
-
-def upgrade(plan, *, identity, distinct=()):
-    """The v5 form of a stored plan, or None to serve the stored plan unchanged.
-
-    `distinct` lists remote IDs of other rows the server proved to be separate
-    transactions (statement siblings), so equal same-day amounts do not hold.
-    """
-    version = plan.get("format_version", 1)
-    if version == FORMAT:
-        return plan
-    body = _statement(plan, identity, distinct) if version == 4 else None
-    if body is None:
-        return None
-    return {"format_version": FORMAT, "operation": plan.get("operation", "append"), "company": plan["company"],
-            "port": plan.get("port") or 9000, "remote_id": plan["remote_id"], **body}
 
 
 _VIEW = {"guid", "master_id", "date", "voucher_type", "family", "reference", "number", "narration", "party_ledger",
@@ -251,7 +197,7 @@ def observed_bill(plan, outcome, current, *, identity):
             "entries": _entries(current), "fingerprint": current["fingerprint"]}
 
 
-def observed_statement(plan, stored, current):
+def observed_statement(plan, current):
     """A verified v5 statement receipt as the stored row observation."""
     current = _current(current)
     if current["tag"] != plan["remote_id"] or current["voucher_type"] != plan["voucher_type"]["NAME"]:
@@ -259,7 +205,7 @@ def observed_statement(plan, stored, current):
     _exact(plan, current)
     return {"guid": current["guid"], "master_id": current["master_id"], "fingerprint": current["fingerprint"],
             "date": current["date"], "voucher_type": current["voucher_type"], "tag": current["tag"],
-            "entries": _entries(current), "allocation": stored.get("allocation")}
+            "entries": _entries(current), "allocations": current["allocations"]}
 
 
 def observed_document(current, target):

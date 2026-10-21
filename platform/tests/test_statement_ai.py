@@ -97,7 +97,9 @@ def test_source_balance_failure_and_money_cannot_be_overridden():
     held=row(code='statement_balance',reason='Balance mismatch.',status='held')
     assert validate([held],[choice()])[0]['code']=='statement_balance'
     result=validate([row()],[choice(amount_cents=-1,date='2026-01-01')])[0]
-    assert result['amount_cents']==-10000 and result['plan']['data']['amount_cents']==-10000
+    plan=result['plan']
+    assert result['amount_cents']==-10000 and plan['header']['date']=='2026-10-01'
+    assert plan['duplicate']['match']=={'ledger':plan['lines'][0]['ledger'],'side':'credit','amount_cents':10000}
 
 
 def test_duplicate_and_unknown_model_row_references_are_rejected():

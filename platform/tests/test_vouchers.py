@@ -26,15 +26,16 @@ BILL = {
     "expected": None,
     "identity": {"version": 2, "series": "invoice", "rule": "in_invoice_year", "hash": IDENTITY},
 }
-STATEMENT = {
-    "format_version": 4, "operation": "append", "company": "Test", "company_guid": "company", "port": 9000,
-    "remote_id": ID, "destination_key": "statement:company:HDFC",
-    "voucher_type": {"NAME": "Payment", "GUID": "vt-payment"},
-    "allocation": {"category": "Sites", "centre": "Site 4", "category_guid": "cat", "centre_guid": "cc"},
+# What statement_routing.validated_plan resolves for one bank-charge payment.
+RESOLVED = {
+    "family": "payment", "lines": None, "company": "Test", "company_guid": "company", "port": 9000,
     "data": {"date": "2026-10-01", "amount_cents": -1770, "bank_ledger": "HDFC", "counter_ledger": "Bank Charges",
              "reference": "", "narration": "NEFT charges"},
+    "allocation": {"category": "Sites", "centre": "Site 4", "category_guid": "cat", "centre_guid": "cc"},
+    "voucher_type": {"NAME": "Payment", "GUID": "vt-payment"},
     "references": {"company_guid": "company", "ledgers": {k: LEDGERS[k] for k in ("HDFC", "Bank Charges")}},
 }
+STATEMENT = vouchers.statement_voucher(RESOLVED, remote_id=ID, identity="row")
 
 
 def observed(plan, **overrides):
@@ -75,11 +76,11 @@ class InvoiceYearTest(unittest.TestCase):
                             vouchers.document_identity("Supplier", "MOCK-1", date(2026, 10, 1)))
 
 
-class UpgradeTest(unittest.TestCase):
+class StatementVoucherTest(unittest.TestCase):
     def test_payment_keeps_its_tag_reference_and_allocation_and_lists_proven_siblings(self):
         sibling = "87654321-4321-5321-8321-cba987654321"
-        plan = vouchers.upgrade(STATEMENT, identity="row", distinct=[sibling])
-        self.assertEqual((plan["family"], plan["fence"]), ("payment", "strict"))
+        plan = vouchers.statement_voucher(RESOLVED, remote_id=ID, identity="row", distinct=[sibling])
+        self.assertEqual((plan["format_version"], plan["family"], plan["fence"]), (5, "payment", "strict"))
         self.assertEqual(plan["lines"], [
             {"ledger": "HDFC", "side": "credit", "amount_cents": 1770, "allocation": None},
             {"ledger": "Bank Charges", "side": "debit", "amount_cents": 1770,
@@ -90,32 +91,28 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual(plan["duplicate"], {"strategy": "tag", "window": {"from": "2026-10-01", "to": "2026-10-01"},
                                              "match": {"ledger": "HDFC", "side": "credit", "amount_cents": 1770},
                                              "distinct": [sibling]})
-        receipt = vouchers.upgrade({**STATEMENT, "data": {**STATEMENT["data"], "amount_cents": 500, "reference": "UTR9"},
-                                    "voucher_type": {"NAME": "Receipt", "GUID": "vt-receipt"}, "allocation": None}, identity="row")
+        self.assertEqual(plan["identity"], {"version": 2, "series": "statement", "rule": "statement_row", "hash": "row"})
+        receipt = vouchers.statement_voucher({**RESOLVED, "family": "receipt", "allocation": None,
+                                              "data": {**RESOLVED["data"], "amount_cents": 500, "reference": "UTR9"},
+                                              "voucher_type": {"NAME": "Receipt", "GUID": "vt-receipt"}},
+                                             remote_id=ID, identity="row")
         self.assertEqual((receipt["family"], receipt["header"]["reference"]), ("receipt", "UTR9"))
         self.assertEqual([(ln["ledger"], ln["side"]) for ln in receipt["lines"]], [("HDFC", "debit"), ("Bank Charges", "credit")])
 
-    def test_v5_plans_and_unknown_formats_are_not_rewritten(self):
-        self.assertIs(vouchers.upgrade(BILL, identity=IDENTITY), BILL)
-        self.assertIsNone(vouchers.upgrade({**STATEMENT, "format_version": 7}, identity="row"))
-
-    def test_legacy_statement_upgrade_compares_siblings_in_both_plan_formats(self):
+    def test_companions_receive_exactly_the_stored_protocol_five_plan(self):
         from minkops_platform.desktop import _native_plan
+        from minkops_platform.errors import ServiceError
 
-        same = vouchers.upgrade({**STATEMENT, "remote_id": "same-v5"}, identity="same")
-        other = vouchers.upgrade({**STATEMENT, "remote_id": "other-v5",
-            "data": {**STATEMENT["data"], "amount_cents": 1770}}, identity="other")
-        for plan in (same, other):
-            plan["destination_key"] = STATEMENT["destination_key"]
-        run = {"result": {"records": [{"plan": p} for p in (STATEMENT, same, other)]}}
-        upgraded = _native_plan(run, {"plan": STATEMENT, "identity": "legacy"}, 5)
-        self.assertEqual(upgraded["duplicate"]["distinct"], ["same-v5"])
+        self.assertIs(_native_plan({"plan": STATEMENT}, 5), STATEMENT)
+        for plan, version in ((STATEMENT, 4), ({**STATEMENT, "format_version": 4}, 5)):
+            with self.subTest(version=version), self.assertRaises(ServiceError):
+                _native_plan({"plan": plan}, version)
 
 
 class ReceiptTest(unittest.TestCase):
     def setUp(self):
         self.bill = BILL
-        self.statement = vouchers.upgrade(STATEMENT, identity="row")
+        self.statement = STATEMENT
 
     def test_a_bill_receipt_becomes_the_stored_observation_shape(self):
         view = vouchers.observed_bill(self.bill, "saved", observed(self.bill), identity=IDENTITY)
@@ -155,14 +152,14 @@ class ReceiptTest(unittest.TestCase):
         self.assertEqual(vouchers.observed_bill(plan, "saved", kept, identity=IDENTITY)["voucher_type"], "Purchase")
 
     def test_a_statement_receipt_must_carry_its_tag_lines_and_allocation(self):
-        view = vouchers.observed_statement(self.statement, STATEMENT, observed(self.statement))
-        self.assertEqual(view["allocation"], STATEMENT["allocation"])
+        view = vouchers.observed_statement(self.statement, observed(self.statement))
+        self.assertEqual(view["allocations"], [{"ledger": "Bank Charges", "category": "Sites", "centre": "Site 4", "amount_cents": -1770}])
         self.assertEqual(view["entries"], [{"ledger": "Bank Charges", "amount": -1770}, {"ledger": "HDFC", "amount": 1770}])
         self.assertEqual(view["tag"], ID)
         for current in (observed(self.statement, tag=None), observed(self.statement, allocations=[]),
                         observed(self.statement, voucher_type="Receipt"), observed(self.statement, date="20261002")):
             with self.subTest(current=current), self.assertRaises(ValueError):
-                vouchers.observed_statement(self.statement, STATEMENT, current)
+                vouchers.observed_statement(self.statement, current)
 
 
     def test_a_refresh_observation_must_name_the_same_document(self):
