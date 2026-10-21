@@ -67,17 +67,22 @@ def entries(connection, tenant_id, client_id, *, company_ids, kinds=None, subjec
     """Entries for these companies and client-wide ones, optionally of some kinds or about some subjects.
 
     A subject matches an entry's subject, the part of it before its treatment (a supplier's GUID, a payee's
-    name), or any GUID the entry names.
+    name), or any GUID the entry names. A payee's name also matches when one contains the other, as narrations
+    print names with codes or suffixes around them.
     """
     wanted = None if subjects is None else sorted({*subjects, *(_key(subject) for subject in subjects)})
     return connection.execute(
         """SELECT * FROM memory_entries WHERE tenant_id=%s AND client_id=%s AND employee_key=%s
            AND (company_id IS NULL OR company_id = ANY(%s::uuid[])) AND status = ANY(%s)
            AND (%s::text[] IS NULL OR kind = ANY(%s))
-           AND (%s::text[] IS NULL OR subject = ANY(%s) OR split_part(subject, ':', 1) = ANY(%s) OR guids && %s)
+           AND (%s::text[] IS NULL OR subject = ANY(%s) OR split_part(subject, ':', 1) = ANY(%s) OR guids && %s
+                OR (kind = 'routing' AND EXISTS (
+                    SELECT 1 FROM unnest(%s::text[]) AS name WHERE length(name) >= 4 AND length(split_part(subject, ':', 1)) >= 4
+                    AND (position(name IN split_part(subject, ':', 1)) > 0
+                         OR position(split_part(subject, ':', 1) IN name) > 0))))
            ORDER BY kind, subject, company_id""",
         (tenant_id, client_id, employee, list(company_ids), list(statuses), kinds, kinds, wanted, wanted, wanted,
-         wanted)).fetchall()
+         wanted, wanted)).fetchall()
 
 
 def _treatment(guids):

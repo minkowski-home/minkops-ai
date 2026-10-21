@@ -377,6 +377,10 @@ def test_an_approved_row_writes_once_and_an_interrupted_save_is_never_resent(des
                               company_ids=[desk["company"]["id"]], kinds=["routing"], subjects=["Acme  steel"])
     assert (learnt["status"], learnt["value"]) == ("confirmed", {"payee": "ACME STEEL", "counter_ledger": "Acme Steel",
                                                                  "voucher_type": "Payment"})
+    # A narration may name the payee with a code or a suffix around it.
+    assert [row["id"] for row in memory.entries(desk["db"], desk["tenant"]["id"], desk["client"]["id"],
+                                                company_ids=[desk["company"]["id"]], kinds=["routing"],
+                                                subjects=["QA ACME STEEL TRADERS"])] == [learnt["id"]]
 
 
 def test_an_unsettled_date_order_waits_for_one_answer_then_reads_the_rows(desk):
