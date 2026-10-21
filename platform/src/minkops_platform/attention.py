@@ -94,7 +94,8 @@ def get(connection, tenant_id, item_id):
     return row
 
 
-def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest"):
+def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest", visible=None):
+    """Items by group and order; `visible` limits client work to reachable clients."""
     grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status"}[group]
     ordering = "a.identifier" if sort == "name" else "a.updated_at DESC"
     rows = connection.execute(
@@ -106,7 +107,9 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
         FROM attention_items a JOIN tasks t ON t.id=a.task_id AND t.tenant_id=a.tenant_id
         LEFT JOIN workflows w ON w.id=t.workflow_id AND w.tenant_id=a.tenant_id
         WHERE a.tenant_id=%s AND (%s='all' OR a.status=%s)
-        ORDER BY {grouping},{ordering},a.id LIMIT 200 OFFSET %s""", (tenant_id, status, status, offset)
+          AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
+        ORDER BY {grouping},{ordering},a.id LIMIT 200 OFFSET %s""",
+        (tenant_id, status, status, *(2 * [None if visible is None else list(visible)]), offset)
     ).fetchall()
     from .accounts.bill_review import reason_sentence
     for row in rows:

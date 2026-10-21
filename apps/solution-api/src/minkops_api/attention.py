@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from minkops_platform import attention
+from minkops_platform import attention, clients
 from minkops_platform.accounts.attention import decide
 
 from .accounts import _call
@@ -18,8 +18,9 @@ router = APIRouter(prefix="/api/tenants/{slug}/attention")
 def items(slug: str, user: User, connection: Db, status: Literal["pending", "done", "all"] = "pending",
           offset: int = Query(default=0, ge=0), group: Literal["workflow", "employee", "status"] = "workflow",
           sort: Literal["newest", "name"] = "newest"):
-    tenant, _ = tenant_access(slug, user, connection)
-    return _call(attention.listing, connection, tenant["id"], status=status, offset=offset, group=group, sort=sort)
+    tenant, member = tenant_access(slug, user, connection)
+    return _call(attention.listing, connection, tenant["id"], status=status, offset=offset, group=group, sort=sort,
+                 visible=clients.visible_ids(connection, tenant, user, member))
 
 
 @router.post("/refresh")

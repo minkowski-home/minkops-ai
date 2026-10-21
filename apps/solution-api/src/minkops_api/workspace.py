@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
+from minkops_platform import clients
 from minkops_platform.run_controls import owns_task, task_control
 from minkops_platform.runtime.launch import installed_definition
 
@@ -53,28 +54,37 @@ def workflows_for(connection, tenant_id):
     return workflows
 
 
-def tasks_for(connection, tenant_id):
+def tasks_for(connection, tenant_id, visible=None):
+    """Recent tasks; `visible` limits client work to the clients a member can reach."""
     return connection.execute(
-        """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
+        """SELECT id, workflow_id, client_id, title,
+                  CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
                   control_state, progress, summary, created_at, updated_at,
                   (SELECT e.event_type FROM task_events e WHERE e.tenant_id=tasks.tenant_id AND e.task_id=tasks.id
                    AND e.event_type IN ('queued','executing','review','approved','writing','completed') ORDER BY e.id DESC LIMIT 1) AS stage
-           FROM tasks WHERE tenant_id = %s ORDER BY updated_at DESC LIMIT 100""",
-        (tenant_id,),
+           FROM tasks WHERE tenant_id = %s AND (client_id IS NULL OR %s::uuid[] IS NULL OR client_id = ANY(%s::uuid[]))
+           ORDER BY updated_at DESC LIMIT 100""",
+        (tenant_id, *(2 * [None if visible is None else list(visible)])),
     ).fetchall()
 
 
 @router.get("/workspace")
 def workspace(slug: str, user: User, connection: Db):
     tenant, member = tenant_access(slug, user, connection)
+    visible = clients.visible_ids(connection, tenant, user, member)
+    scope = None if visible is None else list(visible)
     return {
         "tenant": {"slug": tenant["slug"], "name": tenant["name"]},
         "can_edit": user["is_platform_admin"] or (member and member["role"] == "admin"),
+        "clients": clients.listing(connection, tenant, user, member),
         "employees": employees_for(connection, tenant["id"]),
         "workflows": workflows_for(connection, tenant["id"]),
-        "tasks": tasks_for(connection, tenant["id"]),
-        "attention_count": connection.execute("SELECT count(*) AS n FROM attention_items WHERE tenant_id=%s AND status='pending'",
-                                              (tenant["id"],)).fetchone()["n"],
+        "tasks": tasks_for(connection, tenant["id"], visible),
+        "attention_count": connection.execute(
+            """SELECT count(*) AS n FROM attention_items a JOIN tasks t ON t.tenant_id=a.tenant_id AND t.id=a.task_id
+               WHERE a.tenant_id=%s AND a.status='pending'
+                 AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))""",
+            (tenant["id"], scope, scope)).fetchone()["n"],
     }
 
 
