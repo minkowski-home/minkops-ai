@@ -56,6 +56,12 @@ def companion_report(version, host, session):
             "remote_session": {"remote": True, "console": False}.get(session)}
 
 
+def companion_at_least(report, minimum):
+    """Whether a poll's reported companion is at least this version."""
+    version = report.get("companion_version")
+    return bool(version) and tuple(int(part) for part in version.split(".")) >= minimum
+
+
 def require_companion(device, *, minimum=MINIMUM_COMPANION):
     """Refuse Tally work an outdated companion would mishandle.
 
@@ -496,6 +502,9 @@ def claim(connection, device, report=None):
         WHERE id=%s""",
         (report["companion_version"], report["hostname"], report["remote_session"], device["id"]),
     )
+    if companion_at_least(report, (0, 10, 0)):
+        from .accounts.sync import background
+        background(connection, device)
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
            (state='executing' AND operation NOT IN ('tally.save','tally.statement','attention.supplier','tally.sync') AND lease_until<now()))

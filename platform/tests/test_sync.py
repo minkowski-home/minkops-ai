@@ -290,3 +290,20 @@ def test_a_nightly_sweep_is_due_after_twenty_hours():
     published = datetime(2026, 10, 21, 0, 0, tzinfo=UTC)
     assert not sync.sweep_due({"published_at": published, "swept": True}, datetime(2026, 10, 21, 19, tzinfo=UTC))
     assert sync.sweep_due({"published_at": published, "swept": True}, datetime(2026, 10, 21, 21, tzinfo=UTC))
+
+
+def test_an_idle_pc_gets_one_background_refresh_per_interval_on_one_task(pc):
+    from datetime import timedelta
+    tally = Tally()
+    db, device = pc["db"], pc["device"]
+    assert sync.background(db, device) is None  # Nothing authorised, nothing to keep current.
+    authorised(pc, tally)
+    db.execute("UPDATE desktop_jobs SET state='completed' WHERE device_id=%s", (device["id"],))
+    later = datetime.now(UTC) + sync.BACKGROUND_EVERY + timedelta(minutes=1)
+    first = sync.background(db, device, now=later)
+    assert first["input"] == {"reason": "background"}
+    assert sync.background(db, device, now=later) is None  # Already queued.
+    db.execute("UPDATE desktop_jobs SET state='completed',updated_at=%s WHERE id=%s", (later, first["id"]))
+    assert sync.background(db, device, now=later + timedelta(minutes=5)) is None  # Too soon.
+    second = sync.background(db, device, now=later + sync.BACKGROUND_EVERY + timedelta(minutes=1))
+    assert second["task_id"] == first["task_id"]

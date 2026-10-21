@@ -36,6 +36,7 @@ PROTOCOL = 1
 BATCH = 5000
 PAGE_RECORDS = 500
 SWEEP_EVERY = timedelta(hours=20)
+BACKGROUND_EVERY = timedelta(minutes=15)
 PAGE_KINDS = {"companies", "masters", "vouchers", "counts", "census", "master_census"}
 
 
@@ -94,6 +95,41 @@ def request(connection, tenant, user, member, device_id, *, reason="requested"):
     observe_task(connection, tenant_id=tenant["id"], task_id=task["id"], run_id=job["id"], state="queued",
                  summary=f"Waiting for {device['name']}.", progress=0, event_prefix="sync")
     return desktop.public_job(job)
+
+
+def background(connection, device, *, now=None):
+    """Queue an idle PC's periodic refresh, so a run's "Get ready" finds a small delta.
+
+    Only for a PC with authorised companies, nothing queued or running, and no
+    sync finished within BACKGROUND_EVERY. Background refreshes share one task
+    per PC rather than adding one to the dashboard each time. The nightly sweep
+    needs no scheduler of its own: every sync checks whether one is due.
+    """
+    now = now or datetime.now(UTC)
+    if not connection.execute("SELECT 1 FROM companies WHERE device_id=%s AND status='authorised' LIMIT 1",
+                              (device["id"],)).fetchone():
+        return None
+    if connection.execute("SELECT 1 FROM desktop_jobs WHERE device_id=%s AND state IN ('queued','executing') LIMIT 1",
+                          (device["id"],)).fetchone():
+        return None
+    # When this PC's latest sync last changed, which for a finished one is when it ended.
+    last = connection.execute(
+        """SELECT updated_at FROM desktop_jobs WHERE device_id=%s AND operation='tally.sync'
+           ORDER BY updated_at DESC LIMIT 1""", (device["id"],)).fetchone()
+    if last and now - last["updated_at"] < BACKGROUND_EVERY:
+        return None
+    previous = connection.execute(
+        """SELECT task_id FROM desktop_jobs WHERE device_id=%s AND operation='tally.sync' AND input->>'reason'='background'
+           ORDER BY created_at DESC LIMIT 1""", (device["id"],)).fetchone()
+    task = previous or connection.execute(
+        "INSERT INTO tasks(tenant_id,title,summary) VALUES (%s,%s,%s) RETURNING id AS task_id",
+        (device["tenant_id"], f"Keep Tally copy current on {device['name']}", "Waiting for the PC.")).fetchone()
+    payload = {"reason": "background"}
+    return connection.execute(
+        """INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
+           VALUES (%s,%s,%s,%s,'tally.sync',%s,%s,%s) RETURNING *""",
+        (device["tenant_id"], device["id"], device["owner_id"], task["task_id"], Jsonb(payload), uuid4(),
+         hashlib.sha256(json.dumps(payload).encode()).hexdigest())).fetchone()
 
 
 def plan(connection, device, job, *, today=None):
