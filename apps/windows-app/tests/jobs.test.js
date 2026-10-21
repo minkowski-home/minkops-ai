@@ -57,6 +57,22 @@ test("a voucher plan newer than this companion executes is refused before Tally 
   assert.equal(saved, false);
 });
 
+test("a run's write saves its stored plan behind the durable local fence", async () => {
+  const plan = { format_version: 5, remote_id: "4f1c2f4e-0d63-5b5e-9d3a-2a51f0f4a001", fence: "strict" };
+  const fenced = [];
+  const request = async (path) => {
+    assert.match(path, /\/jobs\/job-1\/plan\?claim_token=claim-1/);
+    return plan;
+  };
+  const saveVoucher = async (voucher, { beforeImport, pc }) => {
+    assert.deepEqual([voucher, pc], [plan, "TEST-PC"]);
+    fenced.push(await beforeImport(voucher));
+    return { outcome: "saved", current: { guid: "g-1" } };
+  };
+  const result = await executor({ request, connectors: { saveVoucher } })(job("tally.write", { write_id: "w-1" }));
+  assert.deepEqual([result, fenced], [{ outcome: "saved", current: { guid: "g-1" } }, [true]]);
+});
+
 test("a failed connection check leaves a diagnostic for the receipt", async () => {
   const recorded = [];
   const checkTally = async () => { throw Object.assign(new Error("Tally isn't open on TEST-PC."), { tallyState: "not_running" }); };

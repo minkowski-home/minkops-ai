@@ -238,8 +238,8 @@ def enqueue_approved(connection, run, device_id, operation, write_id):
 def _observe(connection, job, state, summary, progress):
     if job["operation"] == "tally.sync" and state in ("completed", "failed"):
         return  # The sync's own finish or failure publishes its outcome.
-    if job["operation"] == "tally.statement":
-        return  # The statement manifest/receipt owns its lifecycle and progress.
+    if job["operation"] in ("tally.statement", "tally.write"):
+        return  # The run's records own their lifecycle and progress.
     if job["operation"].startswith("attention."):
         return  # Attention events have their own durable lifecycle and audit.
     if job["operation"] == "sources.discover":
@@ -504,10 +504,12 @@ def claim(connection, device, report=None):
     )
     if companion_at_least(report, (0, 10, 0)):
         from .accounts.sync import background
+        from .accounts.writes import recover
+        recover(connection, device)
         background(connection, device)
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('tally.save','tally.statement','attention.supplier','tally.sync') AND lease_until<now()))
+           (state='executing' AND operation NOT IN ('tally.save','tally.statement','tally.write','attention.supplier','tally.sync') AND lease_until<now()))
            AND (operation='attention.refresh' OR EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id AND t.control_state='active'))
            ORDER BY CASE WHEN operation='tally.save' THEN
              (SELECT company FROM account_tally_writes WHERE id::text=desktop_jobs.input->>'write_id' AND tenant_id=desktop_jobs.tenant_id)
@@ -571,6 +573,9 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
     if job["state"] == "executing" and job["operation"] == "tally.sync":
         from .accounts.sync import plan as sync_plan
         return sync_plan(connection, device, job)
+    if job["state"] == "executing" and job["operation"] == "tally.write":
+        from .accounts.writes import plan as write_plan
+        return write_plan(connection, device, job, plan_version)
     if job["state"] == "executing" and job["operation"] == "tally.statement":
         from .accounts.tally_writes import spec
         run, write = spec(connection, device, job["input"], underway=True)
@@ -697,6 +702,11 @@ def finish(connection, device, job_id, receipt):
         from .accounts.statements import accept
         result = accept(connection, device, job["input"], result if result is not None else {"outcome": "attention"})
         summary = "Statement voucher verified." if result["verified"] else "Statement row needs attention."
+    elif job["operation"] == "tally.write":
+        from .accounts import writes
+        result = (writes.accept(connection, device, job, result) if result is not None
+                  else writes.interrupted(connection, device, job, error))
+        summary = "Entry saved and verified in Tally." if result and result["verified"] else "Entry needs attention."
     elif job["operation"] == "tally.save":
         from .accounts.tally_writes import accept
 
@@ -741,6 +751,9 @@ def finish(connection, device, job_id, receipt):
         from .accounts.repository import run_for
         from .accounts.statements import dispatch_next
         dispatch_next(connection, run_for(connection, device["tenant_id"], job["input"]["run_id"]))
+    if job["operation"] == "tally.write":
+        from .accounts.writes import dispatch
+        dispatch(connection, device["tenant_id"], device["id"])
     summary = (
         error
         or summary
