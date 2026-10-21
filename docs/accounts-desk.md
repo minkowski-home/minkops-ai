@@ -19,8 +19,10 @@ reaches the browser, the companion or a session's tools.
    layout, or a chunk of up to 100 statement rows. The worker's lanes claim items
    and run each in its own tool session.
 3. **Proposals.** A session looks things up with read-only tools scoped to the
-   run, each call logged, and proposes. The server checks every proposal against
-   the pinned books at once, and tells the session what it refused and why.
+   run, each call logged, and proposes. Its lookups include the client's memory:
+   what approved saves taught, the rules people wrote, and how each company keeps
+   its books. The server checks every proposal against the pinned books at once,
+   and tells the session what it refused and why.
 4. **Review.** Each bill or statement row is a record. It moves from `pending`
    through `proposed` or `held`, then `approved` and `writing`, and ends `saved`
    or `duplicate`; Do nothing makes it `deferred`. Decisions are idempotent per
@@ -38,6 +40,22 @@ and never starts, closes or restarts Tally. See
 
 The review surface arrives in rebuild slice 10. Until then, runs are driven
 through the runs API listed in [Bill entry](bill-entry.md#launching-a-run).
+
+## Memory
+
+Each client business keeps a memory per employee (`accounts/memory.py`), shared by
+the employee's workflows and looked up only when a session needs it:
+
+- **Learnt entries.** Verified saves a person approved teach how a supplier's bills
+  and a payee's bank rows are booked, and the sync's probes, or a person's one-click
+  answer, settle how each company keeps its books. Every sync revalidates them: an
+  edit made in Tally demotes an entry, and one whose ledgers are gone retires.
+- **Rules.** Plain-text instructions only people write, scoped to a workflow or a
+  company, versioned, and cited by the proposals that follow them. A solution can
+  seed the rules its client agreed at installation, once.
+
+The memory page shows both. Every member who can reach the client reads it, and
+only admins change it. See [Bill entry](bill-entry.md#memory-and-practice).
 
 ## Recovery
 

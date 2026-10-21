@@ -66,7 +66,9 @@ record a proposal for the run's own review, and they scope themselves to the run
 
 `solutions/<client>/installation.json` selects an **existing** tenant and its
 employees; for example, `{"tenant": "mock-tenant", "employees": ["accounts-desk"]}`.
-Each employee's `binding.json` lists its workflows:
+It may also name the solution's own client business, `"client": {"slug": ..., "name": ...}`,
+which installation creates if it is missing. Each employee's `binding.json` lists its
+workflows:
 
 ```json
 {
@@ -76,6 +78,10 @@ Each employee's `binding.json` lists its workflows:
   ]
 }
 ```
+
+A binding may also list `rules` the client agreed, each `{key, workflow, text}`.
+They need the solution's client business: installation seeds each into the
+employee's memory once, by its key, and an admin's later edit or deletion stands.
 
 Apply migrations, then validate and install with the uv stack:
 

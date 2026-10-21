@@ -320,3 +320,21 @@ All 15 files were read in 4 min 10 s from launch across four lanes; a session to
 - **Correction reasons.** A bill meeting another version in Tally now says what differs: date, total, ledgers or line amounts.
 - **Rechecks kept their first start time,** inflating session timings. A new attempt now starts its own clock.
 - **The HTTP smoke test** announced a long-retired companion and plan, so the server refused its Tally check. It now sends this build's version and plan, which the companion runtime declares once.
+
+## Memory and practice, rehearsed live (21 October 2026)
+
+The same local stack ran slice 6 against the rehearsal companies:
+
+- **A practice answer.** Sachin Infra's open question, how bank payments are booked, was answered through Attention's decision endpoint. The card closed, and its answer became the company's confirmed practice.
+- **A rule.** An admin wrote one through the memory API: plant spares from one supplier go to plant repairs. Every session read it. The first bill from that supplier cited it, and the proposal kept the rule's text.
+- **Bookings learnt.** Four new bills were approved and saved, all verified. Each taught its supplier's booking: the voucher type and the expense ledgers, not the taxes or round-off the bill printed.
+- **An edit made in Tally.** One saved purchase was rebooked in Tally to another expense ledger. The next sync took 3 s, revalidated memory and demoted that booking. Read again, the bill followed the corrected books, without review. Approving it found Tally already holding exactly that voucher, a verified duplicate, and memory then held the corrected booking beside the demoted one.
+- **Routings learnt.** The two-bank statements were approved again. All 11 rows reconciled with the vouchers already in Tally, nothing was added, and 7 payee routings were learnt.
+
+**Usage.** Five runs (four bill, one statement) used 7 sessions: 749,000 input tokens (80% cached) and 19,900 output tokens.
+
+**Found and fixed along the way:**
+
+- **Rules missed by subject.** A session searched rules by its company's name, which no rule mentions, and missed the rule its supplier followed. `rules` now returns every active rule, bounded at 30 per client and employee.
+- **A booking that changed value.** A supplier's second bill printed a round-off, so the booking learnt from its first changed value. Bookings are now the treatment alone, one entry for each way a supplier is booked.
+- **Payees named two ways.** Some payees were named with the statement's code prefix and some without. A lookup now also matches a routing whose name contains the asked name, or is contained in it.

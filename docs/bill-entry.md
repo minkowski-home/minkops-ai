@@ -50,7 +50,9 @@ books with read-only tools, each logged per call:
 - `find_ledger`: by name, alias, GSTIN or bank account, with each ledger's group and description;
 - `voucher_types` and `cost_centres`;
 - `party_history`: how the client booked a supplier's or a ledger's earlier vouchers, including their stock items;
-- `check_gstin`: whether a GSTIN read from the bill is valid, and its state.
+- `check_gstin`: whether a GSTIN read from the bill is valid, and its state;
+- `memory`, `rules` and `practice`: what Minkops learnt about a supplier, the client's own rules, and how a
+  company keeps its books (see [Memory and practice](#memory-and-practice)).
 
 It then calls `propose` with `count`, the number of bills the file holds, and
 the bills numbered in the order they appear. Companion pages such as e-way bills,
@@ -59,7 +61,10 @@ proposal is checked at once and either accepted, rejected with a reason the
 session can act on, or held. A bill has three attempts. A reading that changes a
 printed fact after a refusal goes to review. Where the PDF has a text layer, the
 total and any round-off must be amounts that layer prints. When the file is read
-again, bills a person has already decided keep their numbers.
+again, bills a person has already decided keep their numbers. A bill that follows
+one of the client's rules cites its ID, and the proposal keeps the text it
+followed. A receipt-register stamp (DMR, GRN or MRN) is read as printed, with its
+number and date.
 
 ## The gate
 
@@ -96,7 +101,9 @@ whatever the review mode, when:
 
 - it books the supplier differently from every earlier voucher of theirs (another
   voucher type or expense ledger, or without the stock items they carried). One
-  approval confirms the booking, because the saved voucher becomes its precedent;
+  approval confirms the booking, which memory then holds as a precedent;
+- it books the supplier the way someone changed in Tally since Minkops saved it,
+  or the way a best guess first did;
 - its reading changed after a refusal;
 - it is a copy of a bill in another file, or a best guess.
 
@@ -114,6 +121,7 @@ offers only Do nothing and Recheck.
 | `supplier_missing` | Create this ledger, Do nothing, Recheck |
 | `company_not_open`, `no_company`, `duplicate_company`, `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response`, `rejected`, `save_waiting`, `save_interrupted`, `save_held` | Retry save, Do nothing |
 | `run_stopped`, `destination_changed` | Do nothing |
+| `practice_question` | Do nothing; the answer in Attention releases it |
 
 Best guess write is offered only when the held bill's complete candidate passes
 the gate, and Create this ledger only when the supplier can be created safely
@@ -123,6 +131,40 @@ decision sent twice returns one receipt. Stop is final: unsaved bills hold as
 `run_stopped`, and writes no PC has started are withdrawn. A ledger, voucher type
 or cost allocation that changed in Tally after the run read the books holds as
 `destination_changed`; start a new run for that bill.
+
+## Memory and practice
+
+Treatment follows, in order: a legible handwritten instruction on the bill, the
+client's rules, what Minkops learnt, then the books' history. Tally's masters and
+the gate bind all of them. Memory belongs to the client business and the Accounts
+desk employee (`accounts/memory.py`):
+
+- **Bookings.** A verified save a person approved is one way its supplier's bills
+  are booked: the voucher type and expense ledgers, by GUID. Approving the same
+  booking again uses its entry; a supplier booked two ways has two. A best guess
+  stays unconfirmed until a person approves a bill booked that way.
+- **Upkeep.** Every sync revalidates the entries. An edit made in Tally to a voucher
+  an entry was learnt from, or its deletion, demotes the entry, and the next bill
+  booked that way goes to review. An entry whose ledgers are missing from three
+  syncs in a row retires. A renamed ledger is still the same booking.
+- **Rules.** Plain-text instructions only people write, scoped to a workflow or
+  company, versioned and cited by ID. Sessions read every active rule in scope,
+  so a client keeps at most 30 active rules per employee.
+- **Practice.** After every sync, deterministic probes settle how a company keeps
+  its books, such as where it types invoice numbers and whether it records
+  receipt-register numbers. A probe the history cannot settle raises one
+  one-click question per company in [Attention](attention.md).
+
+Practice shapes the plan. A company that records receipt-register numbers in the
+narration gets the stamp there. While that question is open, a bill with a stamp
+holds as `practice_question`; the answer re-checks it, and standing approval then
+writes a clean one. Duplicates are sought where the company types invoice
+numbers, or in both the reference and the narration while that is unsettled.
+
+The memory page shows a client's entries, with their status and the evidence
+behind them, and its rules. Every member who can reach the client reads it, and
+only admins disable, enable or delete entries or change rules
+(`/api/tenants/{slug}/clients/{client}/memory`).
 
 ## Saving
 

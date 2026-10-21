@@ -66,7 +66,17 @@ own session with the lookup tools:
 | `find_transfer` | Rows in the run that could be the other leg of a transfer |
 | `pair_return` | For a returned payment's UTR, the original in the run or in Tally |
 | `mapping` | Rows of the client's mapping file that mention a label |
+| `memory` | How rows with a payee were booked when a person approved them, by the payee's name |
+| `rules` | Every active rule people wrote for the client's statement work, with its ID and version |
+| `practice` | How a company keeps its books, such as how it books bank payments |
 | `propose` | One proposal per row, checked as it arrives |
+
+A row names its payee as the narration prints it, and cites the IDs of the rules it
+follows; the server checks each citation and keeps the text the row followed. A
+verified row a person approved becomes a routing in the client's memory: the counter
+ledger and voucher type for its payee. A lookup by a payee's name also finds a
+routing learnt under a name that contains it, or that it contains, and an edit made
+in Tally to the saved voucher demotes it (see [Bill entry](bill-entry.md#memory-and-practice)).
 
 `propose` checks each row against the pinned company with `validated_plan`:
 

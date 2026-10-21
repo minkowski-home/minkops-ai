@@ -17,10 +17,11 @@ what belongs to no single record:
 | New company found | A PC's sync shows a company the tenant has not authorised (`accounts/sync.py`) | Authorising it for a client business (`POST /api/tenants/{slug}/companies/{id}/authorise`), which mirrors it |
 | Statement layout question | Only a person can settle a sheet's date order, or how to read rows without a running balance (`accounts/statement_layouts.py`) | Its answer, which reads the waiting rows |
 | Transactions missing | A statement opens at a different balance from where the previous one for that bank ledger closed (`accounts/statement_entry.py`) | Done, once the missing statement is entered |
-| Practice question | The mirror cannot settle how the client books something, such as whether Receipt Notes are in use (`accounts/practice.py`) | Its one-click answer, arriving with rebuild slice 6 |
+| Practice question | The mirror cannot settle how the client books something, such as whether Receipt Notes are in use (`accounts/practice.py`) | Its one-click answer, which becomes the company's practice and releases the bills that waited on it |
 
-A question card is answered with `POST /api/tenants/{slug}/attention/{item}/decision`
-and one of its offered actions, once per member. The same answer sent again
+A question card carries its prompt and the answers the server offers, each with its
+label. It is answered with `POST /api/tenants/{slug}/attention/{item}/decision` and
+one of those actions, once per member. The same answer sent again
 returns its receipt; a different one conflicts. `GET` on the same path returns
 the receipt.
 
