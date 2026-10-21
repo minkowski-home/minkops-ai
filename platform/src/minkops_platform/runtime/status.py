@@ -7,7 +7,11 @@ def execution_status(connection, run, control="active"):
         FROM workflow_runs WHERE tenant_id=%s AND (id=%s OR parent_run_id=%s) AND NOT superseded""",
         (run["tenant_id"], run["id"], run["id"])).fetchall()
     children = [r for r in rows if str(r["id"]) != str(run["id"])]
-    bills = [r for r in children if r["execution_stage"] is None] or [r for r in rows if not children]
+    bills = [r for r in children if r["execution_stage"] is None]
+    if not bills and not run['config'].get('batch'):
+        # A statement's layout is preparatory; classification executes on the
+        # parent itself. Completed layout children must not hide that activity.
+        bills = [r for r in rows if str(r['id']) == str(run['id'])]
     ready = sum(r["state"] in ("review", "completed", "failed") for r in bills)
     active = sum(r["state"] == "executing" for r in bills)
     queued = sum(r["state"] == "queued" for r in bills)
