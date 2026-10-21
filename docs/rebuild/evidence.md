@@ -202,3 +202,17 @@ Confidence: **[D]** documented by Tally; **[I]** seen in open-source integrator 
   - The loader excludes cancelled and optional vouchers [I, S2], so a change into either state looks like a deletion.
 
 The sync algorithm in the [README](README.md#sync-algorithm) is built from these findings and marks the steps that still need the rehearsal.
+
+### Rehearsed on TallyPrime Edit Log 1.1.7.2 (21 October 2026)
+
+These were run on *Test Company*, one of the five synthetic rehearsal companies. The probes were ₹1.00 Journals tagged `[Minkops rehearsal]`, dated 31 October for Educational mode, and every one was deleted afterwards.
+
+- **A delta by AlterID works.** A `Voucher` collection filtered by `$AlterID > N` returns exactly the vouchers altered since marker *N*.
+- **Per-date counts need a source collection.** `BY` and `AGGRCOMPUTE` work only on a collection built from a `SOURCECOLLECTION`; on a typed collection they are ignored and every voucher comes back. A numeric day key avoids two-digit-year strings: `BY VchDay:($$YearOfDate:$Date * 10000 + $$MonthOfDate:$Date * 100 + $$DayOfDate:$Date)`. The same form with `BY All:1` gives an independent count of each master type.
+- **Each creation advances `$AltVchId` by 1.** Over the whole rehearsal it rose from 74 to 86 and never reused a value.
+- **Deleting a voucher removes it from collections and counts.** This held in the Edit Log edition too: it was not kept with `ISDELETED` or `ISDELETEDVCHRETAINED`. One deletion advanced `$AltVchId` by 3. A deletion therefore triggers the next delta, and the census then finds the missing GUID. Deletion through XML import (`ACTION="Delete"` with `TAGNAME="MASTER ID"`) succeeds.
+- **A cancelled voucher stays in collections** with `ISCANCELLED=Yes`, and the cancellation raises its `AlterID`, so the next delta collects the change. Cancelling through XML import needs the voucher's date, type and narration in the body; a bare `ACTION="Cancel"` is refused as an empty object.
+- **An optional voucher is in collections and counts** with `ISOPTIONAL=Yes`.
+- **Collections with `FETCH *` carry every master field the gates read.** For ledgers that means `PARENT`, `ISBILLWISEON`, `ISCOSTCENTRESON`, `PARTYGSTIN`, the bank details and the nested GST, mailing and alias lists. Voucher types carry `RESERVEDNAME`, `ISACTIVE` and `NUMBERINGMETHOD`; stock items carry their units and GST/HSN lists. Fields left at their default "No" are omitted, unlike the "List of Accounts" export.
+
+Still to rehearse: Split Company Data, and restoring an older backup. Both need Tally's UI and are listed for manual testing in the README.

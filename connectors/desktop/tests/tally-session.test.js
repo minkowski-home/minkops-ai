@@ -70,6 +70,9 @@ test("duplicate open names or GUIDs block because requests address companies by 
         error.tallyState === "duplicate_company" &&
         /Close one in Tally on PRAHLAD-GADHWAL/.test(error.message),
     );
+  // A repeated GUID names both companies, not the first one twice.
+  assert.throws(() => openCompanyScope([{ company: "Original", company_guid: "a" }, { company: "Backup", company_guid: "a" }]),
+    { message: /^Original and Backup share one company identity\./ });
 });
 
 test("an empty or oversized open scope is a typed state, not a crash", () => {

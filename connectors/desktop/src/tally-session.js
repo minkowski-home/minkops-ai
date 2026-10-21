@@ -57,8 +57,9 @@ const MESSAGES = {
   busy: (pc) =>
     `Tally on ${pc} is not responding. Finish any password prompt or open dialog in Tally, or wait for a large report to finish, then try again.`,
   no_company: (pc) => `Open at least one company in Tally on ${pc}, then try again.`,
-  duplicate_company: (pc, name) =>
-    `Two open companies are named ${name}. Close one in Tally on ${pc}, then try again.`,
+  duplicate_company: (pc, name, other) => other
+    ? `${name} and ${other} share one company identity. Close one in Tally on ${pc}, then try again.`
+    : `Two open companies are named ${name}. Close one in Tally on ${pc}, then try again.`,
   too_many: (pc) =>
     `More than ${MAX_OPEN_COMPANIES} companies are open in Tally on ${pc}. Close the ones you don't need, then try again.`,
   invalid_response: (pc) =>
@@ -147,8 +148,10 @@ export function openCompanyScope(companies, { pc = "this PC" } = {}) {
     guids = new Map();
   for (const company of companies) {
     const name = company.company.toLowerCase();
-    const repeated = names.get(name) ?? guids.get(company.company_guid);
-    if (repeated) throw unavailable("duplicate_company", pc, repeated.company);
+    if (names.get(name)) throw unavailable("duplicate_company", pc, names.get(name).company);
+    // A repeated GUID with different names: name both companies, not the first twice.
+    const twin = guids.get(company.company_guid);
+    if (twin) throw unavailable("duplicate_company", pc, twin.company, company.company);
     names.set(name, company);
     guids.set(company.company_guid, company);
   }

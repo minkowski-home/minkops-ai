@@ -151,3 +151,4 @@ export async function inventory(root) {
 
 export { inspectTallyAttention } from "./tally.js";
 export { saveVoucher } from "./voucher.js";
+export { runSync } from "./sync.js";
