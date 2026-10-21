@@ -13,6 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.assets import config_json
 
 from .repository import observe, run_for
 
@@ -87,7 +88,7 @@ def create_child(connection, run, file_id, *, config=None, file_ids=None, stage=
             run["definition_version"],
             uuid4(),
             run["request_hash"],
-            Jsonb(config),
+            config_json(connection, run["tenant_id"], config),
             Jsonb(file_ids),
             run["catalog_id"],
             run["id"],
@@ -145,7 +146,7 @@ def resolve_bill(connection, tenant, user, run_id, file_id, reject):
             if not run["config"]["tally_target"].get("schema_only"):
                 connection.execute(
                     "UPDATE account_runs SET config=%s WHERE id=%s",
-                    (Jsonb(run["config"]), run_id),
+                    (config_json(connection, run["tenant_id"], run["config"]), run_id),
                 )
         connection.execute(
             "UPDATE account_runs SET config=config || '{\"superseded\":true}'::jsonb WHERE tenant_id=%s AND parent_run_id=%s AND file_ids @> %s",

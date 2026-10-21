@@ -4,10 +4,10 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from jsonschema import ValidationError
-from psycopg.types.json import Jsonb
 
 from minkops_connectors.excel import inspect_workbook
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.assets import config_json
 from minkops_platform.runtime.environments import (
     SESSION_BYTE_LIMIT,
     SESSION_FILE_LIMIT,
@@ -381,7 +381,7 @@ class BillHandler(AccountsHandler):
 
             config = dict(run["config"])
             attach(connection, run, config, config["company_scope"][0])
-            connection.execute("UPDATE workflow_runs SET config=%s WHERE id=%s", (Jsonb(config), run["id"]))
+            connection.execute("UPDATE workflow_runs SET config=%s WHERE id=%s", (config_json(connection, run["tenant_id"], config), run["id"]))
             run["config"] = config
             return
         if len(run["file_ids"]) > 1 or needs_triage(run["config"]):

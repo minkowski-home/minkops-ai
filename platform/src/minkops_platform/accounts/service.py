@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 from minkops_connectors.excel import open_workbook
 from minkops_platform.errors import ServiceError
 from minkops_platform.runtime.application import binding_for, enforce_policies, get_handler
+from minkops_platform.runtime.assets import config_json
 from minkops_platform.workflows import load_definition as load_definition
 
 from .catalog import apply_records, validate_catalog, validate_data
@@ -140,7 +141,7 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                 run["config"]["tally_target"] = recheck_target(connection, tenant, user, tally)
                 connection.execute(
                     "UPDATE account_runs SET config=%s WHERE id=%s",
-                    (Jsonb(run["config"]), run["id"]),
+                    (config_json(connection, run["tenant_id"], run["config"]), run["id"]),
                 )
                 files, contents = [], {}
             else:
@@ -172,7 +173,7 @@ def approve_run(connection, tenant, user, run_id, body, *, require_destination=T
                 run["config"]["catalog_snapshot"] = catalog
                 connection.execute(
                     "UPDATE account_runs SET config=%s WHERE id=%s",
-                    (Jsonb(run["config"]), run["id"]),
+                    (config_json(connection, run["tenant_id"], run["config"]), run["id"]),
                 )
             if (tally or {}).get("voucher_proposal_version") == 1:
                 # Voucher proposals are bound and checked in prepare(); coverage only here.

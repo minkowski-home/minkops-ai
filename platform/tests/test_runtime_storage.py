@@ -41,6 +41,29 @@ class RuntimeStorageTests(unittest.TestCase):
         self.connection.execute("UPDATE workflow_runs SET config=config || '{\"hosted_session_closed\":true}' WHERE id=%s", (first["id"],))
         self.assertEqual(self.connection.execute("SELECT count(*) AS n FROM workflow_run_assets WHERE tenant_id=%s", (self.tenant,)).fetchone()["n"], 1)
 
+    def test_config_adapter_reuses_assets_before_sending_native_evidence_to_postgres(self):
+        from minkops_platform.runtime.assets import config_json, hydrate
+
+        value = {'source_catalog_snapshot': {'evidence': 'native' * 50000}, 'stage': 'triage'}
+        first = config_json(self.connection, self.tenant, value).obj
+        run = self.insert(first)
+        hydrate(self.connection, run)
+        calls = []
+        connection = self.connection
+        class Observed:
+            def execute(self, query, params):
+                calls.append(query)
+                return connection.execute(query, params)
+        again = config_json(Observed(), self.tenant, run['config']).obj
+        self.assertEqual(again['_assets'], first['_assets'])
+        self.assertNotIn('source_catalog_snapshot', again)
+        self.assertFalse(any('INSERT' in query for query in calls))
+        run['config']['source_catalog_snapshot']['evidence'] = 'Changed'
+        changed = config_json(self.connection, self.tenant, run['config']).obj
+        self.assertNotEqual(changed['_assets'], first['_assets'])
+        self.assertEqual(hydrate(self.connection, self.insert(changed))['config']['source_catalog_snapshot'],
+                         {'evidence': 'Changed'})
+
     def test_releasing_a_dependency_wakes_a_drained_worker_transactionally(self):
         profile = str(uuid4())
         run = self.insert({"awaits": {"profile": profile}})

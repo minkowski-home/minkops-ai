@@ -11,6 +11,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.assets import config_json
 
 
 class HoldReason(ValueError):
@@ -312,7 +313,7 @@ def accept_context(connection, device, job, result):
         raise ServiceError("conflict", str(error)) from error
     run["config"]["tally_target"] = target
     connection.execute(
-        "UPDATE workflow_runs SET config=%s WHERE id=%s", (Jsonb(run["config"]), run["id"])
+        "UPDATE workflow_runs SET config=%s WHERE id=%s", (config_json(connection, run["tenant_id"], run["config"]), run["id"])
     )
     if run.get("parent_run_id"):
         connection.execute(

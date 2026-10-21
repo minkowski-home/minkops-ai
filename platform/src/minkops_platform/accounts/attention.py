@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 
 from minkops_platform import attention
 from minkops_platform.errors import ServiceError
+from minkops_platform.runtime.assets import config_json
 
 from .repository import public_run, run_for
 
@@ -390,7 +391,7 @@ def supplier_created(connection, item, job, observation):
     for row in result["records"]:
         if not any(row is authorized for authorized in eligible) and row.get("status") not in ("saved", "duplicate", "writing", "rejected"):
             row["decision"] = "hold"
-    connection.execute("UPDATE account_runs SET config=%s WHERE id=%s", (Jsonb(run["config"]), run["id"]))
+    connection.execute("UPDATE account_runs SET config=%s WHERE id=%s", (config_json(connection, run["tenant_id"], run["config"]), run["id"]))
     # The native-created master is scoped to this continuation. Other runs keep
     # their confirmed snapshots and must refresh discovery to see the new master.
     prepare(connection, run, result, approved=True)

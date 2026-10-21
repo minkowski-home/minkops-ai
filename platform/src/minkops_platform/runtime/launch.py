@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from minkops_platform.errors import ServiceError
 from minkops_platform.resources import REPOSITORY_ROOT
 from minkops_platform.run_controls import resolve_request
+from minkops_platform.runtime.assets import config_json
 from minkops_platform.workflows import load_definition
 
 from .application import RESERVED, execution_config, get_handler
@@ -137,7 +138,7 @@ def launch_run(connection, tenant, user, body, *, task_id=None):
             definition.metadata["version"],
             body["request_key"],
             fingerprint,
-            Jsonb(config),
+            config_json(connection, tenant["id"], config),
             Jsonb(ids),
             catalog_id,
         ),
