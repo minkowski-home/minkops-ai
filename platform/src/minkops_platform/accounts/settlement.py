@@ -26,6 +26,7 @@ import re
 from itertools import combinations
 
 from . import mirror
+from .vouchers import rupees
 
 # The references a bank row makes: it settles a bill, or pays ahead of one. New Ref opens bills, as purchases do.
 TYPES = ("Agst Ref", "Advance", "On Account")
@@ -123,7 +124,7 @@ def check(bills, allocation, *, amount_cents, payment):
                 raise ValueError(f"{name} is not an open bill this {'payment' if payment else 'receipt'} can settle; "
                                  "open_bills lists the bills that are.")
             if cents > dues[name]:
-                raise ValueError(f"{name} has {_rupees(dues[name])} open, less than {_rupees(cents)}.")
+                raise ValueError(f"{name} has {rupees(dues[name])} open, less than {rupees(cents)}.")
         elif kind == "Advance":
             if not name or name in known:
                 raise ValueError("An Advance names a new bill, such as the payment's reference"
@@ -138,7 +139,7 @@ def check(bills, allocation, *, amount_cents, payment):
             raise ValueError(f"{name or kind} is named twice.")
         seen.add(name or kind)
     if sum(bill["amount_cents"] for bill in allocation) != amount_cents:
-        raise ValueError(f"The bills must add up to the counter line's {_rupees(amount_cents)}.")
+        raise ValueError(f"The bills must add up to the counter line's {rupees(amount_cents)}.")
 
 
 def _dues(bills, payment):
@@ -242,10 +243,10 @@ def _label(allocation, dues):
     against = [bill for bill in allocation if bill["type"] == "Agst Ref"]
     full = [bill["name"] for bill in against if bill["amount_cents"] == open_.get(bill["name"])]
     parts = ([f"{_names(full)} in full"] if full else []) + [
-        f"{_rupees(bill['amount_cents'])} of {bill['name']} ({_rupees(open_[bill['name']])} open)"
+        f"{rupees(bill['amount_cents'])} of {bill['name']} ({rupees(open_[bill['name']])} open)"
         for bill in against if bill["amount_cents"] != open_.get(bill["name"])]
-    rest = [f"{_rupees(bill['amount_cents'])} on account" if bill["type"] == "On Account"
-            else f"{_rupees(bill['amount_cents'])} as Advance {bill['name']}"
+    rest = [f"{rupees(bill['amount_cents'])} on account" if bill["type"] == "On Account"
+            else f"{rupees(bill['amount_cents'])} as Advance {bill['name']}"
             for bill in allocation if bill["type"] != "Agst Ref"]
     if not parts:
         only = allocation[0]
@@ -260,12 +261,3 @@ def _names(names):
 
 def _joined(items):
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
-
-
-def _rupees(cents):
-    """An amount as an Indian reader writes it: the last three digits, then pairs (12,50,000.00)."""
-    whole, paise = divmod(abs(cents), 100)
-    digits = str(whole)
-    head, tail = digits[:-3], digits[-3:]
-    pairs = [head[max(0, end - 2):end] for end in range(len(head), 0, -2)][::-1]
-    return f"{'-' if cents < 0 else ''}{','.join([*pairs, tail])}.{paise:02d}"

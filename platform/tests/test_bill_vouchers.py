@@ -168,7 +168,7 @@ class BoundBillTest(unittest.TestCase):
         code, message = held(proposal(**{"document.total": 6356.00}))
         self.assertEqual(code, "source_values_conflict")
         # The refusal names both figures, and that only a printed round-off may close a gap.
-        self.assertIn("The lines come to 6355.00, but the bill's printed total is 6356.00.", message)
+        self.assertIn("The lines come to 6,355.00, but the bill's printed total is 6,356.00.", message)
         self.assertIn("round-off the bill prints", message)
 
     def test_tax_lines_follow_their_printed_rate_and_central_and_state_halves_match(self):
@@ -191,7 +191,7 @@ class BoundBillTest(unittest.TestCase):
         printed = {"document.taxable": 5560.00, "document.tax": 795.00}
         code, message = held({**inclusive, "document": {**inclusive["document"], "taxable": 5560.00, "tax": 795.00}})
         self.assertEqual(code, "source_values_conflict")
-        self.assertIn("The lines claim 6355.00 of taxable value, but the bill prints 5560.00.", message)
+        self.assertIn("The lines claim 6,355.00 of taxable value, but the bill prints 5,560.00.", message)
         self.assertEqual(check(proposal(**printed)).lines[0]["amount_cents"], 635500)
 
     def test_an_expense_bill_can_be_a_journal_and_a_supplier_credit_note_a_debit_note(self):
@@ -323,12 +323,12 @@ class BoundBillTest(unittest.TestCase):
             "compound unit": (stocked(item("Anchor Bolts", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])),
                               "unsupported_structure", "Anchor Bolts is counted in a compound unit"),
             "rate times quantity": (stocked(item("OPC Cement 53", 100, 390, 38000.00, [("Main Location", 100, 38000.00)])),
-                                    "source_values_conflict", "100 at 390 comes to 39000.00"),
+                                    "source_values_conflict", "100 at 390 comes to 39,000.00"),
             "fractional bags": (stocked(item("OPC Cement 53", 100.5, 378.11, 38000.00,
                                              [("Main Location", 100.5, 38000.00)])),
                                 "source_values_conflict", "OPC Cement 53 is counted in Bag to 0 decimal places"),
             "godowns short": (stocked(item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 90, 34200.00)])),
-                              "classification_uncertain", "OPC Cement 53's godowns must take its 100 Bag and 38000.00"),
+                              "classification_uncertain", "OPC Cement 53's godowns must take its 100 Bag and 38,000.00"),
             "ledger without stock": (stocked(item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 100, 38000.00)],
                                                   ledger="Purchase 18%")),
                                      "classification_uncertain", "Purchase 18% must have inventory values affected"),

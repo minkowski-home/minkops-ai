@@ -42,7 +42,7 @@ from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
 from .desk_tools import Desk, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
-from .vouchers import HoldReason, check, correction_reason, narration_token, observed_bill
+from .vouchers import HoldReason, check, correction_reason, narration_token, observed_bill, rupees
 
 KIND = "bill"
 # A proposal and at most two resubmissions, per bill.
@@ -250,7 +250,7 @@ def _printed(desk, bill):
         ("round_off", "round-off", line["amount"]) for line in bill["voucher"]["lines"] if line["role"] == "round_off"]
     for kind, what, value in figures:
         if isinstance(value, (int, float)) and _paise(value) not in desk.printed[kind]:
-            raise HoldReason("source_values_conflict", f"The bill's text does not print {value:.2f} as its {what}. "
+            raise HoldReason("source_values_conflict", f"The bill's text does not print {rupees(_paise(value))} as its {what}. "
                                                        "Use the figure the bill prints.")
 
 

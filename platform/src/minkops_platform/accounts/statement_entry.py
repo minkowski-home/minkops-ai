@@ -42,7 +42,7 @@ from .desk_tools import COMPANY, SUBJECTS, Desk, schema
 from .holds import ACTIONS, STATEMENT, hold
 from .holds import actions as hold_actions
 from .statement_routing import validated_plan
-from .vouchers import narration_token, observed_statement, statement_voucher
+from .vouchers import narration_token, observed_statement, rupees, statement_voucher
 
 CHUNK = 100
 # A proposal and at most two resubmissions, per row and per layout.
@@ -723,8 +723,8 @@ def _record_spans(connection, run, records):
         if previous and previous["closing_cents"] != opening:
             attention.record(connection, run, f"statement:{run['id']}:{company_id}:{bank}:gap", bank,
                              "Transactions missing", target={"reason": (
-                                 f"{bank} closed at {previous['closing_cents'] / 100:.2f} on {previous['date_to']} in an "
-                                 f"earlier statement, but this one opens at {opening / 100:.2f} on {start[0]['date']}. "
+                                 f"{bank} closed at {rupees(previous['closing_cents'])} on {previous['date_to']} in an "
+                                 f"earlier statement, but this one opens at {rupees(opening)} on {start[0]['date']}. "
                                  "Select the statement that covers the gap; rows here are not held.")},
                              actor=run["actor_id"])
 

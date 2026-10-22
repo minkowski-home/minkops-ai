@@ -285,7 +285,7 @@ def correction_reason(plan, current):
     changed = sorted(ledger for ledger in (ledgers["theirs"] & ledgers["ours"]) - {party}
                      if amounts(theirs, ledger) != amounts(ours, ledger))
     if total["theirs"] != total["ours"]:
-        clauses.append(f"comes to {total['theirs'] / 100:.2f}, not {total['ours'] / 100:.2f}"
+        clauses.append(f"comes to {rupees(total['theirs'])}, not {rupees(total['ours'])}"
                        + (f", with other amounts for {', '.join(changed)}" if changed else ""))
     elif changed:
         clauses.append(f"has other amounts for {', '.join(changed)}")
@@ -336,6 +336,19 @@ class HoldReason(ValueError):
     def __init__(self, code, message, *, final=False):
         super().__init__(message)
         self.code, self.final = code, final
+
+
+def rupees(cents):
+    """An amount as a person reads it in Indian accounts: the last three digits, then pairs (12,50,000.00).
+
+    Every reason, hold and label written for people uses it; amounts handed to
+    a session or returned as data stay plain decimals.
+    """
+    whole, paise = divmod(abs(cents), 100)
+    digits = str(whole)
+    head, tail = digits[:-3], digits[-3:]
+    pairs = [head[max(0, end - 2):end] for end in range(len(head), 0, -2)][::-1]
+    return f"{'-' if cents < 0 else ''}{','.join([*pairs, tail])}.{paise:02d}"
 
 
 def _money(value, what):
@@ -425,7 +438,7 @@ def _printed_totals(document, lines, raw, items_cents=0):
             ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] in roles)
         if abs(claimed - cents) > TOLERANCE_CENTS:
             raise HoldReason("source_values_conflict", (
-                f"The lines claim {claimed / 100:.2f} of {what}, but the bill prints {cents / 100:.2f}. "
+                f"The lines claim {rupees(claimed)} of {what}, but the bill prints {rupees(cents)}. "
                 "Each expense line must carry its taxable value, and each tax its own line."))
 
 
@@ -488,7 +501,7 @@ def _stock(masters, items, party_name):
         priced = int((quantity * rate * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         if abs(priced - amount) > TOLERANCE_CENTS:
             raise HoldReason("source_values_conflict", f"{name}: {_figure(quantity)} at {_figure(rate)} comes to "
-                                                       f"{priced / 100:.2f}, but the bill prints {amount / 100:.2f}.")
+                                                       f"{rupees(priced)}, but the bill prints {rupees(amount)}.")
         ledger = masters.one("LEDGER", raw_item.get("ledger_guid"), "classification_uncertain",
                              "Each item must select one purchase ledger of the routed company.")
         ledger_name = masters.name(ledger)
@@ -511,7 +524,7 @@ def _stock(masters, items, party_name):
             taken, taken_quantity = taken + cents, taken_quantity + moved
         if not 1 <= len(split) <= 10 or taken != amount or taken_quantity != quantity:
             raise HoldReason("classification_uncertain", f"{name}'s godowns must take its {_figure(quantity)} "
-                                                         f"{unit_name} and {amount / 100:.2f} between them.")
+                                                         f"{unit_name} and {rupees(amount)} between them.")
         entries.append({"item": name, "unit": unit_name, "quantity": _figure(quantity), "rate": _figure(rate),
                         "side": "debit", "amount_cents": amount, "ledger": ledger_name, "godowns": split})
         ledgers[ledger_name] = ledgers.get(ledger_name, 0) + amount
@@ -718,7 +731,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                                 for ln, item in zip(lines, raw, strict=True) if item["role"] != "tds")
     if reached != total:
         raise HoldReason("source_values_conflict", (
-            f"The lines come to {reached / 100:.2f}, but the bill's printed total is {total / 100:.2f}. A round-off "
+            f"The lines come to {rupees(reached)}, but the bill's printed total is {rupees(total)}. A round-off "
             "the bill prints, of at most one rupee, is its own line; any other difference means the bill's own "
             "figures conflict."))
     # Tally books the items' value on their purchase ledgers, one line each, ahead of the bill's own lines.

@@ -510,8 +510,8 @@ def test_a_gap_from_the_previous_statement_raises_one_attention_item(desk):
         until(lambda: all(i["state"] == "done" for i in items(desk, run)))
     gaps = desk["db"].execute("SELECT * FROM attention_items WHERE tenant_id=%s AND label='Transactions missing'",
                               (desk["tenant"]["id"],)).fetchall()
-    assert len(gaps) == 1 and "closed at 94882.00 on 2026-09-15" in gaps[0]["target"]["reason"]
-    assert "opens at 90000.00 on 2026-10-01" in gaps[0]["target"]["reason"]
+    assert len(gaps) == 1 and "closed at 94,882.00 on 2026-09-15" in gaps[0]["target"]["reason"]
+    assert "opens at 90,000.00 on 2026-10-01" in gaps[0]["target"]["reason"]
     assert [r["status"] for r in records(desk, run)] == ["proposed", "held", "proposed", "proposed"]
     # A row held for its ledger still chains by its balance: the span runs from the first row to the last.
     spans = desk["db"].execute("SELECT date_from, date_to FROM statement_spans WHERE run_id=%s", (run["id"],)).fetchall()

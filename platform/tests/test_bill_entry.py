@@ -313,7 +313,7 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     assert ([v["reference"] for v in history["vouchers"]], history["unknown_ledgers"]) == (["SOS/26/0007"], ["Sunrise"])
     first, second = answers(session, "propose")
     assert first == {"bills": [{"bill": 1, "status": "rejected", "reason": (
-        "The bill's text does not print 188000.00 as its total. Use the figure the bill prints.")}],
+        "The bill's text does not print 1,88,000.00 as its total. Use the figure the bill prints.")}],
         "still_pending": [1]}
     # The corrected reading is accepted, and the change after a refusal is shown to the reviewer.
     assert second["bills"][0]["status"] == "accepted"
@@ -372,7 +372,7 @@ def test_an_approved_bill_is_saved_once_and_tally_holding_another_version_is_nev
     changed = record(desk, changed)
     assert (changed["status"], changed["hold_codes"]) == ("held", ["save_held"])
     # The reviewer is told what differs, so the voucher can be checked in Tally at a glance.
-    assert changed["review_reasons"] == ["Tally's voucher for SOS/26/0412 comes to 188800.00, not 189980.00, with other "
+    assert changed["review_reasons"] == ["Tally's voucher for SOS/26/0412 comes to 1,88,800.00, not 1,89,980.00, with other "
                                          "amounts for Input CGST 9%, Input SGST 9%, Office Cabins. Review it there; "
                                          "Minkops did not add a second voucher."]
     assert changed["current"]["entries"][0] == {"ledger": "Sunrise Office Systems", "amount": 18880000}
@@ -536,7 +536,7 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
     assert answers(session, "propose")[1]["bills"][0]["status"] == "held"
     session = next(s for s in fake.created if header(s)["file"] == "unbalanced.pdf")
     refusals = [result["bills"][0] for result in answers(session, "propose")]
-    assert refusals[0]["reason"].startswith("The lines come to 188800.00, but the bill's printed total is 188801.00.")
+    assert refusals[0]["reason"].startswith("The lines come to 1,88,800.00, but the bill's printed total is 1,88,801.00.")
     assert refusals[1]["reason"] == "The bill's text does not print 1.00 as its round-off. Use the figure the bill prints."
     assert (contradicted["hold_codes"], contradicted["review_reasons"]) == (["source_values_conflict"],
                                                                             ["Total is 188,801.00."])
