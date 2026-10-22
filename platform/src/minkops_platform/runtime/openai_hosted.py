@@ -3,6 +3,7 @@
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import reduce
 
 from openai import (
     APIConnectionError,
@@ -42,6 +43,12 @@ def cancel_turn(session_id, turn_id=None, *, client=None):
 # re-attached. A conversation-only session must be created together with its
 # input and creation is not idempotent, so a creation whose response was lost
 # is found again by its metadata instead of being started twice.
+#
+# A session may return its work as a final answer the provider constrains to a
+# JSON Schema, instead of a tool the model calls with arguments nothing checks
+# until they arrive. Each turn's answer is handed to the caller, which checks
+# it once; a correction it returns goes back to the same session as a user
+# message, which starts the next turn with everything the session has read.
 
 # Seconds a stream may stay silent before it is re-attached, and the pause before each re-attachment.
 TOOL_TIMEOUT = 120
@@ -83,33 +90,50 @@ class SessionSpec:
     # String values that identify this attempt, so a lost creation can be found.
     metadata: dict
     reasoning: dict | None = None
+    # The JSON Schema the provider constrains each turn's final answer to; None for a session that answers in text.
+    answer_schema: dict | None = None
 
 
-def run_tool_session(spec, *, answer, saved, requesting, alive, client=None, session_id=None, requested_at=None):
-    """Run a session's single turn to its end, answering its function calls.
+def run_tool_session(spec, *, answer, saved, requesting, alive, final=None, client=None, session_id=None,
+                     requested_at=None):
+    """Run a session to its end, answering its function calls and, when it has an answer schema, its final answers.
 
     `answer(call)` returns (success, text) and must return the same answer for
-    a repeated call ID. `saved(session_id, turn_id)` persists provider IDs as
-    soon as they exist; `requesting()` durably records that a session is about
-    to be created and returns that Unix time. `alive()` returns False to cancel
-    the turn; an exception it raises leaves the session running for another
-    worker to resume. Pass a saved `session_id` to resume that session, or the
-    `requested_at` of an earlier creation whose response may have been lost.
-    Returns the session ID, the turn ID and the turn's token usage when the
-    provider reported it with the turn's end (None otherwise).
+    a repeated call ID. `final(turn_id, text)` checks a turn's final answer and
+    returns the correction to send back, or None when the session is done; it
+    must return the same verdict for a repeated turn. `saved(session_id,
+    turn_id)` persists provider IDs as soon as they exist; `requesting()`
+    durably records that a session is about to be created and returns that Unix
+    time. `alive()` returns False to cancel the turn; an exception it raises
+    leaves the session running for another worker to resume. Pass a saved
+    `session_id` to resume that session, or the `requested_at` of an earlier
+    creation whose response may have been lost. Returns the session ID, the
+    last turn's ID and the token usage of every turn when the provider reported
+    it with each turn's end (None otherwise).
     """
+    if (spec.answer_schema is None) != (final is None):
+        raise ValueError("A session with an answer schema needs `final`, and only such a session takes it.")
     client = client or OpenAI(timeout=TOOL_TIMEOUT, max_retries=0)
-    return _ToolSession(client, spec, answer, saved, requesting, alive, session_id, requested_at).run()
+    return _ToolSession(client, spec, answer, final, saved, requesting, alive, session_id, requested_at).run()
 
 
 class _ToolSession:
-    def __init__(self, client, spec, answer, saved, requesting, alive, session_id, requested_at):
+    def __init__(self, client, spec, answer, final, saved, requesting, alive, session_id, requested_at):
         self.client, self.api = client, client.beta.agents.sessions
-        self.spec, self.answer, self.saved, self.requesting, self.alive = spec, answer, saved, requesting, alive
+        self.spec, self.answer, self.final = spec, answer, final
+        self.saved, self.requesting, self.alive = saved, requesting, alive
         self.id, self.requested_at = session_id, requested_at
-        self.turn_id = self.usage = None
+        self.turn_id = None
         self.ended = self.finished = False
         self.answered, self.seen = set(), set()
+        # Each ended turn's usage as reported with its end; None for a turn that reported none.
+        self.usages = {}
+
+    @property
+    def usage(self):
+        if not self.usages or None in self.usages.values():
+            return None
+        return reduce(_summed, self.usages.values())
 
     def run(self):
         stalls = 0
@@ -149,8 +173,10 @@ class _ToolSession:
         if turn is not None:
             self._note_turn(turn.id)
             if session.status == "idle" and turn.status in ("completed", "failed", "cancelled"):
-                self._end(turn.status, turn.error, turn.usage)
-                return None
+                self._end(turn.id, turn.status, turn.error, turn.usage)
+                if self.ended:
+                    return None
+                # A correction started the next turn: follow it.
         events = self.api.events.stream(self.id)
         if session.status == "requires_action":
             self._respond(session.required_actions)
@@ -159,7 +185,9 @@ class _ToolSession:
     def _create(self):
         self.requested_at = self.requesting()
         agent = {"model": self.spec.model, "instructions": self.spec.instructions, "tools": self.spec.tools,
-                 **({"reasoning": self.spec.reasoning} if self.spec.reasoning else {})}
+                 **({"reasoning": self.spec.reasoning} if self.spec.reasoning else {}),
+                 **({"text": {"format": {"type": "json_schema", "schema": self.spec.answer_schema}}}
+                    if self.spec.answer_schema else {})}
         return self.api.create(agent=agent, environment={"type": "none"}, metadata=self.spec.metadata,
                                input=[{"role": "user", "content": self.spec.content}], stream=True)
 
@@ -216,16 +244,33 @@ class _ToolSession:
         elif kind in ("agent.session.turn.completed", "agent.session.turn.failed", "agent.session.turn.cancelled") \
                 and event.turn.subagent_id is None:
             self._note_turn(event.turn_id)
-            self._end(event.turn.status, event.turn.error, event.usage or event.turn.usage)
+            self._end(event.turn_id, event.turn.status, event.turn.error, event.usage or event.turn.usage)
         elif kind == "agent.session.failed":
             raise SessionFailed(event.session.error or "The AI session failed.")
         elif kind == "agent.session.idle" and self.ended:
             self.finished = True
 
-    def _end(self, status, error, usage):
+    def _end(self, turn_id, status, error, usage):
         if status != "completed":
             raise SessionFailed(error.message if error else f"The AI turn was {status}.", error.code if error else None)
-        self.ended, self.usage = True, _usage(usage)
+        self.usages[turn_id] = _usage(usage) if usage is not None else self.usages.get(turn_id)
+        correction = self.final(turn_id, self._final_text(turn_id)) if self.final else None
+        if correction is None:
+            self.ended = True
+            return
+        self._check()
+        # Keyed by the turn it corrects: a correction re-sent after a detached stream is applied once.
+        self.api.events.create(self.id, events=[{"type": "agent.session.input.message", "input": [
+            {"role": "user", "content": [{"type": "input_text", "text": correction}]}]}],
+            idempotency_key=f"minkops-correction-{self.id}-{turn_id}")
+
+    def _final_text(self, turn_id):
+        """The turn's final answer: its last assistant message, which the answer schema constrains."""
+        for item in self.api.items.list(self.id, order="desc", limit=100):
+            if getattr(item, "type", None) == "message" and getattr(item, "role", None) == "assistant" \
+                    and item.turn_id == turn_id and getattr(item, "phase", None) != "commentary":
+                return "".join(getattr(part, "text", "") for part in item.content)
+        return ""
 
     def _note_turn(self, turn_id):
         if turn_id != self.turn_id:
@@ -266,13 +311,22 @@ class _ToolSession:
             raise SessionAbandoned("Stopped before the AI session finished.")
 
 
-def turn_usage(session_id, turn_id, *, client=None):
-    """A finished turn's token usage once the provider has recorded it, else None."""
+def session_usage(session_id, *, client=None):
+    """A finished session's token usage over every turn, once the provider has recorded each; else None."""
     client = client or OpenAI(timeout=30, max_retries=0)
     with suppress(NotFoundError):
-        return _usage(client.beta.agents.sessions.turns.retrieve(turn_id, session_id=session_id).usage)
+        turns = [turn for turn in client.beta.agents.sessions.turns.list(session_id) if turn.subagent_id is None]
+        if turns and all(turn.usage is not None for turn in turns):
+            return reduce(_summed, (_usage(turn.usage) for turn in turns))
     return None
 
 
 def _usage(value):
     return value.model_dump() if value is not None else None
+
+
+def _summed(first, second):
+    """Two usage reports added field by field; nested details too."""
+    return {key: _summed(first.get(key) or {}, second.get(key) or {}) if isinstance(first.get(key), dict)
+            or isinstance(second.get(key), dict) else (first.get(key) or 0) + (second.get(key) or 0)
+            for key in {*first, *second}}

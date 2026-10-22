@@ -155,3 +155,84 @@ def test_a_call_not_yet_registered_is_answered_once_on_retry():
     fake.unregistered_once = True
     Worker().run(fake)
     assert sent(fake.sessions[0]) == [("propose", True)]
+
+
+# --- constrained final answers --------------------------------------------------------
+
+ANSWER = {"type": "object", "additionalProperties": False, "required": ["amount"],
+          "properties": {"amount": {"type": "string"}}}
+
+
+class Checker:
+    """The lane's `final` callback: each turn's answer checked once, a correction for the first."""
+
+    def __init__(self, corrections=("The bill total is 1,280.00.",), leave_once=False):
+        self.corrections, self.leave_once = list(corrections), leave_once
+        self.checked, self.verdicts = [], {}
+
+    def final(self, turn_id, text):
+        if self.leave_once:
+            self.leave_once = False
+            raise LookupError("lease lost")
+        self.checked.append((turn_id, json.loads(text)))
+        if turn_id not in self.verdicts:  # a repeated turn gets the stored verdict, as tools.conclude gives
+            self.verdicts[turn_id] = self.corrections.pop(0) if self.corrections else None
+        return self.verdicts[turn_id]
+
+
+def answered(fake, checker, **resume):
+    worker = Worker()
+    result = run_tool_session(SessionSpec(**{**spec().__dict__, "answer_schema": ANSWER}), answer=worker.answer,
+                              saved=worker.saved, requesting=worker.requesting, alive=worker.alive, client=fake,
+                              final=checker.final, **resume)
+    return result, worker
+
+
+def test_a_constrained_session_ends_on_a_settled_final_answer():
+    fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}], usage_on_event=True))
+    checker = Checker(corrections=())
+    result, worker = answered(fake, checker)
+    [session] = fake.sessions
+    # The provider constrains the final answer to the schema; the answer is no tool the model can call.
+    assert session.agent["text"] == {"format": {"type": "json_schema", "schema": ANSWER}}
+    assert sent(session) == [("find_ledger", True), ("find_ledger", True)]
+    assert checker.checked == [(session.turn.id, {"amount": "1180.00"})] and session.messages == []
+    assert result == {"session_id": session.id, "turn_id": session.turn.id, "usage": USAGE}
+
+
+def test_an_answer_that_needs_correcting_is_answered_again_in_the_same_session():
+    fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}, {"amount": "1280.00"}], usage_on_event=True))
+    checker = Checker()
+    result, _ = answered(fake, checker)
+    [session] = fake.sessions
+    first, second = session.turns
+    assert session.messages == ["The bill total is 1,280.00."]
+    assert checker.checked == [(first.id, {"amount": "1180.00"}), (second.id, {"amount": "1280.00"})]
+    # One paid session; its usage counts every turn.
+    assert len(fake.created) == 1 and result["turn_id"] == second.id
+    assert result["usage"]["output_tokens"] == 2 * USAGE["output_tokens"]
+    assert result["usage"]["input_tokens_details"]["cached_tokens"] == 2 * USAGE["input_tokens_details"]["cached_tokens"]
+
+
+# Events: 1 created, 2 turn.created, 3 in_progress, 4-5 lookups, 6 requires_action, 7 the answer,
+# 8 turn.completed, 9 idle: the first turn ends with the stream detached.
+def test_a_correction_sent_while_detached_is_sent_once():
+    fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}, {"amount": "1280.00"}]))
+    fake.drops = [8, 9]
+    checker = Checker()
+    answered(fake, checker)
+    [session] = fake.sessions
+    assert session.messages == ["The bill total is 1,280.00."] and len(session.turns) == 2
+    assert [turn for turn, _ in checker.checked].count(session.turns[0].id) >= 1
+
+
+def test_an_answer_a_departed_worker_left_unchecked_is_checked_by_its_successor():
+    fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}]))
+    checker = Checker(corrections=(), leave_once=True)
+    with pytest.raises(LookupError):
+        answered(fake, checker)
+    [session] = fake.sessions
+    assert session.status == "idle" and checker.checked == []
+    result, _ = answered(fake, checker, session_id=session.id)
+    assert checker.checked == [(session.turn.id, {"amount": "1180.00"})] and len(fake.created) == 1
+    assert result["turn_id"] == session.turn.id

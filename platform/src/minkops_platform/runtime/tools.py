@@ -8,6 +8,10 @@ validated against its schema, logged once per session and call ID, bounded in
 size, and answered without internal error text: the model reads a short reason
 it can act on, never a stack trace. A call that fails leaves only its log: its
 handler's writes roll back with it.
+
+A session's own work, such as a bill's proposal, is its final answer instead
+(`Answer`): the provider constrains it to the tool's schema, so its shape
+cannot be wrong, and it is checked by the same handler once per turn.
 """
 
 import json
@@ -15,6 +19,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
@@ -116,6 +121,42 @@ def answer(connection, item, session_id, call, tools, context):
          call.name if call.name in tools else "unknown", Jsonb(_evidence(call.arguments)), success, text,
          round((time.monotonic() - started) * 1000)))
     return success, text
+
+
+# Times a session's final answer goes back to it for correcting; the handler settles what is left after that.
+CORRECTIONS = 2
+
+
+@dataclass(frozen=True)
+class Answer:
+    """A session's final answer: constrained to `tool.input_schema` and checked by `tool.handler` once per turn.
+
+    The model never calls it as a tool. `settled(result)` says whether a checked answer leaves nothing to
+    correct; `again` tells the session how to answer once more, after what the check said.
+    """
+
+    tool: Tool
+    settled: Callable[[dict], bool] = lambda result: True
+    again: str = "Answer again with the whole answer corrected."
+
+
+def conclude(connection, item, session_id, turn_id, text, final, context):
+    """Check one turn's final answer once: the correction to send back, or None when the session is done.
+
+    The answer is logged as a call of `final.tool` keyed by its turn, so a turn checked again after a worker
+    restart gets its stored verdict. After CORRECTIONS corrections the session ends whatever the verdict.
+    The caller commits.
+    """
+    call = SimpleNamespace(call_id=f"answer:{turn_id}", turn_id=turn_id, name=final.tool.name, arguments=text)
+    success, reply = answer(connection, item, session_id, call, {final.tool.name: final.tool}, context)
+    if success and final.settled(json.loads(reply)):
+        return None
+    checked = connection.execute(
+        """SELECT count(*) AS n FROM tool_calls WHERE tenant_id=%s AND item_id=%s AND session_id=%s
+           AND call_id LIKE 'answer:%%'""", (item["tenant_id"], item["id"], session_id)).fetchone()["n"]
+    if checked > CORRECTIONS:
+        return None
+    return f"Minkops {'checked' if success else 'refused'} this answer: {reply}\n{final.again}"
 
 
 def _evidence(arguments):

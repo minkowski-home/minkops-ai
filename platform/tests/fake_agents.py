@@ -7,8 +7,11 @@ requires_action; every new stream replays the session's events from the
 start; creation is not idempotent; listed sessions carry their metadata.
 
 Each session follows a script: rounds of function calls, each round issued
-together and answered before the next, then an ending. Tests inject faults:
-dropped streams, a lost creation response and a call-registration race.
+together and answered before the next, then an ending. A session whose agent
+constrains its final answer (`text.format`) ends each turn with the script's
+next answer, marked `final_answer`; a user message starts the next turn, as
+live. Tests inject faults: dropped streams, a lost creation response and a
+call-registration race.
 """
 
 import itertools
@@ -38,8 +41,11 @@ class Script:
     script a model that reacts to what it was given and told.
     """
 
-    def __init__(self, *rounds, ending="completed", error_code=None, usage_on_event=False, usage_after=0):
+    def __init__(self, *rounds, answers=(), ending="completed", error_code=None, usage_on_event=False, usage_after=0):
         self.rounds, self.ending, self.error_code = list(rounds), ending, error_code
+        # Each turn's final answer, in order: a value, or a callable given the session (its tool answers and the
+        # messages it was sent) that returns one.
+        self.answers = list(answers)
         # As measured live, the end of a turn usually carries no usage; the turn
         # reports it a few seconds later (here: after `usage_after` reads).
         self.usage_on_event, self.usage_after = usage_on_event, usage_after
@@ -57,10 +63,17 @@ class _Session:
         self.id = f"sess_{next(fake.ids)}"
         self.created_at, self.status, self.error = created_at, "in_progress", None
         self.log, self.pending, self.answers, self.answered_ids = [], {}, [], set()
+        # Correction messages sent to the session, and the idempotency keys already applied.
+        self.messages, self.keys, self.items = [], set(), []
         self.usage, self.reads = None, 0
         self.round = 0
-        self.turn = Obj(id=f"turn_{next(fake.ids)}", session_id=self.id, status="in_progress", subagent_id=None,
-                       created_at=created_at, usage=None, error=None)
+        self.turns = []
+        self.new_turn(created_at)
+
+    def new_turn(self, created_at):
+        self.turn = Obj(id=f"turn_{next(self.fake.ids)}", session_id=self.id, status="in_progress", subagent_id=None,
+                        created_at=created_at, usage=None, error=None)
+        self.turns.append(self.turn)
 
     def snapshot(self):
         return Obj(id=self.id, status=self.status, required_actions=list(self.pending.values()),
@@ -92,9 +105,33 @@ class _Session:
                 self.status = "requires_action"
                 self.emit("agent.session.requires_action", session=self.snapshot())
                 return
-        self.turn_event("agent.session.turn.item.added",
-                        item=Obj(type="message", content=[Obj(type="output_text", text="DONE")]))
+        if (self.agent.get("text") or {}).get("format", {}).get("type") == "json_schema":
+            value = self.script.answers[len(self.turns) - 1]
+            text = json.dumps(value(self) if callable(value) else value)
+            message = Obj(type="message", role="assistant", phase="final_answer", turn_id=self.turn.id,
+                          content=[Obj(type="output_text", text=text)])
+        else:
+            message = Obj(type="message", role="assistant", phase=None, turn_id=self.turn.id,
+                          content=[Obj(type="output_text", text="DONE")])
+        self.items.append(message)
+        self.turn_event("agent.session.turn.item.added", item=message)
         self.end(self.script.ending)
+
+    def message(self, event, key):
+        """A user message: as live, it starts the session's next turn."""
+        if key in self.keys:
+            self.fake.resent += 1  # the same idempotency key is applied once
+            return
+        if self.status != "idle":
+            raise _error(400, "The session already has an active turn.")
+        self.keys.add(key)
+        self.messages.append(event["input"][0]["content"][0]["text"])
+        self.fake.clock += 1
+        self.new_turn(self.fake.clock)
+        self.status = "in_progress"
+        self.turn_event("agent.session.turn.created")
+        self.round = len(self.script.rounds)  # a correction turn answers at once
+        self.advance()
 
     def end(self, status):
         usage = Usage(**USAGE)
@@ -169,6 +206,8 @@ class _Events:
         for event in events:
             if event["type"] == "agent.session.input.tool_result":
                 session.answer(event)
+            elif event["type"] == "agent.session.input.message":
+                session.message(event, idempotency_key)
             elif event["type"] == "agent.session.input.cancel":
                 self.fake.cancels += 1
                 if session.turn.status in ("in_progress", "waiting"):
@@ -184,19 +223,31 @@ class _Turns:
         self.fake = fake
 
     def list(self, session_id):
-        return [self.retrieve(self.fake.get(session_id).turn.id, session_id=session_id)]
+        """Newest first, as live."""
+        return [self.retrieve(turn.id, session_id=session_id) for turn in reversed(self.fake.get(session_id).turns)]
 
     def retrieve(self, turn_id, *, session_id):
         session = self.fake.get(session_id)
-        assert session.turn.id == turn_id
+        [turn] = [t for t in session.turns if t.id == turn_id]
         session.reads += 1
-        reported = session.usage if session.usage and session.reads > session.script.usage_after else None
-        return Obj(**{**session.turn.__dict__, "usage": reported})
+        ended = turn.status in ("completed", "failed", "cancelled")
+        reported = Usage(**USAGE) if ended and session.reads > session.script.usage_after else None
+        return Obj(**{**turn.__dict__, "usage": reported})
+
+
+class _Items:
+    def __init__(self, fake):
+        self.fake = fake
+
+    def list(self, session_id, *, order="desc", limit=20):
+        assert order in ("asc", "desc") and 1 <= limit <= 100
+        items = list(self.fake.get(session_id).items)
+        return items[::-1] if order == "desc" else items
 
 
 class _Sessions:
     def __init__(self, fake):
-        self.fake, self.events, self.turns = fake, _Events(fake), _Turns(fake)
+        self.fake, self.events, self.turns, self.items = fake, _Events(fake), _Turns(fake), _Items(fake)
 
     def create(self, *, agent, environment, metadata, input, stream):
         assert environment == {"type": "none"} and stream is True

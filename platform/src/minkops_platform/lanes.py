@@ -46,7 +46,7 @@ from .runtime.openai_hosted import (
     SessionSpec,
     close_session,
     run_tool_session,
-    turn_usage,
+    session_usage,
 )
 
 log = logging.getLogger(__name__)
@@ -77,6 +77,9 @@ class Session:
     # The handler's own context for its tools, rebuilt whenever an item is resumed.
     state: object = None
     reasoning: dict | None = None
+    # The session's work as its constrained final answer, checked once per turn; None for a session that
+    # proposes through its tools.
+    answer: tools.Answer | None = None
 
 
 @dataclass(frozen=True)
@@ -293,7 +296,7 @@ class Host:
             try:
                 usage = row["usage"]
                 if usage is None and row["turn_id"]:
-                    usage = turn_usage(row["session_id"], row["turn_id"], client=self.client)
+                    usage = session_usage(row["session_id"], client=self.client)
                     if usage is None and row["age"] < USAGE_WAIT:
                         continue
                 close_session(row["session_id"], client=self.client)
@@ -367,13 +370,23 @@ class Host:
             self._fenced(lambda connection: work.save_session(connection, item["id"], lease.token, session_id,
                                                               turn_id))
 
+        def final(turn_id, text):
+            alive()
+            verdict = self._fenced(lambda connection: work.renew(connection, item["id"], lease.token, self.lease_seconds)
+                                   and {"correction": tools.conclude(connection, item, lease.session_id, turn_id, text,
+                                                                     session.answer,
+                                                                     Call(connection, run, item, session.state))})
+            return verdict["correction"]
+
         spec = SessionSpec(model=session.model, instructions=session.instructions, content=session.content,
                            tools=[tool.function() for tool in session.tools.values()], reasoning=session.reasoning,
+                           answer_schema=session.answer.tool.input_schema if session.answer else None,
                            metadata={"minkops_item": str(item["id"]), "minkops_attempt": str(item["attempt"]),
                                      "minkops_run": str(item["run_id"]), "minkops_tenant": str(item["tenant_id"])})
         requested = item["session_requested_at"]
         return run_tool_session(
-            spec, answer=answer, saved=saved, alive=alive, client=self.client, session_id=item["session_id"],
+            spec, answer=answer, saved=saved, alive=alive, final=final if session.answer else None,
+            client=self.client, session_id=item["session_id"],
             requesting=lambda: self._fenced(lambda c: work.request_session(c, item["id"], lease.token)),
             requested_at=requested.timestamp() if requested else None)
 

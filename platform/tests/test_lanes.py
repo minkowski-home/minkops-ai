@@ -14,7 +14,7 @@ from fake_agents import USAGE, FakeAgents, Script
 
 from minkops_platform import lanes, work
 from minkops_platform.runtime import openai_hosted
-from minkops_platform.runtime.tools import Tool, ToolError
+from minkops_platform.runtime.tools import Answer, Tool, ToolError
 
 pytestmark = pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is required")
 SUBJECTS = {"type": "object", "properties": {"subjects": {"type": "array", "items": {"type": "string"}}},
@@ -140,6 +140,58 @@ def test_items_run_in_parallel_sessions_and_settle_with_their_usage(desk):
     assert fake.store == {} and fake.streams == 3
     assert set(desk["handler"].settled) == {"a", "b", "c"}
     assert all(outcome.error is None for outcome in desk["handler"].settled.values())
+
+
+class Answering(Desk):
+    """The same workflow, its proposal returned as the session's constrained final answer."""
+
+    def session(self, connection, run, item):
+        return lanes.Session(model="gpt-6-luna", instructions="Enter the bill.", tools={"find_ledger": TOOLS["find_ledger"]},
+                             content=[{"type": "input_text", "text": item["source"]["file_id"]}],
+                             answer=Answer(TOOLS["propose"], settled=lambda result: result["accepted"],
+                                           again="Answer again with the bill corrected."))
+
+
+def answers_logged(desk, item):
+    return desk["db"].execute("SELECT call_id, name, success, answer FROM tool_calls WHERE item_id=%s AND "
+                              "call_id LIKE 'answer:%%' ORDER BY created_at", (item["id"],)).fetchall()
+
+
+def test_a_final_answer_is_checked_once_per_turn_and_a_refusal_goes_back_to_the_session(desk):
+    desk["handler"] = Answering()
+    fake = FakeAgents(Script(LOOKUP, answers=[{"amount": "0"}, {"amount": "1180.00"}], usage_after=1))
+    run = launch(desk, {"file_id": "a"})
+    with host(desk, fake, lanes=1) as lanes_:
+        until(lambda: items(desk, run)[0]["state"] == "done")
+        until(lambda: lanes_.settled(desk["db"]))
+        until(lambda: sessions(desk, run)[0]["closed"])
+    [item] = items(desk, run)
+    [session] = fake.created
+    assert session.messages == ["Minkops refused this answer: The amount must be the bill total.\n"
+                                "Answer again with the bill corrected."]
+    # Each turn's answer is logged like a call, under the tool that checked it.
+    assert [(row["call_id"], row["name"], row["success"]) for row in answers_logged(desk, item)] == [
+        (f"answer:{session.turns[0].id}", "propose", False), (f"answer:{session.turns[1].id}", "propose", True)]
+    assert [r["proposal"] for r in desk["db"].execute("SELECT proposal FROM run_records WHERE item_id=%s",
+                                                      (item["id"],))] == [{"amount": "1180.00"}]
+    # The answer was never offered as a tool, and the session's usage counts both turns.
+    assert [tool["name"] for tool in session.agent["tools"]] == ["find_ledger"]
+    assert sessions(desk, run)[0]["usage"]["output_tokens"] == 2 * USAGE["output_tokens"]
+
+
+def test_corrections_stop_after_two_and_the_handler_settles_what_is_left(desk):
+    desk["handler"] = Answering()
+    fake = FakeAgents(Script(answers=[{"amount": "0"}] * 3 + [{"amount": "1180.00"}]))
+    run = launch(desk, {"file_id": "a"})
+    with host(desk, fake, lanes=1) as lanes_:
+        until(lambda: items(desk, run)[0]["state"] == "done")
+        until(lambda: lanes_.settled(desk["db"]))
+    [item] = items(desk, run)
+    [session] = fake.created
+    assert len(session.messages) == 2 and len(session.turns) == 3
+    assert [row["success"] for row in answers_logged(desk, item)] == [False, False, False]
+    assert desk["db"].execute("SELECT count(*) AS n FROM run_records WHERE item_id=%s", (item["id"],)).fetchone()["n"] == 0
+    assert desk["handler"].settled["a"].error is None
 
 
 def test_a_released_blocker_wakes_idle_lanes_at_once(desk):
