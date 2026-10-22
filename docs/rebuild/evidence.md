@@ -115,6 +115,34 @@ Probed with `gpt-6-luna` through SDK 3.19.0:
 - **Usage is per turn.** A session's own `usage` stayed null; each turn reports its
   own, so a session's usage is every turn's, summed.
 
+### Constrained answers, checked live (22 October 2026)
+
+Five synthetic bills that had returned no proposal before (B03, B04, B07, B09 and
+B11 of the 22 October test pack) ran through Bill entry 1.5.0 at high effort on the
+fast tier. No answer was refused for its shape (none of 9, against 78 of 89 before),
+and every bill reached a proposal. Each document fact the pack determines was read
+exactly where printed. All five held for a reason a person can act on: a
+withholding with no precedent, a new supplier, a cost centre named on a company
+that keeps none, a split of one expense across two cost centres (one ledger line
+carries one cost centre today), and a credit note booked on repeated ledgers, whose
+refusal now says to combine them. Bills took 94 to 165 seconds.
+
+The HDFC sheet that held as "Layout unknown" was proved on the first answer in 17
+seconds: its SUM totals, saved with float error, read as their paise amounts, and its
+closing balance printed twice agreed at both copies. Its 920 rows ran as 19 chunks of 50,
+each answered once, in about 100 seconds. Of the 597 rows the pack's key expects to
+resolve, 594 were proposed; of the 323 it expects to need a person, 245 held, mostly as
+`ledger_unresolved` for payees no ledger is, and the rest were proposed, which standing
+approval leaves for a person until a payee is booked twice. Every proposed row used the
+family the key expects. Eight counter ledgers differ from the key: seven follow the
+party the narration names, and one splits a batch payment between the two suppliers it
+names; the key's amounts and references are from another generation of the pack.
+
+One chunk hung after its first correction: the turn the correction started began after
+the stream had ended, and a stream opened on the idle session never delivered it. The
+driver now waits until the session shows the corrected turn before following it; restarted
+with that change, a successor resumed the hung session and checked its second answer.
+
 ### Identity and duplicates
 
 - **Statement tokens include the tenant UUID.** They are `uuid5(NAMESPACE_URL, f"minkops:{tenant_id}:{key}:{identity}")`, built in `accounts/tally_writes.py` (around line 174) and `accounts/statements.py` (around line 90).
