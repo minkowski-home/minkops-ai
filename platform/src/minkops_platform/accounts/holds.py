@@ -137,7 +137,7 @@ _CATALOG = [
          "A formula has no cached value. Recalculate and save the source in Excel."),
         ("statement_conflict", EXCEPTION, "Conflicting rows", "Overlapping files route the same bank transaction differently."),
         ("possible_existing", NATIVE, "Possible existing entry",
-         "A matching untagged voucher may already exist. Verify it in Tally before manual handling."),
+         "A voucher of the same amount on this bank may already record this row. Verify it in Tally before entering it by hand."),
         ("uncertain_import", NATIVE, "Import uncertain",
          "The import was interrupted. Reconcile Tally; Minkops will not resend an uncertain import."),
     ]),
