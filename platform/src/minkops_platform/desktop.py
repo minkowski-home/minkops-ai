@@ -151,8 +151,11 @@ def owned_device(connection, tenant_id, user_id, device_id, *, active=True, lock
 
 
 def revoke(connection, tenant, user, device_id):
-    owned_device(connection, tenant["id"], user["id"], device_id, active=False, lock=True)
+    device = owned_device(connection, tenant["id"], user["id"], device_id, active=False, lock=True)
     connection.execute("UPDATE desktop_devices SET revoked_at=now() WHERE id=%s", (device_id,))
+    # Settle the saves it had begun while their jobs still show which were underway.
+    from .accounts.writes import disconnected
+    disconnected(connection, device)
     pending = connection.execute(
         """UPDATE desktop_jobs SET state='failed',error='This PC was disconnected.',updated_at=now()
            WHERE device_id=%s AND state IN ('queued','executing') RETURNING *""",

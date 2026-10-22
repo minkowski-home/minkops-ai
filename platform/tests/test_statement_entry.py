@@ -411,6 +411,42 @@ def test_an_approved_row_writes_once_and_an_interrupted_save_is_never_resent(des
                                                 subjects=["QA ACME STEEL TRADERS"])] == [learnt["id"]]
 
 
+def test_a_disconnected_pc_holds_the_save_it_began_and_sends_none_it_had_not(desk):
+    from minkops_platform import desktop
+    company = desk["company"]["guid"]
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    begun, waiting = rows["NEFT ACME STEEL UTR111222"], rows["BANK CHARGES"]
+    decide(desk, begun, "approve")
+    decide(desk, waiting, "approve")
+    db = desk["db"]
+    device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
+    # The PC takes the first save, and is disconnected before Tally confirms it.
+    job = desktop.claim(db, device, desktop.companion_report("0.11.0", "Rehearsal PC", "console"))
+    assert job["operation"] == "tally.write"
+    desktop.revoke(db, desk["tenant"], desk["operator"], device["id"])
+    db.commit()
+    # Whether that save reached Tally is unknown: it holds, and is never re-sent on its own.
+    held = work.get_record(db, desk["tenant"]["id"], begun["id"])
+    assert (held["status"], held["hold_codes"]) == ("held", ["statement_save_held"])
+    assert held["review_reasons"][0].startswith("This PC was disconnected before Tally confirmed the save.")
+    # The save the PC never began waits for the PC that replaces it; nothing is queued for a PC that is gone.
+    assert work.get_record(db, desk["tenant"]["id"], waiting["id"])["status"] == "writing"
+    assert db.execute("SELECT outcome FROM native_writes WHERE record_id=%s", (waiting["id"],)).fetchone()["outcome"] \
+        is None
+    assert db.execute("""SELECT count(*) AS n FROM desktop_jobs WHERE device_id=%s AND operation='tally.write'
+                         AND state IN ('queued','executing')""", (device["id"],)).fetchone()["n"] == 0
+    # Retry save on a PC that is gone queues nothing either.
+    decide(desk, held, "retry_save")
+    assert db.execute("""SELECT count(*) AS n FROM desktop_jobs WHERE device_id=%s AND operation='tally.write'
+                         AND state IN ('queued','executing')""", (device["id"],)).fetchone()["n"] == 0
+
+
 def test_an_unsettled_date_order_waits_for_one_answer_then_reads_the_rows(desk):
     # Every date reads both ways, and both readings are in the past: only a person can say which.
     early = ICICI.replace(b"01/09/2026", b"01/02/2026").replace(b"02/09/2026", b"02/03/2026").replace(

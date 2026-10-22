@@ -43,8 +43,15 @@ def request(connection, run, record, plan, company, *, actor):
 
 
 def dispatch(connection, tenant_id, device_id, *, actor=None):
-    """Queue the PC's next pending write unless one is already queued or running there."""
+    """Queue the PC's next pending write unless one is already queued or running there.
+
+    A disconnected PC gets none: its pending writes wait for their company to be continued on the PC that
+    replaces it, which sends them there.
+    """
     connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (f"writes:{device_id}",))
+    if connection.execute("SELECT 1 FROM desktop_devices WHERE id=%s AND revoked_at IS NOT NULL",
+                          (device_id,)).fetchone():
+        return None
     if connection.execute("""SELECT 1 FROM desktop_jobs WHERE device_id=%s AND operation = ANY(%s)
                              AND state IN ('queued','executing') LIMIT 1""", (device_id, list(OPERATIONS))).fetchone():
         return None
@@ -52,7 +59,7 @@ def dispatch(connection, tenant_id, device_id, *, actor=None):
         """SELECT w.*, r.task_id, r.actor_id FROM native_writes w JOIN runs r ON r.id=w.run_id
            JOIN tasks t ON t.tenant_id=r.tenant_id AND t.id=r.task_id
            WHERE w.device_id=%s AND w.finished_at IS NULL AND t.control_state='active'
-               AND NOT EXISTS (SELECT 1 FROM desktop_jobs j WHERE j.operation = ANY(%s)
+               AND NOT EXISTS (SELECT 1 FROM desktop_jobs j WHERE j.device_id=w.device_id AND j.operation = ANY(%s)
                                AND j.input->>'write_id'=w.id::text)
            ORDER BY w.created_at, w.id LIMIT 1""", (device_id, list(OPERATIONS))).fetchone()
     if write is None:
@@ -114,6 +121,19 @@ def interrupted(connection, device, job, error):
         return None
     return accept(connection, device, job, {"outcome": "attention", "hold": "save_interrupted",
                                             "message": str(error or "The save was interrupted.")[:300]})
+
+
+def disconnected(connection, device):
+    """A PC being disconnected never reports again: a save it had begun holds as interrupted.
+
+    Whether that save reached Tally is unknown, so it is never re-sent on its own. A write the PC had not begun
+    stays pending, and nothing is sent to a PC that is gone (`dispatch`).
+    """
+    for job in connection.execute(
+            """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation = ANY(%s) AND state='executing'
+               ORDER BY created_at FOR UPDATE""", (device["id"], list(OPERATIONS))).fetchall():
+        interrupted(connection, device, job, "This PC was disconnected before Tally confirmed the save. Retry save "
+                                             "saves it only if Tally does not already have it.")
 
 
 def recover(connection, device):
