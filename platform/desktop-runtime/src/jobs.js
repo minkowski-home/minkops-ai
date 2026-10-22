@@ -31,9 +31,9 @@ export function createExecutor({ connectors, request, pc, grantFor, durableInten
     // states naming this PC, and each one leaves a local diagnostic record.
     const tallyRequest = transportFor(job);
     if (job.operation === "tally.probe" && !Object.keys(job.input || {}).length) {
-      // Check connection uses the same read-only check as syncs and saves.
+      // Check connection uses the same read-only check as syncs and saves, on this PC's own Tally port.
       try {
-        const ready = await connectors.checkTally({ pc });
+        const ready = await connectors.checkTally({ pc, port: job.tally_port ?? 9000 });
         return { available: true, companies: ready.companies.map((c) => c.company) };
       } catch (error) {
         recordDiagnostic(job, { state: error.tallyState ?? "error", cause: error.detail?.cause,

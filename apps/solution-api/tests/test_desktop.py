@@ -349,6 +349,20 @@ class DesktopTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertNotEqual(stored, self.device["credential"])
 
+    def test_the_pc_checks_and_reports_on_its_own_tally_port(self):
+        """On a shared server each Windows user's Tally has its own port; every check uses this PC's."""
+        self.pair()
+        changed = self.client.patch(f"{self.base}/devices/{self.device['id']}", headers=self.csrf,
+                                    json={"tally_port": 9101})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        listed = next(d for d in self.client.get(self.base + "/devices").json() if d["id"] == self.device["id"])
+        self.assertEqual(listed["tally_port"], 9101)
+        heartbeat = self.client.post(self.worker_base + "/heartbeat", headers=self.worker, json={})
+        self.assertEqual(heartbeat.json(), {"tally_port": 9101})
+        job, _ = self.launch()
+        claimed = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+        self.assertEqual((claimed["id"], claimed["tally_port"]), (job["id"], 9101))
+
     def test_web_start_worker_claim_finish_and_idempotent_receipt(self):
         self.pair()
         job, body = self.launch()

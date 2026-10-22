@@ -40,6 +40,7 @@ def public_device(row):
             "companion_version",
             "hostname",
             "remote_session",
+            "tally_port",
         )
     }
 
@@ -406,6 +407,8 @@ def claim(connection, device, report=None):
         "operation": row["operation"],
         "input": row["input"],
         "claim_token": row["claim_token"],
+        # A connection check reads this PC's own Tally: on a shared server each user's Tally has its own port.
+        "tally_port": device["tally_port"],
     }
 
 

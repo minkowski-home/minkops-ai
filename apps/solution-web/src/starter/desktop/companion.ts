@@ -3,6 +3,8 @@ export interface Device {
   id: string; name: string; owner_id: string; revoked_at: string | null;
   expires_at: string; last_seen_at: string | null;
   companion_version?: string | null; hostname?: string | null; remote_session?: boolean | null;
+  /** The port this PC's Tally serves on; on a shared server each Windows user's Tally has its own. */
+  tally_port?: number;
 }
 
 /** Mirrors the server's gate for a run's Tally refresh (accounts/sync.queue). */

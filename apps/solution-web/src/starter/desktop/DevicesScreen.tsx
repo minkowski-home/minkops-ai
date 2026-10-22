@@ -21,6 +21,7 @@ export function DevicesScreen({
   const [checking, setChecking] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [diagnostics, setDiagnostics] = useState("");
+  const [portSaved, setPortSaved] = useState<{ device: string; port: number } | null>(null);
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(""), [attempt, setAttempt] = useState(0);
   const refresh = useCallback(async () => {
     const [loaded, status] = await Promise.all([
@@ -137,6 +138,23 @@ export function DevicesScreen({
               </p>
               {device.companion_version && <p className="quiet-state">Minkops {device.companion_version}{device.hostname && device.hostname !== device.name ? ` · ${device.hostname}` : ""}</p>}
               {companionNotice(device) && <p role="status" className="form-message">{companionNotice(device)}</p>}
+              <form className="device-port" onSubmit={(event) => {
+                event.preventDefault();
+                const port = Number(new FormData(event.currentTarget).get("port"));
+                void action(async () => {
+                  await api(`/api/tenants/${tenant}/desktop/devices/${device.id}`,
+                    { method: "PATCH", body: JSON.stringify({ tally_port: port }) }, user?.csrf_token);
+                  setPortSaved({ device: device.id, port });
+                });
+              }}>
+                {/* Keyed by the saved port, so a refresh shows the server's value rather than a stale edit. */}
+                <label>Tally port<input key={device.tally_port} name="port" type="number" required min={1} max={65535}
+                  defaultValue={device.tally_port ?? 9000} /></label>
+                <button className="button button-ghost" disabled={busy}>Save port</button>
+                <p className="quiet-state">On a shared server, give each Windows user's Tally a port of its own.</p>
+              </form>
+              {portSaved?.device === device.id && <p role="status" className="form-message">
+                Minkops reads Tally on port {portSaved.port} on this PC.</p>}
               <button className="button button-primary" disabled={busy || expired}
                 aria-expanded={checking === device.id} aria-controls={`connections-${device.id}`}
                 onClick={() => setChecking(current => current === device.id ? null : device.id)}>Check connections</button>

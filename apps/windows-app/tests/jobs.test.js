@@ -98,6 +98,19 @@ test("a failed connection check leaves a diagnostic for the receipt", async () =
   assert.deepEqual(recorded.map(([id, r]) => [id, r.state]), [["job-1", "not_running"]]);
 });
 
+test("a connection check reads this PC's own Tally port", async () => {
+  const ports = [];
+  const checkTally = async ({ port, pc }) => {
+    ports.push([port, pc]);
+    return { companies: [{ company: "Minkops Test" }] };
+  };
+  const check = executor({ request: async () => ({}), connectors: { checkTally } });
+  assert.deepEqual(await check({ ...job("tally.probe"), tally_port: 9101 }), { available: true, companies: ["Minkops Test"] });
+  // A server that names no port means Tally's default.
+  await check(job("tally.probe"));
+  assert.deepEqual(ports, [[9101, "TEST-PC"], [9000, "TEST-PC"]]);
+});
+
 test("unknown operations are refused", async () => {
   await assert.rejects(executor({ request: async () => ({}) })(job("shell.run")), /Unsupported local operation/);
 });

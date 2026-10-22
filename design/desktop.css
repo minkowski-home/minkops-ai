@@ -162,4 +162,9 @@
   .workflow-meter > span, .discovery-row-chevron { transition: none; }
 }
 .device-connections { margin: 16px 0; padding: 16px 0; border-top: var(--rule-default); border-bottom: var(--rule-default); }
+/* A PC's own Tally port: on a shared server each Windows user's Tally serves on its own. */
+.device-port { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin: 0 0 16px; }
+.device-port label { display: grid; gap: 6px; font: var(--type-label); color: var(--text-secondary); }
+.device-port input { width: 10ch; min-height: 36px; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: var(--radius-2); color: inherit; background: var(--surface-raised); }
+.device-port .quiet-state { flex-basis: 100%; margin: 0; }
 .device-connections h4, .device-connections h5 { margin: 0 0 8px; }

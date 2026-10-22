@@ -144,8 +144,12 @@ Device = Annotated[dict, Depends(worker_device)]
 
 @router.post("/api/desktop/worker/heartbeat")
 def heartbeat(device: Device):
-    """Authentication records presence without claiming or extending any job."""
-    return None
+    """Authentication records presence without claiming or extending any job.
+
+    The answer carries the PC's Tally port, so the companion's own checks and
+    diagnostics read the same Tally its jobs do.
+    """
+    return {"tally_port": device["tally_port"]}
 
 
 @router.post("/api/desktop/worker/claim")

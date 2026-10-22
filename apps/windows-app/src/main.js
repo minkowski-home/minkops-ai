@@ -77,6 +77,14 @@ let updates = null;
 const jobDiagnostics = new Map();
 const recentJobs = [];
 const pcName = () => hostname().slice(0, 80);
+// The port this PC's Tally serves on, as the server last told it: on a shared
+// server each Windows user's Tally has its own, so diagnostics check this one.
+let tallyPort = 9000;
+const learnPort = (answer) => {
+  if (Number.isInteger(answer?.tally_port) && answer.tally_port >= 1 && answer.tally_port <= 65535)
+    tallyPort = answer.tally_port;
+  return answer;
+};
 let persistence = Promise.resolve();
 const uuid = (value) =>
   typeof value === "string" &&
@@ -173,33 +181,36 @@ function startWorker() {
   };
   worker = new CompanionWorker({
     request,
-    heartbeat: () => request("/api/desktop/worker/heartbeat", {}),
+    heartbeat: async () => learnPort(await request("/api/desktop/worker/heartbeat", {})),
     execute: createExecutor({
       connectors: { checkTally, inventory, createSupplier, saveVoucher, runSync },
       request, pc: pcName(),
       grantFor: (sourceId) => binding(identity.tenant, sourceId, { id: identity.owner_id }),
       recordDiagnostic: (job, record) => jobDiagnostics.set(job.id, record),
-      transportFor: (job) => tallyTransport({
-        pc: pcName(),
-        diagnose: async (diagnostic) => {
-          const root = join(app.getPath("userData"), "tally-diagnostics");
-          await mkdir(root, { recursive: true });
-          const record = {
-            ...diagnostic,
-            job_id: job.id,
-            collected_at: new Date().toISOString(),
-            windows_events: await tallyCrashEvents(),
-          };
-          await writeFile(join(root, `${job.id}.json`), JSON.stringify(record, null, 2), { mode: 0o600 });
-          jobDiagnostics.set(job.id, {
-            ...diagnostic,
-            windows_events: (record.windows_events ?? []).slice(0, 3).map((event) => ({
-              ...event,
-              Message: String(event.Message ?? "").slice(0, 500),
-            })),
-          });
-        },
-      }),
+      transportFor: (job) => {
+        learnPort(job);
+        return tallyTransport({
+          pc: pcName(),
+          diagnose: async (diagnostic) => {
+            const root = join(app.getPath("userData"), "tally-diagnostics");
+            await mkdir(root, { recursive: true });
+            const record = {
+              ...diagnostic,
+              job_id: job.id,
+              collected_at: new Date().toISOString(),
+              windows_events: await tallyCrashEvents(),
+            };
+            await writeFile(join(root, `${job.id}.json`), JSON.stringify(record, null, 2), { mode: 0o600 });
+            jobDiagnostics.set(job.id, {
+              ...diagnostic,
+              windows_events: (record.windows_events ?? []).slice(0, 3).map((event) => ({
+                ...event,
+                Message: String(event.Message ?? "").slice(0, 500),
+              })),
+            });
+          },
+        });
+      },
       // An encrypted, fsynced intent per remote ID: once written, no later
       // attempt may import that voucher again. Statement plans keep their
       // remote ID across retries, so this directory must stay the one they used.
@@ -258,10 +269,12 @@ function startWorker() {
  * recent outcomes. Never bill data, file contents, XML or credentials. */
 async function collectDiagnostics() {
   const pc = pcName();
+  // Ask for this PC's current Tally port first; offline, the last one known stands.
+  await worker?.heartbeat().catch(() => null);
   const processes = await tallyProcesses().catch(() => null);
   let session;
   try {
-    const ready = await checkTally({ pc, retries: 0 });
+    const ready = await checkTally({ pc, port: tallyPort, retries: 0 });
     session = { state: "ready", companies: ready.companies, warnings: ready.warnings.map((w) => w.state) };
   } catch (error) {
     session = { state: error.tallyState ?? "error", message: String(error.message).slice(0, 300), cause: error.detail?.cause };
