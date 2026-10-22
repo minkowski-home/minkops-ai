@@ -86,13 +86,15 @@ def bundle(connection, run):
 def reasoning(pinned):
     return {"effort": pinned["reasoning_effort"]} if pinned.get("reasoning_effort") else None
 
-SUBJECTS = {"type": "array", "minItems": 1, "maxItems": 20,
+# A chunk's payees are looked up in one call: subjects are cheap mirror searches.
+SUBJECTS = {"type": "array", "minItems": 1, "maxItems": 50,
             "items": {"type": "string", "minLength": 1, "maxLength": 200}}
 # Each kind's reference prefix, and the lookup that issues it.
 REFS = {"company": ("C", "find_company"), "ledger": ("L", "find_ledger"), "stock_item": ("S", "find_stock_item"),
         "godown": ("G", "godowns"), "voucher_type": ("T", "voucher_types"), "cost_centre": ("K", "cost_centres")}
 NOUNS = {"stock_item": "stock item", "voucher_type": "voucher type", "cost_centre": "cost centre"}
 REFERENCE = r"^[A-Z][1-9][0-9]{0,4}$"
+SPOKEN = r"\b[A-Z][1-9][0-9]{0,4}\b"  # a reference as it appears in a sentence
 
 
 def reference(what):
@@ -190,6 +192,27 @@ class Desk:
             if company is not None and row["company_guid"] != company["guid"]:
                 raise ToolError(f"{ref} is another company's {noun}. Look it up in this company with {lookup}.")
         return {ref: rows[ref]["guid"] for ref in wanted}
+
+    def spelled(self, connection, text):
+        """Text a person reads, each reference this item was given replaced by the name it stands for: a session
+        writes an exception's detail by reference, and a reviewer reads names."""
+        found = set(re.findall(SPOKEN, text or ""))
+        if not found or self.item is None:
+            return text
+        names = {}
+        for row in connection.execute("SELECT ref, kind, company_guid, guid FROM item_refs WHERE item_id=%s AND ref = ANY(%s)",
+                                      (self.item["id"], list(found))).fetchall():
+            company = self.companies.get(row["company_guid"])
+            if company is None:
+                continue
+            if row["kind"] == "company":
+                names[row["ref"]] = company["name"]
+                continue
+            data = next((r["data"] for r in self.view(connection, company)["masters"]["records"]
+                         if mirror.text(r["data"].get("GUID")) == row["guid"]), None)
+            if data is not None:
+                names[row["ref"]] = mirror.text(data.get("@_NAME")) or mirror.text(data.get("NAME"))
+        return re.sub(SPOKEN, lambda match: names.get(match.group(0)) or match.group(0), text)
 
     def company_of(self, connection, ref, on=None):
         """The company a reference names; for a year split, the part whose books cover `on` (ISO date)."""

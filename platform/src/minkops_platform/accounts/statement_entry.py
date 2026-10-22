@@ -290,7 +290,8 @@ def propose(call, arguments):
             continue
         if "exception" in entry:
             work.update_record(connection, record, status="held", hold_codes=[entry["exception"]["code"]],
-                               review_reasons=[entry["exception"]["detail"][:300]], company_id=None,
+                               review_reasons=[state.spelled(connection, entry["exception"]["detail"])[:300]],
+                               company_id=None,
                                proposal={"exception": entry["exception"]}, checks={"submissions": submissions + 1})
             held.append(ref)
             continue
@@ -320,10 +321,11 @@ def propose(call, arguments):
                         raise ValueError(f"The paired row does not match this one: {problem}.")
         except (ValueError, ToolError) as refusal:
             last = submissions + 1
-            changes = {"checks": {"submissions": last, "error": str(refusal)[:300]}}
+            said = state.spelled(connection, str(refusal))[:300]
+            changes = {"checks": {"submissions": last, "error": said}}
             if last >= ATTEMPTS:
                 changes.update(status="held", hold_codes=["statement_interpretation"],
-                               review_reasons=[str(refusal)[:300]])
+                               review_reasons=[said])
             work.update_record(connection, record, **changes)
             rejected.append({"ref": ref, "reason": str(refusal)})
             continue

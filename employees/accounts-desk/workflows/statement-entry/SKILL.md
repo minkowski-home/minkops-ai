@@ -15,7 +15,8 @@ Companies and masters go by short references such as `C1` or `L12`: the input
 gives each company's, and every lookup gives the references of what it finds.
 Propose a company, ledger, voucher type or cost centre only by a reference this
 session was given. A ledger you know only by name, from memory or history, is
-looked up before you propose it.
+looked up before you propose it. A person reads an exception's detail: name
+companies and ledgers there by name.
 
 ## Facts are fixed
 

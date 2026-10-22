@@ -572,7 +572,8 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
                    "supplier_details": None, "rules": [],
                    "evidence": [{"field": "buyer", "page": 1, "quote": "Billed to: Unknown"}],
                    "exception": {"code": "company_unresolved", "detail": "The buyer is none of the client's companies."}}
-    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
+    # The model writes its detail by reference; the reviewer reads names.
+    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "L2 or repairs, in C1?"})
     early = proposal(company, **{"document.date": "2026-03-31"})
     # Told the date is before the books begin, the model tries to hold the bill for something weaker.
     reframed = proposal(company, **{"document.date": "2026-03-31"},
@@ -596,6 +597,7 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
         ["company_unresolved"], ["The buyer is none of the client's companies."], ["nothing", "retry"])
     # A complete candidate held for its treatment may be written as a best guess; the gate has checked it.
     assert (guessable["hold_codes"], actions(guessable)) == (["classification_uncertain"], ["guess", "nothing", "retry"])
+    assert guessable["review_reasons"] == ["Office Cabins or repairs, in Rehearsal Infra Private Limited?"]
     # A date before the books begin holds at once: no resubmission can change a printed date, nor recast the hold.
     assert (before_books["hold_codes"], before_books["checks"]["submissions"]) == (["date_before_books"], 1)
     session = next(s for s in fake.created if header(s)["file"] == "early.pdf")

@@ -443,7 +443,7 @@ def _propose_one(connection, desk, record, bill, count):
                          checks={**checks, "final": refusal.code in FINAL or refusal.final}, review=review)
         work.update_record(connection, record, status="pending", hold_codes=[], review_reasons=[], facts=facts,
                            company_id=company["id"] if company else None, proposal={"bill": bill},
-                           checks={**checks, "code": refusal.code, "error": str(refusal)[:300]})
+                           checks={**checks, "code": refusal.code, "error": desk.spelled(connection, str(refusal))[:300]})
         return {"status": "rejected", "reason": str(refusal)}
     if registered:
         # The reviewer sees which IRP registered the bill, and whether its signature verified.
@@ -493,7 +493,8 @@ def _proposal(bill, bound, **extra):
 
 def _hold(connection, desk, record, bill, company, code, reason, *, facts, checks, review, rules=()):
     offers = _offers(connection, desk, bill, company, [code]) if company else []
-    work.update_record(connection, record, status="held", hold_codes=[code], review_reasons=[reason[:300], *review],
+    said = desk.spelled(connection, reason)
+    work.update_record(connection, record, status="held", hold_codes=[code], review_reasons=[said[:300], *review],
                        facts=facts, company_id=company["id"] if company else None,
                        proposal={"bill": bill, **({"rules": list(rules)} if rules else {})},
                        checks={**checks, "offers": offers})
