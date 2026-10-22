@@ -108,7 +108,7 @@ export function MemoryScreen({ tenant }: { tenant: string }) {
     {notice && <p role="status" className="form-message">{notice}</p>}
     {page && <>
       <section className="related-panel"><h3>Learnt from the books</h3>
-        {page.entries.length ? page.entries.map((entry) => <article className="accounts-bill" key={entry.id}>
+        {page.entries.length ? page.entries.map((entry) => <article className="accounts-item" key={entry.id}>
           <strong>{entry.kind === "practice" ? words(entry.subject) : entry.subject}</strong>
           <span> · {KINDS[entry.kind] ?? words(entry.kind)}
             {entry.company ? ` · ${entry.company}` : ""}</span>
@@ -127,7 +127,7 @@ export function MemoryScreen({ tenant }: { tenant: string }) {
           as the books settle how they are kept.</p>}
       </section>
       <section className="related-panel"><h3>Rules</h3>
-        {page.rules.map((rule) => <article className="accounts-bill" key={rule.id}>
+        {page.rules.map((rule) => <article className="accounts-item" key={rule.id}>
           {editing?.id === rule.id
             ? <form onSubmit={(event) => void save(event, rule)}>
               <label className="config-field">Rule<textarea required maxLength={2000} value={editing.text}

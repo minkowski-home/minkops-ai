@@ -147,7 +147,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
           {ordered
             .filter((i) => (i[group] || "Other") === g)
             .map((i) => (
-              <article className="accounts-bill" key={i.id} id={`attention-${i.id}`}>
+              <article className="accounts-item" key={i.id} id={`attention-${i.id}`}>
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
                 <p>{i.reason || "This item needs attention in the original system."}</p>

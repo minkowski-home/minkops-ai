@@ -14,14 +14,6 @@ body {
   overflow: hidden;
 }
 
-/* One configuration area beside Run; administration remains separate. */
-.run-settings { margin-block: 1.25rem; padding-block: 1rem; border-block: 1px solid var(--border, #565963); }
-.run-settings h4 { margin: 0 0 .5rem; }
-.run-settings .accounts-toolbar { flex-wrap: wrap; margin-top: .75rem; }
-.run-settings .accounts-field-grid { margin-block: .75rem; }
-
-.discovery-panel-heading + .button { margin-bottom: 1rem; }
-
 .update-notices { min-width: 0; }
 .update-notices:empty { display: none; }
 .update-notice {
