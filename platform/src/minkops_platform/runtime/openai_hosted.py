@@ -92,6 +92,8 @@ class SessionSpec:
     reasoning: dict | None = None
     # The JSON Schema the provider constrains each turn's final answer to; None for a session that answers in text.
     answer_schema: dict | None = None
+    # The provider's service tier for this session's requests; None for its default.
+    service_tier: str | None = None
 
 
 def run_tool_session(spec, *, answer, saved, requesting, alive, final=None, client=None, session_id=None,
@@ -186,6 +188,7 @@ class _ToolSession:
         self.requested_at = self.requesting()
         agent = {"model": self.spec.model, "instructions": self.spec.instructions, "tools": self.spec.tools,
                  **({"reasoning": self.spec.reasoning} if self.spec.reasoning else {}),
+                 **({"service_tier": self.spec.service_tier} if self.spec.service_tier else {}),
                  **({"text": {"format": {"type": "json_schema", "schema": self.spec.answer_schema}}}
                     if self.spec.answer_schema else {})}
         return self.api.create(agent=agent, environment={"type": "none"}, metadata=self.spec.metadata,

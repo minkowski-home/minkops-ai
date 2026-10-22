@@ -42,12 +42,13 @@ grouping, not another agent loop.
   `tenant_config_schema` and `run_config_schema`, as paths inside the directory;
 - `tenant_defaults` and `run_defaults`;
 - `sessions`: the `model`, an optional `reasoning_effort` (`low`, `medium`,
-  `high`), and optional `stages`, each naming its own instructions. Statement
-  entry's `layout` stage is one.
+  `high`, `xhigh`, `max`), an optional `service_tier` (`default`, `priority` or
+  `fast`, which keep the model and its effort), and optional `stages`, each naming
+  its own instructions. Statement entry's `layout` stage is one.
 
 Every file is read from inside the workflow's own directory, without symlinks.
 Launching a run pins the session bundle (`runtime/bundles.py`): model, reasoning
-effort and every instruction text, with a digest. Later edits never change a run
+effort, service tier and every instruction text, with a digest. Later edits never change a run
 already launched.
 
 A handler module provides what its runs need:

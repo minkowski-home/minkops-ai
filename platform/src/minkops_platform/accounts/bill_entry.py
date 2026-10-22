@@ -215,6 +215,7 @@ def session(connection, run, item):
                 **{key: r["facts"][key] for key in ("supplier", "number", "date") if key in r["facts"]}}
                for r in records if not _open(r)]
     return Session(model=pinned["model"], instructions=pinned["instructions"], reasoning=desk_tools.reasoning(pinned),
+                   service_tier=pinned.get("service_tier"),
                    content=_content(connection, run, desk, file, read, decided), tools={**desk_tools.TOOLS, **BILL_TOOLS},
                    state=desk, answer=PROPOSAL)
 

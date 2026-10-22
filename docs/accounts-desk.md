@@ -3,7 +3,8 @@
 Bill entry and Statement entry read a client's documents and save reviewed,
 verified vouchers in that client's own Tally companies. Both run on one run model;
 see [Bill entry](bill-entry.md) and [Statement entry](statement-entry.md). Sessions
-use `gpt-6-luna` through the OpenAI hosted Agents API. Its key lives in the
+use `gpt-6-luna` at high reasoning effort on the provider's fast tier, through the
+OpenAI hosted Agents API: accuracy comes before speed. Its key lives in the
 git-ignored `apps/solution-api/.env`, which the API and worker read; it never
 reaches the browser, the companion or a session's tools.
 

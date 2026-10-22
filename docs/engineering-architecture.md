@@ -62,8 +62,8 @@ settings/statuses survive reinstall; incompatible schemas are rejected. The
 installed handler and presentation are separate from editable workflow
 preferences. A future admin UI can call the same services.
 
-A launch pins the definition version, the session bundle (model, reasoning effort
-and instructions) and the mirror version of every company it reads. A closed
+A launch pins the definition version, the session bundle (model, reasoning effort,
+service tier and instructions) and the mirror version of every company it reads. A closed
 registry (`work.HANDLER_MODULES`) maps pinned handler keys to ordinary Python
 modules, independently of workflow keys. Accounts keeps its business checks and
 verified Tally write reconciliation in those handlers. The worker serves lanes

@@ -1,8 +1,8 @@
 """Repository-owned session bundles, pinned when a run is launched.
 
 A tool-session workflow runs without an execution environment: what it pins
-is its model, reasoning effort and the texts its sessions are instructed
-with, nothing that executes. Every text is read from inside the workflow's
+is its model, reasoning effort, service tier and the texts its sessions are
+instructed with, nothing that executes. Every text is read from inside the workflow's
 own directory; the digest a run stores detects revision drift.
 """
 
@@ -19,7 +19,9 @@ SESSIONS_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "model": {"type": "string", "minLength": 1},
-        "reasoning_effort": {"enum": ["low", "medium", "high"]},
+        "reasoning_effort": {"enum": ["low", "medium", "high", "xhigh", "max"]},
+        # The provider's tier for the model's requests; `fast` and `priority` keep the model and its effort.
+        "service_tier": {"enum": ["default", "priority", "fast"]},
         "stages": {
             "type": "object",
             "maxProperties": 10,
@@ -84,4 +86,5 @@ def build_session_bundle(directory, metadata):
         raise ValueError("Stage instructions must not be empty.")
     return {"format_version": 1, "key": metadata["key"], "definition_version": metadata["version"],
             "model": sessions["model"], "reasoning_effort": sessions.get("reasoning_effort"),
+            "service_tier": sessions.get("service_tier"),
             "instructions": skill.split("---", 2)[2].strip(), "stages": stages, "variant": None}

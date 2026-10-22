@@ -80,6 +80,7 @@ class Session:
     # The session's work as its constrained final answer, checked once per turn; None for a session that
     # proposes through its tools.
     answer: tools.Answer | None = None
+    service_tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -381,6 +382,7 @@ class Host:
         spec = SessionSpec(model=session.model, instructions=session.instructions, content=session.content,
                            tools=[tool.function() for tool in session.tools.values()], reasoning=session.reasoning,
                            answer_schema=session.answer.tool.input_schema if session.answer else None,
+                           service_tier=session.service_tier,
                            metadata={"minkops_item": str(item["id"]), "minkops_attempt": str(item["attempt"]),
                                      "minkops_run": str(item["run_id"]), "minkops_tenant": str(item["tenant_id"])})
         requested = item["session_requested_at"]

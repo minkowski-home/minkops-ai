@@ -193,6 +193,7 @@ def _layout_session(connection, run, item):
     bundle = desk_tools.bundle(connection, run)
     preview = json.dumps(statement_layouts.preview_sheet(entry), ensure_ascii=False)
     return Session(model=bundle["model"], instructions=bundle["stages"]["layout"], reasoning=desk_tools.reasoning(bundle),
+                   service_tier=bundle.get("service_tier"),
                    content=[{"type": "input_text", "text": preview}], tools={}, state=Layout(run, item, entry),
                    answer=READING)
 
@@ -222,6 +223,7 @@ def _chunk_session(connection, run, item):
     if not run["config"].get("branch_mapping_file_id"):
         tools.pop("mapping")
     return Session(model=bundle["model"], instructions=bundle["instructions"], reasoning=desk_tools.reasoning(bundle),
+                   service_tier=bundle.get("service_tier"),
                    content=[{"type": "input_text", "text": text}], tools=tools, state=state, answer=ROWS)
 
 

@@ -190,6 +190,16 @@ def answered(fake, checker, **resume):
     return result, worker
 
 
+def test_a_session_runs_at_its_reasoning_effort_and_service_tier():
+    fake = FakeAgents(Script(PROPOSE))
+    worker = Worker()
+    run_tool_session(SessionSpec(**{**spec().__dict__, "reasoning": {"effort": "high"}, "service_tier": "fast"}),
+                     answer=worker.answer, saved=worker.saved, requesting=worker.requesting, alive=worker.alive,
+                     client=fake)
+    [session] = fake.sessions
+    assert (session.agent["reasoning"], session.agent["service_tier"]) == ({"effort": "high"}, "fast")
+
+
 def test_a_constrained_session_ends_on_a_settled_final_answer():
     fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}], usage_on_event=True))
     checker = Checker(corrections=())
