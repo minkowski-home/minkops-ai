@@ -4,12 +4,20 @@ A run serves one client business. Its launch asks every PC holding the
 client's authorised companies to refresh its Tally copy, and its sessions wait
 for those refreshes, then pin one mirror version per company (`ready`). Every
 tool reads only those companies at those versions, takes a list of subjects,
-and answers compactly with names, GUIDs and the facts a proposal needs, never
-whole native records. Workflow tools, such as a statement's `propose`, build
-on the same Desk.
+and answers compactly with names, references and the facts a proposal needs,
+never whole native records. Workflow tools, such as a statement's `propose`,
+build on the same Desk.
+
+Companies and masters reach a session, and come back from it, as short
+references its lookups issue: C1 for a company, L12 for a ledger. Each names
+one company or master for the whole item (migration 0031), and a proposal may
+cite only references its item was given. Tally numbers a company's masters in
+sequence, so a GUID a session guessed or mistyped could name another real
+master; a reference no lookup issued names none.
 """
 
 import json
+import re
 from datetime import timedelta
 
 from minkops_platform import clients
@@ -80,14 +88,30 @@ def reasoning(pinned):
 
 SUBJECTS = {"type": "array", "minItems": 1, "maxItems": 20,
             "items": {"type": "string", "minLength": 1, "maxLength": 200}}
-COMPANY = {"type": "string", "minLength": 1, "maxLength": 100, "description": "The company's GUID."}
+# Each kind's reference prefix, and the lookup that issues it.
+REFS = {"company": ("C", "find_company"), "ledger": ("L", "find_ledger"), "stock_item": ("S", "find_stock_item"),
+        "godown": ("G", "godowns"), "voucher_type": ("T", "voucher_types"), "cost_centre": ("K", "cost_centres")}
+NOUNS = {"stock_item": "stock item", "voucher_type": "voucher type", "cost_centre": "cost centre"}
+REFERENCE = r"^[A-Z][1-9][0-9]{0,4}$"
+
+
+def reference(what):
+    return {"type": "string", "pattern": REFERENCE, "description": what}
+
+
+COMPANY = reference("The company's reference, as the session's header or find_company gives it.")
 FAMILIES = ("payment", "receipt", "contra", "purchase", "journal", "debit note", "credit note", "sales")
 # The oldest open bills listed per ledger, and the godowns listed per company; the rest are counted.
 OPEN_BILLS, GODOWNS = 50, 200
 
 
 class Desk:
-    """One item's scope: the run's companies at their pinned versions, with per-company caches."""
+    """One item's scope: the run's companies at their pinned versions, with per-company caches.
+
+    A session's desk (Bills, Chunk) has its `item`, to which the references its lookups issue belong.
+    """
+
+    item = None
 
     def __init__(self, connection, run):
         rows = connection.execute(
@@ -114,6 +138,62 @@ class Desk:
             return parts[-1]
         covering = [part for part in parts if part["books_from"].isoformat() <= on]
         return covering[-1] if covering else parts[0]
+
+    def issue(self, connection, kind, owner, guids):
+        """This item's reference for each of these masters of the company whose GUID is `owner`, or for these
+        companies when `kind` is company: {guid: ref}. New ones follow the item's last of their kind.
+
+        References are read and written in the call's own transaction, never cached, so a call that fails
+        leaves no reference the session saw but the item does not hold.
+        """
+        wanted = list(dict.fromkeys(guid for guid in guids if guid))
+        if not wanted:
+            return {}
+        owners = [owner or guid for guid in wanted]  # a company is its own owner
+        issued = {row["guid"]: row["ref"] for row in connection.execute(
+            """SELECT r.guid, r.ref FROM item_refs r JOIN unnest(%s::text[], %s::text[]) AS w(owner, guid)
+               ON r.company_guid=w.owner AND r.guid=w.guid WHERE r.item_id=%s AND r.kind=%s""",
+            (owners, wanted, self.item["id"], kind)).fetchall()}
+        fresh = [guid for guid in wanted if guid not in issued]
+        if fresh:
+            last = connection.execute(
+                "SELECT coalesce(max(substring(ref FROM 2)::int), 0) AS n FROM item_refs WHERE item_id=%s AND kind=%s",
+                (self.item["id"], kind)).fetchone()["n"]
+            new = {guid: f"{REFS[kind][0]}{last + n}" for n, guid in enumerate(fresh, 1)}
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    "INSERT INTO item_refs (tenant_id, item_id, ref, kind, company_guid, guid) VALUES (%s,%s,%s,%s,%s,%s)",
+                    [(self.item["tenant_id"], self.item["id"], ref, kind, owner or guid, guid)
+                     for guid, ref in new.items()])
+            issued.update(new)
+        return issued
+
+    def refer(self, connection, company):
+        """A company's reference, as the session reads it."""
+        return self.issue(connection, "company", None, [company["guid"]])[company["guid"]]
+
+    def resolve(self, connection, kind, refs, company=None):
+        """The GUID each reference stands for: {ref: guid}. A reference this item was not given, or one naming
+        another kind of master or another company's, is refused with how to find the right one."""
+        wanted = list(dict.fromkeys(ref for ref in refs if ref))
+        rows = {row["ref"]: row for row in connection.execute(
+            "SELECT ref, kind, company_guid, guid FROM item_refs WHERE item_id=%s AND ref = ANY(%s)",
+            (self.item["id"], wanted)).fetchall()} if wanted else {}
+        noun, lookup = NOUNS.get(kind, kind), REFS[kind][1]
+        for ref in wanted:
+            row = rows.get(ref)
+            if row is None:
+                raise ToolError(f"{ref} is not a reference this session was given. Look the {noun} up with {lookup}, "
+                                "and use the reference it gives.")
+            if row["kind"] != kind:
+                raise ToolError(f"{ref} is a {NOUNS.get(row['kind'], row['kind'])}, not a {noun}.")
+            if company is not None and row["company_guid"] != company["guid"]:
+                raise ToolError(f"{ref} is another company's {noun}. Look it up in this company with {lookup}.")
+        return {ref: rows[ref]["guid"] for ref in wanted}
+
+    def company_of(self, connection, ref, on=None):
+        """The company a reference names; for a year split, the part whose books cover `on` (ISO date)."""
+        return self.company(self.resolve(connection, "company", [ref])[ref], on=on)
 
     def part_ids(self, company=None):
         """Every part of one company (its year-split siblings share what memory learnt), or of all of them."""
@@ -151,6 +231,15 @@ class Desk:
                                           "books_from": company["books_from"].isoformat()}
         return self._views[company["id"]]
 
+    def category(self, connection, company, centre):
+        """The GUID of the cost category a cost centre belongs to, or None: a session cites the centre alone."""
+        records = self.view(connection, company)["masters"]["records"]
+        named = next((mirror.normalized(mirror.text(r["data"].get("CATEGORY"))) for r in records
+                      if r["type"] == "COSTCENTRE" and mirror.text(r["data"].get("GUID")) == centre), None)
+        guids = [mirror.text(r["data"].get("GUID")) for r in records if r["type"] == "COSTCATEGORY" and named
+                 and mirror.normalized(mirror.text(r["data"].get("@_NAME")) or mirror.text(r["data"].get("NAME"))) == named]
+        return guids[0] if len(guids) == 1 else None
+
     def gstins(self, connection, company):
         """Every GSTIN the company is registered under, across its tax units."""
         if company["id"] not in self._gstins:
@@ -181,6 +270,7 @@ class Desk:
         return " < ".join(chain)
 
     def voucher_types(self, connection, company):
+        """The company's voucher types with their GUIDs, families and whether each is active (server-side)."""
         if company["id"] not in self._types:
             rows = mirror.masters(connection, company["id"], company["version"], types=["VOUCHERTYPE"])
             bases = base_types([row["data"] for row in rows])
@@ -189,12 +279,12 @@ class Desk:
                  "active": mirror.text(row["data"].get("ISACTIVE")).casefold() != "no"} for row in rows]
         return self._types[company["id"]]
 
-    def ledger(self, connection, company, row):
+    def ledger(self, connection, company, row, ref):
         data = row["data"]
         yes = lambda field: mirror.text(data.get(field)).casefold() == "yes"  # noqa: E731
         # A ledger's description is the client's own note on what it records.
         return {key: value for key, value in {
-            "name": row["name"], "guid": row["guid"], "group": self.path(connection, company, row["parent"]),
+            "name": row["name"], "ref": ref, "group": self.path(connection, company, row["parent"]),
             "aliases": row["aliases"] or None, "gstin": row["gstin"],
             "bank_account_ends": row["bank_account"][-4:] if row["bank_account"] else None, "ifsc": row["ifsc"],
             "cost_centres": yes("ISCOSTCENTRESON") or None, "bill_by_bill": yes("ISBILLWISEON") or None,
@@ -226,72 +316,83 @@ def voucher(row):
 
 def find_company(call, arguments):
     desk, subjects = call.state, arguments.get("subjects") or []
+    parts = [part for parts in desk.parts.values() for part in parts]
+    refs = desk.issue(call.connection, "company", None, [part["guid"] for part in parts])
     out = []
-    for company in (part for parts in desk.parts.values() for part in parts):
+    for company in parts:
         gstins = desk.gstins(call.connection, company)
         named = mirror.normalized(company["name"])
         matches = [s for s in subjects if s.strip().upper() in gstins
                    or all(word in named for word in mirror.normalized(s).split())]
-        out.append({"guid": company["guid"], "name": company["name"], "books_from": company["books_from"].isoformat(),
+        # A year split's parts share one reference: a bill's date picks the part.
+        out.append({"ref": refs[company["guid"]], "name": company["name"], "books_from": company["books_from"].isoformat(),
                     "gstins": gstins, **({"matches": matches} if subjects else {})})
     return {"companies": out}
 
 
+def _ledgers(call, company, subjects):
+    """The rows of these ledgers, named by reference (resolved here) or by exact name, and the subjects that
+    named none."""
+    refs = [s for s in subjects if re.fullmatch(REFERENCE, s)]
+    guids = call.state.resolve(call.connection, "ledger", refs, company)
+    wanted = [guids.get(s, s) for s in subjects]
+    found = mirror.named(call.connection, company["id"], company["version"], "LEDGER", wanted)
+    known = {row["guid"] for row in found} | {row["name_key"] for row in found}
+    return found, [s for s, w in zip(subjects, wanted, strict=True) if w not in known and mirror.normalized(w) not in known]
+
+
 def find_ledger(call, arguments):
     """Without a company, every company in scope is searched: which one owns this bank account or supplier."""
-    desk = call.state
-    scope = [desk.company(arguments["company"])] if arguments.get("company") else list(desk.companies.values())
-    results = []
-    for subject in arguments["subjects"]:
-        ledgers = []
-        for company in scope:
-            for row in mirror.search_masters(call.connection, company["id"], company["version"], ["LEDGER"], subject):
-                found = desk.ledger(call.connection, company, row)
-                ledgers.append(found if arguments.get("company") else {**found, "company": company["name"],
-                                                                        "company_guid": company["guid"]})
-        results.append({"subject": subject, "ledgers": ledgers})
-    return {"results": results}
+    desk, connection = call.state, call.connection
+    scope = [desk.company_of(connection, arguments["company"])] if arguments.get("company") else list(desk.companies.values())
+    found = [(subject, company, row) for subject in arguments["subjects"] for company in scope
+             for row in mirror.search_masters(connection, company["id"], company["version"], ["LEDGER"], subject)]
+    refs = {company["guid"]: desk.issue(connection, "ledger", company["guid"],
+                                        [row["guid"] for _, owner, row in found if owner["guid"] == company["guid"]])
+            for company in scope}
+    named = {} if arguments.get("company") else desk.issue(connection, "company", None, [c["guid"] for c in scope])
+    return {"results": [{"subject": subject, "ledgers": [
+        {**desk.ledger(connection, company, row, refs[company["guid"]][row["guid"]]),
+         **({"company": company["name"], "company_ref": named[company["guid"]]} if named else {})}
+        for asked, company, row in found if asked == subject]} for subject in arguments["subjects"]]}
 
 
 def find_stock_item(call, arguments):
     """A company's stock items matching each subject: every word of a name or alias, or an HSN code."""
     desk = call.state
-    company = desk.company(arguments["company"])
-    results = []
-    for subject in arguments["subjects"]:
-        rows = mirror.search_masters(call.connection, company["id"], company["version"], ["STOCKITEM"], subject)
-        results.append({"subject": subject, "items": [{key: value for key, value in {
-            "name": row["name"], "guid": row["guid"], "unit": mirror.text(row["data"].get("BASEUNITS")) or None,
-            "group": row["parent"], "hsn": row["hsn"], "aliases": row["aliases"] or None,
-            "batches": mirror.text(row["data"].get("ISBATCHWISEON")).casefold() == "yes" or None,
-        }.items() if value is not None} for row in rows]})
-    return {"results": results}
+    company = desk.company_of(call.connection, arguments["company"])
+    found = [(subject, mirror.search_masters(call.connection, company["id"], company["version"], ["STOCKITEM"], subject))
+             for subject in arguments["subjects"]]
+    refs = desk.issue(call.connection, "stock_item", company["guid"], [row["guid"] for _, rows in found for row in rows])
+    return {"results": [{"subject": subject, "items": [{key: value for key, value in {
+        "name": row["name"], "ref": refs[row["guid"]], "unit": mirror.text(row["data"].get("BASEUNITS")) or None,
+        "group": row["parent"], "hsn": row["hsn"], "aliases": row["aliases"] or None,
+        "batches": mirror.text(row["data"].get("ISBATCHWISEON")).casefold() == "yes" or None,
+    }.items() if value is not None} for row in rows]} for subject, rows in found]}
 
 
 def godowns(call, arguments):
     desk = call.state
-    company = desk.company(arguments["company"])
+    company = desk.company_of(call.connection, arguments["company"])
     rows = mirror.masters(call.connection, company["id"], company["version"], types=["GODOWN"])
-    return {"godowns": [{"name": row["name"], "guid": row["guid"], "under": row["parent"]} for row in rows[:GODOWNS]],
+    listed = rows[:GODOWNS]
+    refs = desk.issue(call.connection, "godown", company["guid"], [row["guid"] for row in listed])
+    return {"godowns": [{"name": row["name"], "ref": refs[row["guid"]], "under": row["parent"]} for row in listed],
             **({"more": len(rows) - GODOWNS} if len(rows) > GODOWNS else {})}
 
 
 def voucher_types(call, arguments):
     desk = call.state
-    company, families = desk.company(arguments["company"]), set(arguments["families"])
-    return {"voucher_types": [{"name": t["name"], "guid": t["guid"], "family": t["family"]}
-                              for t in desk.voucher_types(call.connection, company)
-                              if t["active"] and t["family"] in families]}
+    company, families = desk.company_of(call.connection, arguments["company"]), set(arguments["families"])
+    types = [t for t in desk.voucher_types(call.connection, company) if t["active"] and t["family"] in families]
+    refs = desk.issue(call.connection, "voucher_type", company["guid"], [t["guid"] for t in types])
+    return {"voucher_types": [{"name": t["name"], "ref": refs[t["guid"]], "family": t["family"]} for t in types]}
 
 
 def party_history(call, arguments):
-    """Ledgers are named by GUID, as find_ledger gives them, or by name; one that is no ledger is reported."""
-    desk = call.state
-    company = desk.company(arguments["company"])
-    subjects = arguments["ledgers"]
-    found = mirror.named(call.connection, company["id"], company["version"], "LEDGER", subjects)
-    known = {row["guid"] for row in found} | {row["name_key"] for row in found}
-    unknown = [s for s in subjects if s not in known and mirror.normalized(s) not in known]
+    """Ledgers are named by reference, as find_ledger gives them, or by name; one that is no ledger is reported."""
+    company = call.state.company_of(call.connection, arguments["company"])
+    found, unknown = _ledgers(call, company, arguments["ledgers"])
     rows = mirror.ledger_history(call.connection, company["id"], company["version"], [row["name"] for row in found],
                                  limit=arguments.get("limit", 8)) if found else []
     return {"vouchers": [voucher(row) for row in rows], **({"unknown_ledgers": unknown} if unknown else {})}
@@ -300,10 +401,8 @@ def party_history(call, arguments):
 def open_bills(call, arguments):
     """Each ledger's open bills, as party_history names ledgers; one that keeps no bills says so."""
     desk = call.state
-    company = desk.company(arguments["company"])
-    found = mirror.named(call.connection, company["id"], company["version"], "LEDGER", arguments["ledgers"])
-    known = {row["guid"] for row in found} | {row["name_key"] for row in found}
-    unknown = [s for s in arguments["ledgers"] if s not in known and mirror.normalized(s) not in known]
+    company = desk.company_of(call.connection, arguments["company"])
+    found, unknown = _ledgers(call, company, arguments["ledgers"])
     results = []
     for row in found:
         if row["name"] not in desk.billwise(call.connection, company):
@@ -319,13 +418,20 @@ def open_bills(call, arguments):
 
 
 def remembered(call, arguments):
+    """A supplier is asked about by its ledger's reference, which memory keys by GUID; a booking answers with
+    that reference, never the GUID."""
     desk = call.state
-    company = desk.company(arguments["company"])
+    company = desk.company_of(call.connection, arguments["company"])
+    refs = [s for s in arguments["subjects"] if re.fullmatch(REFERENCE, s)]
+    guids = desk.resolve(call.connection, "ledger", refs, company)
     rows = memory.entries(call.connection, desk.run["tenant_id"], desk.run["client_id"],
                           company_ids=desk.part_ids(company), kinds=arguments.get("kinds"),
-                          subjects=arguments["subjects"])
-    return {"entries": [{"kind": row["kind"], "subject": row["subject"], "value": row["value"], "status": row["status"],
-                         "uses": row["uses"]} for row in rows]}
+                          subjects=[guids.get(s, s) for s in arguments["subjects"]])
+    suppliers = desk.issue(call.connection, "ledger", company["guid"],
+                           [row["subject"].split(":")[0] for row in rows if row["kind"] == "booking"])
+    return {"entries": [{"kind": row["kind"], "status": row["status"], "uses": row["uses"], "value": row["value"],
+                         "subject": suppliers[row["subject"].split(":")[0]] if row["kind"] == "booking" else row["subject"]}
+                        for row in rows]}
 
 
 def rules(call, arguments):
@@ -339,7 +445,7 @@ def rules(call, arguments):
 
 def practice(call, arguments):
     desk = call.state
-    parts = desk.part_ids(desk.company(arguments["company"]))
+    parts = desk.part_ids(desk.company_of(call.connection, arguments["company"]))
     rows = memory.entries(call.connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=parts,
                           kinds=["practice"], statuses=("confirmed",))
     questions = call.connection.execute(
@@ -352,13 +458,13 @@ def practice(call, arguments):
 
 def cost_centres(call, arguments):
     desk = call.state
-    company = desk.company(arguments["company"])
-    return {"results": [
-        {"subject": subject, "cost_centres": [
-            {"name": row["name"], "guid": row["guid"], "category": mirror.text(row["data"].get("CATEGORY")) or None}
-            for row in mirror.search_masters(call.connection, company["id"], company["version"], ["COSTCENTRE"],
-                                             subject)]}
-        for subject in arguments["subjects"]]}
+    company = desk.company_of(call.connection, arguments["company"])
+    found = [(subject, mirror.search_masters(call.connection, company["id"], company["version"], ["COSTCENTRE"], subject))
+             for subject in arguments["subjects"]]
+    refs = desk.issue(call.connection, "cost_centre", company["guid"], [row["guid"] for _, rows in found for row in rows])
+    return {"results": [{"subject": subject, "cost_centres": [
+        {"name": row["name"], "ref": refs[row["guid"]], "category": mirror.text(row["data"].get("CATEGORY")) or None}
+        for row in rows]} for subject, rows in found]}
 
 
 def schema(properties, required):
@@ -378,12 +484,13 @@ TOOLS = {tool.name: tool for tool in (
                 ["company", "families"]), voucher_types),
     Tool("party_history", "The newest vouchers posting to any of these ledgers in a company, cancelled ones excluded: "
          "how the client booked such transactions before, with the stock items of any booked item-wise. Give ledger "
-         "GUIDs as find_ledger returns them, or exact ledger names.",
+         "references as find_ledger returns them, or exact ledger names.",
          schema({"company": COMPANY, "ledgers": SUBJECTS, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
                 ["company", "ledgers"]), party_history),
     Tool("open_bills", "The open bills of ledgers that keep bill-by-bill balances, oldest first, less what this "
          "run's other rows already settle. A credit balance is owed to the party, and a payment settles it; a debit "
-         "balance is owed by the party or was paid ahead, and a receipt settles it. Give ledger GUIDs or exact names.",
+         "balance is owed by the party or was paid ahead, and a receipt settles it. Give ledger references or exact "
+         "names.",
          schema({"company": COMPANY, "ledgers": {**SUBJECTS, "maxItems": 5}}, ["company", "ledgers"]), open_bills),
     Tool("find_stock_item", "A company's stock items matching each subject: every word of a name or alias, or an "
          "HSN code. Each names the unit its quantities are counted in; `batches` means Tally tracks its batches.",
@@ -393,7 +500,7 @@ TOOLS = {tool.name: tool for tool in (
     Tool("cost_centres", "Cost centres of a company matching each subject, with their categories.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["company", "subjects"]), cost_centres),
     Tool("memory", "What Minkops learnt about these subjects in a company, from saves a person approved: how a "
-         "supplier's bills were booked (subject: the supplier ledger's GUID), how a payee's bank rows were booked "
+         "supplier's bills were booked (subject: the supplier ledger's reference), how a payee's bank rows were booked "
          "(subject: the payee's name), and how the company keeps its books (subject: a practice name). A demoted "
          "entry was changed in Tally since it was learnt; an unconfirmed one was a best guess.",
          schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {

@@ -19,6 +19,7 @@ import factory
 import pytest
 from fake_agents import FakeAgents, Script
 from PIL import Image
+from references import by_reference, looked_up, named
 
 from minkops_platform import desktop, lanes, run_controls, work
 from minkops_platform.accounts import bill_entry, supplier_gst, sync
@@ -93,6 +94,21 @@ B03 = factory.text_pdf(invoice(supplier="Cabin Services UAT", supplier_gstin=CAB
 B03_NEXT = factory.text_pdf(invoice(supplier="Cabin Services UAT", supplier_gstin=CABINS, number="CS/26/0002",
                                     day="02-Sep-2026", taxable="1,000.00", tax="90.00", total="1,180.00",
                                     extra=CABIN_DETAILS))
+
+
+def names_of(*companies):
+    """What the fixtures' masters are called, each company's own included, for a scripted model to look them up."""
+    return named([record for company in companies for record in masters(company)] + STORES + STOCK)
+
+
+def proposing(names, *bills, count=1):
+    """A scripted model's rounds for these bills, written by GUID: it looks up what they cite, then proposes."""
+    return looked_up("propose", {"count": count, "bills": list(bills)}, names)
+
+
+def reproposing(names, *bills, count=1):
+    """Proposing these bills again, by the references the session's earlier lookups gave it."""
+    return by_reference("propose", {"count": count, "bills": list(bills)}, names)
 
 
 def line(role, ledger_guid, amount, *, side="debit", tax=None):
@@ -280,17 +296,14 @@ def actions(row):
 
 
 def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as_it_is_proposed(desk):
-    company = desk["company"]["guid"]
-
-    def misread(answers_so_far, session):
-        # The total is read as 188,000.00: no such figure is printed, so it cannot be the bill's total.
-        return [("propose", {"count": 1, "bills": [proposal(company, **{"document.total": 188000.0})]})]
-
+    company, names = desk["company"]["guid"], names_of(desk["company"])
+    # The total is read as 188,000.00: no such figure is printed, so it cannot be the bill's total.
+    misread = proposal(company, **{"document.total": 188000.0})
     fake = by_file(**{"sunrise-0412.pdf": [
         [("find_company", {"subjects": [BUYER]}), ("find_ledger", {"subjects": [SUNRISE]}),
          ("check_gstin", {"values": [SUNRISE, SUNRISE[:-1] + ("A" if SUNRISE[-1] != "A" else "B")]}),
-         ("party_history", {"company": company, "ledgers": ["g-sunrise", "Sunrise"]})],
-        misread, [("propose", {"count": 1, "bills": [proposal(company)]})]]})
+         ("party_history", {"company": "C1", "ledgers": ["L1", "Sunrise"]})],
+        *proposing(names, misread), reproposing(names, proposal(company))]})
     run = launch(desk, {"sunrise-0412.pdf": B01})
     [item] = items(desk, run)
     [waiting] = records(desk, run)
@@ -300,15 +313,18 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     read(desk, fake, run)
     [session] = fake.created
     assert header(session) == {"file": "sunrise-0412.pdf", "pages": 1, "company_mode": "infer", "companies": [
-        {"name": "Rehearsal Infra Private Limited", "guid": company, "books_from": "2026-04-01"}]}
+        {"name": "Rehearsal Infra Private Limited", "ref": "C1", "books_from": "2026-04-01"}]}
     # Each page arrives as its text layer and as an image the model reads either way.
     assert session.content[1]["text"].startswith("Page 1 of 1. Text layer:\nTAX INVOICE\nSunrise Office Systems")
     assert session.content[2]["image_url"].startswith("data:image/jpeg;base64,")
     [found] = answers(session, "find_company")
     assert (found["companies"][0]["gstins"], found["companies"][0]["matches"]) == ([BUYER], [BUYER])
-    assert [ln["name"] for ln in answers(session, "find_ledger")[0]["results"][0]["ledgers"]] == ["Sunrise Office Systems"]
+    # Searching every company, a ledger names its company; each master is a reference, never its GUID.
+    assert answers(session, "find_ledger")[0]["results"][0]["ledgers"] == [{
+        "name": "Sunrise Office Systems", "ref": "L1", "group": "Sundry Creditors", "gstin": SUNRISE,
+        "company": "Rehearsal Infra Private Limited", "company_ref": "C1"}]
     assert [r["valid"] for r in answers(session, "check_gstin")[0]["results"]] == [True, False]
-    # History is asked for by the GUIDs find_ledger gives; a subject that is no ledger is named, never dropped.
+    # History is asked for by the references find_ledger gives; a subject that is no ledger is named, never dropped.
     [history] = answers(session, "party_history")
     assert ([v["reference"] for v in history["vouchers"]], history["unknown_ledgers"]) == (["SOS/26/0007"], ["Sunrise"])
     first, second = answers(session, "propose")
@@ -331,11 +347,56 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     assert work.get_run(desk["db"], desk["tenant"]["id"], run["id"])["state"] == "review"
 
 
+def test_a_bill_cites_only_masters_its_session_was_given(desk):
+    """Tally numbers masters in sequence, so a guessed GUID can name another real ledger: a session cites only the
+    references its own lookups gave it."""
+    db, company = desk["db"], desk["company"]
+    sister = factory.company(db, desk["tenant"], desk["device"], desk["client"], name="Sister Infra")
+    factory.books(db, sister, masters(sister))
+    db.commit()
+    names = names_of(company, sister)
+    lookups, right = proposing(names, proposal(company["guid"]))
+
+    def citing(ledger):
+        def round_(answers, session):
+            [(tool, arguments)] = right(answers, session)
+            arguments["bills"][0]["voucher"]["lines"][0]["ledger"] = ledger
+            return [(tool, arguments)]
+        return round_
+
+    # Each bill has three submissions: one file tries a reference never given and one of another kind, the other
+    # a ledger given from the other company.
+    fake = by_file(**{"guessed.pdf": [lookups, citing("L99"), citing("T1"), right],
+                      "elsewhere.pdf": [lookups, [("find_ledger", {"company": "C2", "subjects": ["Office Cabins"]})],
+                                        citing("L5"), right]})
+    run = launch(desk, {"guessed.pdf": B01, "elsewhere.pdf": B01})
+    read(desk, fake, run)
+    reasons = {}
+    for session in fake.created:
+        reasons[header(session)["file"]] = [a["bills"][0].get("reason") for a in answers(session, "propose")]
+    assert reasons == {
+        "guessed.pdf": ["L99 is not a reference this session was given. Look the ledger up with find_ledger, and use "
+                        "the reference it gives.", "T1 is a voucher type, not a ledger.", None],
+        "elsewhere.pdf": ["L5 is another company's ledger. Look it up in this company with find_ledger.", None]}
+    session = next(s for s in fake.created if header(s)["file"] == "elsewhere.pdf")
+    # The other company's Office Cabins was given as L5; this company's as L2.
+    assert answers(session, "find_ledger")[1]["results"][0]["ledgers"][0]["ref"] == "L5"
+    assert [r["status"] for r in records(desk, run)] == ["proposed", "proposed"]
+    assert records(desk, run)[0]["proposal"]["preview"]["lines"][1]["ledger"] == "Office Cabins"
+    # A GUID is no reference at all: the contract refuses it before any check.
+    [(tool, arguments)] = right(session.answers, session)
+    arguments["bills"][0]["voucher"]["lines"][0]["ledger"] = "g-cabins"
+    from minkops_platform.runtime.tools import compute
+    assert compute(bill_entry.BILL_TOOLS, None, tool, arguments) == (
+        False, "Invalid bills/0/voucher/lines/0/ledger: 'g-cabins' does not match '^[A-Z][1-9][0-9]{0,4}$'")
+
+
 def test_an_approved_bill_is_saved_once_and_tally_holding_another_version_is_never_overwritten(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    fake = by_file(**{"sunrise.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
-                      "sunrise-resubmitted.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
-                      "sunrise-revised.pdf": [[("propose", {"count": 1, "bills": [revised(company)]})]]})
+    fake = by_file(**{"sunrise.pdf": proposing(names, proposal(company)),
+                      "sunrise-resubmitted.pdf": proposing(names, proposal(company)),
+                      "sunrise-revised.pdf": proposing(names, revised(company))})
     first = launch(desk, {"sunrise.pdf": B01})
     read(desk, fake, first)
     [bill] = records(desk, first)
@@ -391,13 +452,14 @@ def scan(text_colour=(0, 0, 0)):
 
 
 def test_a_bill_in_several_files_is_written_once_and_different_printed_versions_all_hold(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
     # The scan's session books the same bill to another expense ledger; the first file's reading is the one written.
     scanned = proposal(company, **{"voucher.lines.0.ledger_guid": "g-repairs"})
-    fake = by_file(**{"a-sunrise.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
-                      "b-sunrise-copy.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
-                      "c-sunrise-scan.png": [[("propose", {"count": 1, "bills": [scanned]})]],
-                      "d-sunrise-revised.pdf": [[("propose", {"count": 1, "bills": [revised(company)]})]]})
+    fake = by_file(**{"a-sunrise.pdf": proposing(names, proposal(company)),
+                      "b-sunrise-copy.pdf": proposing(names, proposal(company)),
+                      "c-sunrise-scan.png": proposing(names, scanned),
+                      "d-sunrise-revised.pdf": proposing(names, revised(company))})
     run = launch(desk, {"a-sunrise.pdf": B01, "b-sunrise-copy.pdf": B01, "c-sunrise-scan.png": scan()})
     read(desk, fake, run)
     original, copy_, photo = records(desk, run)
@@ -457,11 +519,12 @@ def created(details_state="Andhra Pradesh"):
 
 
 def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
     lookup = [("find_ledger", {"subjects": [CABINS, "Cabin Services"]})]
-    fake = by_file(**{"cabins-1.pdf": [lookup, [("propose", {"count": 1, "bills": [new_supplier(company)]})]],
-                      "cabins-2.pdf": [[("propose", {"count": 1, "bills": [new_supplier(company, number="CS/26/0002",
-                                                                                         total=1180.0)]})]]})
+    fake = by_file(**{"cabins-1.pdf": [lookup, *proposing(names, new_supplier(company))],
+                      "cabins-2.pdf": proposing(names, new_supplier(company, number="CS/26/0002",
+                                                                                         total=1180.0))})
     run = launch(desk, {"cabins-1.pdf": B03, "cabins-2.pdf": B03_NEXT})
     read(desk, fake, run)
     session = next(s for s in fake.created if header(s)["file"] == "cabins-1.pdf")
@@ -500,6 +563,7 @@ def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(de
 
 
 def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the_gate(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
     unaddressed = {"bill": 1, "document": None, "company_guid": None, "company_evidence": None, "voucher": None,
                    "supplier_details": None, "rules": [],
@@ -516,13 +580,12 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
     invented = copy.deepcopy(unbalanced)
     invented["voucher"]["lines"].append(line("round_off", "g-round", 1.0))
     conflict = {**unbalanced, "exception": {"code": "source_values_conflict", "detail": "Total is 188,801.00."}}
-    fake = by_file(**{"unaddressed.pdf": [[("propose", {"count": 1, "bills": [unaddressed]})]],
-                      "unsure.pdf": [[("propose", {"count": 1, "bills": [unsure]})]],
-                      "early.pdf": [[("propose", {"count": 1, "bills": [early]})],
-                                    [("propose", {"count": 1, "bills": [reframed]})]],
-                      "unbalanced.pdf": [[("propose", {"count": 1, "bills": [unbalanced]})],
-                                         [("propose", {"count": 1, "bills": [invented]})],
-                                         [("propose", {"count": 1, "bills": [conflict]})]]})
+    fake = by_file(**{"unaddressed.pdf": proposing(names, unaddressed),
+                      "unsure.pdf": proposing(names, unsure),
+                      "early.pdf": [*proposing(names, early), reproposing(names, reframed)],
+                      # The invented round-off line cites a ledger the model looks up first.
+                      "unbalanced.pdf": [*proposing(names, unbalanced), *proposing(names, invented),
+                                         reproposing(names, conflict)]})
     run = launch(desk, {"unaddressed.pdf": B01, "unsure.pdf": B01, "early.pdf": B01, "unbalanced.pdf": B06})
     read(desk, fake, run)
     nobody, guessable, before_books, contradicted = records(desk, run)
@@ -565,13 +628,13 @@ def second_bill(company, n=2):
 
 
 def test_a_file_of_several_bills_keeps_its_decided_bills_through_a_recheck(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
     unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
     # First taken for three bills, the file is read again as two: the third, untouched by anyone, goes.
-    reading = [[("propose", {"count": 3, "bills": [unsure, second_bill(company), second_bill(company, 3)]})],
-               [("propose", {"count": 2, "bills": [unsure]})]]
-    recheck = [[("propose", {"count": 1, "bills": [proposal(company)]})],
-               [("propose", {"count": 2, "bills": [proposal(company), second_bill(company)]})]]
+    reading = [*proposing(names, unsure, second_bill(company), second_bill(company, 3), count=3),
+               reproposing(names, unsure, count=2)]
+    recheck = [*proposing(names, proposal(company)), reproposing(names, proposal(company), second_bill(company), count=2)]
     sessions = iter([reading, recheck])
     fake = FakeAgents(script_for=lambda metadata, content: Script(*next(sessions)))
     run = launch(desk, {"two-bills.pdf": SECOND})
@@ -605,20 +668,21 @@ def test_a_locked_run_enters_bills_into_its_company_and_a_year_split_routes_by_d
     sister = factory.company(db, desk["tenant"], desk["device"], desk["client"], name="Sister Infra")
     factory.books(db, sister, masters(sister))
     db.commit()
+    names = names_of(company, earlier, sister)
     march = proposal(company["guid"], **{"document.date": "2026-03-02"})
     elsewhere = proposal(sister["guid"])
     held = {**elsewhere, "exception": {"code": "company_unresolved", "detail": "Addressed to Sister Infra."}}
-    fake = by_file(**{"march.pdf": [[("propose", {"count": 1, "bills": [march]})]],
-                      "sister.pdf": [[("propose", {"count": 1, "bills": [elsewhere]})],
-                                     [("propose", {"count": 1, "bills": [held]})]]})
+    fake = by_file(**{"march.pdf": proposing(names, march),
+                      "sister.pdf": [*proposing(names, elsewhere), reproposing(names, held)]})
     run = launch(desk, {"march.pdf": B01, "sister.pdf": B01}, company_mode="locked",
                  locked_company_guid=company["guid"])
     read(desk, fake, run)
     session = next(s for s in fake.created if header(s)["file"] == "march.pdf")
-    assert header(session)["locked_company_guid"] == company["guid"]
-    assert sorted((c["name"], c["books_from"]) for c in header(session)["companies"]) == [
-        ("Rehearsal Infra (2025-26)", "2025-04-01"), ("Rehearsal Infra Private Limited", "2026-04-01"),
-        ("Sister Infra", "2026-04-01")]
+    # A year split's parts share one reference; the locked company is named by it.
+    assert header(session)["locked_company"] == "C1"
+    assert sorted((c["name"], c["ref"], c["books_from"]) for c in header(session)["companies"]) == [
+        ("Rehearsal Infra (2025-26)", "C1", "2025-04-01"), ("Rehearsal Infra Private Limited", "C1", "2026-04-01"),
+        ("Sister Infra", "C2", "2026-04-01")]
     in_march, to_sister = records(desk, run)
     # A bill from March belongs to the part whose books cover it.
     assert (in_march["status"], in_march["company_id"], in_march["facts"]["company"]) == (
@@ -632,8 +696,9 @@ def test_a_locked_run_enters_bills_into_its_company_and_a_year_split_routes_by_d
 
 
 def test_a_scan_is_read_from_its_image_and_an_unreadable_file_holds_without_a_session(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    fake = by_file(**{"photo.jpg": [[("propose", {"count": 1, "bills": [proposal(company)]})]]})
+    fake = by_file(**{"photo.jpg": proposing(names, proposal(company))})
     photo = io.BytesIO()
     Image.open(io.BytesIO(scan())).save(photo, format="JPEG")
     run = launch(desk, {"photo.jpg": photo.getvalue(), "damaged.pdf": b"%PDF-1.7 truncated"})
@@ -672,23 +737,24 @@ ITEM_WISE = {"GUID": "v-depot", "MASTERID": "6", "ALTERID": "4", "DATE": "202608
 
 
 def test_a_supplier_booked_item_wise_shows_its_items_and_a_plain_reading_waits_for_a_person(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
     factory.books(desk["db"], desk["company"], masters(desk["company"]) + STORES, [PRIOR, ITEM_WISE])
     plain = second_bill(company, 1)
     plain["document"].update(number="SD/26/0150", supplier_name="Stores Depot", supplier_gstin=DEPOT)
     plain["voucher"]["party"]["ledger_guid"] = "g-depot"
     plain["voucher"]["lines"][0]["ledger_guid"] = "g-spares"
-    fake = by_file(**{"depot.pdf": [[("find_ledger", {"company": company, "subjects": ["Spares"]}),
-                                     ("party_history", {"company": company, "ledgers": ["g-depot"]})],
-                                    [("propose", {"count": 1, "bills": [plain]})]]})
+    fake = by_file(**{"depot.pdf": [[("find_ledger", {"company": "C1", "subjects": ["Spares"]}),
+                                     ("party_history", {"company": "C1", "ledgers": ["Stores Depot"]})],
+                                    *proposing(names, plain)]})
     bill = factory.text_pdf(invoice(supplier="Stores Depot", supplier_gstin=DEPOT, number="SD/26/0150",
                                     day="02-Sep-2026", taxable="10,000.00", tax="900.00", total="11,800.00"))
     run = launch(desk, {"depot.pdf": bill}, review_mode="only_exceptions")
     read(desk, fake, run)
     [session] = fake.created
     # A ledger's description is the client's own note on what it records.
-    [found] = answers(session, "find_ledger")
-    assert found["results"][0]["ledgers"] == [{"name": "Spares Purchase", "guid": "g-spares", "group": "Purchase Accounts",
+    found = answers(session, "find_ledger")[0]
+    assert found["results"][0]["ledgers"] == [{"name": "Spares Purchase", "ref": "L1", "group": "Purchase Accounts",
                                                "description": "Spares received into the site stores."}]
     [history] = answers(session, "party_history")
     assert history["vouchers"][0]["items"] == [{"item": "Bucket tooth", "quantity": "50 Nos", "amount": "10000.00",
@@ -729,20 +795,22 @@ def settle_practice(desk, **values):
 
 
 def test_an_item_wise_bill_carries_its_items_to_their_godowns_and_is_learnt_item_wise(desk):
+    names = names_of(desk["company"])
     company, db = desk["company"]["guid"], desk["db"]
     factory.books(db, desk["company"], masters(desk["company"]) + STORES + STOCK, [PRIOR, ITEM_WISE])
     settle_practice(desk, receipt_notes={"in_use": False}, purchase_orders={"in_use": False})
-    fake = by_file(**{"depot.pdf": [[("find_stock_item", {"company": company, "subjects": ["bucket tooth", "8431"]}),
-                                     ("godowns", {"company": company})],
-                                    [("propose", {"count": 1, "bills": [depot(company)]})]]})
+    fake = by_file(**{"depot.pdf": [[("find_stock_item", {"company": "C1", "subjects": ["bucket tooth", "8431"]}),
+                                     ("godowns", {"company": "C1"})],
+                                    *proposing(names, depot(company))]})
     run = launch(desk, {"depot.pdf": DEPOT_PDF}, review_mode="only_exceptions")
     read(desk, fake, run)
     [session] = fake.created
+    # Found by name and by HSN code, one item keeps one reference.
     by_name, by_hsn = answers(session, "find_stock_item")[0]["results"]
-    assert by_name["items"] == by_hsn["items"] == [{"name": "Bucket tooth", "guid": "s-tooth", "unit": "Nos",
+    assert by_name["items"] == by_hsn["items"] == [{"name": "Bucket tooth", "ref": "S1", "unit": "Nos",
                                                     "group": "Spares", "hsn": "84314990"}]
-    assert answers(session, "godowns")[0] == {"godowns": [{"name": "Main Location", "guid": "gd-main", "under": None},
-                                                          {"name": "Site Stores", "guid": "gd-site",
+    assert answers(session, "godowns")[0] == {"godowns": [{"name": "Main Location", "ref": "G1", "under": None},
+                                                          {"name": "Site Stores", "ref": "G2",
                                                            "under": "Main Location"}]}
     # Booked item-wise as this supplier's earlier bill was, it needs no review under standing approval.
     [bill] = records(desk, run)
@@ -765,6 +833,7 @@ def test_an_item_wise_bill_carries_its_items_to_their_godowns_and_is_learnt_item
 
 
 def test_an_item_wise_bill_waits_on_open_practice_and_holds_where_orders_track_its_goods(desk):
+    names = names_of(desk["company"])
     from minkops_platform import attention
     from minkops_platform.accounts import practice
     company, db = desk["company"]["guid"], desk["db"]
@@ -774,7 +843,7 @@ def test_an_item_wise_bill_waits_on_open_practice_and_holds_where_orders_track_i
     # Two purchases settle neither whether Receipt Notes nor purchase orders are in use.
     practice.probe(db, desk["company"], version, {"task_id": task["id"]})
     db.commit()
-    fake = by_file(**{"depot.pdf": [[("propose", {"count": 1, "bills": [depot(company)]})]]})
+    fake = by_file(**{"depot.pdf": proposing(names, depot(company))})
     run = launch(desk, {"depot.pdf": DEPOT_PDF})
     read(desk, fake, run)
 
@@ -798,11 +867,12 @@ def test_an_item_wise_bill_waits_on_open_practice_and_holds_where_orders_track_i
 
 
 def test_a_practice_the_books_settle_later_releases_the_bills_that_waited_on_it(desk):
+    names = names_of(desk["company"])
     from minkops_platform.accounts import practice
     company, db = desk["company"]["guid"], desk["db"]
     factory.books(db, desk["company"], masters(desk["company"]) + STORES + STOCK, [PRIOR, ITEM_WISE])
     settle_practice(desk, receipt_notes={"in_use": False})
-    fake = by_file(**{"depot.pdf": [[("propose", {"count": 1, "bills": [depot(company)]})]]})
+    fake = by_file(**{"depot.pdf": proposing(names, depot(company))})
     run = launch(desk, {"depot.pdf": DEPOT_PDF})
     read(desk, fake, run)
     [waiting] = records(desk, run)
@@ -829,6 +899,7 @@ def einvoice_pdf(code):
 
 
 def test_a_signed_e_invoice_pins_the_bill_it_registers(desk, monkeypatch):
+    names = names_of(desk["company"])
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -851,10 +922,9 @@ def test_a_signed_e_invoice_pins_the_bill_it_registers(desk, monkeypatch):
 
     misread = proposal(company, **{"document.total": 188000.0})
     fake = by_file(**{
-        "registered.pdf": [[("propose", {"count": 1, "bills": [misread]})],
-                           [("propose", {"count": 1, "bills": [proposal(company)]})]],
-        "altered.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
-        "elsewhere.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]]})
+        "registered.pdf": [*proposing(names, misread), reproposing(names, proposal(company))],
+        "altered.pdf": proposing(names, proposal(company)),
+        "elsewhere.pdf": proposing(names, proposal(company))})
     run = launch(desk, {"registered.pdf": einvoice_pdf(code()), "altered.pdf": einvoice_pdf(code(sign=False)),
                         "elsewhere.pdf": einvoice_pdf(code(buyer=gstin("37ZZZZZ9999Z1Z")))})
     read(desk, fake, run)
@@ -888,12 +958,13 @@ def repairs_pdf(number):
 
 
 def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_next_bill_to_review(desk):
+    names = names_of(desk["company"])
     from minkops_platform.accounts import memory
     company, db = desk["company"]["guid"], desk["db"]
 
     def bill(number, **config):
         name = f"{number.replace('/', '-')}.pdf"
-        fake = by_file(**{name: [[("propose", {"count": 1, "bills": [repairs(company, number)]})]]})
+        fake = by_file(**{name: proposing(names, repairs(company, number))})
         run = launch(desk, {name: repairs_pdf(number)}, **config)
         read(desk, fake, run)
         return records(desk, run)[0]
@@ -930,6 +1001,7 @@ def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_n
 
 
 def test_a_bill_waits_on_its_companys_open_practice_and_the_answer_releases_it(desk):
+    names = names_of(desk["company"])
     from minkops_platform import attention
     from minkops_platform.accounts import mirror, practice
     company, db = desk["company"]["guid"], desk["db"]
@@ -945,10 +1017,12 @@ def test_a_bill_waits_on_its_companys_open_practice_and_the_answer_releases_it(d
     stamped = proposal(company, **{"document.receipt_register": {"label": "DMR", "number": "1811", "date": "2026-09-02"},
                                    "rules": [str(rule["id"])]})
     unknown = proposal(company, rules=["00000000-0000-4000-8000-000000000000"])
+    # Memory is asked about the supplier by the reference find_ledger gave it.
     fake = by_file(**{"stamped.pdf": [
-        [("practice", {"company": company}), ("rules", {}),
-         ("memory", {"company": company, "subjects": ["g-sunrise"]})],
-        [("propose", {"count": 1, "bills": [unknown]})], [("propose", {"count": 1, "bills": [stamped]})]]})
+        [("practice", {"company": "C1"}), ("rules", {}),
+         ("find_ledger", {"company": "C1", "subjects": ["Sunrise Office Systems"]})],
+        [("memory", {"company": "C1", "subjects": ["L1"]})],
+        *proposing(names, unknown), reproposing(names, stamped)]})
     run = launch(desk, {"stamped.pdf": B01})
     read(desk, fake, run)
     [session] = fake.created
@@ -981,12 +1055,13 @@ def test_a_bill_waits_on_its_companys_open_practice_and_the_answer_releases_it(d
 
 
 def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the_rest(desk):
+    names = names_of(desk["company"])
     company = desk["company"]["guid"]
     # Booked to repairs, a first for this supplier: it waits for a person even under standing approval.
     first_time = second_bill(company, 1)
     first_time["voucher"]["lines"][0]["ledger_guid"] = "g-repairs"
-    fake = by_file(**{"usual.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
-                      "first-time.pdf": [[("propose", {"count": 1, "bills": [first_time]})]]})
+    fake = by_file(**{"usual.pdf": proposing(names, proposal(company)),
+                      "first-time.pdf": proposing(names, first_time)})
     run = launch(desk, {"usual.pdf": B01, "first-time.pdf": SECOND}, review_mode="only_exceptions")
     read(desk, fake, run)
     usual, unprecedented = records(desk, run)

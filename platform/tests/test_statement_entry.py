@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from fake_agents import FakeAgents, Script
+from references import everything, named, referring
 
 from minkops_platform import lanes, work
 from minkops_platform.accounts import statement_entry, sync
@@ -62,6 +63,24 @@ def vtype(guid, name):
                                             "ALTERID": "1", "ISACTIVE": "Yes"}}
 
 
+def masters(company):
+    return [
+        {"type": "COMPANY", "data": {"@_NAME": company["name"], "GUID": company["guid"], "BOOKSFROM": "20260401"}},
+        ledger("g-icici", "ICICI Current A/c", "Bank Accounts", BANKDETAILS="000405001234"),
+        ledger("g-hdfc", "HDFC Current A/c", "Bank Accounts", BANKDETAILS="50200012345678"),
+        ledger("g-acme", "Acme Steel", "Sundry Creditors"),
+        ledger("g-steel", "Steel Mart", "Sundry Creditors", ISBILLWISEON="Yes"),
+        ledger("g-charges", "Bank Charges", "Indirect Expenses"),
+        vtype("g-payment", "Payment"), vtype("g-receipt", "Receipt"), vtype("g-contra", "Contra")]
+
+
+def chunk_session(desk, *rounds):
+    """A chunk session's script: the model looks up the company's masters, then makes each round, written here
+    by GUID, by the references it was given."""
+    names = named(masters(desk["company"]))
+    return Script(everything(names), *(referring(round_, names) for round_ in rounds))
+
+
 @pytest.fixture(autouse=True)
 def quick(monkeypatch):
     monkeypatch.setattr(openai_hosted.time, "sleep", lambda seconds: None)
@@ -77,15 +96,8 @@ def desk():
         client = factory.client(db, tenant)
         device = factory.device(db, tenant, operator)
         company = factory.company(db, tenant, device, client, name="Rehearsal Infra")
-        factory.books(db, company, [
-            {"type": "COMPANY", "data": {"@_NAME": company["name"], "GUID": company["guid"], "BOOKSFROM": "20260401"}},
-            ledger("g-icici", "ICICI Current A/c", "Bank Accounts", BANKDETAILS="000405001234"),
-            ledger("g-hdfc", "HDFC Current A/c", "Bank Accounts", BANKDETAILS="50200012345678"),
-            ledger("g-acme", "Acme Steel", "Sundry Creditors"),
-            ledger("g-steel", "Steel Mart", "Sundry Creditors", ISBILLWISEON="Yes"),
-            ledger("g-charges", "Bank Charges", "Indirect Expenses"),
-            vtype("g-payment", "Payment"), vtype("g-receipt", "Receipt"), vtype("g-contra", "Contra")],
-            [purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00")])
+        factory.books(db, company, masters(company),
+                      [purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00")])
         flow = {**factory.workflow(db, tenant, key="statement-entry"), "config_values": {"review_mode": "all_outputs"}}
         db.commit()
         yield {"db": db, "tenant": tenant, "operator": operator, "client": client, "device": device,
@@ -221,19 +233,20 @@ def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
     def corrected(answers, session):
         return [("propose", {"rows": [{**booked(rows_of(session)[0], company), "rules": [str(rule["id"])]}]})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(first, corrected) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, first, corrected) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, run, fake)
     with host(desk, fake):
         until(lambda: all(i["state"] == "done" for i in items(desk, run)))
     chunk = next(s for s in fake.created if is_chunk(s.content))
-    lookups = [json.loads(a["text"])["results"] for a in chunk.answers if a["name"] == "find_ledger"]
+    # After the model's first look at every master, its own lookups follow.
+    lookups = [json.loads(a["text"])["results"] for a in chunk.answers if a["name"] == "find_ledger"][1:]
     # A masked account number matches its bank ledger by the last digits; names match on every word.
     assert [[ledger["name"] for ledger in result["ledgers"]] for result in lookups[0]] == [["ICICI Current A/c"],
                                                                                            ["Acme Steel"]]
-    # Without a company, every company in scope is searched and each match names its company.
-    assert [(ledger["name"], ledger["company_guid"]) for ledger in lookups[1][0]["ledgers"]] == [
-        ("ICICI Current A/c", company)]
+    # Without a company, every company in scope is searched and each match names its company by reference.
+    assert [(ledger["name"], ledger["ref"], ledger["company_ref"]) for ledger in lookups[1][0]["ledgers"]] == [
+        ("ICICI Current A/c", "L1", "C1")]
     proposed = [json.loads(a["text"]) for a in chunk.answers if a["name"] == "propose"]
     assert proposed[0]["rejected"][0]["reason"] == "The bank ledger must belong to the Bank Accounts group."
     assert proposed[0]["held"] == [rows_of(chunk)[1]["ref"]] and proposed[1]["accepted"] == [rows_of(chunk)[0]["ref"]]
@@ -321,7 +334,7 @@ def decide(desk, record, action, detail=None):
 
 def test_a_transfer_between_own_accounts_is_written_once_for_both_rows(desk):
     company = desk["company"]["guid"]
-    fake = FakeAgents(script_for=lambda m, content: Script(transfers, routed(company)) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
                       else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI, "hdfc-sep.csv": HDFC})
     learned(desk, run, fake)
@@ -354,7 +367,7 @@ def test_a_transfer_between_own_accounts_is_written_once_for_both_rows(desk):
 
 def test_an_approved_row_writes_once_and_an_interrupted_save_is_never_resent(desk):
     company = desk["company"]["guid"]
-    fake = FakeAgents(script_for=lambda m, content: Script(transfers, routed(company)) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
                       else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI, "hdfc-sep.csv": HDFC})
     learned(desk, run, fake)
@@ -444,7 +457,7 @@ def test_balances_that_refute_a_reading_are_explained_and_never_kept(desk):
 
 def test_a_transaction_in_overlapping_statements_is_written_once(desk):
     company = desk["company"]["guid"]
-    fake = FakeAgents(script_for=lambda m, content: Script(transfers, routed(company)) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
                       else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI, "icici-sep-again.csv": ICICI})
     learned(desk, run, fake)
@@ -474,7 +487,7 @@ def test_overlapping_statements_that_route_one_transaction_differently_both_hold
                 entries.append(entry)
         return [("propose", {"rows": entries})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(disagree) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, disagree) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI, "icici-sep-again.csv": ICICI})
     learned(desk, run, fake)
     with host(desk, fake):
@@ -495,7 +508,7 @@ def test_a_gap_from_the_previous_statement_raises_one_attention_item(desk):
                 else entry for entry in arguments["rows"]]
         return [(name, {"rows": rows})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(transfers, october_unsure) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, october_unsure) if is_chunk(content)
                       else Script(layouts))
     september = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, september, fake)
@@ -531,7 +544,7 @@ def test_a_returned_payment_is_found_in_the_run_and_in_tally(desk):
     def lookup(answers, session):
         return [("pair_return", {"utrs": ["UTR111222", "UTR999888"]})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(lookup) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, lookup) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, run, fake)
     with host(desk, fake):
@@ -574,7 +587,7 @@ def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_
     def corrected(answers, session):
         return [("propose", {"rows": [to_steel_mart(rows_of(session)[3], company)]})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(settle, corrected) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, settle, corrected) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-steel.csv": STEEL})
     learned(desk, run, fake)
     with host(desk, fake):
@@ -610,7 +623,7 @@ def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk)
     company = desk["company"]["guid"]
     statement = STEEL.split(b"\n15/09")[0] + (b"\n15/09/2026,NEFT STEEL MART,UTR301,1000.00,,99000.00\n"
                                               b"16/09/2026,NEFT STEEL MART SM/101,UTR302,1180.00,,97820.00\n")
-    fake = FakeAgents(script_for=lambda m, content: Script(lambda answers, session: [("propose", {"rows": [
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, lambda answers, session: [("propose", {"rows": [
         to_steel_mart(row, company) for row in rows_of(session)]})]) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-steel.csv": statement})
     learned(desk, run, fake)
@@ -643,7 +656,7 @@ def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk)
 
 def test_standing_approval_writes_clean_rows_and_leaves_exceptions_for_review(desk):
     company = desk["company"]["guid"]
-    fake = FakeAgents(script_for=lambda m, content: Script(transfers, routed(company)) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
                       else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI}, review_mode="only_exceptions", branch_mapping_file_id=None)
     learned(desk, run, fake)
@@ -663,7 +676,7 @@ def test_standing_approval_writes_clean_rows_and_leaves_exceptions_for_review(de
 def test_stopping_holds_unsaved_rows_and_withdraws_writes_no_pc_has_started(desk):
     from minkops_platform.run_controls import task_control
     company = desk["company"]["guid"]
-    fake = FakeAgents(script_for=lambda m, content: Script(transfers, routed(company)) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
                       else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, run, fake)
@@ -691,7 +704,7 @@ def test_a_rechecked_row_gets_a_fresh_proposal_in_a_new_attempt_of_its_chunk(des
             if first and "ACME" in row["narration"] else booked(row, company)
             for row in rows if "TRANSFER" not in row["narration"]]})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(once_unsure) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, once_unsure) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, run, fake)
     with host(desk, fake):
@@ -718,7 +731,7 @@ def test_a_mapping_file_is_consulted_through_its_tool_and_never_read_as_transact
     def consult(answers, session):
         return [("mapping", {"labels": [row["hint"] for row in rows_of(session)]})]
 
-    fake = FakeAgents(script_for=lambda m, content: Script(consult) if is_chunk(content)
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, consult) if is_chunk(content)
                       else Script([("propose_layout", {"layout": layout})]))
     run = launch(desk, {"icici-branches.csv": branched}, branch_mapping_file_id=str(mapping["id"]))
     assert [i["kind"] for i in items(desk, run)] == ["layout"]  # the mapping is not a statement

@@ -20,6 +20,12 @@ lists `decided_bills`, a person has already decided those: keep their numbers
 and propose the others. List in `rules` the IDs of the client's rules the bill
 follows, or `[]`.
 
+Companies and masters go by short references such as `C1` or `L12`: the input
+gives each company's, and every lookup gives the references of what it finds.
+Propose a company, ledger, voucher type, stock item, godown or cost centre only
+by a reference this session was given. A master you know only by name, from
+memory or history, is looked up before you propose it.
+
 ## Reading the file
 
 - **Bills and their companions.** One file often holds a bill with companion
@@ -106,7 +112,7 @@ Propose the voucher this client's own practice records for the document.
 
 - **What guides treatment.** In order: a legible handwritten instruction on this
   bill; the client's `rules`; what `memory` learnt about this supplier (look it up
-  by the supplier ledger's GUID); then history. `practice` says how the company
+  by the supplier ledger's reference); then history. `practice` says how the company
   keeps its books. Tally's masters and Minkops's checks bind all of them. A
   demoted memory entry was changed in Tally since, so prefer what the books show
   now.

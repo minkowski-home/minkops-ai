@@ -11,6 +11,12 @@ up with the tools and propose an entry for every row with `propose`. Minkops
 checks each proposal against the client's books at once and tells you what it
 rejected and why.
 
+Companies and masters go by short references such as `C1` or `L12`: the input
+gives each company's, and every lookup gives the references of what it finds.
+Propose a company, ledger, voucher type or cost centre only by a reference this
+session was given. A ledger you know only by name, from memory or history, is
+looked up before you propose it.
+
 ## Facts are fixed
 
 Dates, amounts, balances and references were read through a layout proven

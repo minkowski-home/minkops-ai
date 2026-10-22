@@ -38,7 +38,7 @@ from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
 from . import desk_tools, memory, mirror, settlement, statement_layouts, sync, writes
-from .desk_tools import COMPANY, SUBJECTS, Desk, schema
+from .desk_tools import COMPANY, SUBJECTS, Desk, reference, schema
 from .holds import ACTIONS, STATEMENT, hold
 from .holds import actions as hold_actions
 from .statement_routing import validated_plan
@@ -211,7 +211,8 @@ def _chunk_session(connection, run, item):
         "balance": _rupees(row["facts"]["balance_cents"]), "reference": row["facts"]["reference"] or None,
         "narration": row["facts"]["narration"] or None, "hint": row["facts"]["branch"] or None,
         "account": row["facts"]["account"] or None}.items() if value is not None}, ensure_ascii=False) for row in rows]
-    companies = "; ".join(f"{c['name']} ({guid})" for guid, c in state.companies.items())
+    refs = state.issue(connection, "company", None, list(state.companies))
+    companies = "; ".join(f"{c['name']} ({refs[guid]})" for guid, c in state.companies.items())
     header = {"statement": rows[0]["facts"]["file"], "sheet": source["sheet"], "account_details": source["details"],
               "routing_hint_column": source.get("hint"), "companies": companies,
               "mapping": bool(run["config"].get("branch_mapping_file_id"))}
@@ -294,10 +295,10 @@ def propose(call, arguments):
             held.append(ref)
             continue
         try:
-            company = state.company(entry["company_guid"])
+            company, selection = _selection(connection, state, entry)
             cited = state.cite(connection, entry.get("rules", []))
-            resolved = validated_plan(record["facts"], [state.view(connection, company)], entry)
-            proposal = {"selection": entry, "resolved": resolved, **({"rules": cited} if cited else {})}
+            resolved = validated_plan(record["facts"], [state.view(connection, company)], selection)
+            proposal = {"selection": selection, "resolved": resolved, **({"rules": cited} if cited else {})}
             try:
                 proposal["resolved"] = _settled(connection, state, company, record, resolved, entry.get("bills"))
             except settlement.Unresolved as unresolved:
@@ -332,6 +333,26 @@ def propose(call, arguments):
     remaining = connection.execute("SELECT count(*) AS n FROM run_records WHERE item_id=%s AND status='pending'",
                                    (state.item["id"],)).fetchone()["n"]
     return {"accepted": accepted, "held": held, "rejected": rejected, "remaining": remaining}
+
+
+def _selection(connection, state, entry):
+    """A row's company, and its proposal as validated_plan reads it: the company and masters it cites by
+    reference, by GUID. A reference the session was not given, or of another kind or company, is refused."""
+    company = state.company_of(connection, entry["company"])
+    guid = lambda kind, ref: state.resolve(connection, kind, [ref], company)[ref] if ref else None  # noqa: E731
+
+    def centre(cited):
+        found = guid("cost_centre", cited.get("cost_centre"))
+        return {"cost_centre_guid": found, "cost_category_guid": state.category(connection, company, found) if found else None}
+
+    cited = ("company", "bank_ledger", "counter_ledger", "voucher_type", "cost_centre", "lines")
+    return company, {
+        **{key: value for key, value in entry.items() if key not in cited},
+        "company_guid": company["guid"], "bank_ledger_guid": guid("ledger", entry["bank_ledger"]),
+        "counter_ledger_guid": guid("ledger", entry["counter_ledger"]),
+        "voucher_type_guid": guid("voucher_type", entry["voucher_type"]), **centre(entry),
+        **({"lines": [{"role": line["role"], "ledger_guid": guid("ledger", line["ledger"]), "amount": line["amount"],
+                       **centre(line)} for line in entry["lines"]]} if "lines" in entry else {})}
 
 
 def _uuid(ref):
@@ -466,15 +487,17 @@ def _brief(row):
 
 
 REF = {"type": "string", "minLength": 36, "maxLength": 36}
-GUID = {"type": ["string", "null"], "maxLength": 100}
+LEDGER = reference("A ledger's reference, as find_ledger gives it.")
+CENTRE = {"anyOf": [{"type": "null"}, reference("A cost centre's reference, as cost_centres gives it; its category "
+                                                 "follows from it.")]}
 SELECTION = schema({
-    "ref": REF, "company_guid": COMPANY, "bank_ledger_guid": COMPANY, "counter_ledger_guid": COMPANY,
-    "voucher_type_guid": COMPANY, "family": {"enum": ["payment", "receipt", "contra"]},
-    "cost_centre_guid": GUID, "cost_category_guid": GUID,
+    "ref": REF, "company": COMPANY, "bank_ledger": LEDGER, "counter_ledger": LEDGER,
+    "voucher_type": reference("The voucher type's reference, as voucher_types gives it."),
+    "family": {"enum": ["payment", "receipt", "contra"]}, "cost_centre": CENTRE,
     "lines": {"type": "array", "minItems": 1, "maxItems": 10, "items": schema({
-        "role": {"enum": ["counter", "tax", "tds", "charge"]}, "ledger_guid": COMPANY,
-        "amount": {"type": "number", "exclusiveMinimum": 0}, "cost_centre_guid": GUID, "cost_category_guid": GUID},
-        ["role", "ledger_guid", "amount"])},
+        "role": {"enum": ["counter", "tax", "tds", "charge"]}, "ledger": LEDGER,
+        "amount": {"type": "number", "exclusiveMinimum": 0}, "cost_centre": CENTRE},
+        ["role", "ledger", "amount"])},
     "pair": {**REF, "description": "The other leg's ref, for a transfer between own accounts."},
     "bills": {"type": "array", "minItems": 1, "maxItems": 20, "description": (
         "For a counter ledger that keeps bill-by-bill balances: the bills its line settles, adding up to its amount. "
@@ -487,7 +510,7 @@ SELECTION = schema({
     "payee": {"type": "string", "minLength": 1, "maxLength": 200,
               "description": "The counterparty the narration names, as printed, without references or amounts."},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
-}, ["ref", "company_guid", "bank_ledger_guid", "counter_ledger_guid", "voucher_type_guid", "evidence"])
+}, ["ref", "company", "bank_ledger", "counter_ledger", "voucher_type", "evidence"])
 EXCEPTION = schema({"ref": REF, "exception": schema({"code": {"enum": list(EXCEPTIONS)},
                                                      "detail": {"type": "string", "minLength": 1, "maxLength": 1000}},
                                                     ["code", "detail"])}, ["ref", "exception"])

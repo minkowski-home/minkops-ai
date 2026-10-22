@@ -39,7 +39,7 @@ from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
 from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
-from .desk_tools import Desk, schema
+from .desk_tools import COMPANY, Desk, reference, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
 from .vouchers import HoldReason, check, correction_reason, narration_token, observed_bill, rupees
@@ -169,13 +169,14 @@ def _open(record):
         record["status"] == "held" and all(hold(code).kind == EXCEPTION for code in record["hold_codes"]))
 
 
-def _content(run, desk, file, read, decided):
+def _content(connection, run, desk, file, read, decided):
     config = run["config"]
+    refs = desk.issue(connection, "company", None, list(desk.parts))
     header = {"file": Path(file["path"]).name, "pages": len(read), "company_mode": config["company_mode"],
-              "companies": [{"name": part["name"], "guid": part["guid"], "books_from": part["books_from"].isoformat()}
+              "companies": [{"name": part["name"], "ref": refs[part["guid"]], "books_from": part["books_from"].isoformat()}
                             for parts in desk.parts.values() for part in parts]}
     if config["company_mode"] == "locked":
-        header["locked_company_guid"] = config["locked_company_guid"]
+        header["locked_company"] = refs[config["locked_company_guid"]]
     if decided:
         header["decided_bills"] = decided
     content = [{"type": "input_text", "text": json.dumps(header, ensure_ascii=False)}]
@@ -209,7 +210,7 @@ def session(connection, run, item):
                 **{key: r["facts"][key] for key in ("supplier", "number", "date") if key in r["facts"]}}
                for r in records if not _open(r)]
     return Session(model=pinned["model"], instructions=pinned["instructions"], reasoning=desk_tools.reasoning(pinned),
-                   content=_content(run, desk, file, read, decided), tools={**desk_tools.TOOLS, **BILL_TOOLS},
+                   content=_content(connection, run, desk, file, read, decided), tools={**desk_tools.TOOLS, **BILL_TOOLS},
                    state=desk)
 
 
@@ -347,6 +348,45 @@ def propose(call, arguments):
     return {"bills": results, **({"still_pending": waiting} if waiting else {})}
 
 
+def _cited(connection, desk, bill):
+    """The bill as the checks and its plan read it: the company and masters it cites by reference, by GUID.
+
+    A reference the session was not given, or one naming another kind of master or another company's, is
+    refused with how to find the right one; the session may propose the bill again.
+    """
+    out = {key: value for key, value in bill.items() if key != "company"}
+    try:
+        out["company_guid"] = desk.resolve(connection, "company", [bill["company"]])[bill["company"]] \
+            if bill.get("company") else None
+    except ToolError as refusal:
+        raise HoldReason("company_unresolved", str(refusal)) from None
+    voucher, company = bill.get("voucher"), desk.companies.get(out["company_guid"])
+    if voucher is None:
+        return out
+    try:
+        guid = lambda kind, ref: desk.resolve(connection, kind, [ref], company)[ref] if ref else None  # noqa: E731
+        lines = []
+        for line in voucher["lines"]:
+            centre = guid("cost_centre", line["cost_centre"])
+            lines.append({**{key: value for key, value in line.items() if key not in ("ledger", "cost_centre")},
+                          "ledger_guid": guid("ledger", line["ledger"]), "cost_centre_guid": centre,
+                          "cost_category_guid": desk.category(connection, company, centre) if centre else None})
+        out["voucher"] = {
+            **{key: value for key, value in voucher.items() if key not in ("voucher_type", "party", "lines", "items")},
+            "voucher_type_guid": guid("voucher_type", voucher["voucher_type"]),
+            "party": {"ledger_guid": guid("ledger", voucher["party"]["ledger"]),
+                      "new_supplier": voucher["party"]["new_supplier"], "evidence": voucher["party"]["evidence"]},
+            "lines": lines,
+            **({"items": [{**{key: value for key, value in item.items() if key not in ("item", "ledger", "godowns")},
+                           "item_guid": guid("stock_item", item["item"]), "ledger_guid": guid("ledger", item["ledger"]),
+                           "godowns": [{"godown_guid": guid("godown", place["godown"]), "quantity": place["quantity"],
+                                        "amount": place["amount"]} for place in item["godowns"]]}
+                          for item in voucher["items"]]} if "items" in voucher else {})}
+    except ToolError as refusal:
+        raise HoldReason("classification_uncertain", str(refusal)) from None
+    return out
+
+
 def _company(desk, bill):
     guid = bill.get("company_guid")
     if guid not in desk.parts:
@@ -375,10 +415,12 @@ def _propose_one(connection, desk, record, bill, count):
     checks = {"submissions": submissions, "read": earlier.get("read") or reading}
     review = [f"The bill was read differently after a refusal: {'; '.join(changed)}."
               for changed in [_changed(checks["read"], reading)] if changed]
-    company = _company(desk, bill)
-    facts = _facts(record, document, company)
+    company = facts = None
     locked = run["config"].get("locked_company_guid") if run["config"]["company_mode"] == "locked" else None
     try:
+        bill = _cited(connection, desk, bill)
+        company = _company(desk, bill)
+        facts = _facts(record, document, company)
         cited = desk.cite(connection, bill["rules"])
         if bill["exception"]:
             return _hold(connection, desk, record, bill, company, bill["exception"]["code"],
@@ -395,6 +437,7 @@ def _propose_one(connection, desk, record, bill, count):
             registered = _registered(connection, desk, bill, company, count)
         bound = check(bill, desk.view(connection, company), company, until=desk.until(company))
     except HoldReason as refusal:
+        facts = facts or _facts(record, document, company)
         if refusal.code in FINAL or refusal.final or submissions >= ATTEMPTS:
             return _hold(connection, desk, record, bill, company, refusal.code, str(refusal), facts=facts,
                          checks={**checks, "final": refusal.code in FINAL or refusal.final}, review=review)
@@ -518,7 +561,7 @@ def _nullable(definition):
 
 
 TEXT = {"type": "string", "minLength": 1, "maxLength": 1000}
-GUID = {"type": ["string", "null"], "maxLength": 100}
+LEDGER = reference("A ledger's reference, as find_ledger gives it.")
 MONEY = {"type": "number", "exclusiveMinimum": 0}
 PRINTED = {"type": ["number", "null"], "exclusiveMinimum": 0}
 FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "taxable", "tax", "round_off", "note",
@@ -540,32 +583,33 @@ DOCUMENT = schema({
      "receipt_register"])
 LINE = schema({
     "role": {"enum": ["expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"]},
-    "ledger_guid": {"type": "string", "minLength": 1, "maxLength": 100}, "side": {"enum": ["debit", "credit"]},
-    "amount": MONEY, "cost_centre_guid": GUID, "cost_category_guid": GUID,
+    "ledger": LEDGER, "side": {"enum": ["debit", "credit"]},
+    "amount": MONEY, "cost_centre": _nullable(reference("A cost centre's reference, as cost_centres gives it.")),
     "tax": _nullable(schema({"head": {"enum": ["cgst", "sgst", "igst", "cess"]}, "rate": MONEY, "taxable": MONEY},
                             ["head", "rate", "taxable"])),
     "tds": _nullable(schema({"section": {"type": "string", "minLength": 2, "maxLength": 10}, "rate": MONEY},
                             ["section", "rate"])),
     "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
-    ["role", "ledger_guid", "side", "amount", "cost_centre_guid", "cost_category_guid", "tax", "tds", "evidence"])
+    ["role", "ledger", "side", "amount", "cost_centre", "tax", "tds", "evidence"])
 QUANTITY = {"type": "number", "exclusiveMinimum": 0}
 ITEM = schema({
-    "item_guid": {"type": "string", "minLength": 1, "maxLength": 100}, "quantity": QUANTITY, "rate": MONEY,
-    "amount": MONEY, "ledger_guid": {"type": "string", "minLength": 1, "maxLength": 100},
+    "item": reference("The stock item's reference, as find_stock_item gives it."), "quantity": QUANTITY, "rate": MONEY,
+    "amount": MONEY, "ledger": LEDGER,
     "godowns": {"type": "array", "minItems": 1, "maxItems": 10, "items": schema({
-        "godown_guid": {"type": "string", "minLength": 1, "maxLength": 100}, "quantity": QUANTITY, "amount": MONEY},
-        ["godown_guid", "quantity", "amount"])},
+        "godown": reference("A godown's reference, as godowns gives it."), "quantity": QUANTITY, "amount": MONEY},
+        ["godown", "quantity", "amount"])},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
-    ["item_guid", "quantity", "rate", "amount", "ledger_guid", "godowns", "evidence"])
+    ["item", "quantity", "rate", "amount", "ledger", "godowns", "evidence"])
 VOUCHER = schema({
-    "family": {"enum": ["purchase", "journal", "debit_note"]}, "voucher_type_guid": GUID,
-    "party": schema({"ledger_guid": GUID, "new_supplier": {"type": "boolean"}, "evidence": TEXT},
-                    ["ledger_guid", "new_supplier", "evidence"]),
+    "family": {"enum": ["purchase", "journal", "debit_note"]},
+    "voucher_type": _nullable(reference("The voucher type's reference, as voucher_types gives it.")),
+    "party": schema({"ledger": _nullable(LEDGER), "new_supplier": {"type": "boolean"}, "evidence": TEXT},
+                    ["ledger", "new_supplier", "evidence"]),
     "lines": {"type": "array", "maxItems": 39, "items": LINE},
     "items": {"type": "array", "maxItems": 40, "items": ITEM, "description": (
         "For a purchase the client books item-wise: each item line of the bill, in the stock item's own unit. "
         "Items carry the taxable value their lines print, so they are not expense lines too.")}},
-    ["family", "voucher_type_guid", "party", "lines"])
+    ["family", "voucher_type", "party", "lines"])
 SUPPLIER = schema({
     **{key: {"type": "string", "maxLength": 250} for key in ("gstin", "registration_type", "state", "state_code",
                                                              "place_of_supply", "pincode")},
@@ -577,11 +621,11 @@ SUPPLIER = schema({
     ["gstin", "registration_type", "state", "state_code", "place_of_supply", "address", "pincode", "evidence"])
 BILL_SCHEMA = schema({
     "bill": {"type": "integer", "minimum": 1, "maximum": MAX_BILLS}, "document": _nullable(DOCUMENT),
-    "company_guid": GUID, "company_evidence": {"type": ["string", "null"], "maxLength": 1000},
+    "company": _nullable(COMPANY), "company_evidence": {"type": ["string", "null"], "maxLength": 1000},
     "voucher": _nullable(VOUCHER), "supplier_details": _nullable(SUPPLIER), "evidence": EVIDENCE,
     "exception": _nullable(schema({"code": {"enum": list(EXCEPTIONS)}, "detail": TEXT}, ["code", "detail"])),
     "rules": {"type": "array", "maxItems": 10, "items": {"type": "string", "minLength": 36, "maxLength": 36}},
-}, ["bill", "document", "company_guid", "company_evidence", "voucher", "supplier_details", "evidence", "exception",
+}, ["bill", "document", "company", "company_evidence", "voucher", "supplier_details", "evidence", "exception",
     "rules"])
 BILL_TOOLS = {tool.name: tool for tool in (
     Tool("propose", "Propose bills of this file, numbered from 1 in the order they appear; `count` is how many bills "

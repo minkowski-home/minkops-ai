@@ -35,7 +35,9 @@ class ClientVariantTests(TestCase):
             self.assertEqual(installed.employees[0].metadata["name"], "Client A Accounts")
             self.assertTrue(bundle["instructions"].endswith(
                 "## Client procedure\n\nClient A: book both legs of a NEFT return."))
-            self.assertEqual(bundle["variant"], {"solution": "client-a", "core_version": "1.0.0", "version": "1.2.0"})
+            core_version = json.loads((root / "employees/accounts-desk/workflows/statement-entry/workflow.json")
+                                      .read_text())["version"]
+            self.assertEqual(bundle["variant"], {"solution": "client-a", "core_version": core_version, "version": "1.2.0"})
             self.assertNotIn("---", bundle["instructions"].split("\n", 1)[0])  # the skill manifest is not sent
             self.assertEqual(installed.bindings["statement-entry"]["defaults"]["review_mode"], "only_exceptions")
             self.assertEqual(installed.bindings["statement-entry"]["solution"], "client-a")
