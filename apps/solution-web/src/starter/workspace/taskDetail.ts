@@ -1,6 +1,7 @@
 import type { Task, TaskEvent } from "../api";
 
-export type TaskDetails = Task & { events: TaskEvent[] };
+/** A run's task names its run and client, whose review it shows. */
+export type TaskDetails = Task & { events: TaskEvent[]; run?: { id: string; client: string } };
 
 export function taskSnapshot(tasks: Task[], id: string): TaskDetails | null {
   const task = tasks.find((item) => item.id === id);

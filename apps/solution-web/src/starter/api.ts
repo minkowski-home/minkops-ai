@@ -38,6 +38,8 @@ export interface Employee {
   config_version: number;
 }
 
+export interface Client { id: string; slug: string; name: string; can_edit?: boolean }
+
 export interface Workflow {
   id: string;
   key: string;
@@ -79,6 +81,8 @@ export interface Workspace {
   tenant: { slug: string; name: string };
   can_edit: boolean;
   attention_count?: number;
+  /** The client businesses this member can reach. */
+  clients?: Client[];
   employees: Employee[];
   workflows: Workflow[];
   tasks: Task[];

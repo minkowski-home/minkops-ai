@@ -149,7 +149,8 @@ settles on its line (`accounts/settlement.py`):
 
 ## Review and writes
 
-The runs API serves:
+Rows are reviewed on the run's task page ([Accounts desk](accounts-desk.md#in-the-console)),
+each settlement choice as its own button. The runs API serves:
 
 - a small status DTO;
 - pages of record summaries;

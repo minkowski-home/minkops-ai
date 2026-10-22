@@ -11,9 +11,9 @@ readback.
 
 ## Launching a run
 
-A run covers one client business. The review surface arrives in rebuild slice 10.
-Until then, runs are driven through the runs API, under
-`/api/tenants/{slug}/clients/{client}`:
+A run covers one client business. It starts from the workflow's page and is
+reviewed on its task page; see [Accounts desk](accounts-desk.md#in-the-console).
+Both use the runs API, under `/api/tenants/{slug}/clients/{client}`:
 
 | Call | Purpose |
 | --- | --- |
@@ -22,7 +22,7 @@ Until then, runs are driven through the runs API, under
 | `GET /runs/{id}/status` | Small status: run state, item and record counts, blockers |
 | `GET /runs/{id}/records` | One summary per bill, paged with `after` |
 | `GET /records/{id}` | One bill's proposal, evidence, lines and Tally observation |
-| `POST /records/{id}/decisions` | `{action, version}`: one of the bill's offered actions |
+| `POST /records/{id}/decisions` | `{action, version, detail}`: one of the bill's offered actions, with the detail it was offered with |
 | `POST /runs/{id}/approve` | Write ready bills: approve every proposal that needs no review |
 
 Stop and pause are task controls (`POST /api/tenants/{slug}/tasks/{task}/control`).

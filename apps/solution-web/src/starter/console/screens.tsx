@@ -11,6 +11,8 @@ import { progressView, type ProgressMode } from '../workspace/progress';
 import { RunTiming } from "../workspace/RunTiming";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { RunControls } from "../workspace/RunControls";
+import { RunReview } from "../workspace/RunReview";
+import { LaunchRun } from "../workspace/LaunchRun";
 import { LoadingIndicator, Spinner } from "../components/Feedback";
 import { useRead } from "../useRead";
 import { reads } from "../readCache";
@@ -193,6 +195,7 @@ function WorkflowDetailContent({ workspace, routeSlug, id, onSaved }: {
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
     <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
+    <LaunchRun workspace={workspace} workflow={item} routeSlug={routeSlug} />
     <div className="detail-grid"><ConfigPanel key={`${item.id}:${item.status}`} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
       canEdit={workspace.can_edit} onSaved={onSaved} />
       <aside className="related-panel"><h2>Employees</h2>
@@ -293,6 +296,7 @@ export function TaskDetail({ workspace, routeSlug, id }: {
     <RunTiming task={detail} />
     <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { setData(task); reads.invalidate(scope, resource => resource !== path); }} />
     <TaskProgress view={progress} stale={Boolean(error)} />
+    {detail.run && <RunReview tenant={workspace.tenant.slug} client={detail.run.client} run={detail.run.id} />}
       {error && <p role="alert" className="form-message">Could not refresh <button
         className="button button-ghost" onClick={() => void refresh()}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}

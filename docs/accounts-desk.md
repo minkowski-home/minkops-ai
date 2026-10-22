@@ -38,8 +38,23 @@ and proposes; it never writes to Tally. The companion performs every native writ
 and never starts, closes or restarts Tally. See
 [Windows setup and recovery](windows-app.md).
 
-The review surface arrives in rebuild slice 10. Until then, runs are driven
-through the runs API listed in [Bill entry](bill-entry.md#launching-a-run).
+### In the console
+
+A run starts from its workflow's page: the client, the files, and only the run
+settings the workflow declares. Its task page then shows the one review surface
+every workflow shares, driven by what the handler reports and the server offers:
+
+- each record's status, its holds and their reasons, and what its review asks a
+  person to check;
+- one button per offered decision, such as Approve, Do nothing, Recheck, or each
+  of a statement row's settlement choices, sent with the record's version;
+- its details: the proposed entry and items, the bills it settles, a verified
+  e-invoice, evidence quotes, the rules it follows, a new supplier, and what Tally
+  holds now.
+
+Save ready entries approves every proposal that needs no review. The list is read
+again whenever the run's activity changes, 100 records a page. Scripts and other
+integrations make the same calls: the runs API in [Bill entry](bill-entry.md#launching-a-run).
 
 ## Memory
 
