@@ -125,7 +125,7 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
         updated = connection.execute(
             """UPDATE memory_entries SET evidence=%s, uses=uses+%s, updated_at=now(),
                status=CASE WHEN %s THEN 'confirmed' ELSE status END, misses=CASE WHEN %s THEN 0 ELSE misses END,
-               confirmed_by=CASE WHEN %s THEN %s ELSE confirmed_by END,
+               confirmed_by=CASE WHEN %s THEN %s::uuid ELSE confirmed_by END,
                confirmed_at=CASE WHEN %s THEN now() ELSE confirmed_at END WHERE id=%s RETURNING *""",
             (Jsonb(history), int(use and entry["value"] == value), confirm, confirm, confirm, actor_id, confirm,
              entry["id"])).fetchone()
@@ -134,7 +134,7 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
         return updated
     updated = connection.execute(
         """UPDATE memory_entries SET value=%s,guids=%s,evidence=%s,status=%s,misses=0,uses=%s,version=version+1,
-           confirmed_by=CASE WHEN %s='confirmed' THEN %s END,confirmed_at=CASE WHEN %s='confirmed' THEN now() END,
+           confirmed_by=CASE WHEN %s='confirmed' THEN %s::uuid END,confirmed_at=CASE WHEN %s='confirmed' THEN now() END,
            updated_at=now() WHERE id=%s RETURNING *""",
         (Jsonb(value), list(guids), Jsonb(history), status, int(use), status, actor_id, status, entry["id"])).fetchone()
     _event(connection, updated, "changed", actor_id, {"from": entry["value"], "to": value})

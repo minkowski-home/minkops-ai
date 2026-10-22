@@ -116,6 +116,26 @@ def test_a_settled_fact_is_a_confirmed_entry_and_a_persons_answer_is_never_overw
     assert (invoice["status"], invoice["value"]) == ("confirmed", {"fields": ["REFERENCE"]})
 
 
+def test_books_that_settle_a_fact_differently_later_change_its_entry(books):
+    db, company = books["db"], books["company"]
+
+    def synced(bill_by_bill):
+        """A sync of books where this many of twelve suppliers keep bill-by-bill balances."""
+        suppliers = [{"type": "LEDGER", "data": {"@_NAME": f"Payee {n}", "GUID": f"l-{n}", "PARENT": "Sundry Creditors",
+                                                 "ISBILLWISEON": "Yes" if n < bill_by_bill else "No"}}
+                     for n in range(12)]
+        _, version = found(books, masters(*suppliers), [purchase(n, reference=f"INV-{n}") for n in range(12)])
+        practice.probe(db, company, version, books["job"])
+        return memory.live(db, company["tenant_id"], company["client_id"], company_id=company["id"],
+                           kind="practice", subject="billwise")
+
+    first, later = synced(0), synced(3)
+    assert (first["value"], later["value"]) == ({"in_use": False, "share": 0.0}, {"in_use": True, "share": 0.25})
+    # The same entry, at its next version, still settled by the books rather than by a person.
+    assert (later["id"], later["version"], later["status"], later["confirmed_by"]) == (
+        first["id"], first["version"] + 1, "confirmed", None)
+
+
 def test_an_answer_settles_the_practice_and_no_later_sync_asks_again(books):
     from minkops_platform import attention
     from minkops_platform.errors import ServiceError
