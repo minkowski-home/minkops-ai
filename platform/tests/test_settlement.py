@@ -83,17 +83,18 @@ def test_choices_are_labelled_as_a_person_reads_them():
         allocate(OPEN, 12000)
     assert [choice["label"] for choice in held.value.choices] == [
         "Settle SM/101, SM/102 and SM/103 in full, and 820.00 on account", "On account, settling no bill"]
+    # Amounts are grouped as an Indian reader writes them.
     with pytest.raises(settlement.Unresolved) as held:
-        allocate(OPEN, 1000)
-    assert held.value.choices[0]["label"] == "Settle 1000.00 of SM/101 (1180.00 open)"
+        allocate([bill("SM/201", 1250000)], 100000)
+    assert held.value.choices[0]["label"] == "Settle 1,00,000.00 of SM/201 (12,50,000.00 open)"
 
 
 @pytest.mark.parametrize(("case", "proposed", "message"), [
     ("a bill that is not open", [against("SM/999", 1180)], "SM/999 is not an open bill this payment can settle"),
-    ("more than a bill has open", [against("SM/101", 2000)], "SM/101 has 1180.00 open, less than 2000.00"),
+    ("more than a bill has open", [against("SM/101", 2000)], "SM/101 has 1,180.00 open, less than 2,000.00"),
     ("a debit balance against a payment", [against("ADV-1", 300)], "ADV-1 is not an open bill this payment can settle"),
     ("references that do not add up", [against("SM/101", 1180), on_account(100)],
-     "The bills must add up to the counter line's 2000.00"),
+     "The bills must add up to the counter line's 2,000.00"),
     ("a new bill from a bank row", [{"type": "New Ref", "name": "X1", "amount_cents": 200000}],
      "A bank row settles bills"),
     ("an Advance that reuses an open bill's name", [{"type": "Advance", "name": "SM/101", "amount_cents": 200000}],

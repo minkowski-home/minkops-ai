@@ -263,4 +263,9 @@ def _joined(items):
 
 
 def _rupees(cents):
-    return f"{cents / 100:.2f}"
+    """An amount as an Indian reader writes it: the last three digits, then pairs (12,50,000.00)."""
+    whole, paise = divmod(abs(cents), 100)
+    digits = str(whole)
+    head, tail = digits[:-3], digits[-3:]
+    pairs = [head[max(0, end - 2):end] for end in range(len(head), 0, -2)][::-1]
+    return f"{'-' if cents < 0 else ''}{','.join([*pairs, tail])}.{paise:02d}"

@@ -623,7 +623,7 @@ def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk)
     assert named["proposal"]["resolved"]["bills"] == [{"type": "Agst Ref", "name": "SM/101", "amount_cents": 118000}]
     run = work.get_run(desk["db"], desk["tenant"]["id"], run["id"])
     assert [(a["label"], a.get("detail")) for a in statement_entry.HANDLER.summarize(run, part)["actions"]] == [
-        ("Settle 1000.00 of SM/101 (1180.00 open)", {"choice": 0}), ("On account, settling no bill", {"choice": 1}),
+        ("Settle 1,000.00 of SM/101 (1,180.00 open)", {"choice": 0}), ("On account, settling no bill", {"choice": 1}),
         ("Do nothing", None), ("Recheck", None)]
     # SM/101 was settled after the choice was offered: the row is offered what is open now instead.
     assert decide(desk, part, "settle", {"choice": 0})["status"] == "held"
@@ -631,7 +631,7 @@ def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk)
     assert part["review_reasons"] == [
         "Another entry of this run settled some of these invoices since they were offered. Choose again."]
     assert [c["label"] for c in part["proposal"]["settlement"]["choices"]] == [
-        "Settle 1000.00 of SM/102 (5000.00 open)", "On account, settling no bill"]
+        "Settle 1,000.00 of SM/102 (5,000.00 open)", "On account, settling no bill"]
     receipt = decide(desk, part, "settle", {"choice": 0})
     assert (receipt["status"], decide(desk, part, "settle", {"choice": 0})["replayed"]) == ("writing", True)
     with pytest.raises(ServiceError, match="already decided"):
