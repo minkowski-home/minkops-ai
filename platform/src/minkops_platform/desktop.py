@@ -47,6 +47,9 @@ def public_device(row):
 
 # Every new native voucher is a protocol-6 plan, which companions execute from 0.10.0.
 MINIMUM_COMPANION = (0, 10, 0)
+# On a server several Windows users share, a companion must confirm that Tally on its port is its own
+# user's, not another firm's: companions do from 0.11.0.
+SHARED_SERVER_COMPANION = (0, 11, 0)
 
 
 def companion_report(version, host, session):
@@ -68,9 +71,13 @@ def require_companion(device, *, minimum=MINIMUM_COMPANION):
 
     A PC that has never polled is allowed: work waits until it connects, and it
     reports its version then. One that polls without a version predates 0.7.0.
+    A PC in a remote session, as on a shared server, needs the companion that
+    confirms its Tally is its own user's.
     """
     if device["last_seen_at"] is None:
         return
+    if device.get("remote_session"):
+        minimum = max(minimum, SHARED_SERVER_COMPANION)
     version = device.get("companion_version")
     if version is None or tuple(int(part) for part in version.split(".")) < minimum:
         raise ServiceError(

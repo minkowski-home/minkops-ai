@@ -7,18 +7,22 @@ export interface Device {
   tally_port?: number;
 }
 
-/** Mirrors the server's gate for a run's Tally refresh (accounts/sync.queue). */
+/** Mirrors the server's gate for Tally work (desktop.require_companion). */
 export const MINIMUM_COMPANION = [0, 10, 0];
-function older(version: number[]) {
-  for (let i = 0; i < MINIMUM_COMPANION.length; i++)
-    if (version[i] !== MINIMUM_COMPANION[i]) return version[i] < MINIMUM_COMPANION[i];
+/** On a shared server, the first companion that confirms Tally is this Windows user's own. */
+export const SHARED_SERVER_COMPANION = [0, 11, 0];
+function older(version: number[], minimum: number[]) {
+  for (let i = 0; i < minimum.length; i++)
+    if (version[i] !== minimum[i]) return version[i] < minimum[i];
   return false;
 }
 export function companionNotice(device: Device) {
   if (!device.last_seen_at) return '';
+  const minimum = device.remote_session ? SHARED_SERVER_COMPANION : MINIMUM_COMPANION;
   const version = device.companion_version?.split('.').map(Number);
-  const outdated = !version || version.length !== 3 || version.some(Number.isNaN) || older(version);
-  if (outdated) return `Update Minkops on ${device.name} to ${MINIMUM_COMPANION.join('.')} or later before running Tally work.`;
-  if (device.remote_session) return `${device.name} is a Remote Desktop session. Run Minkops on the PC where Tally is open.`;
+  const outdated = !version || version.length !== 3 || version.some(Number.isNaN) || older(version, minimum);
+  if (outdated) return `Update Minkops on ${device.name} to ${minimum.join('.')} or later before running Tally work.`;
+  if (device.remote_session) return `${device.name} runs in a remote session. Minkops reads only the Tally open in this `
+    + `Windows user's session, on port ${device.tally_port ?? 9000}.`;
   return '';
 }

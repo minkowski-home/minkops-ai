@@ -520,6 +520,14 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
         self.claim_as({"X-Minkops-Companion-Version": "0.10.0"})
         self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
+        # On a shared server, only a companion that confirms Tally is the user's own receives Tally work.
+        self.claim_as({"X-Minkops-Companion-Version": "0.10.0", "X-Minkops-Session": "remote"})
+        body = {**body, "request_key": str(uuid.uuid4())}
+        shared = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
+        self.assertEqual(shared.status_code, 409, shared.text)
+        self.assertIn("Update Minkops on Office PC to 0.11.0 or later", shared.json()["detail"])
+        self.claim_as({"X-Minkops-Companion-Version": "0.11.0", "X-Minkops-Session": "remote"})
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
 
     def bundle(self, **extra):
         return {
