@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/tenants/{slug}/attention")
 
 @router.get("")
 def items(slug: str, user: User, connection: Db, status: Literal["pending", "done", "all"] = "pending",
-          offset: int = Query(default=0, ge=0), group: Literal["workflow", "employee", "status"] = "workflow",
+          offset: int = Query(default=0, ge=0), group: Literal["workflow", "employee", "status", "client"] = "workflow",
           sort: Literal["newest", "name"] = "newest"):
     tenant, member = tenant_access(slug, user, connection)
     return _call(attention.listing, connection, tenant["id"], status=status, offset=offset, group=group, sort=sort,

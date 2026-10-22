@@ -72,6 +72,13 @@ class AttentionApiTests(unittest.TestCase):
                          "A statement for 1–14 September is missing.")
         admin, _ = self.login(self.admin)
         self.assertEqual(len(admin.get(self.base).json()), 4)
+        # Each item names its client, and the list groups by client.
+        by_client = admin.get(self.base, params={"group": "client"}).json()
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            names = {row["slug"]: row["name"] for row in db.execute(
+                "SELECT slug, name FROM client_businesses WHERE tenant_id=%s", (self.tenant["id"],))}
+        self.assertEqual([item["client"] for item in by_client],
+                         sorted([names[self.granted]] * 2 + [names[self.other]] * 2))
         self.assertEqual(member.post(f"{self.base}/{mine['gap']['id']}/done", headers=csrf).json(), {"status": "done"})
         with psycopg.connect(URL, row_factory=dict_row) as db:
             event = db.execute("SELECT actor_id, action FROM attention_events WHERE item_id=%s ORDER BY id DESC LIMIT 1",

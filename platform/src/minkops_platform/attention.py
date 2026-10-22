@@ -70,16 +70,17 @@ def get(connection, tenant_id, item_id, visible=None):
 
 def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest", visible=None):
     """Items by group and order; `visible` limits client work to reachable clients."""
-    grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status"}[group]
+    grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status", "client": "client"}[group]
     ordering = "a.identifier" if sort == "name" else "a.updated_at DESC"
     rows = connection.execute(
         f"""SELECT a.id,a.task_id,a.identifier,a.label,a.kind,a.status,a.created_at,a.updated_at,a.done_at,a.target,
-        a.done_by,a.authorized_by,w.name AS workflow,
+        a.done_by,a.authorized_by,w.name AS workflow,c.name AS client,
         coalesce((SELECT string_agg(e.name,', ' ORDER BY e.name) FROM employees e
           JOIN workflow_employees we ON we.employee_id=e.id AND we.tenant_id=e.tenant_id
           WHERE we.workflow_id=t.workflow_id AND we.tenant_id=a.tenant_id),'') AS employee
         FROM attention_items a JOIN tasks t ON t.id=a.task_id AND t.tenant_id=a.tenant_id
         LEFT JOIN workflows w ON w.id=t.workflow_id AND w.tenant_id=a.tenant_id
+        LEFT JOIN client_businesses c ON c.id=t.client_id AND c.tenant_id=a.tenant_id
         WHERE a.tenant_id=%s AND (%s='all' OR a.status=%s)
           AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
         ORDER BY {grouping},{ordering},a.id LIMIT 200 OFFSET %s""",

@@ -22,6 +22,8 @@ interface Item {
   };
   workflow: string;
   employee: string;
+  /** The client business whose work it is; none for a tenant's own items. */
+  client: string | null;
   updated_at: string;
 }
 
@@ -29,7 +31,7 @@ interface Item {
 export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: string }) {
   const { user } = useAuth();
   const [status, setStatus] = useState("pending");
-  const [group, setGroup] = useState<"workflow" | "employee" | "status">("workflow");
+  const [group, setGroup] = useState<"workflow" | "employee" | "status" | "client">("client");
   const [sort, setSort] = useState("newest"),
     [offset, setOffset] = useState(0);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -86,7 +88,9 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
       ? a.identifier.localeCompare(b.identifier)
       : b.updated_at.localeCompare(a.updated_at)
   );
-  const groups = [...new Set(ordered.map((i) => i[group] || "Other"))].sort();
+  // Items of no client, such as a company found on a PC, belong to the workspace itself.
+  const groupOf = (i: Item) => i[group] || (group === "client" ? "Workspace" : "Other");
+  const groups = [...new Set(ordered.map(groupOf))].sort();
   return (
     <section className="route-screen">
       <h2>Attention items</h2>
@@ -118,7 +122,7 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
               setOffset(0);
             }}
           >
-            {["workflow", "employee", "status"].map((v) => (
+            {["client", "workflow", "employee", "status"].map((v) => (
               <option key={v} value={v}>
                 {v[0].toUpperCase() + v.slice(1)}
               </option>
@@ -145,11 +149,12 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
         <section key={g}>
           <h3>{g}</h3>
           {ordered
-            .filter((i) => (i[group] || "Other") === g)
+            .filter((i) => groupOf(i) === g)
             .map((i) => (
               <article className="accounts-item" key={i.id} id={`attention-${i.id}`}>
                 <Link to={`/${routeSlug}/tasks/${i.task_id}`}>{i.identifier}</Link>
                 <span> · {i.label}</span>
+                {i.client && group !== "client" && <span> · {i.client}</span>}
                 <p>{i.reason || "This item needs attention in the original system."}</p>
                 {i.question && (
                   <div>

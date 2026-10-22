@@ -28,7 +28,9 @@ the receipt.
 Workflows restate an item by its event key whenever they settle again. Restating
 changes nothing, so an operator's Done survives. A new event reopens the item with
 its new reason. Any workspace member may mark an item Done
-(`POST .../attention/{item}/done`). Lists are grouped by workflow, employee or
-status, sorted newest first or by name, 200 per page, and show only items of the
-clients a member can reach. The warehouse is future work; the audit trail lives in
-PostgreSQL.
+(`POST .../attention/{item}/done`). Lists are grouped by client business (the
+console's default; items of no client fall under Workspace), workflow, employee or
+status, sorted newest first or by name, 200 per page. A member sees only the items
+of the clients they can reach: in the list, and by ID, where an item of any other
+client is not found, whether read, answered or marked Done. The warehouse is future
+work; the audit trail lives in PostgreSQL.
