@@ -37,7 +37,8 @@ export function RunReview({ tenant, client, run }: { tenant: string; client: str
   const { data: page, error, loading, refresh } = useRead<RecordPage>(scope,
     `${runPath}/records?limit=${PAGE}${after ? `&after=${encodeURIComponent(after)}` : ""}`);
   const [pending, setPending] = useState("");
-  const [notice, setNotice] = useState("");
+  // `saving` marks a notice that something is saving, with the run's activity when it was given.
+  const [notice, setNotice] = useState<{ text: string; saving?: string | null }>({ text: "" });
   const [open, setOpen] = useState("");
   // The entries shown move with the run's activity: read them again whenever it changes.
   const seen = useRef<string | null | undefined>(undefined);
@@ -47,6 +48,11 @@ export function RunReview({ tenant, client, run }: { tenant: string; client: str
       reads.invalidate(scope, (path) => path.startsWith(`${runPath}/records`) || path.startsWith(`${base}/records/`));
     seen.current = activity;
   }, [activity, scope, base, runPath]);
+  // Such a notice holds until the run, having moved on since, shows nothing approved or saving: the counts say how it ended.
+  useEffect(() => {
+    if (notice.saving !== undefined && status && status.activity !== notice.saving
+      && !status.records.approved && !status.records.writing) setNotice({ text: "" });
+  }, [status, notice]);
 
   // A receipt is authoritative; invalidating also fences reads that started before it.
   const settle = () => reads.invalidate(scope, (path) => path.startsWith(base)
@@ -55,14 +61,16 @@ export function RunReview({ tenant, client, run }: { tenant: string; client: str
   async function decide(record: RecordSummary, choice: RecordAction) {
     if (!user || pending) return;
     setPending(actionKey(record, choice));
-    setNotice("");
+    setNotice({ text: "" });
+    const since = activity ?? null;
     try {
       const receipt = await api<{ status: string }>(`${base}/records/${record.id}/decisions`, {
         method: "POST", body: JSON.stringify({ action: choice.action, version: record.version, detail: choice.detail ?? {} }),
       }, user.csrf_token);
-      setNotice(OUTCOME[receipt.status] ?? "Decision recorded.");
+      setNotice({ text: OUTCOME[receipt.status] ?? "Decision recorded.",
+        ...(receipt.status === "writing" ? { saving: since } : {}) });
     } catch (caught) {
-      setNotice(`${caught instanceof Error ? caught.message : "Could not record this decision."} Showing the entry as it is now.`);
+      setNotice({ text: `${caught instanceof Error ? caught.message : "Could not record this decision."} Showing the entry as it is now.` });
     } finally {
       setPending("");
       settle();
@@ -72,13 +80,14 @@ export function RunReview({ tenant, client, run }: { tenant: string; client: str
   async function saveReady() {
     if (!user || pending) return;
     setPending("ready");
-    setNotice("");
+    setNotice({ text: "" });
+    const since = activity ?? null;
     try {
       const { approved } = await api<{ approved: number }>(`${runPath}/approve`, { method: "POST" }, user.csrf_token);
-      setNotice(approved ? `${approved} ${approved === 1 ? "entry" : "entries"} approved. Saving in Tally.`
-        : "Every ready entry needs your review first: approve each one.");
+      setNotice(approved ? { text: `${approved} ${approved === 1 ? "entry" : "entries"} approved. Saving in Tally.`, saving: since }
+        : { text: "Every ready entry needs your review first: approve each one." });
     } catch (caught) {
-      setNotice(caught instanceof Error ? caught.message : "Could not approve the ready entries.");
+      setNotice({ text: caught instanceof Error ? caught.message : "Could not approve the ready entries." });
     } finally {
       setPending("");
       settle();
@@ -92,7 +101,7 @@ export function RunReview({ tenant, client, run }: { tenant: string; client: str
       {Boolean(status?.records.proposed) && <button className="button button-primary" disabled={Boolean(pending)}
         onClick={() => void saveReady()}>{pending === "ready" && <Spinner />}{pending === "ready" ? "Approving…" : "Save ready entries"}</button>}
     </header>
-    {notice && <p role="status" className="form-message">{notice}</p>}
+    {notice.text && <p role="status" className="form-message">{notice.text}</p>}
     {error && <RetryMessage onRetry={() => void refresh()}>Could not refresh this run's entries. Showing the last received
       results.</RetryMessage>}
     {loading && <LoadingIndicator>Loading entries…</LoadingIndicator>}

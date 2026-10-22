@@ -71,6 +71,10 @@ async function console_(context, admin = true) {
     } else throw Error(`${method} ${path}`);
     await route.fulfill({json:body});
   });
+  // The PC finishes every save it was given; not enumerable, so `calls` still compares as the calls made.
+  Object.defineProperty(calls, 'finish', {value:() => {
+    records = records.map(record => record.status === 'writing' ? {...record, status:'saved'} : record);
+  }});
   return calls;
 }
 
@@ -103,6 +107,10 @@ test('a run is reviewed record by record, with the decisions each one allows', a
   await expect(page.getByRole('status').filter({hasText:'1 entry approved. Saving in Tally.'})).toBeVisible();
   await expect(proposed).toContainText('Saving');
   expect(calls).toEqual([['s-1', {action:'settle', version:4, detail:{choice:1}}], ['ready']]);
+  // Once nothing is saving, a notice that something is saving goes; the counts say how it ended.
+  calls.finish();
+  await expect(review).toContainText('3 saved in Tally');
+  await expect(page.getByRole('status').filter({hasText:'Saving'})).toHaveCount(0);
   await page.setViewportSize({width:390, height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
