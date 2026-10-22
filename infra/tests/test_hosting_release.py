@@ -24,7 +24,7 @@ def test_invalid_installer_cannot_create_a_hosting_version(tmp_path, monkeypatch
     content.mkdir(parents=True)
     payload = b"reviewed installer"
     manifest = {"filename": "setup.exe", "bytes": len(payload),
-                "sha256": hashlib.sha256(payload).hexdigest()}
+                "sha256": hashlib.sha256(payload).hexdigest(), "unsigned": True}
     (content / "windows-release.json").write_text(json.dumps(manifest))
     (tmp_path / "firebase.json").write_text(json.dumps({"hosting": [
         {"target": "corporate", "public": "site/dist"}]}))
@@ -48,8 +48,11 @@ def test_invalid_installer_cannot_create_a_hosting_version(tmp_path, monkeypatch
     assert not (build / "downloads").exists()
 
 
-def release_tree(tmp_path, monkeypatch, payload=b"reviewed installer"):
-    """A corporate build with a manifest-matching installer and its update feed."""
+def release_tree(tmp_path, monkeypatch, payload=b"reviewed installer", publisher=None):
+    """A corporate build with a manifest-matching installer and its update feed.
+
+    Without a `publisher`, the manifest declares an unsigned release candidate.
+    """
     import base64
 
     build = tmp_path / "site/dist"
@@ -58,7 +61,8 @@ def release_tree(tmp_path, monkeypatch, payload=b"reviewed installer"):
     content = tmp_path / "site/src/content"
     content.mkdir(parents=True)
     manifest = {"version": "0.7.0", "filename": "Minkops-Setup-0.7.0.exe", "bytes": len(payload),
-                "sha256": hashlib.sha256(payload).hexdigest()}
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                **({"publisher": publisher} if publisher else {"unsigned": True})}
     (content / "windows-release.json").write_text(json.dumps(manifest))
     (tmp_path / "firebase.json").write_text(json.dumps({"hosting": [{"target": "corporate", "public": "site/dist"}]}))
     monkeypatch.setattr(hosting, "__file__", str(tmp_path / "deploy_hosting.py"))
@@ -127,3 +131,74 @@ def test_updater_file_entries_are_checked_before_any_publication(tmp_path, monke
     with pytest.raises(RuntimeError, match="update feed"):
         hosting.deploy("corporate", installer)
     assert not (build / "downloads").exists()
+
+
+def signed_installer(common_name, ends_in_zero=False):
+    """A minimal Windows executable carrying an Authenticode-shaped PKCS#7 signature by `common_name`.
+
+    With `ends_in_zero`, the signature's last byte is 0, as about one real signature in 256 is.
+    """
+    import datetime
+    import struct
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import pkcs7
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = datetime.datetime.now(datetime.UTC)
+    certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                   .serial_number(1).not_valid_before(now).not_valid_after(now + datetime.timedelta(days=1))
+                   .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False)
+                   .sign(key, hashes.SHA256()))
+    builder = pkcs7.PKCS7SignatureBuilder().set_data(b"installer digest").add_signer(certificate, key, hashes.SHA256())
+    signature = builder.sign(serialization.Encoding.DER, [])
+    while ends_in_zero and signature[-1] != 0:  # ECDSA signatures differ each time
+        signature = builder.sign(serialization.Encoding.DER, [])
+    headers = bytearray(64 + 4 + 20 + 240)
+    headers[:2], headers[0x3C:0x40] = b"MZ", (64).to_bytes(4, "little")
+    headers[64:68] = b"PE\0\0"
+    struct.pack_into("<HHIIIHH", headers, 68, 0x8664, 0, 0, 0, 0, 240, 0x22)
+    struct.pack_into("<H", headers, 88, 0x20B)  # PE32+
+    entry = bytes(signature) + b"\0" * (-len(signature) % 8)
+    struct.pack_into("<II", headers, 88 + 112 + 4 * 8, len(headers), 8 + len(entry))  # the security directory
+    return bytes(headers) + struct.pack("<IHH", 8 + len(entry), 0x0200, 2) + entry
+
+
+@pytest.mark.parametrize(("signer", "refusal"), [
+    (None, "is not signed by Example Publisher Ltd"),
+    ("Someone Else", "is not signed by Example Publisher Ltd"),
+])
+def test_a_signed_release_ships_only_an_installer_its_publisher_signed(tmp_path, monkeypatch, signer, refusal):
+    payload = signed_installer(signer) if signer else b"reviewed installer"
+    build, installer, feed = release_tree(tmp_path, monkeypatch, payload=payload, publisher="Example Publisher Ltd")
+    monkeypatch.setattr(hosting, "GoogleApi", lambda *args: pytest.fail("A wrongly signed release reached publication"))
+    with pytest.raises(RuntimeError, match=refusal):
+        hosting.deploy("corporate", installer)
+    assert not (build / "downloads").exists()
+
+
+def test_a_signature_that_ends_in_a_zero_byte_still_names_its_signer(tmp_path):
+    installer = tmp_path / "setup.exe"
+    installer.write_bytes(signed_installer("Example Publisher Ltd", ends_in_zero=True))
+    assert hosting.authenticode_publisher(installer) == "Example Publisher Ltd"
+
+
+def test_an_installer_signed_by_its_publisher_is_published(tmp_path, monkeypatch):
+    payload = signed_installer("Example Publisher Ltd")
+    build, installer, feed = release_tree(tmp_path, monkeypatch, payload=payload, publisher="Example Publisher Ltd")
+    assert hosting.authenticode_publisher(installer) == "Example Publisher Ltd"
+
+    class StopBeforeUploadError(Exception):
+        pass
+
+    def stop(*args):
+        raise StopBeforeUploadError()
+
+    monkeypatch.setattr(hosting, "GoogleApi", stop)
+    with pytest.raises(StopBeforeUploadError):
+        hosting.deploy("corporate", installer)
+    assert (build / "downloads" / "Minkops-Setup-0.7.0.exe").read_bytes() == payload
