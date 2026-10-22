@@ -105,11 +105,16 @@ def revoke(connection, tenant, user, member, slug, user_id):
 
 
 def companies(connection, tenant, client):
-    """The client's authorised companies, each on the PC where it was seen."""
+    """The client's authorised companies, each on the connected PC where it was seen.
+
+    A disconnected PC's companies leave the client's books: its runs would wait on a PC that never answers. The PC
+    that replaces it finds the same companies as new, for an admin to authorise.
+    """
     return connection.execute(
         """SELECT c.*, d.name AS device_name FROM companies c
            JOIN desktop_devices d ON d.tenant_id=c.tenant_id AND d.id=c.device_id
-           WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised' ORDER BY c.name, c.books_from""",
+           WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised' AND d.revoked_at IS NULL
+           ORDER BY c.name, c.books_from""",
         (tenant["id"], client["id"])).fetchall()
 
 

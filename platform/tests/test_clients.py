@@ -99,6 +99,30 @@ def test_a_company_is_authorised_for_one_client_by_an_admin(db):
     assert moved.value.kind == "conflict"
 
 
+def test_a_disconnected_pcs_companies_leave_the_client_and_come_back_from_the_pc_that_replaces_it(db):
+    import factory
+
+    from minkops_platform import desktop
+    from minkops_platform.accounts import desk_tools
+    tenant = factory.tenant(db)
+    admin = factory.user(db, tenant, role="admin")
+    member = factory.member(db, tenant, admin)
+    client = factory.client(db, tenant)
+    old = factory.device(db, tenant, admin)
+    factory.company(db, tenant, old, client, guid="g-books")
+    # Disconnected, a PC's companies no longer hold the client's runs waiting on a PC that will never answer.
+    desktop.revoke(db, tenant, admin, old["id"])
+    assert clients.companies(db, tenant, client) == []
+    with pytest.raises(ServiceError, match="Authorise this client's Tally companies"):
+        desk_tools.prepare(db, tenant, admin, client)
+    # The PC that replaces it finds the same books as new; once authorised, they are the client's again.
+    new = factory.device(db, tenant, admin)
+    found = factory.company(db, tenant, new, guid="g-books", status="pending")
+    clients.authorise_company(db, tenant, admin, member, found["id"], client["slug"])
+    assert [c["id"] for c in clients.companies(db, tenant, client)] == [found["id"]]
+    assert [c["id"] for c in desk_tools.prepare(db, tenant, admin, client)[0]] == [found["id"]]
+
+
 class CompanyIdentityTest(unittest.TestCase):
     """The pure part of company identity: which observed changes are the same company."""
 

@@ -50,6 +50,7 @@ def refreshing(connection, client_id, *, since=None):
     """The blocker of a refresh still running for one of the client's PCs, or None."""
     pending = connection.execute(
         """SELECT j.device_id FROM desktop_jobs j JOIN companies c ON c.device_id=j.device_id
+           JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NULL
            WHERE c.client_id=%s AND c.status='authorised' AND j.operation='tally.sync'
                AND j.state IN ('queued','executing') AND (%s::timestamptz IS NULL OR j.created_at <= %s)
            ORDER BY j.device_id LIMIT 1""", (client_id, since, since)).fetchone()
@@ -64,7 +65,8 @@ def ready(connection, run):
     run = connection.execute("SELECT * FROM runs WHERE id=%s FOR UPDATE", (run["id"],)).fetchone()
     if not run["pins"]:
         ids = [c["id"] for c in connection.execute(
-            "SELECT id FROM companies WHERE tenant_id=%s AND client_id=%s AND status='authorised'",
+            """SELECT c.id FROM companies c JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NULL
+               WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised'""",
             (run["tenant_id"], run["client_id"])).fetchall()]
         pins = mirror.pins(connection, ids)
         if not pins:
