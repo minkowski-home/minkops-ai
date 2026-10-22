@@ -294,7 +294,7 @@ def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
         ("proposed", []), ("held", ["classification_uncertain"]), ("held", ["statement_interpretation"]),
         ("held", ["statement_interpretation"])]
     assert rows[0]["proposal"]["resolved"]["data"]["counter_ledger"] == "Acme Steel" and rows[0]["checks"] == {
-        "submissions": 2}
+        "submissions": 2, "precedents": 0}
     # The rule the row follows is kept with the text it said then.
     assert rows[0]["proposal"]["rules"] == [{"id": str(rule["id"]), "version": 1,
                                              "text": "Steel advances go to the supplier."}]
@@ -752,8 +752,19 @@ def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk)
     assert work.get_record(desk["db"], desk["tenant"]["id"], part["id"])["status"] == "saved"
 
 
-def test_standing_approval_writes_clean_rows_and_leaves_exceptions_for_review(desk):
+def test_standing_approval_writes_only_rows_people_booked_so_twice_and_leaves_the_rest_for_review(desk):
+    from minkops_platform.accounts import memory
     company = desk["company"]["guid"]
+    # People approved two of Acme Steel's payments to its ledger before: a practice. Nothing else was learnt.
+    for n in (1, 2):
+        memory.learn_routing(desk["db"], {**desk["client"], "tenant_id": desk["tenant"]["id"], "client_id": desk["client"]["id"],
+                                          "id": f"00000000-0000-4000-8000-00000000000{n}"},
+                             {"company_id": desk["company"]["id"], "id": f"00000000-0000-4000-8000-00000000010{n}",
+                              "proposal": {"selection": {"payee": "ACME STEEL"},
+                                           "resolved": {"data": {"counter_ledger": "Acme Steel"}}}},
+                             {"references": {"ledgers": {"Acme Steel": {"GUID": "g-acme"}}},
+                              "voucher_type": {"GUID": "g-payment", "NAME": "Payment"}}, f"v-acme-{n}", actor_id=None)
+    desk["db"].commit()
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
                       else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI}, review_mode="only_exceptions", branch_mapping_file_id=None)
@@ -763,12 +774,12 @@ def test_standing_approval_writes_clean_rows_and_leaves_exceptions_for_review(de
     by_status = {}
     for row in records(desk, run):
         by_status.setdefault(row["status"], []).append(row["facts"]["narration"])
-    # One write at a time per PC: the first clean row is being written, the others wait their turn.
-    assert sorted(by_status["writing"]) == ["BANK CHARGES", "NEFT ACME STEEL UTR111222", "NEFT RETURN UTR111222",
-                                            "TRANSFER TO HDFC"]
+    # Only the row booked as people booked its payee twice is written; the rest wait for a person.
+    assert by_status["writing"] == ["NEFT ACME STEEL UTR111222"]
+    assert sorted(by_status["proposed"]) == ["BANK CHARGES", "NEFT RETURN UTR111222", "TRANSFER TO HDFC"]
     while companion(desk):
         pass
-    assert {r["status"] for r in records(desk, run)} == {"saved"}
+    assert {r["facts"]["narration"]: r["status"] for r in records(desk, run)}["NEFT ACME STEEL UTR111222"] == "saved"
 
 
 def test_stopping_holds_unsaved_rows_and_withdraws_writes_no_pc_has_started(desk):

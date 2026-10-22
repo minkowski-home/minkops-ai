@@ -31,8 +31,9 @@ reaches the browser, the companion or a session's tools.
 4. **Review.** Each bill or statement row is a record. It moves from `pending`
    through `proposed` or `held`, then `approved` and `writing`, and ends `saved`
    or `duplicate`; Do nothing makes it `deferred`. Decisions are idempotent per
-   record version. Under the `only_exceptions` review mode, clean proposals are
-   approved once the run is read; the rest wait for a person.
+   record version. Under the `only_exceptions` review mode, clean proposals the client
+   has booked this way at least twice before (`memory.STANDING`) are approved once
+   the run is read; the rest wait for a person. One earlier booking may be a one-off.
 5. **Writes.** An approved record becomes a durable native write
    (`accounts/writes.py`). Each PC runs one `tally.write` at a time; the companion
    saves the voucher and reads it back, and only a readback that matches the

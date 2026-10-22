@@ -127,8 +127,10 @@ When the last item settles:
 - **Gaps.** When a statement opens at a different balance from where the previous
   one for that bank ledger closed, one "Transactions missing" item names both; no
   row is held.
-- **Standing approval.** With review mode `only_exceptions`, every clean proposal is
-  approved; the exceptions wait for review.
+- **Standing approval.** With review mode `only_exceptions`, a clean proposal is
+  approved when people approved at least two earlier saves booking its payee the same
+  way (`memory.STANDING`); every other row waits for review, as do the exceptions.
+  **Write ready rows** still writes every clean row a person chooses to write.
 
 ## Bill-by-bill parties
 

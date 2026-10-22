@@ -923,9 +923,11 @@ def test_an_item_wise_bill_carries_its_items_to_their_godowns_and_is_learnt_item
     assert answers(session, "godowns")[0] == {"godowns": [{"name": "Main Location", "ref": "G1", "under": None},
                                                           {"name": "Site Stores", "ref": "G2",
                                                            "under": "Main Location"}]}
-    # Booked item-wise as this supplier's earlier bill was, it needs no review under standing approval.
+    # Booked item-wise as this supplier's earlier bill was, it needs no review note; seen once, it waits for a person
+    # even under standing approval.
     [bill] = records(desk, run)
-    assert (bill["status"], bill["review_reasons"]) == ("writing", [])
+    assert (bill["status"], bill["review_reasons"], bill["checks"]["precedents"]) == ("proposed", [], 1)
+    decide(desk, bill, "approve")
     _, plan = companion(desk)
     assert plan["inventory"] == [{"item": "Bucket tooth", "unit": "Nos", "quantity": "50", "rate": "200", "side": "debit",
                                   "amount_cents": 1000000, "ledger": "Spares Purchase", "godowns": [
@@ -1093,9 +1095,11 @@ def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_n
     assert (learnt["guids"][0], learnt["status"], learnt["uses"]) == ("g-sunrise", "confirmed", 1)
     assert learnt["value"] == {"supplier": "Sunrise Office Systems", "voucher_type": "Purchase",
                                "ledgers": ["Repairs and Maintenance"]}
-    # One approval confirms the booking: under standing approval the next such bill is written unreviewed.
+    # One approval confirms the booking, so the next such bill needs no review note; but a booking seen once may be
+    # a one-off, so standing approval leaves it for a person until it is seen twice.
     second = bill("SOS/26/0502", review_mode="only_exceptions")
-    assert (second["status"], second["review_reasons"]) == ("writing", [])
+    assert (second["status"], second["review_reasons"], second["checks"]["precedents"]) == ("proposed", [], 1)
+    decide(desk, second, "approve")
     companion(desk)
     # The same booking again is one entry, used twice.
     assert [row["uses"] for row in db.execute("SELECT uses FROM memory_entries WHERE company_id=%s AND kind='booking'",
@@ -1198,7 +1202,10 @@ def test_a_taxed_bill_waits_while_its_company_has_not_said_which_gst_ledgers_it_
 def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the_rest(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    # Booked to repairs, a first for this supplier: it waits for a person even under standing approval.
+    # Two earlier bills booked to cabins make a practice; one booked to repairs is a first.
+    again = {**PRIOR, "GUID": "v-prior-2", "MASTERID": "6", "ALTERID": "4", "DATE": "20260801", "REFERENCE": "SOS/26/0008"}
+    factory.books(desk["db"], desk["company"], masters(desk["company"]), [PRIOR, again])
+    desk["db"].commit()
     first_time = second_bill(company, 1)
     first_time["voucher"]["lines"][0]["ledger_guid"] = "g-repairs"
     fake = by_file(**{"usual.pdf": proposing(names, proposal(company)),
@@ -1206,9 +1213,9 @@ def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the
     run = launch(desk, {"usual.pdf": B01, "first-time.pdf": SECOND}, review_mode="only_exceptions")
     read(desk, fake, run)
     usual, unprecedented = records(desk, run)
-    assert usual["status"] == "writing"
+    assert (usual["status"], usual["checks"]["precedents"]) == ("writing", 2)
     assert (unprecedented["status"], unprecedented["review_reasons"]) == ("proposed", [
-        f"{bill_entry.UNPRECEDENTED} Its last bill, SOS/26/0007, was a Purchase to Input CGST 9%, Input SGST 9%, "
+        f"{bill_entry.UNPRECEDENTED} Its last bill, SOS/26/0008, was a Purchase to Input CGST 9%, Input SGST 9%, "
         "Office Cabins; this one is a Purchase to Repairs and Maintenance."])
     # The note is the reviewer's: the session only learns its bill was accepted, so it never bends a sound
     # proposal to avoid review.

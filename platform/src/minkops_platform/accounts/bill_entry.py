@@ -454,7 +454,9 @@ def _propose_one(connection, desk, record, bill, count):
     if registered:
         # The reviewer sees which IRP registered the bill, and whether its signature verified.
         facts = {**facts, "einvoice": {key: registered[key] for key in ("status", "signer", "irn", "page")}}
-    review += [*bound.notes, *[note for note in [_precedent(connection, desk, company, bound)] if note]]
+    note, precedents = _precedent(connection, desk, company, bound)
+    review += [*bound.notes, *([note] if note else [])]
+    checks = {**checks, "precedents": precedents}
     waits = _waits(connection, company, bill, bound)
     if waits:
         # An open practice is a one-click question whose answer releases the bill; a tracked one is final.
@@ -527,34 +529,43 @@ def _offers(connection, desk, bill, company, codes):
 
 
 def _precedent(connection, desk, company, bound):
-    """The review a booking needs, or None when the client booked this supplier's bills this way before.
+    """The review a booking needs, or None, and how many times the client booked this supplier's bills this way.
 
     "This way" is the same voucher type and expense ledgers, item-wise when the bill is and not otherwise.
     What memory learnt comes first: a booking someone changed in Tally since, or one first written as a best
     guess, waits for a person even when history repeats it; one a person approved is a precedent. Otherwise
     the books' history decides. A bill without a precedent is a first: it goes to review, whatever the
-    review mode.
+    review mode. The count is what standing approval weighs: a booking seen once may be a one-off.
     """
     if bound.party not in bound.identities:
-        return UNPRECEDENTED
+        return UNPRECEDENTED, 0
     booking = bound.booking
     wanted = set(booking["ledgers"])
-    learnt = [row["status"] for row in memory.entries(
+    learnt = [row for row in memory.entries(
         connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=desk.part_ids(company),
         kinds=["booking"], subjects=[bound.identities[bound.party]["GUID"]])
         if row["value"]["voucher_type"] == booking["voucher_type"]["NAME"] and wanted <= set(row["value"]["ledgers"])
         and bool(row["value"].get("items")) == booking["items"]]
-    if "demoted" in learnt:
-        return DEMOTED
-    if "confirmed" in learnt:
-        return None
-    if "unconfirmed" in learnt:
-        return GUESSED_BOOKING
+    statuses = {row["status"] for row in learnt}
+    if "demoted" in statuses:
+        return DEMOTED, 0
+    if "unconfirmed" in statuses and "confirmed" not in statuses:
+        return GUESSED_BOOKING, 0
     history = [row for part in desk.parts[company["guid"]]
                for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50)]
-    booked = any(row["voucher_type"] == booking["voucher_type"]["NAME"] and wanted <= set(row["ledgers"])
-                 and bool(mirror.stock_lines(row["data"])) == booking["items"] for row in history)
-    return None if booked else _departure(connection, desk, company, bound, history)
+    booked = sum(1 for row in history if row["voucher_type"] == booking["voucher_type"]["NAME"]
+                 and wanted <= set(row["ledgers"]) and bool(mirror.stock_lines(row["data"])) == booking["items"])
+    # A save Minkops made is both a confirmed use and a voucher in the books: the larger count, not their sum.
+    seen = max(booked, sum(row["uses"] for row in learnt if row["status"] == "confirmed"))
+    if seen:
+        return None, seen
+    return _departure(connection, desk, company, bound, history), 0
+
+
+def _standing(record):
+    """Whether standing approval may write this proposal without a person: nothing to review, booked so before."""
+    return (record["status"] == "proposed" and not record["review_reasons"]
+            and (record["checks"] or {}).get("precedents", 0) >= memory.STANDING)
 
 
 def _departure(connection, desk, company, bound, history):
@@ -748,7 +759,7 @@ def _finalize(connection, run, *, settling):
     if (run["config"].get("review_mode") == "only_exceptions"
             and control_state(connection, run["tenant_id"], run["task_id"]) == "active"):
         for record in ready:
-            if record["status"] == "proposed" and not record["review_reasons"]:
+            if _standing(record):
                 _approve(connection, run, record, actor=run["actor_id"])
 
 
@@ -957,11 +968,13 @@ def _repropose(connection, run, record, bill, *, review, created=(), precedent=F
                                    **({"final": True} if code != "practice_question" else {})})
         return False
     review = [*review, *[note for note in bound.notes if note not in review]]
+    checks = {**(record["checks"] or {}), "offers": []}
     if precedent:
-        review = [*review, *[note for note in [_precedent(connection, desk, company, bound)] if note]]
+        note, checks["precedents"] = _precedent(connection, desk, company, bound)
+        review = [*review, *([note] if note else [])]
     kept = {key: record["proposal"][key] for key in ("rules",) if record["proposal"].get(key)}
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review,
-                       checks={**(record["checks"] or {}), "offers": []},
+                       checks=checks,
                        proposal=_proposal(bill, bound, **kept, **({"created": list(created)} if created else {})))
     return True
 
@@ -981,7 +994,7 @@ def practice_settled(connection, tenant_id, company_id, probe):
                 and run["config"].get("review_mode") == "only_exceptions" and not review
                 and control_state(connection, tenant_id, run["task_id"]) == "active"):
             proposed = work.get_record(connection, tenant_id, record["id"], lock=True)
-            if not proposed["review_reasons"]:
+            if _standing(proposed):
                 _approve(connection, run, proposed, actor=run["actor_id"])
         work.refresh(connection, tenant_id, run["id"], describe=describe)
 

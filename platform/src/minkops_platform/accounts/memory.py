@@ -56,6 +56,11 @@ def live(connection, tenant_id, client_id, *, company_id, kind, subject, employe
         (tenant_id, client_id, employee, company_id, kind, subject)).fetchone()
 
 
+# How many times the client must have booked something this way before standing approval writes it without a
+# person: one earlier booking may be a one-off, two are a practice.
+STANDING = 2
+
+
 def _key(name):
     """A payee's name as an entry subject: spacing and case never make two payees."""
     return mirror.normalized(name).replace(":", " ")

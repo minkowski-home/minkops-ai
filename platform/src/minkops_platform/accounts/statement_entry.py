@@ -336,11 +336,25 @@ def propose(call, arguments):
             rejected.append({"ref": ref, "reason": str(refusal)})
             continue
         work.update_record(connection, record, status="proposed", company_id=company["id"], hold_codes=[],
-                           review_reasons=[], proposal=proposal, checks={"submissions": submissions + 1})
+                           review_reasons=[], proposal=proposal,
+                           checks={"submissions": submissions + 1,
+                                   "precedents": _precedents(connection, state, company, entry, resolved)})
         accepted.append(ref)
     remaining = connection.execute("SELECT count(*) AS n FROM run_records WHERE item_id=%s AND status='pending'",
                                    (state.item["id"],)).fetchone()["n"]
     return {"accepted": accepted, "held": held, "rejected": rejected, "remaining": remaining}
+
+
+def _precedents(connection, state, company, entry, resolved):
+    """How many approved saves booked this payee's rows to this counter ledger and voucher type, as the client's
+    memory learnt them: what standing approval weighs before writing a row without a person."""
+    if not entry.get("payee"):
+        return 0
+    return sum(row["uses"] for row in memory.entries(
+        connection, state.run["tenant_id"], state.run["client_id"], company_ids=state.part_ids(company),
+        kinds=["routing"], subjects=[entry["payee"]], statuses=("confirmed",))
+        if row["value"]["counter_ledger"] == resolved["data"]["counter_ledger"]
+        and row["value"]["voucher_type"] == resolved["voucher_type"]["NAME"])
 
 
 def _selection(connection, state, entry):
@@ -688,7 +702,9 @@ def _finalize(connection, run, *, settling):
     if (run["config"].get("review_mode") == "only_exceptions"
             and control_state(connection, run["tenant_id"], run["task_id"]) == "active"):
         for record in records:
-            if record["status"] == "proposed" and not record["review_reasons"]:
+            # Written without a person only when nothing needs review and people booked its payee so before.
+            if (record["status"] == "proposed" and not record["review_reasons"]
+                    and (record["checks"] or {}).get("precedents", 0) >= memory.STANDING):
                 _approve(connection, run, record, actor=run["actor_id"])
 
 
