@@ -129,7 +129,8 @@ def proposal(company, n=1, **changes):
                     "party": {"ledger_guid": "g-sunrise", "new_supplier": False, "evidence": "GSTIN matches."},
                     "lines": [line("expense", "g-cabins", 160000.0, supply="goods"),
                               line("tax", "g-cgst", 14400.0, tax={"head": "cgst", "rate": 9, "taxable": 160000.0}),
-                              line("tax", "g-sgst", 14400.0, tax={"head": "sgst", "rate": 9, "taxable": 160000.0})]},
+                              line("tax", "g-sgst", 14400.0, tax={"head": "sgst", "rate": 9, "taxable": 160000.0})],
+                    "items": None},
         "supplier_details": None, "exception": None, "rules": [],
         "evidence": [{"field": "supplier_name", "page": 1, "quote": "Sunrise Office Systems"},
                      {"field": "total", "page": 1, "quote": "Invoice total 188,800.00"}]}
@@ -249,7 +250,15 @@ def header(session):
 
 
 def answers(session, name):
-    """Every answer a scripted session received from one tool, parsed where it was not refused."""
+    """Every answer a scripted session received from one tool, parsed where it was not refused.
+
+    A proposal is the session's final answer, so its verdicts are the ones the worker logged for each turn.
+    """
+    if name == bill_entry.PROPOSAL.tool.name:
+        with factory.connect() as db:
+            return [json.loads(row["answer"]) if row["success"] else row["answer"] for row in db.execute(
+                """SELECT success, answer FROM tool_calls WHERE session_id=%s AND call_id LIKE 'answer:%%'
+                   ORDER BY created_at""", (session.id,))]
     return [json.loads(a["text"]) if a["success"] else a["text"] for a in session.answers if a["name"] == name]
 
 
@@ -408,11 +417,11 @@ def test_a_bill_cites_only_masters_its_session_was_given(desk):
     assert answers(session, "find_ledger")[1]["results"][0]["ledgers"][0]["ref"] == "L5"
     assert [r["status"] for r in records(desk, run)] == ["proposed", "proposed"]
     assert records(desk, run)[0]["proposal"]["preview"]["lines"][1]["ledger"] == "Office Cabins"
-    # A GUID is no reference at all: the contract refuses it before any check.
+    # A GUID is no reference at all: the contract the answer is constrained to refuses it before any check.
     [(tool, arguments)] = right(session.answers, session)
     arguments["bills"][0]["voucher"]["lines"][0]["ledger"] = "g-cabins"
     from minkops_platform.runtime.tools import compute
-    assert compute(bill_entry.BILL_TOOLS, None, tool, arguments) == (
+    assert compute({tool: bill_entry.PROPOSAL.tool}, None, tool, arguments) == (
         False, "Invalid bills/0/voucher/lines/0/ledger: 'g-cabins' does not match '^[A-Z][1-9][0-9]{0,4}$'")
 
 
@@ -649,19 +658,23 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
                         exception={"code": "classification_uncertain", "detail": "How to book a bill outside the books?"})
     unbalanced = proposal(company, **{"document.number": "SOS/26/0413", "document.date": "2026-09-02",
                                       "document.total": 188801.0})
+    short = second_bill(company)
+    short["document"]["total"] = 11801.0
     # Told the lines fall a rupee short, the model invents a round-off: no round-off line prints one.
     invented = copy.deepcopy(unbalanced)
     invented["voucher"]["lines"].append(line("round_off", "g-round", 1.0))
     conflict = {**unbalanced, "exception": {"code": "source_values_conflict", "detail": "Total is 188,801.00."}}
     fake = by_file(**{"unaddressed.pdf": proposing(names, unaddressed),
                       "unsure.pdf": proposing(names, unsure),
-                      "early.pdf": [*proposing(names, early), reproposing(names, reframed)],
+                      # The second bill is refused, and answering again the model tries to recast the first.
+                      "early.pdf": [*proposing(names, early, short, count=2),
+                                    reproposing(names, reframed, second_bill(company), count=2)],
                       # The invented round-off line cites a ledger the model looks up first.
                       "unbalanced.pdf": [*proposing(names, unbalanced), *proposing(names, invented),
                                          reproposing(names, conflict)]})
-    run = launch(desk, {"unaddressed.pdf": B01, "unsure.pdf": B01, "early.pdf": B01, "unbalanced.pdf": B06})
+    run = launch(desk, {"unaddressed.pdf": B01, "unsure.pdf": B01, "early.pdf": SECOND, "unbalanced.pdf": B06})
     read(desk, fake, run)
-    nobody, guessable, before_books, contradicted = records(desk, run)
+    nobody, guessable, before_books, corrected, contradicted = records(desk, run)
     assert (nobody["hold_codes"], nobody["review_reasons"], actions(nobody)) == (
         ["company_unresolved"], ["The buyer is none of the client's companies."], ["nothing", "retry"])
     # A complete candidate held for its treatment may be written as a best guess; the gate has checked it.
@@ -671,6 +684,7 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
     assert (before_books["hold_codes"], before_books["checks"]["submissions"]) == (["date_before_books"], 1)
     session = next(s for s in fake.created if header(s)["file"] == "early.pdf")
     assert answers(session, "propose")[1]["bills"][0]["status"] == "held"
+    assert record(desk, before_books)["hold_codes"] == ["date_before_books"] and corrected["status"] == "proposed"
     session = next(s for s in fake.created if header(s)["file"] == "unbalanced.pdf")
     refusals = [result["bills"][0] for result in answers(session, "propose")]
     assert refusals[0]["reason"].startswith("The lines come to 1,88,800.00, but the bill's printed total is 1,88,801.00.")
@@ -705,8 +719,11 @@ def test_a_file_of_several_bills_keeps_its_decided_bills_through_a_recheck(desk)
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
     unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
-    # First taken for three bills, the file is read again as two: the third, untouched by anyone, goes.
-    reading = [*proposing(names, unsure, second_bill(company), second_bill(company, 3), count=3),
+    # First taken for three bills, the third refused as the file prints no such total; corrected, the file is read
+    # as two: the third, untouched by anyone, goes.
+    phantom = second_bill(company, 3)
+    phantom["document"]["total"] = 11801.0
+    reading = [*proposing(names, unsure, second_bill(company), phantom, count=3),
                reproposing(names, unsure, count=2)]
     recheck = [*proposing(names, proposal(company)), reproposing(names, proposal(company), second_bill(company), count=2)]
     sessions = iter([reading, recheck])

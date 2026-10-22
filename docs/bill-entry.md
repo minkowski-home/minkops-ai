@@ -67,12 +67,16 @@ company's masters in sequence, so a guessed or mistyped GUID could name another
 real ledger; a reference no lookup issued names none, and is refused with the
 lookup that finds the right one. A cost centre's category follows from the centre.
 
-It then calls `propose` with `count`, the number of bills the file holds, and
-the bills numbered in the order they appear. Companion pages such as e-way bills,
-challans and annexures corroborate a bill and are never bills themselves. Each
-proposal is checked at once and either accepted, rejected with a reason the
-session can act on, or held. A bill has three attempts. A reading that changes a
-printed fact after a refusal goes to review. Where the PDF has a text layer, the
+It then gives its final answer: `count`, the number of bills the file holds, and
+the bills numbered in the order they appear. The provider constrains that answer
+to the proposal's schema (`PROPOSAL` in `bill_entry.py`), so its shape cannot be
+wrong; every value in it still comes from the bill and the lookups. Companion pages
+such as e-way bills, challans and annexures corroborate a bill and are never bills
+themselves. Each bill is then checked and either accepted, rejected with a reason
+the session can act on, or held. What is rejected goes back to the same session,
+which answers again with those bills corrected, at most twice
+(`tools.CORRECTIONS`); a bill still rejected then holds for that reason. A reading
+that changes a printed fact after a refusal goes to review. Where the PDF has a text layer, the
 total and any round-off must be amounts that layer prints. When the file is read
 again, bills a person has already decided keep their numbers. A bill that follows
 one of the client's rules cites its ID, and the proposal keeps the text it

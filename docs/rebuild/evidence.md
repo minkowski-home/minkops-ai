@@ -90,6 +90,31 @@ These were measured with `gpt-6-luna` through the installed SDK, using tiny prom
 
   The session took about 20 s.
 
+### Constrained final answers, measured live (22 October 2026)
+
+A bill run of 12 synthetic bills had 78 of 89 `propose` calls refused for their
+shape: the model wrote fields the instructions described (`{page, quote}` evidence, a
+cost centre with its category) rather than the schema's, and five sessions gave up.
+Probed with `gpt-6-luna` through SDK 3.19.0:
+
+- **Function tools are not constrained.** Asked to, the model sent arguments that
+  break the tool's schema, and the provider passed them on.
+- **`strict` is refused.** `agent.tools[0].strict` returns 400 `unknown_parameter`;
+  `agent_tool_param.py` declares only name, description, parameters and
+  `defer_loading`.
+- **A final answer is constrained.** `agent.text.format: {type: json_schema, schema}`
+  holds the turn's last message to the schema: asked for the same malformed value,
+  the model answered within it. The message is listed with `phase: final_answer`.
+- **Lookups and corrections fit around it.** A turn calls its function tools, then
+  answers within the schema. An `agent.session.input.message` (its `input` a list of
+  user messages) starts the next turn, whose answer is constrained again.
+- **The bill proposal's schema is accepted whole.** 9,158 characters using `type`,
+  `properties`, `required`, `additionalProperties`, `items`, `anyOf`, `enum`,
+  `description`, `pattern`, `minLength`, `maxLength`, `minimum`, `maximum`,
+  `exclusiveMinimum`, `minItems` and `maxItems` (`tools.CONSTRAINED`).
+- **Usage is per turn.** A session's own `usage` stayed null; each turn reports its
+  own, so a session's usage is every turn's, summed.
+
 ### Identity and duplicates
 
 - **Statement tokens include the tenant UUID.** They are `uuid5(NAMESPACE_URL, f"minkops:{tenant_id}:{key}:{identity}")`, built in `accounts/tally_writes.py` (around line 174) and `accounts/statements.py` (around line 90).

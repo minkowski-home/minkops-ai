@@ -125,6 +125,10 @@ def answer(connection, item, session_id, call, tools, context):
 
 # Times a session's final answer goes back to it for correcting; the handler settles what is left after that.
 CORRECTIONS = 2
+# The schema keywords the provider was measured to constrain a final answer with (docs/rebuild/evidence.md).
+CONSTRAINED = frozenset({"type", "properties", "required", "additionalProperties", "items", "anyOf", "enum",
+                         "description", "pattern", "minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum",
+                         "minItems", "maxItems"})
 
 
 @dataclass(frozen=True)
@@ -132,12 +136,41 @@ class Answer:
     """A session's final answer: constrained to `tool.input_schema` and checked by `tool.handler` once per turn.
 
     The model never calls it as a tool. `settled(result)` says whether a checked answer leaves nothing to
-    correct; `again` tells the session how to answer once more, after what the check said.
+    correct; `again` tells the session how to answer once more, after what the check said. A schema the
+    provider could not fully constrain is refused here, where the workflow declares it.
     """
 
     tool: Tool
     settled: Callable[[dict], bool] = lambda result: True
     again: str = "Answer again with the whole answer corrected."
+
+    def __post_init__(self):
+        fault = _unconstrained(self.tool.input_schema, "answer")
+        if fault:
+            raise ValueError(fault)
+
+
+def _unconstrained(schema, path):
+    """Why the provider could not hold an answer to this schema, or None.
+
+    A constrained answer is whole: every property present and nothing else, an absent value written as null, and
+    every enum typed. A keyword the provider was not measured to constrain with could be ignored silently.
+    """
+    unknown = sorted(set(schema) - CONSTRAINED)
+    if unknown:
+        return f"{path}: {unknown[0]} is not a keyword the provider constrains an answer with"
+    if "enum" in schema and "type" not in schema:
+        return f"{path}: an enum needs its type"
+    if "properties" in schema:
+        if schema.get("additionalProperties") is not False:
+            return f"{path}: an object must not allow other properties"
+        optional = sorted(set(schema["properties"]) - set(schema.get("required", [])))
+        if optional:
+            return f"{path}: every property must be required, null where it may be absent ({optional[0]} is optional)"
+    children = [(f"{path}/{name}", child) for name, child in schema.get("properties", {}).items()]
+    children += [(path, child) for child in schema.get("anyOf", [])]
+    children += [(path, schema["items"])] if isinstance(schema.get("items"), dict) else []
+    return next((fault for child_path, child in children if (fault := _unconstrained(child, child_path))), None)
 
 
 def conclude(connection, item, session_id, turn_id, text, final, context):

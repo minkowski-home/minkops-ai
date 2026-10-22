@@ -182,7 +182,9 @@ class Checker:
 
 def answered(fake, checker, **resume):
     worker = Worker()
-    result = run_tool_session(SessionSpec(**{**spec().__dict__, "answer_schema": ANSWER}), answer=worker.answer,
+    lookup = {"type": "function", "name": "find_ledger", "description": "Find ledgers.", "parameters": {}}
+    result = run_tool_session(SessionSpec(**{**spec().__dict__, "tools": [lookup], "answer_schema": ANSWER}),
+                              answer=worker.answer,
                               saved=worker.saved, requesting=worker.requesting, alive=worker.alive, client=fake,
                               final=checker.final, **resume)
     return result, worker

@@ -8,10 +8,12 @@ start; creation is not idempotent; listed sessions carry their metadata.
 
 Each session follows a script: rounds of function calls, each round issued
 together and answered before the next, then an ending. A session whose agent
-constrains its final answer (`text.format`) ends each turn with the script's
-next answer, marked `final_answer`; a user message starts the next turn, as
-live. Tests inject faults: dropped streams, a lost creation response and a
-call-registration race.
+constrains its final answer (`text.format`) ends each turn with a final
+answer, marked `final_answer`: a scripted call to a tool the agent was not
+given, which the model cannot call, is that answer; so are the script's
+`answers` once its rounds run out. A user message starts the next turn, which
+carries on with the next round, as live. Tests inject faults: dropped
+streams, a lost creation response and a call-registration race.
 """
 
 import itertools
@@ -65,6 +67,8 @@ class _Session:
         self.log, self.pending, self.answers, self.answered_ids = [], {}, [], set()
         # Correction messages sent to the session, and the idempotency keys already applied.
         self.messages, self.keys, self.items = [], set(), []
+        # The final answers given, and how many came from scripted rounds rather than `answers`.
+        self.finals, self.from_rounds = [], 0
         self.usage, self.reads = None, 0
         self.round = 0
         self.turns = []
@@ -92,10 +96,21 @@ class _Session:
         self.emit("agent.session.in_progress", session=self.snapshot())
         self.advance()
 
+    @property
+    def answering(self):
+        return (self.agent.get("text") or {}).get("format", {}).get("type") == "json_schema"
+
     def advance(self):
         if self.round < len(self.script.rounds):
             calls = self.script.rounds[self.round]
             calls = calls(list(self.answers), self) if callable(calls) else calls
+            given = {tool["name"] for tool in self.agent.get("tools") or []}
+            final = [arguments for name, arguments in calls or [] if self.answering and name not in given]
+            if final:
+                assert len(calls) == 1, "a final answer ends the turn on its own"
+                self.round += 1
+                self.conclude(final[0])
+                return
             if calls:
                 for name, arguments in calls:
                     call = Obj(type="function_call", call_id=f"call_{next(self.fake.ids)}", turn_id=self.turn.id,
@@ -105,14 +120,22 @@ class _Session:
                 self.status = "requires_action"
                 self.emit("agent.session.requires_action", session=self.snapshot())
                 return
-        if (self.agent.get("text") or {}).get("format", {}).get("type") == "json_schema":
-            value = self.script.answers[len(self.turns) - 1]
-            text = json.dumps(value(self) if callable(value) else value)
-            message = Obj(type="message", role="assistant", phase="final_answer", turn_id=self.turn.id,
-                          content=[Obj(type="output_text", text=text)])
-        else:
-            message = Obj(type="message", role="assistant", phase=None, turn_id=self.turn.id,
-                          content=[Obj(type="output_text", text="DONE")])
+        if self.answering:
+            value = self.script.answers[len(self.finals) - self.from_rounds]
+            self.conclude(value(self) if callable(value) else value, listed=True)
+            return
+        message = Obj(type="message", role="assistant", phase=None, turn_id=self.turn.id,
+                      content=[Obj(type="output_text", text="DONE")])
+        self.items.append(message)
+        self.turn_event("agent.session.turn.item.added", item=message)
+        self.end(self.script.ending)
+
+    def conclude(self, value, *, listed=False):
+        """End the turn with this final answer."""
+        self.finals.append(value)
+        self.from_rounds += 0 if listed else 1
+        message = Obj(type="message", role="assistant", phase="final_answer", turn_id=self.turn.id,
+                      content=[Obj(type="output_text", text=json.dumps(value))])
         self.items.append(message)
         self.turn_event("agent.session.turn.item.added", item=message)
         self.end(self.script.ending)
@@ -130,7 +153,6 @@ class _Session:
         self.new_turn(self.fake.clock)
         self.status = "in_progress"
         self.turn_event("agent.session.turn.created")
-        self.round = len(self.script.rounds)  # a correction turn answers at once
         self.advance()
 
     def end(self, status):

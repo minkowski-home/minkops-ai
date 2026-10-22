@@ -9,7 +9,7 @@ import pytest
 
 from minkops_platform import work
 from minkops_platform.runtime import tools
-from minkops_platform.runtime.tools import Tool, ToolError
+from minkops_platform.runtime.tools import Answer, Tool, ToolError
 
 SUBJECTS = {"type": "object", "properties": {"subjects": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
             "required": ["subjects"], "additionalProperties": False}
@@ -118,3 +118,34 @@ def test_a_call_that_fails_leaves_nothing_behind_but_its_log():
         assert [r["call_id"] for r in db.execute(
             "SELECT call_id FROM tool_calls WHERE item_id=%s AND NOT success ORDER BY call_id", (item["id"],))] == [
             "call_0", "call_1"]
+
+
+# --- final answers ------------------------------------------------------------------------------
+
+def answer_tool(schema):
+    return Tool("propose", "The proposal.", schema, lambda call, arguments: {})
+
+
+CLOSED = {"type": "object", "properties": {"amount": {"type": "number"}}, "required": ["amount"],
+          "additionalProperties": False}
+
+
+@pytest.mark.parametrize(("schema", "fault"), [
+    ({**CLOSED, "properties": {**CLOSED["properties"], "note": {"type": "string"}}},
+     "answer: every property must be required, null where it may be absent (note is optional)"),
+    ({**CLOSED, "additionalProperties": True}, "answer: an object must not allow other properties"),
+    ({**CLOSED, "properties": {"amount": {"enum": ["a", "b"]}}}, "answer/amount: an enum needs its type"),
+    ({**CLOSED, "properties": {"amount": {"type": "array", "uniqueItems": True}}},
+     "answer/amount: uniqueItems is not a keyword the provider constrains an answer with"),
+])
+def test_an_answer_the_provider_cannot_fully_constrain_is_refused_where_it_is_declared(schema, fault):
+    with pytest.raises(ValueError) as refused:
+        Answer(answer_tool(schema))
+    assert str(refused.value) == fault
+
+
+def test_every_workflow_answer_is_constrainable():
+    """Declared at import: a workflow whose answer the provider could not constrain does not load."""
+    from minkops_platform.accounts import bill_entry
+    assert Answer(answer_tool(CLOSED)).tool.name == "propose"
+    assert bill_entry.PROPOSAL.tool.input_schema["required"] == ["count", "bills"]

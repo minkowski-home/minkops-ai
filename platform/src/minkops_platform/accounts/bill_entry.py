@@ -1,12 +1,14 @@
-"""Bill entry on runs: each bill file read in its own tool session, every proposal checked as it arrives.
+"""Bill entry on runs: each bill file read in its own tool session, its proposal checked once answered.
 
 At launch each selected file becomes an item that waits until the client's
 PCs have refreshed their Tally copies. Its session reads the file's pages, as
 images and, where the PDF has one, a text layer (minkops_connectors.documents),
-and proposes the bills it holds with `propose`, numbered in the order they
-appear. Each proposal is bound to the company the bill is addressed to and
-checked against that company's pinned mirror by the voucher gate
-(vouchers.check). A file holds one record per bill.
+looks up the client's books, and answers with the bills the file holds,
+numbered in the order they appear: a final answer the provider constrains to
+the proposal's schema (PROPOSAL). Each bill is bound to the company it is
+addressed to and checked against that company's pinned mirror by the voucher
+gate (vouchers.check); what the gate rejects goes back to the same session to
+correct. A file holds one record per bill.
 
 When the last item settles, a bill repeated across files is written once, and
 files printing different versions of one bill all hold. Approved bills become
@@ -35,7 +37,7 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.files import files_for
 from minkops_platform.lanes import Session
 from minkops_platform.run_controls import control_state, require_active, resolve_request
-from minkops_platform.runtime.tools import Tool, ToolError
+from minkops_platform.runtime.tools import Answer, Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
 from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
@@ -211,7 +213,7 @@ def session(connection, run, item):
                for r in records if not _open(r)]
     return Session(model=pinned["model"], instructions=pinned["instructions"], reasoning=desk_tools.reasoning(pinned),
                    content=_content(connection, run, desk, file, read, decided), tools={**desk_tools.TOOLS, **BILL_TOOLS},
-                   state=desk)
+                   state=desk, answer=PROPOSAL)
 
 
 def _hold_pending(connection, item, code, reason, *, refusals=True):
@@ -381,7 +383,7 @@ def _cited(connection, desk, bill):
                            "item_guid": guid("stock_item", item["item"]), "ledger_guid": guid("ledger", item["ledger"]),
                            "godowns": [{"godown_guid": guid("godown", place["godown"]), "quantity": place["quantity"],
                                         "amount": place["amount"]} for place in item["godowns"]]}
-                          for item in voucher["items"]]} if "items" in voucher else {})}
+                          for item in voucher["items"]]} if voucher.get("items") else {})}
     except ToolError as refusal:
         raise HoldReason("classification_uncertain", str(refusal)) from None
     return out
@@ -561,48 +563,59 @@ def _nullable(definition):
     return {"anyOf": [{"type": "null"}, definition]}
 
 
+def choice(*values, null=False):
+    """One of these strings, or null when `null`: typed, as a constrained answer needs every enum to be."""
+    return {"type": ["string", "null"] if null else "string", "enum": [*values, *([None] if null else [])]}
+
+
 TEXT = {"type": "string", "minLength": 1, "maxLength": 1000}
 LEDGER = reference("A ledger's reference, as find_ledger gives it.")
 MONEY = {"type": "number", "exclusiveMinimum": 0}
 PRINTED = {"type": ["number", "null"], "exclusiveMinimum": 0}
 FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "place_of_supply", "taxable", "tax",
           "round_off", "note", "receipt_register", "other")
-EVIDENCE = {"type": "array", "maxItems": 40, "items": schema({
-    "field": {"enum": list(FIELDS)}, "page": {"type": "integer", "minimum": 1, "maximum": 12},
+EVIDENCE = {"type": "array", "maxItems": 40, "description": "Where the bill prints each document value you read.",
+            "items": schema({
+    "field": choice(*FIELDS), "page": {"type": "integer", "minimum": 1, "maximum": 12},
     "quote": {"type": "string", "minLength": 1, "maxLength": 300}}, ["field", "page", "quote"])}
 DOCUMENT = schema({
-    "kind": {"enum": ["invoice", "credit_note", None]}, "number": {"type": ["string", "null"], "maxLength": 100},
-    "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}, "total": PRINTED,
+    "kind": choice("invoice", "credit_note", null=True),
+    "number": {"type": ["string", "null"], "maxLength": 100, "description": "The supplier's document number."},
+    "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": "The issue date."},
+    "total": {**PRINTED, "description": "The gross amount payable for this document, as printed."},
     "supplier_name": {"type": ["string", "null"], "maxLength": 200},
-    "supplier_gstin": {"type": ["string", "null"], "maxLength": 20}, "origin": {"enum": ["domestic", "foreign", None]},
+    "supplier_gstin": {"type": ["string", "null"], "maxLength": 20},
+    "origin": {**choice("domestic", "foreign", null=True),
+               "description": "foreign for an import or a supplier outside India."},
     "buyer_gstin": {"type": ["string", "null"], "maxLength": 20,
                     "description": "The buyer GSTIN the bill is addressed to, as printed."},
     "place_of_supply": {"type": ["string", "null"], "maxLength": 60,
                         "description": "The place of supply as the bill prints it, such as Delhi (07); null if it prints none."},
-    "taxable": PRINTED, "tax": {"type": ["number", "null"], "minimum": 0},
-    "receipt_register": _nullable(schema({
+    "taxable": {**PRINTED, "description": "The printed taxable total; null when the bill prints none."},
+    "tax": {"type": ["number", "null"], "minimum": 0, "description": "The printed tax total; null when none is printed."},
+    "receipt_register": {"description": "A receipt-register stamp (DMR, GRN or MRN) as printed.", **_nullable(schema({
         "label": {"type": "string", "minLength": 1, "maxLength": 20},
         "number": {"type": "string", "minLength": 1, "maxLength": 40},
-        "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}}, ["label", "number", "date"]))},
-    # The buyer GSTIN and place of supply are optional: a company with GST switched on asks for what it needs.
-    ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "taxable", "tax",
-     "receipt_register"])
+        "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}}, ["label", "number", "date"]))}},
+    ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "buyer_gstin", "place_of_supply",
+     "taxable", "tax", "receipt_register"])
 LINE = schema({
-    "role": {"enum": ["expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"]},
-    "ledger": LEDGER, "side": {"enum": ["debit", "credit"]},
+    "role": choice("expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"),
+    "ledger": LEDGER, "side": choice("debit", "credit"),
     "amount": MONEY, "cost_centre": _nullable(reference("A cost centre's reference, as cost_centres gives it.")),
-    "tax": _nullable(schema({"head": {"enum": ["cgst", "sgst", "igst", "cess"]}, "rate": MONEY, "taxable": MONEY},
+    "tax": _nullable(schema({"head": choice("cgst", "sgst", "igst", "cess"), "rate": MONEY, "taxable": MONEY},
                             ["head", "rate", "taxable"])),
     "tds": _nullable(schema({"section": {"type": "string", "minLength": 2, "maxLength": 10}, "rate": MONEY},
                             ["section", "rate"])),
     "gst_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "description": (
         "For an expense, freight or other charge on a bill taxing its lines at more than one rate: the line's GST "
         "rate as printed (CGST plus SGST, or IGST); 0 for an untaxed line. Otherwise null.")},
-    "supply": {"enum": ["goods", "services", None], "description": (
-        "For a taxed expense, freight or other charge: whether it supplies goods (HSN) or services (SAC).")},
-    "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
-    # A line's GST rate and supply are optional: only a taxed purchase into a GST-registered company needs them.
-    ["role", "ledger", "side", "amount", "cost_centre", "tax", "tds", "evidence"])
+    "supply": {**choice("goods", "services", null=True), "description": (
+        "For a taxed expense, freight or other charge: whether it supplies goods (HSN) or services (SAC); "
+        "otherwise null.")},
+    "evidence": {"type": "string", "minLength": 1, "maxLength": 500,
+                 "description": "Where the bill prints this line, quoted: such as Page 1: Freight 1,180.00."}},
+    ["role", "ledger", "side", "amount", "cost_centre", "tax", "tds", "gst_rate", "supply", "evidence"])
 QUANTITY = {"type": "number", "exclusiveMinimum": 0}
 ITEM = schema({
     "item": reference("The stock item's reference, as find_stock_item gives it."), "quantity": QUANTITY, "rate": MONEY,
@@ -613,21 +626,23 @@ ITEM = schema({
     "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
     ["item", "quantity", "rate", "amount", "ledger", "godowns", "evidence"])
 VOUCHER = schema({
-    "family": {"enum": ["purchase", "journal", "debit_note"]},
+    "family": choice("purchase", "journal", "debit_note"),
     "voucher_type": _nullable(reference("The voucher type's reference, as voucher_types gives it.")),
-    "party": schema({"ledger": _nullable(LEDGER), "new_supplier": {"type": "boolean"}, "evidence": TEXT},
+    "party": schema({"ledger": _nullable(LEDGER), "new_supplier": {
+        "type": "boolean", "description": "True only once no ledger is this supplier; the ledger is then null."},
+        "evidence": TEXT},
                     ["ledger", "new_supplier", "evidence"]),
     "lines": {"type": "array", "maxItems": 39, "items": LINE},
-    "items": {"type": "array", "maxItems": 40, "items": ITEM, "description": (
+    "items": {**_nullable({"type": "array", "maxItems": 40, "items": ITEM}), "description": (
         "For a purchase the client books item-wise: each item line of the bill, in the stock item's own unit. "
-        "Items carry the taxable value their lines print, so they are not expense lines too.")}},
-    ["family", "voucher_type", "party", "lines"])
+        "Items carry the taxable value their lines print, so they are not expense lines too. Otherwise null.")}},
+    ["family", "voucher_type", "party", "lines", "items"])
 SUPPLIER = schema({
     **{key: {"type": "string", "maxLength": 250} for key in ("gstin", "registration_type", "state", "state_code",
                                                              "place_of_supply", "pincode")},
     "address": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 250}},
     "evidence": {"type": "array", "maxItems": 20, "items": schema({
-        "field": {"enum": ["gstin", "registration_type", "state", "place_of_supply", "address"]},
+        "field": choice("gstin", "registration_type", "state", "place_of_supply", "address"),
         "page": {"type": "integer", "minimum": 1, "maximum": 12},
         "quote": {"type": "string", "minLength": 1, "maxLength": 300}}, ["field", "page", "quote"])}},
     ["gstin", "registration_type", "state", "state_code", "place_of_supply", "address", "pincode", "evidence"])
@@ -635,17 +650,22 @@ BILL_SCHEMA = schema({
     "bill": {"type": "integer", "minimum": 1, "maximum": MAX_BILLS}, "document": _nullable(DOCUMENT),
     "company": _nullable(COMPANY), "company_evidence": {"type": ["string", "null"], "maxLength": 1000},
     "voucher": _nullable(VOUCHER), "supplier_details": _nullable(SUPPLIER), "evidence": EVIDENCE,
-    "exception": _nullable(schema({"code": {"enum": list(EXCEPTIONS)}, "detail": TEXT}, ["code", "detail"])),
+    "exception": _nullable(schema({"code": choice(*EXCEPTIONS), "detail": TEXT}, ["code", "detail"])),
     "rules": {"type": "array", "maxItems": 10, "items": {"type": "string", "minLength": 36, "maxLength": 36}},
 }, ["bill", "document", "company", "company_evidence", "voucher", "supplier_details", "evidence", "exception",
     "rules"])
-BILL_TOOLS = {tool.name: tool for tool in (
-    Tool("propose", "Propose bills of this file, numbered from 1 in the order they appear; `count` is how many bills "
-         "the file holds. Each is checked against its company at once, and a rejected bill says why. Proposing a "
-         "bill again replaces its earlier proposal.",
+# A session's final answer: the file's bills, each checked against its company once answered. A bill answered again
+# replaces its earlier proposal; one rejected, or not yet answered, goes back to the session.
+PROPOSAL = Answer(
+    Tool("propose", "The bills of this file, numbered from 1 in the order they appear; `count` is how many bills "
+         "the file holds.",
          schema({"count": {"type": "integer", "minimum": 1, "maximum": MAX_BILLS},
                  "bills": {"type": "array", "minItems": 1, "maxItems": MAX_BILLS, "items": BILL_SCHEMA}},
                 ["count", "bills"]), propose),
+    settled=lambda result: not result.get("still_pending") and all(b["status"] != "rejected" for b in result["bills"]),
+    again="Answer again with the bills it rejected or did not receive, each corrected; the bills it accepted or held "
+          "stay as they are.")
+BILL_TOOLS = {tool.name: tool for tool in (
     Tool("check_gstin", "Whether each value is a valid GSTIN (format, state code and check character), and its state.",
          schema({"values": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 30}}},
                 ["values"]), check_gstin),

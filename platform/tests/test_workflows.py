@@ -1,6 +1,7 @@
 """Workflow contracts: tool-session definitions, their pinned bundles and layered run configuration."""
 
 import json
+import re
 import shutil
 import unittest
 from pathlib import Path
@@ -61,3 +62,48 @@ class WorkflowContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def answer_names(schema, found=None):
+    """Every property name and enum value an answer schema declares."""
+    found = set() if found is None else found
+    if isinstance(schema, dict):
+        found.update(schema.get("properties", {}))
+        found.update(value for value in schema.get("enum", []) if isinstance(value, str))
+        for value in schema.values():
+            answer_names(value, found)
+    elif isinstance(schema, list):
+        for value in schema:
+            answer_names(value, found)
+    return found
+
+
+def resolves(schema, path):
+    """Whether a dotted path names a property of the answer schema, at any depth."""
+    if not path:
+        return True
+    for node in [schema, *schema.get("anyOf", []), schema.get("items") or {}]:
+        if isinstance(node, dict):
+            if path[0] in node.get("properties", {}) and resolves(node["properties"][path[0]], path[1:]):
+                return True
+            if any(resolves(child, path) for child in node.get("properties", {}).values()):
+                return True
+    return False
+
+
+class InstructionContractTests(unittest.TestCase):
+    """Instructions name only what exists: a field renamed in the answer's schema cannot leave them behind."""
+
+    def test_the_bill_instructions_name_only_fields_tools_and_codes_that_exist(self):
+        from minkops_platform.accounts import bill_entry, desk_tools
+        schema = bill_entry.PROPOSAL.tool.input_schema
+        # Fields of the session's input and of lookup answers, which no answer schema declares.
+        given = {"decided_bills", "gst_duty", "description"}
+        known = answer_names(schema) | set(desk_tools.TOOLS) | set(bill_entry.BILL_TOOLS) | given
+        names = re.findall(r"`([a-z][a-z_.]*)`", load_definition(WORKFLOWS / "bill-entry").instructions)
+        for name in names:
+            with self.subTest(name=name):
+                if "." in name:
+                    self.assertTrue(resolves(schema, name.split(".")), f"{name} is no path of the answer")
+                else:
+                    self.assertIn(name, known)
