@@ -238,5 +238,6 @@ Companion 0.10.0 still executes v5 plans.
 ## Dev channel
 
 `npm run package:win:dev` builds **Minkops Dev** with its own app ID, install
-folder and profile and no update feed, pointed at `http://127.0.0.1:3018`. It
-can be installed beside the production companion without touching it.
+folder and profile and no update feed, pointed at the local console,
+`http://127.0.0.1:3000`. It can be installed beside the production companion
+without touching it, and replaces the earlier `--local-demo` switch.

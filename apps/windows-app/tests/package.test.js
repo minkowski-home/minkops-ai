@@ -30,6 +30,18 @@ test("a release candidate is unsigned on purpose, even where a certificate is at
   assert.equal(env.PATH, "p");
 });
 
+test("Minkops Dev is another app beside the production companion, unsigned and without updates", () => {
+  const { env, publisher, config } = packaging({ argv: ["--dev"], env: { PATH: "p", ...signing } });
+  assert.equal(publisher, null);
+  assert.equal(env.WIN_CSC_LINK, undefined);
+  // Its own ID and name give it its own install folder, shortcuts and uninstall entry.
+  assert.deepEqual([config.appId, config.productName, config.win.executableName, config.nsis.artifactName],
+    ["com.minkops.desktop.dev", "Minkops Dev", "Minkops Dev", "Minkops-Dev-Setup-${version}.${ext}"]);
+  // No feed: neither does it update itself, nor can a production update replace it.
+  assert.equal(config.publish, null);
+  assert.deepEqual(packaging({ argv: ["--unsigned"], env: {} }).config, {});
+});
+
 test("a signed installer passes only when Windows trusts its signature and updates check the same publisher", () => {
   const subject = 'CN="Example Publisher, Ltd.", O="Example Publisher, Ltd.", L=Bengaluru, C=IN';
   const update = 'provider: generic\nurl: https://minkops.com/downloads/\npublisherName:\n  - "Example Publisher, Ltd."\n';

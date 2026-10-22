@@ -48,15 +48,14 @@ import {
   validateFolderReconnect,
 } from "./policy.js";
 
-const localDemo = process.argv.includes("--local-demo");
-// Voucher plan protocol this companion executes; the server serves nothing newer.
+// The dev channel (npm run package:win:dev) is its own app beside the production companion: built to talk to the
+// local stack only, in its own profile, and never to update itself. The build fixes it; no flag can repoint it.
+const dev = __MINKOPS_DEV__;
 const origin = trustedOrigin(
-  process.env.MINKOPS_APP_URL ||
-    (localDemo ? "http://127.0.0.1:3018" : "https://app.minkops.com"),
-  !app.isPackaged || localDemo,
+  dev ? "http://127.0.0.1:3000" : process.env.MINKOPS_APP_URL || "https://app.minkops.com",
+  !app.isPackaged || dev,
 );
-if (localDemo)
-  app.setPath("userData", join(app.getPath("appData"), "Minkops Local Demo"));
+if (dev) app.setPath("userData", join(app.getPath("appData"), "Minkops Dev"));
 let window;
 let tray;
 let quitting = false;
@@ -626,7 +625,7 @@ else {
         join(app.getAppPath(), "assets/tray.png"),
       );
       tray = new Tray(image);
-      tray.setToolTip("Minkops");
+      tray.setToolTip(dev ? "Minkops Dev" : "Minkops");
       tray.setContextMenu(
         Menu.buildFromTemplate([
           { label: "Open Minkops", click: openConsole },
@@ -646,7 +645,7 @@ else {
       startWorker();
       updates = startUpdates({
         updater: electronUpdater.autoUpdater,
-        isPackaged: app.isPackaged && !localDemo,
+        isPackaged: app.isPackaged && !dev,
         // Never restart over a claimed job, an unsent receipt or an active user.
         isIdle: () => !worker?.busy && !state.pending && !window?.isFocused(),
         canRestart: () => !worker?.busy && !state.pending,

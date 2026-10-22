@@ -157,6 +157,7 @@ npm test
 npm run build
 npm run package:win            # a release, signed by its publisher
 npm run package:win:candidate  # an unsigned release candidate
+npm run package:win:dev        # Minkops Dev, for the local stack
 ```
 
 Build on Windows with a Windows-local checkout and Node/npm. WSL symlinks are
@@ -175,11 +176,14 @@ branch. Run the migrations before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
-For a locally installed build, `Minkops.exe --local-demo` uses the fixed
-`http://127.0.0.1:3018` origin and isolated `Minkops Local Demo` profile. The normal
-packaged profile remains HTTPS-only. This switch grants no general URL override.
-The local profile retains encrypted registration credentials and folder grants
-across install/restart; keep the local API/UI/worker services running for testing.
+To test the local stack from an installed app, `npm run package:win:dev` builds
+**Minkops Dev** (`Minkops-Dev-Setup-<version>.exe`). It is another app beside the
+production companion: its own app ID, install folder, shortcuts and `Minkops Dev`
+profile, unsigned, with no update feed. Its server is fixed at build time to the
+local console, `http://127.0.0.1:3000`; no flag or variable repoints it, and the
+production build remains HTTPS-only. Its profile keeps encrypted registration
+credentials and folder grants across restarts; keep the local API, worker and
+console running while testing. From WSL, Windows reaches them on `127.0.0.1`.
 
 Configure an edge request limit of at most 42 MB on the base64 folder receipt
 route, with smaller limits elsewhere. Services/native adapters enforce 100

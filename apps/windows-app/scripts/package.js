@@ -1,5 +1,6 @@
 /** Package the Windows installer: a release signed by its publisher, or, with
- * --unsigned, a release candidate unsigned on purpose.
+ * --unsigned, a release candidate unsigned on purpose, or, with --dev, Minkops Dev:
+ * the local stack's companion, installed beside the production one.
  *
  * A release needs the code-signing certificate electron-builder reads
  * (WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD, or CSC_LINK and CSC_KEY_PASSWORD)
@@ -20,18 +21,28 @@ const CERTIFICATE = ["WIN_CSC_LINK", "CSC_LINK"];
 const PASSWORD = ["WIN_CSC_KEY_PASSWORD", "CSC_KEY_PASSWORD"];
 const given = (env, names) => names.map((name) => env[name]?.trim()).find(Boolean);
 
-/** The build environment and the publisher the installer must be signed by (null for a release candidate). */
+// Minkops Dev is another app: its own ID, install folder, shortcuts and profile, and no update feed, so it can
+// neither replace the production companion nor be replaced by its updates.
+const DEV = {
+  appId: "com.minkops.desktop.dev", productName: "Minkops Dev",
+  win: { executableName: "Minkops Dev" },
+  nsis: { artifactName: "Minkops-Dev-Setup-${version}.${ext}" },
+  publish: null,
+};
+
+/** The build environment, the publisher the installer must be signed by (null for a release candidate or the
+ * dev channel), and how the build differs from the release's own configuration. */
 export function packaging({ argv, env }) {
-  if (argv.includes("--unsigned")) {
+  if (argv.includes("--unsigned") || argv.includes("--dev")) {
     const unsigned = { ...env, CSC_IDENTITY_AUTO_DISCOVERY: "false" };
     for (const name of [...CERTIFICATE, ...PASSWORD]) delete unsigned[name];
-    return { env: unsigned, publisher: null };
+    return { env: unsigned, publisher: null, config: argv.includes("--dev") ? DEV : {} };
   }
   const publisher = env.MINKOPS_WINDOWS_PUBLISHER?.trim();
   if (!given(env, CERTIFICATE) || !given(env, PASSWORD) || !publisher)
     throw new Error("A release installer is signed. Set WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD and MINKOPS_WINDOWS_PUBLISHER "
       + "(the certificate's common name), or pass --unsigned for a release candidate.");
-  return { env: { ...env }, publisher };
+  return { env: { ...env }, publisher, config: {} };
 }
 
 /** Why a signed build must not be released, or null when Windows trusts it and updates check its publisher. */
@@ -56,14 +67,20 @@ function authenticode(file) {
 
 async function main() {
   if (process.platform !== "win32") throw new Error("Package the Windows installer on Windows.");
-  const { env, publisher } = packaging({ argv: process.argv.slice(2), env: process.env });
+  const { env, publisher, config } = packaging({ argv: process.argv.slice(2), env: process.env });
   // The programmatic build reads signing settings from the process environment.
   for (const name of Object.keys(process.env)) if (!(name in env)) delete process.env[name];
   Object.assign(process.env, env);
   const { build, Platform, Arch } = await import("electron-builder");
-  await build({ targets: Platform.WINDOWS.createTarget(["nsis"], Arch.x64) });
-  const { version } = JSON.parse(await readFile("package.json", "utf8"));
-  const installer = resolve("release", `Minkops-Setup-${version}.exe`);
+  // The release's own configuration (package.json "build"), with the dev channel's differences laid over it.
+  const { build: release, version } = JSON.parse(await readFile("package.json", "utf8"));
+  await build({ targets: Platform.WINDOWS.createTarget(["nsis"], Arch.x64),
+    config: { ...release, ...config, win: { ...release.win, ...config.win }, nsis: { ...release.nsis, ...config.nsis } } });
+  const installer = resolve("release", `Minkops${config === DEV ? "-Dev" : ""}-Setup-${version}.exe`);
+  if (config === DEV) {
+    console.log(`${installer} is Minkops Dev: unsigned, for the local stack at http://127.0.0.1:3000, with no updates.`);
+    return;
+  }
   if (!publisher) {
     console.warn(`${installer} is an unsigned release candidate: Windows SmartScreen warns on first install, `
       + "and its updates do not check their publisher. Its release notes must say so.");
