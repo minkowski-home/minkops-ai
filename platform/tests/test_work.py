@@ -268,6 +268,23 @@ def test_the_run_state_follows_its_items_and_records(scope):
         assert work.refresh(db, scope["tenant"]["id"], run["id"]) == "completed"
 
 
+def test_a_run_summary_counts_its_work_in_its_workflows_words():
+    """The task's one line counts what waits as the review does, in the singular and plural."""
+    bills = work.Wording(input=("file", "files"), entry=("bill", "bills"), destination="Tally")
+    items, records = dict.fromkeys(work.ITEM_STATES, 0), dict.fromkeys(work.RECORD_STATUSES, 0)
+    assert work.describe_run("running", items | {"done": 1, "running": 2}, records, bills) == ("1 of 3 files read.", 23)
+    review = lambda **counts: work.describe_run("review", items, records | counts, bills)[0]  # noqa: E731
+    assert review(held=1, proposed=2) == "1 bill needs a decision; 2 ready to approve."
+    assert review(held=3) == "3 bills need a decision."
+    assert review(proposed=1, approved=2) == "1 bill ready to approve; 2 approved."
+    done = lambda **counts: work.describe_run("completed", items, records | counts, bills)[0]  # noqa: E731
+    assert done(saved=8, duplicate=2, deferred=1) == "8 bills saved in Tally; 2 already in Tally; 1 left as is."
+    assert done() == "No bills entered."
+    # A task title names its first input and counts the rest, never cut mid-name.
+    assert work.title("Bill entry", ["01.pdf"]) == "Bill entry: 01.pdf"
+    assert work.title("Bill entry", [f"{n:02}.pdf" for n in range(1, 16)]) == "Bill entry: 01.pdf and 14 more"
+
+
 def test_an_unchanged_refresh_writes_no_timeline_event(scope):
     import factory
     with factory.connect() as db:

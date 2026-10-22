@@ -424,7 +424,7 @@ def refresh(connection, tenant_id, run_id, *, describe=None):
     else:
         state = "completed"
     run = get_run(connection, tenant_id, run_id)
-    summary, progress = (describe or _describe)(state, items, records)
+    summary, progress = (describe or describe_run)(state, items, records)
     if state != run["state"]:
         connection.execute("UPDATE runs SET state=%s,updated_at=now() WHERE id=%s", (state, run_id))
     task = connection.execute("SELECT control_state,status,summary,progress FROM tasks WHERE tenant_id=%s AND id=%s",
@@ -438,17 +438,49 @@ def refresh(connection, tenant_id, run_id, *, describe=None):
     return state
 
 
-def _describe(state, items, records):
+@dataclass(frozen=True)
+class Wording:
+    """How a workflow names its inputs, its entries and where they are saved, in its run's task summary."""
+    input: tuple[str, str] = ("input", "inputs")
+    entry: tuple[str, str] = ("entry", "entries")
+    destination: str = "the destination"
+    preparing: str = "Getting ready."
+    failed: str = "The inputs could not be processed. Recheck them or start a new run."
+
+
+GENERIC = Wording()
+
+
+def describe_run(state, items, records, wording=GENERIC):
+    """The task's summary and progress for a run in `state`, counted as its review counts them."""
     total = sum(items.values()) - items["cancelled"]
     finished = items["done"] + items["failed"]
-    settled = records["saved"] + records["duplicate"] + records["deferred"]
-    if state in ("preparing", "running"):
-        return (f"{finished} of {total} inputs read." if state == "running" else "Getting ready."), \
-            min(60, 60 * finished // max(total, 1))
+    if state == "preparing":
+        return wording.preparing, 5
+    if state == "running":
+        return f"{finished} of {total} {wording.input[total != 1]} read.", min(60, 5 + 55 * finished // max(total, 1))
     if state == "writing":
-        return "Saving approved entries and checking them in Tally.", 85
+        verified = records["saved"] + records["duplicate"]
+        return f"Saving approved {wording.entry[1]} in {wording.destination}: {verified} verified so far.", 85
     if state == "review":
-        return f"{records['proposed'] + records['approved']} ready to save; {records['held']} need attention.", 70
+        return _counted(wording.entry, (records["held"], "needs a decision", "need a decision"),
+                        (records["proposed"], "ready to approve", None), (records["approved"], "approved", None)), 70
     if state == "failed":
-        return "The inputs could not be processed. Recheck them or start a new run.", 100
-    return f"{settled} entries settled.", 100
+        return wording.failed, 100
+    return _counted(wording.entry, (records["saved"], f"saved in {wording.destination}", None),
+                    (records["duplicate"], f"already in {wording.destination}", None),
+                    (records["deferred"], "left as is", None)), 100
+
+
+def _counted(entry, *counts):
+    """'1 bill needs a decision; 2 ready to approve.': the first count names the entries, in agreement."""
+    parts = [(n, many if n != 1 and many else one) for n, one, many in counts if n]
+    if not parts:
+        return f"No {entry[1]} entered."
+    (first, phrase), rest = parts[0], parts[1:]
+    return "; ".join([f"{first} {entry[first != 1]} {phrase}", *(f"{n} {words}" for n, words in rest)]) + "."
+
+
+def title(workflow, names):
+    """A run's task title: its workflow and first input, then how many more, so a long list is never cut mid-name."""
+    return f"{workflow}: {names[0]}" + (f" and {len(names) - 1} more" if len(names) > 1 else "")

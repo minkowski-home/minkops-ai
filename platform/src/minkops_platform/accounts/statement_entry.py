@@ -22,6 +22,7 @@ import json
 from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from uuid import UUID
 
@@ -110,11 +111,11 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
             specs.append(work.ItemSpec("chunk", chunk["source"], waiting_on=sync.blocker(devices[0]["id"])))
             rows.append(chunk["rows"])
     config["files"] = [{"id": str(f["id"]), "path": f["path"][:200]} for f in statements]
-    names = ", ".join(Path(f["path"]).name for f in statements)
     run = work.launch(connection, tenant_id=tenant["id"], client_id=client["id"], workflow=workflow,
                       handler="desk.statement", definition_version=definition.metadata["version"],
                       bundle=definition.session_bundle, actor_id=user["id"], request_key=body["request_key"],
-                      request_hash=fingerprint, config=config, title=f"Statement entry: {names}"[:200], items=specs)
+                      request_hash=fingerprint, config=config,
+                      title=work.title("Statement entry", [Path(f["path"]).name for f in statements]), items=specs)
     items = connection.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
     for item, chunk in zip(items, rows, strict=True):
         if chunk:
@@ -934,21 +935,10 @@ def stopped(connection, run):
         ([hold("run_stopped").reason_for(STATEMENT)], run["id"], withdrawn))
 
 
-def describe(state, items, records):
-    total = sum(items.values()) - items["cancelled"]
-    finished = items["done"] + items["failed"]
-    settled = records["saved"] + records["duplicate"] + records["deferred"]
-    if state == "preparing":
-        return "Refreshing the Tally copy on your PC.", 5
-    if state == "running":
-        return f"{finished} of {total} parts read.", min(60, 5 + 55 * finished // max(total, 1))
-    if state == "writing":
-        return f"Saving approved entries in Tally: {records['saved'] + records['duplicate']} verified so far.", 85
-    if state == "review":
-        return f"{records['proposed']} entries ready to approve; {records['held']} need attention.", 70
-    if state == "failed":
-        return "The statements could not be read. Recheck them or start a new run.", 100
-    return f"{settled} entries settled.", 100
+describe = partial(work.describe_run, wording=work.Wording(
+    input=("part", "parts"), entry=("entry", "entries"), destination="Tally",
+    preparing="Refreshing the Tally copy on your PC.",
+    failed="The statements could not be read. Recheck them or start a new run."))
 
 
 class StatementEntry:

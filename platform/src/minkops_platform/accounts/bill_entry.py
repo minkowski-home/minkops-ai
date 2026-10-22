@@ -23,6 +23,7 @@ import json
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from pathlib import Path
 
 from jsonschema import ValidationError
@@ -97,11 +98,11 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
         raise ServiceError("invalid", "Choose one of this client's companies to enter every bill into.")
     paths = {str(f["id"]): f["path"][:200] for f in files}
     config["files"] = [{"id": file_id, "path": paths[file_id]} for file_id in file_ids]
-    names = ", ".join(Path(paths[file_id]).name for file_id in file_ids)
     run = work.launch(connection, tenant_id=tenant["id"], client_id=client["id"], workflow=workflow,
                       handler="desk.bill", definition_version=definition.metadata["version"],
                       bundle=definition.session_bundle, actor_id=user["id"], request_key=body["request_key"],
-                      request_hash=fingerprint, config=config, title=f"Bill entry: {names}"[:200],
+                      request_hash=fingerprint, config=config,
+                      title=work.title("Bill entry", [Path(paths[file_id]).name for file_id in file_ids]),
                       items=[work.ItemSpec(KIND, {"file_id": file_id}, waiting_on=sync.blocker(devices[0]["id"]))
                              for file_id in file_ids])
     items = connection.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
@@ -994,21 +995,9 @@ def stopped(connection, run):
         ([hold("run_stopped").reason_for(BILL)], run["id"], withdrawn))
 
 
-def describe(state, items, records):
-    total = sum(items.values()) - items["cancelled"]
-    finished = items["done"] + items["failed"]
-    settled = records["saved"] + records["duplicate"] + records["deferred"]
-    if state == "preparing":
-        return "Refreshing the Tally copy on your PC.", 5
-    if state == "running":
-        return f"{finished} of {total} files read.", min(60, 5 + 55 * finished // max(total, 1))
-    if state == "writing":
-        return f"Saving approved bills in Tally: {records['saved'] + records['duplicate']} verified so far.", 85
-    if state == "review":
-        return f"{records['proposed']} bills ready to approve; {records['held']} need attention.", 70
-    if state == "failed":
-        return "The bills could not be read. Recheck them or start a new run.", 100
-    return f"{settled} bills settled.", 100
+describe = partial(work.describe_run, wording=work.Wording(
+    input=("file", "files"), entry=("bill", "bills"), destination="Tally",
+    preparing="Refreshing the Tally copy on your PC.", failed="The bills could not be read. Recheck them or start a new run."))
 
 
 class BillEntry:
