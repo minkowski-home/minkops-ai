@@ -6,7 +6,9 @@ const workflow = {id:'w-1', key:'bill-entry', name:'Bill entry', description:'En
   presentation:'desk-review', run_defaults:{company_mode:'infer'},
   run_schema:{properties:{review_mode:{enum:['all_outputs', 'only_exceptions']}, company_mode:{enum:['locked', 'infer']},
     locked_company_guid:{type:['string', 'null']}}}};
-const task = {id:'t-1', workflow_id:'w-1', title:'Bill entry', status:'attention', control_state:'active', progress:70,
+// A real title: one long file name, which must wrap rather than push the status off a phone's screen.
+const task = {id:'t-1', workflow_id:'w-1', title:'Bill entry: 09-conflicting_version_of_the_supplier_invoice.pdf and 14 more',
+  status:'attention', control_state:'active', progress:70,
   summary:'1 ready to save; 1 needs attention.', stage:'review', created_at:'2026-10-22T09:00:00Z',
   updated_at:'2026-10-22T09:05:00Z'};
 const bill = {id:'b-1', version:2, kind:'bill', status:'proposed', file:'sunrise.pdf', bill:1,
@@ -108,6 +110,7 @@ test('a run starts from its workflow with the client, the files and the settings
   const calls = await console_(context);
   await page.goto('http://127.0.0.1:3000/mock-tenant/workflows/w-1');
   const form = page.locator('form').filter({hasText:'Start a run'});
+  await expect(form.getByRole('combobox', {name:'Client'})).toHaveValue('rehearsal');
   // A company split by year is offered once: each bill goes to the part whose books cover its date.
   await expect(form.getByRole('combobox', {name:'Company'}).locator('option')).toHaveText([
     'The company each bill is addressed to', 'Test Company']);

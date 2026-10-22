@@ -75,9 +75,10 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
   return <form className="config-panel launch-panel" onSubmit={(event) => void start(event)}>
     <div className="section-heading"><div><h2>Start a run</h2><p>Choose the files to read, and whose books they belong to.</p></div></div>
     <div className="accounts-field-grid">
-      {clients.length > 1 && <label>Client<select aria-label="Client" value={client}
+      {/* Shown even for one client, so the person starting the run sees whose books it reads. */}
+      <label>Client<select aria-label="Client" value={client}
         onChange={(event) => { setClient(event.target.value); setCompany(""); }}>
-        {clients.map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>}
+        {clients.map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
       <label>Files<input type="file" aria-label="Files" multiple required
         onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
       {settings.branch_mapping_file_id && <label>Mapping file (optional)<input type="file" aria-label="Mapping file"
