@@ -818,6 +818,62 @@ def test_a_practice_the_books_settle_later_releases_the_bills_that_waited_on_it(
     assert (released["status"], released["hold_codes"], released["review_reasons"]) == ("proposed", [], [])
 
 
+def einvoice_pdf(code):
+    """A scanned bill page carrying a QR code: the image a session reads, with no text layer."""
+    import qrcode
+    page = Image.new("RGB", (1240, 1754), "white")
+    page.paste(qrcode.make(code, box_size=4, border=4).get_image().convert("RGB"), (700, 1100))
+    buffer = io.BytesIO()
+    page.save(buffer, format="PDF", resolution=150)
+    return buffer.getvalue()
+
+
+def test_a_signed_e_invoice_pins_the_bill_it_registers(desk, monkeypatch):
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+    from minkops_connectors import einvoice
+    company = desk["company"]["guid"]
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(einvoice, "signers", lambda: (einvoice.Signer("Test IRP", key.public_key(), "CD" * 20,
+                                                                      (None, None)),))
+
+    def code(buyer=BUYER, total=188800, sign=True):
+        encode = lambda value: base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()  # noqa: E731
+        head = encode({"alg": "RS256", "kid": "CD" * 20, "typ": "JWT"})
+        body = encode({"iss": "TEST", "data": json.dumps({
+            "SellerGstin": SUNRISE, "BuyerGstin": buyer, "DocNo": "SOS/26/0412", "DocTyp": "INV", "DocDt": "01/09/2026",
+            "TotInvVal": total, "ItemCnt": 1, "MainHsnCode": "9406", "Irn": "f" * 64, "IrnDt": "2026-09-01 11:00:00"})})
+        # An altered code carries a signature made over other contents.
+        signed_over = body if sign else encode({"iss": "TEST", "data": "{}"})
+        signature = key.sign(f"{head}.{signed_over}".encode(), padding.PKCS1v15(), hashes.SHA256())
+        return f"{head}.{body}." + base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
+
+    misread = proposal(company, **{"document.total": 188000.0})
+    fake = by_file(**{
+        "registered.pdf": [[("propose", {"count": 1, "bills": [misread]})],
+                           [("propose", {"count": 1, "bills": [proposal(company)]})]],
+        "altered.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]],
+        "elsewhere.pdf": [[("propose", {"count": 1, "bills": [proposal(company)]})]]})
+    run = launch(desk, {"registered.pdf": einvoice_pdf(code()), "altered.pdf": einvoice_pdf(code(sign=False)),
+                        "elsewhere.pdf": einvoice_pdf(code(buyer=gstin("37ZZZZZ9999Z1Z")))})
+    read(desk, fake, run)
+    session = next(s for s in fake.created if header(s)["file"] == "registered.pdf")
+    # The session reads the bill against what the QR code registers.
+    assert session.content[1]["text"].startswith("Page 1 carries a signed e-invoice QR code, verified as signed by "
+                                                 "Test IRP. It registers {")
+    assert answers(session, "propose")[0]["bills"][0] == {"bill": 1, "status": "rejected", "reason": (
+        "The e-invoice QR code on page 1 says its total is 188800.00. Read the bill against it.")}
+    registered, altered, elsewhere = records(desk, run)
+    assert (registered["status"], registered["facts"]["einvoice"]) == (
+        "proposed", {"status": "verified", "signer": "Test IRP", "irn": "f" * 64, "page": 1})
+    # A code its signer's key does not verify holds at once: no later reading could clear it.
+    assert (altered["status"], altered["hold_codes"], altered["checks"]["final"]) == (
+        "held", ["source_values_conflict"], True)
+    assert altered["review_reasons"][0].startswith("The e-invoice QR code on page 1 fails Test IRP's signature")
+    assert (elsewhere["status"], elsewhere["hold_codes"]) == ("held", ["company_unresolved"])
+
+
 def repairs(company, number):
     """A Sunrise bill of 10,000.00 and 9% CGST and SGST, booked to repairs: unlike Sunrise's earlier bills."""
     entry = second_bill(company, 1)

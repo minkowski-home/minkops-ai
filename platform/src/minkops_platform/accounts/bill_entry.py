@@ -27,6 +27,7 @@ from pathlib import Path
 
 from jsonschema import ValidationError
 
+from minkops_connectors import einvoice
 from minkops_connectors.documents import pages
 from minkops_platform import work
 from minkops_platform.errors import ServiceError
@@ -117,11 +118,12 @@ def _blank(item, path, number):
 # --- sessions -------------------------------------------------------------------------
 
 class Bills(Desk):
-    """A bill session's state: the desk, the file's item, and the amounts its text layer prints (_figures)."""
+    """A bill session's state: the desk, the file's item, the amounts its text layer prints (_figures), and the
+    e-invoices its signed QR codes register (minkops_connectors.einvoice)."""
 
-    def __init__(self, connection, run, item, printed):
+    def __init__(self, connection, run, item, printed, einvoices=()):
         super().__init__(connection, run)
-        self.item, self.printed = item, printed
+        self.item, self.printed, self.einvoices = item, printed, list(einvoices)
 
 
 FIGURE = re.compile(r"\d[\d,]*(?:\.\d+)?")
@@ -176,6 +178,8 @@ def _content(run, desk, file, read, decided):
     if decided:
         header["decided_bills"] = decided
     content = [{"type": "input_text", "text": json.dumps(header, ensure_ascii=False)}]
+    for found in desk.einvoices:
+        content.append({"type": "input_text", "text": _registered_text(found)})
     for page in read:
         layer = f"Text layer:\n{page['text']}" if page["text"] else "A scan with no text layer."
         content.append({"type": "input_text", "text": f"Page {page['page']} of {len(read)}. {layer}"})
@@ -195,7 +199,9 @@ def session(connection, run, item):
     except ValueError as error:
         _hold_pending(connection, item, "source_unreadable", str(error))
         return None
-    desk = Bills(connection, run, item, _figures(read))
+    einvoices = [{"page": page["page"], **found} for page in read for code in page["codes"]
+                 if (found := einvoice.read(code))]
+    desk = Bills(connection, run, item, _figures(read), einvoices)
     pinned = desk_tools.bundle(connection, run)
     # A recheck reads the whole file again; the bills already decided keep their numbers.
     decided = [{"bill": r["position"] + 1, "status": r["status"],
@@ -247,6 +253,56 @@ def _printed(desk, bill):
                                                        "Use the figure the bill prints.")
 
 
+SIGNED = {"verified": "a signed e-invoice QR code, verified as signed by {signer}",
+          "unverified": "a signed e-invoice QR code whose signer Minkops cannot verify",
+          "altered": "an e-invoice QR code that fails {signer}'s signature, so what it says may have been altered"}
+
+
+def _registered_text(found):
+    """How the session is told what a signed e-invoice code on a page registers."""
+    values = {"kind": found["kind"], "number": found["number"], "date": found["date"],
+              "total": f"{found['total_cents'] / 100:.2f}", "seller_gstin": found["seller_gstin"],
+              "buyer_gstin": found["buyer_gstin"], "irn": found["irn"]}
+    return (f"Page {found['page']} carries {SIGNED[found['status']].format(signer=found['signer'])}. It registers "
+            f"{json.dumps(values, ensure_ascii=False)}. Read the bill against these values.")
+
+
+def _registered(connection, desk, bill, company, count):
+    """The e-invoice a bill's signed QR code registers, which its reading must agree with; None without one.
+
+    A code belongs to the bill with its number, or to a file's only bill when it
+    is the file's only code. What it registers binds the reading's number,
+    date, total, seller and kind, and its buyer must be the routed company.
+    """
+    document = bill["document"]
+    same = [found for found in desk.einvoices if _key(found["number"]) == _key(document["number"])]
+    found = (same or (desk.einvoices if len(desk.einvoices) == 1 and count == 1 else [None]))[0]
+    if found is None:
+        return None
+    where = f"The e-invoice QR code on page {found['page']}"
+    if found["status"] == "altered":
+        raise HoldReason("source_values_conflict", f"{where} fails {found['signer']}'s signature, so what it says may "
+                                                   "have been altered. Check this bill with the supplier.", final=True)
+    kind = "credit_note" if found["kind"] == "credit_note" else "invoice"
+    conflicts = [f"its {what} is {theirs}" for what, theirs, ours in (
+        ("number", found["number"], _key(document["number"]) == _key(found["number"])),
+        ("date", found["date"], document["date"] == found["date"]),
+        ("total", f"{found['total_cents'] / 100:.2f}", _paise(document["total"]) == found["total_cents"]),
+        ("seller GSTIN", found["seller_gstin"], (document.get("supplier_gstin") or "").upper() == found["seller_gstin"]),
+        ("document kind", kind.replace("_", " "), document["kind"] == kind)) if not ours]
+    if conflicts:
+        raise HoldReason("source_values_conflict", f"{where} says {'; '.join(conflicts)}. Read the bill against it.")
+    buyer = found["buyer_gstin"]
+    if buyer and buyer != "URP" and buyer not in desk.gstins(connection, company):
+        raise HoldReason("company_unresolved", f"{where} registers the bill to buyer GSTIN {buyer}, which is not "
+                                               f"{company['name']}'s.")
+    return found
+
+
+def _key(number):
+    return re.sub(r"\s", "", str(number or "")).casefold()
+
+
 def _resize(connection, item, records, count):
     """Grow or shrink the file's bills to `count`; a bill no longer found holds if a person acted on it."""
     if count > len(records):
@@ -285,7 +341,7 @@ def propose(call, arguments):
         if not _open(record):
             results.append({"bill": bill["bill"], "status": record["status"], "reason": "Already decided."})
             continue
-        results.append({"bill": bill["bill"], **_propose_one(connection, desk, record, bill)})
+        results.append({"bill": bill["bill"], **_propose_one(connection, desk, record, bill, count)})
     waiting = [number for number, r in by_number.items() if r["status"] == "pending"]
     return {"bills": results, **({"still_pending": waiting} if waiting else {})}
 
@@ -305,7 +361,7 @@ def _facts(record, document, company):
             **{key: value for key, value in read.items() if value is not None}}
 
 
-def _propose_one(connection, desk, record, bill):
+def _propose_one(connection, desk, record, bill, count):
     run, document = desk.run, bill["document"] or {}
     earlier = record["checks"] or {}
     if earlier.get("final"):
@@ -332,17 +388,22 @@ def _propose_one(connection, desk, record, bill):
         if locked and company["guid"] != locked:
             raise HoldReason("company_unresolved", "This run enters every bill into its locked company. When the bill "
                                                    "is addressed to another buyer, propose company_unresolved.")
+        registered = None
         if bill["document"] and bill["voucher"]:
             _printed(desk, bill)
+            registered = _registered(connection, desk, bill, company, count)
         bound = check(bill, desk.view(connection, company), company, until=desk.until(company))
     except HoldReason as refusal:
-        if refusal.code in FINAL or submissions >= ATTEMPTS:
+        if refusal.code in FINAL or refusal.final or submissions >= ATTEMPTS:
             return _hold(connection, desk, record, bill, company, refusal.code, str(refusal), facts=facts,
-                         checks={**checks, "final": refusal.code in FINAL}, review=review)
+                         checks={**checks, "final": refusal.code in FINAL or refusal.final}, review=review)
         work.update_record(connection, record, status="pending", hold_codes=[], review_reasons=[], facts=facts,
                            company_id=company["id"] if company else None, proposal={"bill": bill},
                            checks={**checks, "code": refusal.code, "error": str(refusal)[:300]})
         return {"status": "rejected", "reason": str(refusal)}
+    if registered:
+        # The reviewer sees which IRP registered the bill, and whether its signature verified.
+        facts = {**facts, "einvoice": {key: registered[key] for key in ("status", "signer", "irn", "page")}}
     review += [note for note in [_precedent(connection, desk, company, bound)] if note]
     waits = _waits(connection, company, bill, bound)
     if waits:

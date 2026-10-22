@@ -45,6 +45,11 @@ follows, or `[]`.
 - **Stamps.** A receipt-register stamp (DMR, GRN or MRN) with its number, and its
   date when it has one, goes in `document.receipt_register` as printed, quoted as
   evidence. Minkops records it wherever the company's practice says.
+- **Signed e-invoices.** When a page carries an e-invoice's signed QR code,
+  Minkops reads it for you and says what it registers: the document number and
+  kind, date, total, and seller and buyer GSTIN. They are the invoice's
+  registered values, so your reading must agree with them; read the bill again
+  where it seems not to.
 
 ## The document
 

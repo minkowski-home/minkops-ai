@@ -328,11 +328,14 @@ TOLERANCE_CENTS = 100
 
 
 class HoldReason(ValueError):
-    """A server-side hold with a stable code from the hold matrix (holds.py)."""
+    """A server-side hold with a stable code from the hold matrix (holds.py).
 
-    def __init__(self, code, message):
+    `final` holds at once, whatever its code: no later reading could clear it.
+    """
+
+    def __init__(self, code, message, *, final=False):
         super().__init__(message)
-        self.code = code
+        self.code, self.final = code, final
 
 
 def _money(value, what):

@@ -103,7 +103,7 @@ class Desk:
         for parts in self.parts.values():
             parts.sort(key=lambda part: part["books_from"])
         self.companies = {guid: parts[-1] for guid, parts in self.parts.items()}
-        self._groups, self._types, self._views, self._billwise, self._rules = {}, {}, {}, {}, None
+        self._groups, self._types, self._views, self._billwise, self._gstins, self._rules = {}, {}, {}, {}, {}, None
 
     def company(self, guid, on=None):
         """The company with this GUID; for a year split, the part whose books cover `on` (ISO date)."""
@@ -150,6 +150,14 @@ class Desk:
             self._views[company["id"]] = {**view, "port": company["tally_port"],
                                           "books_from": company["books_from"].isoformat()}
         return self._views[company["id"]]
+
+    def gstins(self, connection, company):
+        """Every GSTIN the company is registered under, across its tax units."""
+        if company["id"] not in self._gstins:
+            self._gstins[company["id"]] = sorted({
+                row["gstin"] for row in mirror.masters(connection, company["id"], company["version"],
+                                                       types=["TAXUNIT", "COMPANY"]) if row["gstin"]})
+        return self._gstins[company["id"]]
 
     def billwise(self, connection, company):
         """The names of the company's ledgers that keep bill-by-bill balances."""
@@ -220,8 +228,7 @@ def find_company(call, arguments):
     desk, subjects = call.state, arguments.get("subjects") or []
     out = []
     for company in (part for parts in desk.parts.values() for part in parts):
-        gstins = sorted({row["gstin"] for row in mirror.masters(call.connection, company["id"], company["version"],
-                                                                 types=["TAXUNIT", "COMPANY"]) if row["gstin"]})
+        gstins = desk.gstins(call.connection, company)
         named = mirror.normalized(company["name"])
         matches = [s for s in subjects if s.strip().upper() in gstins
                    or all(word in named for word in mirror.normalized(s).split())]
