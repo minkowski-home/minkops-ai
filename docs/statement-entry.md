@@ -35,11 +35,15 @@ statement's own balances (`accounts/statement_layouts.py`, reader in
   answers at once:
   - every running balance must equal the previous one plus the transaction;
   - declared summary controls (opening, closing, total withdrawals and deposits) must
-    match, wherever they sit in the sheet;
+    match, wherever they sit in the sheet, and so must every copy of one printed twice,
+    such as a closing balance in a header summary and again in the footer. A
+    spreadsheet total saved with float error (14985856.630000005 for 1,49,85,856.63)
+    reads as its paise amount; a real third decimal is refused;
   - the dates must settle their own day-month order.
 
-  A refuted reading is explained to the session, which has two more attempts. A
-  refuted reading is never stored.
+  A refuted reading is explained to the session, naming the cell and what differs, and
+  the session has two more attempts. A refuted reading is never stored; a sheet held
+  after the last attempt shows the person that refusal.
 - **When only a person can decide** (the date order, or rows with no running balance),
   one Attention card asks once, answered with
   `POST /api/tenants/{tenant}/attention/{item}/decision` and its chosen `action`. The

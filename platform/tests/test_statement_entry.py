@@ -17,6 +17,7 @@ from references import everything, named, referring
 
 from minkops_platform import lanes, work
 from minkops_platform.accounts import statement_entry, sync
+from minkops_platform.accounts.holds import hold
 from minkops_platform.errors import ServiceError
 from minkops_platform.runtime import openai_hosted
 from minkops_platform.workflows import load_definition
@@ -501,12 +502,15 @@ def test_balances_that_refute_a_reading_are_explained_and_never_kept(desk):
     [session] = fake.sessions or fake.created
     texts = [a["text"] for a in session.answers]
     # The first row chains from its own implied opening; the second shows the swapped columns.
-    assert texts[0] == ("The balances refute this reading. Row 5: The running balance cannot be verified against the "
-                        "preceding balance and transaction.")
+    refusal = ("The statement does not confirm this reading. Row 5: The running balance cannot be verified against "
+               "the preceding balance and transaction.")
+    assert texts[0] == refusal
     assert texts[3] == "No more attempts: this sheet will be held for review."
     [sheet] = records(desk, run)
     assert (sheet["kind"], sheet["status"], sheet["hold_codes"]) == ("statement_sheet", "held",
                                                                      ["statement_layout_unknown"])
+    # The person reads why: the statement's own refusal of the last reading.
+    assert sheet["review_reasons"] == [f"{hold('statement_layout_unknown').reason} {refusal}"[:300]]
     assert desk["db"].execute("SELECT count(*) AS n FROM client_profiles WHERE tenant_id=%s",
                               (desk["tenant"]["id"],)).fetchone()["n"] == 0
 

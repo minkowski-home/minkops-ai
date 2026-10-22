@@ -142,7 +142,8 @@ _CATALOG = [
          "The import was interrupted. Reconcile Tally; Minkops will not resend an uncertain import."),
     ]),
     *_holds((STATEMENT,), NON_WRITING, [
-        ("statement_layout_unknown", EXCEPTION, "Layout unknown", "Minkops could not read this sheet's layout."),
+        ("statement_layout_unknown", EXCEPTION, "Layout not proved",
+         "No reading of this sheet was confirmed by the statement's own balances and totals."),
         ("statement_layout_changed", EXCEPTION, "Layout changed",
          "This statement's layout changed and could not be verified."),
         ("statement_transfer_unpaired", EXCEPTION, "Transfer unpaired",

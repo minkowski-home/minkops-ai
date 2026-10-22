@@ -467,7 +467,7 @@ def propose_layout(call, arguments):
                                       today=statement_layouts.today_for(run), actor=run["actor_id"],
                                       provenance={"run_id": str(run["id"]), "file": path})
     if outcome["status"] == "refuted":
-        raise ToolError(f"The balances refute this reading. {outcome['reason']}")
+        raise ToolError(f"The statement does not confirm this reading. {outcome['reason']}")
     if outcome["status"] == "question":
         statement_layouts.ask(connection, run, outcome["profile"], path, outcome["question"], outcome["proof"],
                               outcome["printed"])
@@ -615,7 +615,13 @@ def _settle_layout(connection, run, item, outcome):
         raise Wait(statement_layouts.blocker(profile["id"]))
     if not profile:
         code = "statement_layout_changed" if item["source"].get("changed") else "statement_layout_unknown"
-        _hold_sheet(connection, item, path, "held", code, outcome.error or hold(code).reason)
+        # The person sees why the statement refused the last reading, not only that it did.
+        refused = connection.execute(
+            """SELECT answer FROM tool_calls WHERE item_id=%s AND name='propose_layout' AND NOT success
+               AND answer LIKE 'The statement does not confirm%%' ORDER BY created_at DESC LIMIT 1""",
+            (item["id"],)).fetchone()
+        reason = outcome.error or (f"{hold(code).reason} {refused['answer']}" if refused else hold(code).reason)
+        _hold_sheet(connection, item, path, "held", code, reason)
         return
     rows, _, details = statement_layouts.read(entry, profile["payload"], entry["header_index"],
                                               today=statement_layouts.today_for(run))

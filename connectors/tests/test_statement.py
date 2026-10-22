@@ -1,4 +1,6 @@
 import io
+import re
+import zipfile
 from collections import Counter
 from datetime import date
 
@@ -172,7 +174,7 @@ def test_independent_footer_controls_use_their_declared_value_columns_after_tabl
     ('Opening Bal:,1000', 'Opening Bal:,1001'), ('Closing Bal:,950', 'Closing Bal:,949'),
     ('Withdrawls:,100', 'Withdrawls:,101'), ('Deposits:,50', 'Deposits:,49'),
     ('Closing Bal:,950', 'Closing Bal:,unreadable'), ('Closing Bal:,950', ''),
-    ('Closing Bal:,950', 'Closing Bal:,950\nClosing Bal:,950')])
+    ('Closing Bal:,950', 'Closing Bal:,950\nClosing Bal:,940')])
 def test_declared_missing_invalid_duplicate_or_conflicting_controls_hold_the_whole_sheet(change):
     rows, proof = apply_layout(table(SUMMARY.replace(*change)), summary_layout(), 0)
     assert not proof['amounts'] and proof['summary'] is False
@@ -191,6 +193,75 @@ def test_summary_controls_follow_accumulation_order_in_newest_first_statements()
     spec = summary_layout()
     spec['row_order'] = 'newest_first'
     assert apply_layout(table(text), spec, 0)[1]['summary'] is True
+
+
+def xlsx(rows, saved=None):
+    """A workbook as Excel saves it: `saved` puts a numeric cell's value in the file exactly as Excel writes it.
+
+    Excel writes 17 significant digits, so a SUM's cached value keeps its float error (14985856.630000005);
+    openpyxl would round it to 15 and hide the case.
+    """
+    book = Workbook()
+    for row in rows:
+        book.active.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    content = buffer.getvalue()
+    if saved:
+        source, target = zipfile.ZipFile(io.BytesIO(content)), io.BytesIO()
+        with zipfile.ZipFile(target, 'w') as rewritten:
+            for info in source.infolist():
+                data = source.read(info)
+                if info.filename == 'xl/worksheets/sheet1.xml':
+                    for cell, value in saved.items():
+                        data = re.sub(rf'(<c r="{cell}"[^>]*><v>)[^<]*'.encode(), rf'\g<1>{value}'.encode(), data)
+                rewritten.writestr(info, data)
+        content = target.getvalue()
+    return read_tables(content, '.xlsx')[0][1]
+
+
+FLOAT_SUMMARY = [['Date', 'Ref', 'Debit', 'Credit', 'Balance'], ['01/Sep/2026', 'A', 0.1, None, 999.9],
+                 ['02/Sep/2026', 'B', 0.2, None, 999.7], ['Page Total'], ['Opening Bal:', 1000],
+                 ['Withdrawls:', 0.3], ['Deposits:', 0], ['Closing Bal:', 999.7]]
+
+
+def test_a_spreadsheet_total_carrying_float_error_reads_as_its_paise_amount():
+    """Excel keeps numbers as binary doubles: a SUM of 0.10 and 0.20 is saved as 0.30000000000000004."""
+    sheet = xlsx(FLOAT_SUMMARY, saved={'B6': repr(0.1 + 0.2)})
+    assert sheet[5][1] == 0.1 + 0.2 != 0.3
+    rows, proof = apply_layout(sheet, summary_layout(), 0)
+    assert proof['amounts'] and proof['summary'] is True
+    assert [r['amount_cents'] for r in rows] == [-10, -20]
+
+
+@pytest.mark.parametrize('printed', [0.305, '0.30000000000000004'])
+def test_a_real_third_decimal_or_text_past_paise_is_still_refused(printed):
+    sheet = xlsx([*FLOAT_SUMMARY[:5], ['Withdrawls:', printed], *FLOAT_SUMMARY[6:]])
+    rows, proof = apply_layout(sheet, summary_layout(), 0)
+    assert proof['summary'] is False
+    assert any(r.get('reason', '').startswith(f'Row 6, column 2: the printed debit total {printed} is not an amount')
+               for r in rows)
+
+
+def test_a_refused_control_names_its_cell_and_what_differs():
+    rows, _ = apply_layout(table(SUMMARY.replace('Withdrawls:,100', 'Withdrawls:,101')), summary_layout(), 0)
+    assert ('Row 6, column 2: the printed debit total 101.00 differs from the transactions, which come to 100.00.'
+            in [r.get('reason') for r in rows])
+    rows, _ = apply_layout(table(SUMMARY.replace('Closing Bal:,950', 'Closing Bal:,950\nClosing Bal:,940')),
+                           summary_layout(), 0)
+    assert ('Row 9, column 2: the printed closing balance 940.00 differs from the transactions, which come to 950.00.'
+            in [r.get('reason') for r in rows])
+
+
+def test_a_control_printed_twice_proves_the_reading_only_when_every_copy_agrees():
+    """Banks often print the closing balance in a header summary and again in the footer: both are checked."""
+    twice = SUMMARY.replace('Date,Ref', 'Closing Bal:,950\nDate,Ref')
+    rows, proof = apply_layout(table(twice), summary_layout(), 1)
+    assert proof['amounts'] and proof['summary'] is True and not any(r.get('code') for r in rows)
+    rows, proof = apply_layout(table(twice.replace('Closing Bal:,950\nDate', 'Closing Bal:,905\nDate')),
+                               summary_layout(), 1)
+    assert not proof['amounts'] and 'Row 1, column 2: the printed closing balance 905.00 differs from the ' \
+        'transactions, which come to 950.00.' in [r.get('reason') for r in rows]
 
 
 def test_uncached_summary_formula_does_not_prove_a_sheet():

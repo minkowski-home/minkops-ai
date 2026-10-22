@@ -13,6 +13,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import re
 from collections import Counter
 from datetime import date, datetime
@@ -32,6 +33,16 @@ def normalized(value):
 
 
 def money(value):
+    """Paise from a printed amount; anything finer than paise is refused, never rounded away.
+
+    A spreadsheet number is a binary double, and Excel saves a SUM's cached value with its float error:
+    14,985,856.63 is saved as 14985856.630000005. Within a few units of the last place of a paise amount,
+    the cell is that amount; a real third decimal (0.305) is far outside it and is refused like text.
+    """
+    if isinstance(value, float) and math.isfinite(value):
+        paise = round(value, 2)
+        if abs(value - paise) <= min(1024 * math.ulp(value), 1e-4):
+            value = paise
     raw = str(value).strip().replace(',', '').replace('₹', '').strip()
     raw = re.sub(r'^(?:inr|rs\.?)\s*', '', raw, flags=re.I)
     suffix = re.search(r'\s*(Dr|Cr)$', raw, re.I)
@@ -164,8 +175,9 @@ def _summary_controls(table, rules, transactions, *, columns, sheet, formulas):
 
     A bank may print balances/totals in another column after `ends_at`. Scan
     those declarations across the complete sheet, but never use them to invent
-    transactions or silently repair source money. Duplicate/missing controls
-    are unsafe even when an internally valid running chain remains.
+    transactions or silently repair source money. Every printed copy of a
+    control must agree, so a page subtotal sharing a total's label refutes the
+    reading; a missing control is unsafe even when the running chain holds.
     """
     if not rules:
         return []
@@ -178,30 +190,53 @@ def _summary_controls(table, rules, transactions, *, columns, sheet, formulas):
         totals['closing'] = row['balance_cents']
         totals['debit'] += max(-row['amount_cents'], 0)
         totals['credit'] += max(row['amount_cents'], 0)
-    findings, seen = [], set()
+    findings = []
     for rule in rules:
+        kind, value_column = rule['kind'], rule['value_column']
         matches = [(number, cells) for number, cells in enumerate(table, 1) if _matches(cells, [rule])]
         if not matches:
             findings.append({'row': 0, 'sheet': sheet, 'code': 'statement_summary',
-                             'reason': 'A declared statement summary control is missing.'})
+                             'reason': f'The declared {CONTROLS[kind]} labelled "{rule.get("starts_with")}" is not in the sheet.'})
         for number, cells in matches:
-            kind, value_column = rule['kind'], rule['value_column']
             account_column = rule.get('account_column') or (columns.get('account') or {}).get('column')
             account = cell_text(cells[account_column - 1]) if account_column and account_column <= len(cells) else ''
-            key = (kind, account)
-            try:
-                if key in seen or (number, value_column) in formulas or value_column > len(cells):
-                    raise ValueError()
-                seen.add(key)
-                amount = money(cells[value_column - 1])
-                if kind in ('debit', 'credit') and amount < 0:
-                    raise ValueError()
-                if amount != expected.get(account, {}).get(kind):
-                    raise ValueError()
-            except (ValueError, TypeError):
+            # A control printed twice, as in a header summary and a footer, is checked at every copy.
+            reason = _control_fault(cells, number, value_column, expected.get(account, {}).get(kind), formulas,
+                                    signed=kind not in ('debit', 'credit'))
+            if reason:
                 findings.append({'row': number, 'sheet': sheet, 'code': 'statement_summary',
-                                 'reason': 'A printed statement summary control is invalid, repeated or differs from its transactions.'})
+                                 'reason': f'Row {number}, column {value_column}: the printed {CONTROLS[kind]} {reason}'})
     return findings
+
+
+CONTROLS = {'opening': 'opening balance', 'closing': 'closing balance', 'debit': 'debit total', 'credit': 'credit total'}
+
+
+def _control_fault(cells, number, column, expected, formulas, *, signed):
+    """Why one printed control does not prove the reading, worded for whoever corrects it; None when it does.
+
+    A value that cannot be read is the source's fault and says so; one that differs gives both amounts, so the
+    reader can tell a wrong column from a statement that does not add up.
+    """
+    if (number, column) in formulas:
+        return 'is a formula with no saved value. Recalculate and save the statement in Excel.'
+    if column > len(cells) or cells[column - 1] in (None, ''):
+        return 'is empty.'
+    try:
+        amount = money(cells[column - 1])
+    except ValueError:
+        return f'{cell_text(cells[column - 1])} is not an amount in paise.'
+    if not signed and amount < 0:
+        return f'{_paise(amount)} is negative.'
+    if expected is None:
+        return f'{_paise(amount)} has no transactions to check it against.'
+    if amount != expected:
+        return f'{_paise(amount)} differs from the transactions, which come to {_paise(expected)}.'
+    return None
+
+
+def _paise(cents):
+    return f'{Decimal(cents) / 100:.2f}'
 
 
 def apply_layout(table, layout, header_index, *, sheet='', formulas=frozenset(), occurrences=None, today=None):
