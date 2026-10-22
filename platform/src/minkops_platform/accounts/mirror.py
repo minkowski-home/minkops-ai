@@ -446,18 +446,25 @@ def open_bills(connection, company_id, version, ledgers):
                    if bill["opened"] and bill["balance_cents"]), key=lambda bill: (bill["date"], bill["name"]))
 
 
+def words(value):
+    """A name's words: punctuation separates them as spaces do, so "AG Section-1" is ag, section and 1."""
+    return re.findall(r"[^\W_]+", str(value or "").casefold())
+
+
 def search_masters(connection, company_id, version, types, subject, *, limit=8):
     """Masters of these types matching one subject: by GSTIN, bank account number, HSN, or every word of a name.
 
     A statement often masks an account number ("XXXXXX1234"), so its digits
     match the end of a ledger's account number. An HSN heading matches the
-    codes under it. Names match on all words, in the name or any alias; an
-    exact name sorts first.
+    codes under it. Names match on all words, in the name or any alias,
+    whatever punctuation separates them: a word may be part of one ("cabin"
+    finds Cabins), but a number is a whole word, so Section 1 is never
+    Section 2 nor QA18. An exact name sorts first.
     """
     digits = re.sub(r"\D", "", subject)
     found = GSTIN.search(subject.upper())
-    words = [word for word in normalized(subject).split() if len(word) > 1][:8]
-    if not (found or len(digits) >= 4 or words):
+    wanted = [word for word in words(subject) if len(word) > 1 or word.isdigit()][:8]
+    if not (found or len(digits) >= 4 or wanted):
         return []
     return connection.execute(
         f"""SELECT * FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE} AND type = ANY(%(types)s) AND (
@@ -465,11 +472,14 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
                 OR (%(digits)s::text IS NOT NULL AND bank_account LIKE '%%' || %(digits)s)
                 OR (%(digits)s::text IS NOT NULL AND hsn LIKE %(digits)s || '%%')
                 OR (cardinality(%(words)s::text[]) > 0 AND NOT EXISTS (
-                    SELECT 1 FROM unnest(%(words)s::text[]) AS word
-                    WHERE position(word IN name_key || ' ' || lower(array_to_string(aliases, ' '))) = 0)))
+                    SELECT 1 FROM unnest(%(words)s::text[]) AS word,
+                         LATERAL (SELECT ' ' || btrim(regexp_replace(lower(name_key || ' ' ||
+                                 array_to_string(aliases, ' ')), '[^[:alnum:]]+', ' ', 'g')) || ' ' AS text) AS spoken
+                    WHERE CASE WHEN word ~ '^[0-9]+$' THEN position(' ' || word || ' ' IN spoken.text) = 0
+                               ELSE position(word IN spoken.text) = 0 END)))
             ORDER BY (name_key = %(key)s) DESC, length(name), guid LIMIT %(limit)s""",
         {"c": company_id, "v": version, "types": list(types), "gstin": found.group(0) if found else None,
-         "digits": digits if len(digits) >= 4 else None, "words": words, "key": normalized(subject),
+         "digits": digits if len(digits) >= 4 else None, "words": wanted, "key": normalized(subject),
          "limit": limit}).fetchall()
 
 

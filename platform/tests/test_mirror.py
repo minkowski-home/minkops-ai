@@ -208,3 +208,24 @@ def test_the_company_view_feeds_the_existing_voucher_gate(company):
     assert masters.name(masters.one("LEDGER", "g-1", "x", "x")) == "Acme"
     assert masters.family(masters.one("VOUCHERTYPE", "t-1", "x", "x")) == "purchase"
     assert view["company_guid"] == row["guid"] and view["company"] == row["name"]
+
+
+@DB
+def test_a_name_is_found_whatever_punctuation_separates_its_words_and_a_number_matches_whole(company):
+    """A narration or bill writes "AG Section-1" for the books' "QA18 AG Section 1"; it is never Section 2."""
+    db, row = company
+    version = build(db, row, kind="full", masters=[
+        ledger("g-1", "QA18 AG Section 1", parent="Indirect Expenses"),
+        ledger("g-2", "QA18 AG Section 2", parent="Indirect Expenses"),
+        ledger("g-cgst9", "Input CGST 9%", parent="Duties & Taxes"),
+        ledger("g-cgst25", "Input CGST 2.5%", parent="Duties & Taxes"),
+        ledger("g-cabins", "Portable Site Cabins - UAT", parent="Fixed Assets")])["version"]
+
+    def found(subject):
+        return [m["name"] for m in mirror.search_masters(db, row["id"], version, ["LEDGER"], subject)]
+
+    assert found("AG Section-1") == found("ag section 1") == found("AG/Section 1") == ["QA18 AG Section 1"]
+    assert found("CGST 9%") == ["Input CGST 9%"] and found("CGST 2.5%") == ["Input CGST 2.5%"]
+    # A word may still be part of one, as before: a cabin is among the cabins.
+    assert found("site cabin") == ["Portable Site Cabins - UAT"]
+    assert found("Section 3") == []

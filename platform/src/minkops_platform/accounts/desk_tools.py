@@ -504,7 +504,8 @@ def schema(properties, required):
 TOOLS = {tool.name: tool for tool in (
     Tool("find_company", "The client's companies in scope, with their GSTINs. Subjects (names or GSTINs) are "
          "marked where they match.", schema({"subjects": {**SUBJECTS, "minItems": 0}}, []), find_company),
-    Tool("find_ledger", "Ledgers matching each subject: a name or alias (every word must appear), a GSTIN, or a bank "
+    Tool("find_ledger", "Ledgers matching each subject: a name or alias (every word must appear, whatever punctuation "
+         "separates them; a number as a whole word), a GSTIN, or a bank "
          "account number; a masked number matches by its last digits. Give a company to search only it; without one, "
          "every company is searched and each ledger names its company.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["subjects"]), find_ledger),
