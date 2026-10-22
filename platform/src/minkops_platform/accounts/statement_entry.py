@@ -5,10 +5,12 @@ A sheet in a format not seen before becomes a `layout` item: one session
 declares how to read it, and Minkops proves the reading against the running
 balances before keeping it. Proven rows become records, chunked into `chunk`
 items of up to CHUNK rows. Each chunk is routed in its own session through the
-desk lookups, and `propose` checks every row as it arrives (validated_plan).
-When the last item settles, transfer legs are paired, rows repeated across
-overlapping files are reconciled, and a gap from the previous statement of the
-same bank ledger is reported. Approved rows become native writes (writes.py).
+desk lookups, and `propose` checks every row as it arrives (validated_plan); a
+row to a ledger that keeps bill-by-bill balances also settles its open bills
+(settlement). When the last item settles, transfer legs are paired, rows
+repeated across overlapping files are reconciled, and a gap from the previous
+statement of the same bank ledger is reported. Approved rows become native
+writes (writes.py).
 
 Facts are immutable: a proposal chooses accounting identities, never amounts,
 dates or references, and a source failure found by the reader cannot be
@@ -19,6 +21,7 @@ import hashlib
 import json
 from collections import Counter
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
@@ -33,7 +36,7 @@ from minkops_platform.run_controls import control_state, require_active, resolve
 from minkops_platform.runtime.tools import Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
-from . import desk_tools, memory, mirror, statement_layouts, sync, writes
+from . import desk_tools, memory, mirror, settlement, statement_layouts, sync, writes
 from .desk_tools import COMPANY, SUBJECTS, Desk, schema
 from .holds import ACTIONS, STATEMENT, hold
 from .holds import actions as hold_actions
@@ -53,7 +56,7 @@ REPROPOSABLE = {*EXCEPTIONS, "statement_interpretation"}
 SAVE_HOLDS = {"possible_existing", "uncertain_import", "destination_changed", "company_not_open", "no_company",
               "duplicate_company", "not_running", "port_closed", "busy", "too_many", "invalid_response", "rejected"}
 # A statement row offers these of its holds' actions; a best-guess write needs a plan the checks accepted.
-OFFERED = ("nothing", "retry", "retry_save")
+OFFERED = ("nothing", "retry", "retry_save", "settle")
 
 
 # --- launch ---------------------------------------------------------------------------
@@ -226,14 +229,13 @@ def _rupees(cents):
 # --- tools ------------------------------------------------------------------------------
 
 def _row_of(connection, run, ref, *, item=None, lock=False):
-    try:
-        ref = UUID(ref)
-    except ValueError as error:
-        raise ToolError(f"{ref} is not a row ref.") from error
+    parsed = _uuid(ref)
+    if parsed is None:
+        raise ToolError(f"{ref} is not a row ref.")
     row = connection.execute(
         f"""SELECT * FROM run_records WHERE run_id=%s AND id=%s AND kind=%s
             {"AND item_id=%s" if item else ""}{" FOR UPDATE" if lock else ""}""",
-        (run["id"], ref, ROW, *([item["id"]] if item else []))).fetchone()
+        (run["id"], parsed, ROW, *([item["id"]] if item else []))).fetchone()
     if row is None:
         raise ToolError(f"{ref} is not a row of this {'chunk' if item else 'run'}.")
     return row
@@ -262,6 +264,11 @@ def _mirrors(proposal, other):
 def propose(call, arguments):
     state, connection, run = call.state, call.connection, call.run
     accepted, held, rejected = [], [], []
+    # Every row of the call is locked before a bill is settled, so a person deciding one of them never deadlocks
+    # with this call over the run's settlement lock.
+    refs = sorted({ref for entry in arguments["rows"] if (ref := _uuid(entry["ref"]))})
+    connection.execute("SELECT 1 FROM run_records WHERE run_id=%s AND item_id=%s AND id = ANY(%s) ORDER BY id FOR UPDATE",
+                       (run["id"], state.item["id"], refs))
     for entry in arguments["rows"]:
         ref = entry["ref"]
         try:
@@ -289,6 +296,16 @@ def propose(call, arguments):
             cited = state.cite(connection, entry.get("rules", []))
             resolved = validated_plan(record["facts"], [state.view(connection, company)], entry)
             proposal = {"selection": entry, "resolved": resolved, **({"rules": cited} if cited else {})}
+            try:
+                proposal["resolved"] = _settled(connection, state, company, record, resolved, entry.get("bills"))
+            except settlement.Unresolved as unresolved:
+                # Recorded for a person's one click; the row's own work is done, so it is not a rejection.
+                work.update_record(connection, record, status="held", company_id=company["id"],
+                                   hold_codes=["bill_unresolved"], review_reasons=[unresolved.reason],
+                                   proposal={**proposal, "settlement": {"choices": unresolved.choices}},
+                                   checks={"submissions": submissions + 1})
+                accepted.append(ref)
+                continue
             if entry.get("pair"):
                 if resolved["family"] != "contra" or entry["pair"] == ref:
                     raise ValueError("Only a Contra pairs with another row, and never with itself.")
@@ -313,6 +330,49 @@ def propose(call, arguments):
     remaining = connection.execute("SELECT count(*) AS n FROM run_records WHERE item_id=%s AND status='pending'",
                                    (state.item["id"],)).fetchone()["n"]
     return {"accepted": accepted, "held": held, "rejected": rejected, "remaining": remaining}
+
+
+def _uuid(ref):
+    try:
+        return UUID(ref)
+    except ValueError:
+        return None
+
+
+def _settled(connection, state, company, record, resolved, proposed):
+    """The resolved row with its counter line's bills when that ledger keeps bill-by-bill balances.
+
+    Raises ValueError for bills that cannot be written, and settlement.Unresolved
+    when which bills the row settles is a person's choice.
+    """
+    billwise = state.billwise(connection, company)
+    counter, lines = resolved["data"]["counter_ledger"], resolved.get("lines") or []
+    other = next((line["ledger"] for line in lines[1:] if line["ledger"] in billwise), None)
+    if other:
+        raise ValueError(f"{other} keeps bill-by-bill balances, so it can only be the counter ledger.")
+    if counter not in billwise:
+        if proposed:
+            raise ValueError(f"{counter} does not keep bill-by-bill balances; give no bills.")
+        return resolved
+    bills = []
+    for bill in proposed or []:
+        cents = Decimal(str(bill["amount"])) * 100
+        if cents != int(cents):
+            raise ValueError("Each bill amount must be exact to the paisa.")
+        bills.append({"type": bill["type"], **({"name": bill["name"]} if "name" in bill else {}),
+                      "amount_cents": int(cents)})
+    settlement.lock(connection, state.run)
+    allocated = settlement.allocate(settlement.open_bills(connection, state.run, company, counter, record=record),
+                                    proposed=bills if proposed else None, **_terms(record, resolved))
+    return {**resolved, "bills": allocated}
+
+
+def _terms(record, resolved):
+    """What a row's counter line settles: its amount and direction, and the text that may name the bills."""
+    facts, lines = record["facts"], resolved.get("lines") or []
+    return {"amount_cents": lines[0]["amount_cents"] if lines else abs(facts["amount_cents"]),
+            "payment": facts["amount_cents"] < 0,
+            "text": f"{facts.get('narration') or ''} {facts.get('reference') or ''}"}
 
 
 def find_transfer(call, arguments):
@@ -414,6 +474,13 @@ SELECTION = schema({
         "amount": {"type": "number", "exclusiveMinimum": 0}, "cost_centre_guid": GUID, "cost_category_guid": GUID},
         ["role", "ledger_guid", "amount"])},
     "pair": {**REF, "description": "The other leg's ref, for a transfer between own accounts."},
+    "bills": {"type": "array", "minItems": 1, "maxItems": 20, "description": (
+        "For a counter ledger that keeps bill-by-bill balances: the bills its line settles, adding up to its amount. "
+        "Leave out to let the open bills decide."), "items": schema({
+            "type": {"enum": list(settlement.TYPES)},
+            "name": {"type": "string", "minLength": 1, "maxLength": 100,
+                     "description": "The open bill's name; an Advance names a new one. On Account names none."},
+            "amount": {"type": "number", "exclusiveMinimum": 0}}, ["type", "amount"])},
     "rules": {"type": "array", "maxItems": 10, "items": REF, "description": "The client's rules this row follows."},
     "payee": {"type": "string", "minLength": 1, "maxLength": 200,
               "description": "The counterparty the narration names, as printed, without references or amounts."},
@@ -585,7 +652,8 @@ def _pair_transfers(connection, ready):
 def _accounting(record):
     resolved = record["proposal"]["resolved"]
     return json.dumps([resolved["family"], resolved["voucher_type"]["GUID"], resolved["data"]["counter_ledger"],
-                       resolved.get("lines"), resolved.get("allocation")], sort_keys=True, default=str)
+                       resolved.get("lines"), resolved.get("allocation"), resolved.get("bills")], sort_keys=True,
+                      default=str)
 
 
 def _reconcile_repeats(connection, ready):
@@ -676,6 +744,19 @@ def _offered(record):
     return []
 
 
+def _actions(record):
+    """The row's one-click actions; Settle is one button per allocation the open bills leave."""
+    choices = ((record["proposal"] or {}).get("settlement") or {}).get("choices") or []
+    actions = []
+    for action in _offered(record):
+        if action == "settle":
+            actions.extend({"action": action, "label": choice["label"], "detail": {"choice": index}}
+                           for index, choice in enumerate(choices))
+        else:
+            actions.append({"action": action, "label": ACTIONS.get(action, "Approve")})
+    return actions
+
+
 def summarize(run, record):
     facts, resolved = record["facts"] or {}, (record["proposal"] or {}).get("resolved") or {}
     return {key: value for key, value in {
@@ -684,9 +765,8 @@ def summarize(run, record):
         "amount": _rupees(facts.get("amount_cents")), "narration": (facts.get("narration") or "")[:120] or None,
         "company": resolved.get("company"), "bank_ledger": (resolved.get("data") or {}).get("bank_ledger"),
         "counter_ledger": " + ".join(line["ledger"] for line in resolved["lines"]) if resolved.get("lines")
-        else (resolved.get("data") or {}).get("counter_ledger"), "holds": _holds(record),
-        "review": record["review_reasons"], "actions": [{"action": a, "label": ACTIONS.get(a, "Approve")}
-                                                        for a in _offered(record)],
+        else (resolved.get("data") or {}).get("counter_ledger"), "bills": resolved.get("bills"),
+        "holds": _holds(record), "review": record["review_reasons"], "actions": _actions(record),
     }.items() if value not in (None, [])}
 
 
@@ -695,7 +775,8 @@ def detail(connection, run, record):
     return {**summarize(run, record), "facts": record["facts"], "evidence": (proposal.get("selection") or {}).get(
         "evidence") or (proposal.get("exception") or {}).get("detail"), "transfer": proposal.get("transfer"),
             "repeat_of": proposal.get("repeat_of"), "current": record["current"],
-            "lines": (proposal.get("resolved") or {}).get("lines"), "rules": proposal.get("rules")}
+            "lines": (proposal.get("resolved") or {}).get("lines"), "rules": proposal.get("rules"),
+            "settlement": proposal.get("settlement")}
 
 
 def decide(connection, run, record, action, detail, context):
@@ -703,6 +784,8 @@ def decide(connection, run, record, action, detail, context):
         raise ServiceError("conflict", "That action is not available for this row now.")
     if action == "approve":
         return _approve(connection, run, record, actor=context["user"]["id"])
+    if action == "settle":
+        return _settle(connection, run, record, detail, actor=context["user"]["id"])
     if action == "nothing":
         work.update_record(connection, record, status="deferred")
         return {"status": "deferred"}
@@ -717,6 +800,32 @@ def decide(connection, run, record, action, detail, context):
     if item["state"] in ("done", "failed"):
         work.requeue_item(connection, run["tenant_id"], item["id"])
     return {"status": "pending"}
+
+
+def _settle(connection, run, record, detail, *, actor):
+    """A person's choice of the bills a held row settles: approved with them, or offered again when they changed."""
+    proposal = record["proposal"]
+    choices = proposal["settlement"]["choices"]
+    index = (detail or {}).get("choice")
+    if type(index) is not int or not 0 <= index < len(choices):
+        raise ServiceError("invalid", "Choose one of the offered settlements.")
+    resolved, terms = proposal["resolved"], _terms(record, proposal["resolved"])
+    company = connection.execute("SELECT * FROM companies WHERE id=%s", (record["company_id"],)).fetchone()
+    company = {**company, "version": run["pins"][str(company["id"])]}
+    settlement.lock(connection, run)
+    bills = settlement.open_bills(connection, run, company, resolved["data"]["counter_ledger"], record=record)
+    try:
+        settlement.check(bills, choices[index]["bills"], amount_cents=terms["amount_cents"], payment=terms["payment"])
+    except ValueError:
+        # Another row settled some of these bills since they were offered: offer what is open now.
+        work.update_record(connection, record, proposal={**proposal, "settlement": {
+            "choices": settlement.offers(bills, **terms)}}, review_reasons=[
+            "Another entry of this run settled some of these invoices since they were offered. Choose again."])
+        return {"status": "held"}
+    work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=[], proposal={
+        **proposal, "resolved": {**resolved, "bills": choices[index]["bills"]},
+        "settlement": {**proposal["settlement"], "chosen": index}})
+    return _approve(connection, run, record, actor=actor)
 
 
 def approve_ready(connection, run, actor):

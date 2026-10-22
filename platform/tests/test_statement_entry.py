@@ -16,6 +16,7 @@ from fake_agents import FakeAgents, Script
 
 from minkops_platform import lanes, work
 from minkops_platform.accounts import statement_entry, sync
+from minkops_platform.errors import ServiceError
 from minkops_platform.runtime import openai_hosted
 from minkops_platform.workflows import load_definition
 
@@ -47,6 +48,15 @@ def ledger(guid, name, parent, **extra):
     return {"type": "LEDGER", "data": {"@_NAME": name, "GUID": guid, "PARENT": parent, "ALTERID": "1", **extra}}
 
 
+def purchase(guid, stamp, number, rupees):
+    """A purchase that opened a bill on Steel Mart, which keeps bill-by-bill balances."""
+    return {"GUID": guid, "MASTERID": guid[-1], "ALTERID": "1", "DATE": stamp, "VOUCHERTYPENAME": "Purchase",
+            "REFERENCE": number, "PARTYLEDGERNAME": "Steel Mart",
+            "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": "Steel Mart", "AMOUNT": rupees, "BILLALLOCATIONS.LIST": {
+                "NAME": number, "BILLTYPE": "New Ref", "AMOUNT": rupees}},
+                {"LEDGERNAME": "Steel Purchases", "AMOUNT": f"-{rupees}"}]}
+
+
 def vtype(guid, name):
     return {"type": "VOUCHERTYPE", "data": {"@_NAME": name, "@_RESERVEDNAME": name, "GUID": guid, "PARENT": name,
                                             "ALTERID": "1", "ISACTIVE": "Yes"}}
@@ -72,8 +82,10 @@ def desk():
             ledger("g-icici", "ICICI Current A/c", "Bank Accounts", BANKDETAILS="000405001234"),
             ledger("g-hdfc", "HDFC Current A/c", "Bank Accounts", BANKDETAILS="50200012345678"),
             ledger("g-acme", "Acme Steel", "Sundry Creditors"),
+            ledger("g-steel", "Steel Mart", "Sundry Creditors", ISBILLWISEON="Yes"),
             ledger("g-charges", "Bank Charges", "Indirect Expenses"),
-            vtype("g-payment", "Payment"), vtype("g-receipt", "Receipt"), vtype("g-contra", "Contra")])
+            vtype("g-payment", "Payment"), vtype("g-receipt", "Receipt"), vtype("g-contra", "Contra")],
+            [purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00")])
         flow = {**factory.workflow(db, tenant, key="statement-entry"), "config_values": {"review_mode": "all_outputs"}}
         db.commit()
         yield {"db": db, "tenant": tenant, "operator": operator, "client": client, "device": device,
@@ -269,10 +281,13 @@ def readback(plan, guid="tally-1"):
     return {"guid": guid, "master_id": "71", "date": plan["header"]["date"].replace("-", ""),
             "voucher_type": plan["voucher_type"]["NAME"], "family": plan["family"],
             "reference": plan["header"]["reference"], "number": "", "narration": plan["header"]["narration"],
-            "party_ledger": "", "tag": plan["remote_id"], "fingerprint": f"fp-{guid}", "allocations": [], "bills": [],
+            "party_ledger": "", "tag": plan["remote_id"], "fingerprint": f"fp-{guid}", "allocations": [],
             "lines": [{"ledger": line["ledger"],
                        "amount_cents": line["amount_cents"] * (1 if line["side"] == "credit" else -1)}
-                      for line in plan["lines"]]}
+                      for line in plan["lines"]],
+            "bills": [{"ledger": line["ledger"], "name": bill.get("name"), "type": bill["type"],
+                       "amount_cents": bill["amount_cents"] * (1 if line["side"] == "credit" else -1)}
+                      for line in plan["lines"] for bill in line.get("bills") or []]}
 
 
 def companion(desk, outcome="saved"):
@@ -292,13 +307,13 @@ def companion(desk, outcome="saved"):
     return plan
 
 
-def decide(desk, record, action):
+def decide(desk, record, action, detail=None):
     from minkops_platform.accounts.statement_entry import HANDLER
     db = desk["db"]
     run = work.get_run(db, desk["tenant"]["id"], record["run_id"])
     receipt = work.decide(db, tenant_id=desk["tenant"]["id"], record_id=record["id"], version=record["version"],
-                          actor_id=desk["operator"]["id"], action=action,
-                          apply=lambda current: HANDLER.decide(db, run, current, action, {},
+                          actor_id=desk["operator"]["id"], action=action, detail=detail,
+                          apply=lambda current: HANDLER.decide(db, run, current, action, detail or {},
                                                                {"user": desk["operator"]}))
     db.commit()
     return receipt
@@ -528,6 +543,102 @@ def test_a_returned_payment_is_found_in_the_run_and_in_tally(desk):
                                   "reference": "UTR999888", "narration": "NEFT to Acme Steel UTR999888",
                                   "entries": [{"ledger": "Acme Steel", "debit": "2500.00"},
                                               {"ledger": "ICICI Current A/c", "credit": "2500.00"}]}]
+
+
+STEEL = b"""Account Number,000405001234
+Statement period,01/09/2026 to 30/09/2026
+Date,Narration,Ref,Withdrawal,Deposit,Balance
+15/09/2026,NEFT STEEL MART SM/102 PART,UTR201,2000.00,,98000.00
+16/09/2026,NEFT STEEL MART SM/102,UTR202,3000.00,,95000.00
+17/09/2026,NEFT STEEL MART,UTR203,1180.00,,93820.00
+18/09/2026,NEFT STEEL MART,UTR204,500.00,,93320.00
+"""
+
+
+def to_steel_mart(row, company, **extra):
+    return {"ref": row["ref"], "company_guid": company, "bank_ledger_guid": "g-icici", "counter_ledger_guid": "g-steel",
+            "voucher_type_guid": "g-payment", "payee": "STEEL MART", "evidence": "NEFT to Steel Mart.", **extra}
+
+
+def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_twice(desk):
+    company = desk["company"]["guid"]
+
+    def settle(answers, session):
+        rows = rows_of(session)
+        # The last row asks for SM/101, which the row before it settles in full.
+        return [("open_bills", {"company": company, "ledgers": ["g-steel", "Acme Steel"]}),
+                ("propose", {"rows": [to_steel_mart(row, company) for row in rows[:3]] + [to_steel_mart(
+                    rows[3], company, bills=[{"type": "Agst Ref", "name": "SM/101", "amount": 500}])]}),
+                ("open_bills", {"company": company, "ledgers": ["g-steel"]})]
+
+    def corrected(answers, session):
+        return [("propose", {"rows": [to_steel_mart(rows_of(session)[3], company)]})]
+
+    fake = FakeAgents(script_for=lambda m, content: Script(settle, corrected) if is_chunk(content) else Script(layouts))
+    run = launch(desk, {"icici-steel.csv": STEEL})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    chunk = next(s for s in fake.created if is_chunk(s.content))
+    before, after = [json.loads(a["text"]) for a in chunk.answers if a["name"] == "open_bills"]
+    assert before["ledgers"] == [{"ledger": "Acme Steel", "bill_by_bill": False}, {
+        "ledger": "Steel Mart", "bill_by_bill": True, "bills": [
+            {"name": "SM/101", "date": "2026-08-01", "open": "1180.00", "balance": "credit"},
+            {"name": "SM/102", "date": "2026-08-15", "open": "5000.00", "balance": "credit"}]}]
+    # What this run's rows settle is no longer open to the next.
+    assert after["ledgers"] == [{"ledger": "Steel Mart", "bill_by_bill": True, "bills": []}]
+    proposed = [json.loads(a["text"]) for a in chunk.answers if a["name"] == "propose"]
+    assert proposed[0]["rejected"][0]["reason"] == ("SM/101 is not an open bill this payment can settle; open_bills "
+                                                    "lists the bills that are.")
+    rows = records(desk, run)
+    # The bill a narration names, the only bill of the amount, and on account once nothing is left open.
+    assert [(r["status"], r["proposal"]["resolved"]["bills"]) for r in rows] == [
+        ("proposed", [{"type": "Agst Ref", "name": "SM/102", "amount_cents": 200000}]),
+        ("proposed", [{"type": "Agst Ref", "name": "SM/102", "amount_cents": 300000}]),
+        ("proposed", [{"type": "Agst Ref", "name": "SM/101", "amount_cents": 118000}]),
+        ("proposed", [{"type": "On Account", "amount_cents": 50000}])]
+    decide(desk, rows[0], "approve")
+    plan = companion(desk)
+    assert plan["lines"][1] == {"ledger": "Steel Mart", "side": "debit", "amount_cents": 200000, "allocation": None,
+                                "bills": [{"type": "Agst Ref", "name": "SM/102", "amount_cents": 200000}]}
+    saved = work.get_record(desk["db"], desk["tenant"]["id"], rows[0]["id"])
+    assert (saved["status"], saved["current"]["bills"]) == (
+        "saved", [{"ledger": "Steel Mart", "name": "SM/102", "type": "Agst Ref", "amount_cents": -200000}])
+
+
+def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk):
+    company = desk["company"]["guid"]
+    statement = STEEL.split(b"\n15/09")[0] + (b"\n15/09/2026,NEFT STEEL MART,UTR301,1000.00,,99000.00\n"
+                                              b"16/09/2026,NEFT STEEL MART SM/101,UTR302,1180.00,,97820.00\n")
+    fake = FakeAgents(script_for=lambda m, content: Script(lambda answers, session: [("propose", {"rows": [
+        to_steel_mart(row, company) for row in rows_of(session)]})]) if is_chunk(content) else Script(layouts))
+    run = launch(desk, {"icici-steel.csv": statement})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    part, named = records(desk, run)
+    # Part of a bill the narration does not name is a person's choice; the row naming SM/101 settles it in full.
+    assert (part["status"], part["hold_codes"], part["review_reasons"]) == ("held", ["bill_unresolved"], [
+        "No set of open bills adds up to this amount, and the narration names none of them."])
+    assert named["proposal"]["resolved"]["bills"] == [{"type": "Agst Ref", "name": "SM/101", "amount_cents": 118000}]
+    run = work.get_run(desk["db"], desk["tenant"]["id"], run["id"])
+    assert [(a["label"], a.get("detail")) for a in statement_entry.HANDLER.summarize(run, part)["actions"]] == [
+        ("Settle 1000.00 of SM/101 (1180.00 open)", {"choice": 0}), ("On account, settling no bill", {"choice": 1}),
+        ("Do nothing", None), ("Recheck", None)]
+    # SM/101 was settled after the choice was offered: the row is offered what is open now instead.
+    assert decide(desk, part, "settle", {"choice": 0})["status"] == "held"
+    part = work.get_record(desk["db"], desk["tenant"]["id"], part["id"])
+    assert part["review_reasons"] == [
+        "Another entry of this run settled some of these invoices since they were offered. Choose again."]
+    assert [c["label"] for c in part["proposal"]["settlement"]["choices"]] == [
+        "Settle 1000.00 of SM/102 (5000.00 open)", "On account, settling no bill"]
+    receipt = decide(desk, part, "settle", {"choice": 0})
+    assert (receipt["status"], decide(desk, part, "settle", {"choice": 0})["replayed"]) == ("writing", True)
+    with pytest.raises(ServiceError, match="already decided"):
+        decide(desk, part, "settle", {"choice": 1})
+    plan = companion(desk)
+    assert plan["lines"][1]["bills"] == [{"type": "Agst Ref", "name": "SM/102", "amount_cents": 100000}]
+    assert work.get_record(desk["db"], desk["tenant"]["id"], part["id"])["status"] == "saved"
 
 
 def test_standing_approval_writes_clean_rows_and_leaves_exceptions_for_review(desk):

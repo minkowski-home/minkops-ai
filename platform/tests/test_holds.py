@@ -38,6 +38,8 @@ STATEMENT_ONLY = {
     "statement_transfer_unpaired": ("nothing", "retry"), "statement_interpretation": ("guess", "nothing", "retry"),
     "ledger_unresolved": ("guess", "nothing", "retry"), "branch_unresolved": ("guess", "nothing", "retry"),
     "statement_save_waiting": ("retry_save", "nothing"), "statement_save_held": ("retry_save", "nothing"),
+    # Settled by a person's choice among the allocations the open bills leave.
+    "bill_unresolved": ("settle", "nothing", "retry"),
 }
 
 
@@ -54,7 +56,7 @@ class HoldMatrixTest(unittest.TestCase):
         for hold in holds.HOLDS.values():
             self.assertTrue(set(hold.actions) <= set(holds.ACTIONS), hold.code)
             self.assertIn("nothing", hold.actions, "Do nothing is always available")
-        self.assertEqual(set(holds.ACTIONS), {"nothing", "retry", "guess", "supplier", "retry_save"})
+        self.assertEqual(set(holds.ACTIONS), {"nothing", "retry", "guess", "supplier", "retry_save", "settle"})
 
     def test_an_unknown_code_fails_closed_to_actions_that_cannot_write(self):
         self.assertEqual(holds.hold("never_heard_of_it").actions, ("nothing", "retry"))

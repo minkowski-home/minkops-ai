@@ -17,6 +17,7 @@ ACTIONS = {
     "guess": "Best guess write",
     "supplier": "Create this ledger",
     "retry_save": "Retry save",
+    "settle": "Settle",
 }
 NON_WRITING = ("nothing", "retry")
 BILL, STATEMENT = "bill", "statement"
@@ -153,6 +154,11 @@ _CATALOG = [
          "The other side of this transaction could not be matched to exactly one Tally ledger."),
         ("branch_unresolved", EXCEPTION, "Routing label unclear",
          "The client's routing label on this row could not be interpreted."),
+    ]),
+    # A person chooses which open bills a payment settles, from the allocations the books leave open.
+    *_holds((STATEMENT,), ("settle", "nothing", "retry"), [
+        ("bill_unresolved", EXCEPTION, "Settlement unclear",
+         "Which of the party's open invoices this entry settles needs a person's choice."),
     ]),
     *_holds((STATEMENT,), _DESTINATION, [
         ("statement_save_waiting", LIFECYCLE, "Save waiting", "Another approved run is reconciling this transaction."),

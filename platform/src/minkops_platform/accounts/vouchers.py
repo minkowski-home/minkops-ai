@@ -81,12 +81,13 @@ def _signed(line):
 
 
 def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart=False, legs=None):
-    """A native v5 Payment, Receipt or Contra from a routed statement row.
+    """A native Payment, Receipt or Contra from a routed statement row.
 
     `lines` (several counter lines) split the bank amount exactly; a Contra moves
-    it to another own bank or cash ledger. A paired Contra (`legs`) is written
-    once for both statement rows; a lone leg first looks for the transfer its
-    other leg may already have entered (`counterpart`).
+    it to another own bank or cash ledger. The counter line carries the bills it
+    settles (`bills`, protocol 6). A paired Contra (`legs`) is written once for
+    both statement rows; a lone leg first looks for the transfer its other leg
+    may already have entered (`counterpart`).
     """
     data, amount = resolved["data"], resolved["data"]["amount_cents"]
     bank_side, counter_side = ("credit", "debit") if amount < 0 else ("debit", "credit")
@@ -95,6 +96,8 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
         return {k: a[k] for k in ("category", "category_guid", "centre", "centre_guid")} if a else None
     counters = [_line(ln["ledger"], counter_side, ln["amount_cents"], allocation(ln["allocation"])) for ln in resolved["lines"]] \
         if resolved.get("lines") else [_line(data["counter_ledger"], counter_side, abs(amount), allocation(resolved.get("allocation")))]
+    if resolved.get("bills"):
+        counters[0] = {**counters[0], "bills": resolved["bills"]}
     ledgers = {**resolved["references"]["ledgers"], **{ln["ledger"]: ln["identity"] for ln in resolved.get("lines") or []}}
     window = {"from": data["date"], "to": data["date"]}
     if counterpart:

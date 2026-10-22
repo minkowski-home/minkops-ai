@@ -141,13 +141,44 @@ def test_only_one_version_builds_at_a_time(company):
         mirror.begin(db, row, kind="delta", reason="test", markers={}, coverage={"from": "2026-04-01", "to": "2027-03-31"})
 
 
+def settling(guid, date, bill, amount, *, kind="Agst Ref", alter=1, **flags):
+    """A payment to the supplier that settles `amount` of one bill (or pays an Advance ahead of one)."""
+    return {"GUID": guid, "MASTERID": "8", "ALTERID": str(alter), "DATE": date, "VOUCHERTYPENAME": "Payment",
+            "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": "Supplier", "AMOUNT": f"-{amount}", "BILLALLOCATIONS.LIST": {
+                "NAME": bill, "BILLTYPE": kind, "AMOUNT": f"-{amount}"}}, {"LEDGERNAME": "Bank", "AMOUNT": amount}],
+            **flags}
+
+
 @DB
-def test_bill_references_follow_their_voucher(company):
+def test_open_bills_balance_each_bill_from_its_origin_at_the_pinned_version(company):
+    import factory
     db, row = company
-    build(db, row, kind="full", vouchers=[voucher("v-1", "20260901")])
-    build(db, row, vouchers=[voucher("v-1", "20260901", alter=2, amount="-2360.00")])
-    refs = lambda version: [(r["name"], r["amount_cents"]) for r in mirror.bill_refs(db, row["id"], version, ["supplier"])]  # noqa: E731
-    assert (refs(1), refs(2)) == ([("INV-1", 118000)], [("INV-1", 236000)])
+    supplier = ledger("g-1", "Supplier", ISBILLWISEON="Yes", **{"BILLALLOCATIONS.LIST": [
+        {"NAME": "OB-1", "BILLDATE": "20260331", "OPENINGBALANCE": "5000.00", "ISADVANCE": "No"},
+        {"NAME": "OB-2", "BILLDATE": "20260330", "OPENINGBALANCE": "700.00"}]})
+    payments = [settling("p-1", "20260905", "INV-1", "180.00"),
+                settling("p-2", "20260906", "INV-1", "1000.00", ISCANCELLED="Yes"),
+                settling("p-3", "20260907", "INV-1", "1000.00", ISOPTIONAL="Yes"),
+                settling("p-4", "20260908", "OLD-9", "300.00"),
+                settling("p-5", "20260909", "OB-1", "5000.00"),
+                settling("p-6", "20260910", "ADV-1", "250.00", kind="Advance")]
+    build(db, row, kind="full", masters=[supplier], vouchers=[voucher("v-1", "20260901"), *payments])
+    bills = lambda version, company=row: [  # noqa: E731
+        (b["name"], b["date"].isoformat(), b["balance_cents"], b["advance"])
+        for b in mirror.open_bills(db, company["id"], version, ["supplier"])]
+    # Credit balances are owed to the supplier, debit ones paid ahead. Cancelled and optional payments settle
+    # nothing; a settled bill and one opened before the mirror's window (OLD-9) are not open bills.
+    assert bills(1) == [("OB-2", "2026-03-30", 70000, False), ("INV-1", "2026-09-01", 100000, False),
+                        ("ADV-1", "2026-09-10", -25000, True)]
+    # Paying the rest of INV-1 settles it at the next version; a run pinned to the first still sees it open.
+    build(db, row, vouchers=[settling("p-1", "20260905", "INV-1", "1180.00", alter=2)])
+    assert [name for name, *_ in bills(2)] == ["OB-2", "ADV-1"] and bills(1)[1][0] == "INV-1"
+    # When the books begin before the mirror's window, opening bills are stale: what settled them is not mirrored.
+    tenant = factory.tenant(db)
+    older = factory.company(db, tenant, factory.device(db, tenant, factory.user(db, tenant)), factory.client(db, tenant),
+                            books_from="2025-04-01")
+    build(db, older, kind="full", masters=[supplier], vouchers=[voucher("v-1", "20260901")])
+    assert bills(1, older) == [("INV-1", "2026-09-01", 118000, False)]
 
 
 @DB

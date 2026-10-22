@@ -53,7 +53,8 @@ matters and cannot be established, hold the row with `branch_unresolved`.
 - **Several ledgers.** One bank line booked to several ledgers (bank charges
   plus their GST, or TDS) uses `lines`: each line names its ledger and exact
   amount, the lines add up to the bank amount, and the counter ledger comes
-  first.
+  first. A ledger that keeps bill-by-bill balances can only be that counter
+  ledger.
 - **Transfers.** A transfer between own accounts has family `contra`, and its
   counter ledger is the other own bank or cash ledger. When the other leg is
   among this run's rows (`find_transfer` shows it), set `pair` to that row's
@@ -63,6 +64,27 @@ matters and cannot be established, hold the row with `branch_unresolved`.
 - **Returns.** A returned payment, such as a NEFT return, carries the original
   payment's UTR. `pair_return` finds that payment, in this run or in Tally, and
   how it was booked.
+
+## Bill-by-bill parties
+
+`find_ledger` marks a ledger that keeps its balances bill by bill
+(`bill_by_bill`). A row to such a counter ledger settles that party's bills:
+`open_bills` lists them oldest first, less what this run's other rows already
+settle. A credit balance is owed to the party and a payment settles it; a debit
+balance is owed by the party, and a receipt settles it.
+
+- When the narration or reference points to bills, even loosely ("INV 101 &
+  102"), give `bills`: an `Agst Ref` for each bill the row settles, in full or
+  in part, and `On Account` for any amount no bill takes. They add up to the
+  counter line's amount.
+- An `Advance` names a new bill, such as the payment's reference: use it for
+  money paid ahead of a bill the narration says is coming.
+- Otherwise leave `bills` out. Minkops settles the bills the narration names,
+  or the only open bills whose balances add up to the amount, and puts the row
+  on account when nothing is open. When the books do not settle it, a person
+  chooses in one click; that is not a failure of yours.
+
+A bank row never opens a bill (New Ref): purchases and sales do.
 
 ## Holding a row
 
@@ -75,8 +97,8 @@ evidence plainly. The codes are:
 - `classification_uncertain`;
 - `branch_unresolved`;
 - `unsupported_structure`, for anything the entry cannot carry, such as
-  inventory, bill-wise allocations or split cost allocations. Never flatten it
-  into an incorrect entry.
+  inventory, split cost allocations, or one row paying two bill-by-bill
+  parties. Never flatten it into an incorrect entry.
 
 An uncertain row never blocks its siblings. Never invent a ledger or create a
 master.

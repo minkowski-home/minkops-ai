@@ -367,11 +367,52 @@ def voucher_counts(connection, company_id, version, date_from, date_to):
     return {row["date"].isoformat(): row["n"] for row in rows}
 
 
-def bill_refs(connection, company_id, version, ledger_keys):
-    return connection.execute(
-        f"""SELECT * FROM mirror_bill_refs WHERE company_id=%(c)s AND {_VISIBLE} AND ledger_key = ANY(%(keys)s)
-            ORDER BY ledger_key, name, date""",
-        {"c": company_id, "v": version, "keys": list(ledger_keys)}).fetchall()
+def open_bills(connection, company_id, version, ledgers):
+    """The bills of these ledgers (by name) with a balance at a pinned version, oldest first.
+
+    Each is {ledger, name, date, balance_cents, advance}, the balance signed as
+    Tally signs amounts, credit positive. References in cancelled or optional
+    vouchers settle nothing. A bill is balanced only from its origin: a New Ref
+    or Advance in a mirrored voucher, or a ledger's opening bill when the books
+    begin inside the mirror's window. Before that, what settled an opening bill
+    is not mirrored, nor is the origin of a bill a mirrored reference settles,
+    so such bills are left out rather than balanced wrongly.
+    """
+    keys = [normalized(ledger) for ledger in ledgers]
+    window = connection.execute(
+        """SELECT v.coverage->>'from' AS start, c.books_from FROM mirror_versions v
+           JOIN companies c ON c.id=v.company_id WHERE v.company_id=%s AND v.version=%s""",
+        (company_id, version)).fetchone()
+    bills = {}
+    if window and window["books_from"].isoformat() >= window["start"]:
+        for row in connection.execute(
+                f"""SELECT name, name_key, data FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE}
+                    AND type='LEDGER' AND name_key = ANY(%(keys)s)""", {"c": company_id, "v": version, "keys": keys}):
+            for bill in (item for item in _list(row["data"].get("BILLALLOCATIONS.LIST")) if isinstance(item, dict)):
+                name, stamp, cents = text(bill.get("NAME")), text(bill.get("BILLDATE")), _cents(bill.get("OPENINGBALANCE"))
+                if name and cents and re.fullmatch(r"\d{8}", stamp):
+                    bills[(row["name_key"], name)] = {
+                        "ledger": row["name"], "name": name, "date": date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:])),
+                        "balance_cents": cents, "advance": text(bill.get("ISADVANCE")).casefold() == "yes",
+                        "opened": True}
+    for ref in connection.execute(
+            """SELECT r.ledger_key, r.name, min(r.ledger) AS ledger, sum(r.amount_cents)::bigint AS cents,
+                      min(r.date) AS used,
+                      min(r.date) FILTER (WHERE r.bill_type IN ('New Ref','Advance')) AS opened,
+                      bool_or(r.bill_type = 'Advance') AS advance
+               FROM mirror_bill_refs r JOIN mirror_vouchers v
+                   ON v.company_id=r.company_id AND v.guid=r.voucher_guid AND v.synced_in=r.synced_in
+               WHERE r.company_id=%(c)s AND r.ledger_key = ANY(%(keys)s) AND NOT v.cancelled AND NOT v.optional
+                   AND r.synced_in <= %(v)s AND (r.superseded_in IS NULL OR r.superseded_in > %(v)s)
+               GROUP BY r.ledger_key, r.name""", {"c": company_id, "v": version, "keys": keys}):
+        bill = bills.setdefault((ref["ledger_key"], ref["name"]), {
+            "ledger": ref["ledger"], "name": ref["name"], "date": ref["opened"] or ref["used"], "balance_cents": 0,
+            "advance": False, "opened": ref["opened"] is not None})
+        bill["balance_cents"] += ref["cents"]
+        bill["advance"] = bill["advance"] or ref["advance"]
+        bill["opened"] = bill["opened"] or ref["opened"] is not None
+    return sorted(({key: value for key, value in bill.items() if key != "opened"} for bill in bills.values()
+                   if bill["opened"] and bill["balance_cents"]), key=lambda bill: (bill["date"], bill["name"]))
 
 
 def search_masters(connection, company_id, version, types, subject, *, limit=8):

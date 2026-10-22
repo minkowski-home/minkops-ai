@@ -17,7 +17,7 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.lanes import Wait
 from minkops_platform.runtime.tools import Tool, ToolError
 
-from . import memory, mirror, sync
+from . import memory, mirror, settlement, sync
 from .voucher_types import base_types
 from .vouchers import HoldReason
 
@@ -82,6 +82,8 @@ SUBJECTS = {"type": "array", "minItems": 1, "maxItems": 20,
             "items": {"type": "string", "minLength": 1, "maxLength": 200}}
 COMPANY = {"type": "string", "minLength": 1, "maxLength": 100, "description": "The company's GUID."}
 FAMILIES = ("payment", "receipt", "contra", "purchase", "journal", "debit note", "credit note", "sales")
+# The oldest open bills listed per ledger; the rest are counted.
+OPEN_BILLS = 50
 
 
 class Desk:
@@ -101,7 +103,7 @@ class Desk:
         for parts in self.parts.values():
             parts.sort(key=lambda part: part["books_from"])
         self.companies = {guid: parts[-1] for guid, parts in self.parts.items()}
-        self._groups, self._types, self._views, self._rules = {}, {}, {}, None
+        self._groups, self._types, self._views, self._billwise, self._rules = {}, {}, {}, {}, None
 
     def company(self, guid, on=None):
         """The company with this GUID; for a year split, the part whose books cover `on` (ISO date)."""
@@ -148,6 +150,15 @@ class Desk:
             self._views[company["id"]] = {**view, "port": company["tally_port"],
                                           "books_from": company["books_from"].isoformat()}
         return self._views[company["id"]]
+
+    def billwise(self, connection, company):
+        """The names of the company's ledgers that keep bill-by-bill balances."""
+        if company["id"] not in self._billwise:
+            self._billwise[company["id"]] = {
+                mirror.text(r["data"].get("@_NAME")) or mirror.text(r["data"].get("NAME"))
+                for r in self.view(connection, company)["masters"]["records"]
+                if r["type"] == "LEDGER" and mirror.text(r["data"].get("ISBILLWISEON")).casefold() == "yes"}
+        return self._billwise[company["id"]]
 
     def path(self, connection, company, parent):
         """A master's group chain, nearest first: "Sundry Creditors < Current Liabilities"."""
@@ -255,6 +266,27 @@ def party_history(call, arguments):
     return {"vouchers": [voucher(row) for row in rows], **({"unknown_ledgers": unknown} if unknown else {})}
 
 
+def open_bills(call, arguments):
+    """Each ledger's open bills, as party_history names ledgers; one that keeps no bills says so."""
+    desk = call.state
+    company = desk.company(arguments["company"])
+    found = mirror.named(call.connection, company["id"], company["version"], "LEDGER", arguments["ledgers"])
+    known = {row["guid"] for row in found} | {row["name_key"] for row in found}
+    unknown = [s for s in arguments["ledgers"] if s not in known and mirror.normalized(s) not in known]
+    results = []
+    for row in found:
+        if row["name"] not in desk.billwise(call.connection, company):
+            results.append({"ledger": row["name"], "bill_by_bill": False})
+            continue
+        bills = settlement.open_bills(call.connection, desk.run, company, row["name"])
+        results.append({"ledger": row["name"], "bill_by_bill": True, "bills": [{key: value for key, value in {
+            "name": bill["name"], "date": bill["date"].isoformat(), "open": f"{abs(bill['balance_cents']) / 100:.2f}",
+            "balance": "credit" if bill["balance_cents"] > 0 else "debit", "advance": bill["advance"] or None,
+        }.items() if value is not None} for bill in bills[:OPEN_BILLS]],
+            **({"more": len(bills) - OPEN_BILLS} if len(bills) > OPEN_BILLS else {})})
+    return {"ledgers": results, **({"unknown_ledgers": unknown} if unknown else {})}
+
+
 def remembered(call, arguments):
     desk = call.state
     company = desk.company(arguments["company"])
@@ -318,6 +350,10 @@ TOOLS = {tool.name: tool for tool in (
          "GUIDs as find_ledger returns them, or exact ledger names.",
          schema({"company": COMPANY, "ledgers": SUBJECTS, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
                 ["company", "ledgers"]), party_history),
+    Tool("open_bills", "The open bills of ledgers that keep bill-by-bill balances, oldest first, less what this "
+         "run's other rows already settle. A credit balance is owed to the party, and a payment settles it; a debit "
+         "balance is owed by the party or was paid ahead, and a receipt settles it. Give ledger GUIDs or exact names.",
+         schema({"company": COMPANY, "ledgers": {**SUBJECTS, "maxItems": 5}}, ["company", "ledgers"]), open_bills),
     Tool("cost_centres", "Cost centres of a company matching each subject, with their categories.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["company", "subjects"]), cost_centres),
     Tool("memory", "What Minkops learnt about these subjects in a company, from saves a person approved: how a "

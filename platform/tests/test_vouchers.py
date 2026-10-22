@@ -1,4 +1,4 @@
-"""Plan protocol 5: one voucher contract whose receipts verify exactly."""
+"""Plan protocol 6: one voucher contract whose receipts verify exactly."""
 
 import unittest
 from datetime import date
@@ -206,6 +206,22 @@ class ReceiptTest(unittest.TestCase):
                         observed(self.statement, voucher_type="Receipt"), observed(self.statement, date="20261002")):
             with self.subTest(current=current), self.assertRaises(ValueError):
                 vouchers.observed_statement(self.statement, current)
+
+    def test_a_payment_to_a_bill_by_bill_party_must_read_back_the_bills_it_settles(self):
+        settled = vouchers.statement_voucher({**RESOLVED, "allocation": None, "bills": [
+            {"type": "Agst Ref", "name": "SM/101", "amount_cents": 1000}, {"type": "On Account", "amount_cents": 770}]},
+            remote_id=ID, identity="row")
+        self.assertEqual(settled["lines"][1]["bills"], [{"type": "Agst Ref", "name": "SM/101", "amount_cents": 1000},
+                                                        {"type": "On Account", "amount_cents": 770}])
+        # The counter line is a debit, so Tally reports its references negative.
+        view = vouchers.observed_statement(settled, observed(settled))
+        self.assertEqual(view["bills"], [
+            {"ledger": "Bank Charges", "name": "SM/101", "type": "Agst Ref", "amount_cents": -1000},
+            {"ledger": "Bank Charges", "name": None, "type": "On Account", "amount_cents": -770}])
+        for bills in ([], [{"ledger": "Bank Charges", "name": "SM/102", "type": "Agst Ref", "amount_cents": -1000},
+                           {"ledger": "Bank Charges", "name": None, "type": "On Account", "amount_cents": -770}]):
+            with self.subTest(bills=bills), self.assertRaises(ValueError):
+                vouchers.observed_statement(settled, observed(settled, bills=bills))
 
 
 if __name__ == "__main__":
