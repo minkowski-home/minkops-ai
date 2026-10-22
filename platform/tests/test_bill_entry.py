@@ -265,7 +265,7 @@ def companion(desk, respond=saved):
     """The PC claims its next native write, fetches the stored plan, and reports `respond(operation, plan)`."""
     db = desk["db"]
     device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
-    job = desktop.claim(db, device, desktop.companion_report("0.10.0", "Rehearsal PC", "console"))
+    job = desktop.claim(db, device, desktop.companion_report("0.11.0", "Rehearsal PC", "console"))
     if job is None or job["operation"] not in ("tally.write", "tally.supplier"):
         db.rollback()
         return None
@@ -407,7 +407,7 @@ def test_an_approved_bill_is_saved_once_and_tally_holding_another_version_is_nev
     # A companion that predates protocol 6 is refused the plan before it touches Tally.
     db = desk["db"]
     device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
-    job = desktop.claim(db, device, desktop.companion_report("0.10.0", "Rehearsal PC", "console"))
+    job = desktop.claim(db, device, desktop.companion_report("0.11.0", "Rehearsal PC", "console"))
     with pytest.raises(ServiceError, match="Update Minkops on this PC"):
         desktop.plan(db, device, job["id"], job["claim_token"], 5)
     db.rollback()

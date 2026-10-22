@@ -7,8 +7,7 @@ one workspace/account is connected per running installation.
 
 This revision builds companion 0.11.0 (plan protocol 6; see its contracts below);
 the last release recorded in `windows-release.json` is 0.9.1. The server refuses
-Tally work from companions older than 0.10.0, and older than 0.11.0 on a remote
-session such as a shared server. The companion works only with the companies open
+Tally work from companions older than 0.11.0. The companion works only with the companies open
 in the user's own Tally, reports typed session states, sends diagnostics and
 updates itself. For Tally on a hosted server, see [Hosted Tally](hosted-tally.md). Its Tally sync uses HTTP/XML exports and needs no
 ODBC driver. Windows 10 device testing was deferred by the owner; compatibility
@@ -135,9 +134,9 @@ Bill data, request XML, file contents and credentials never leave the PC.
 
 Every poll reports the companion version, hostname and whether the session is a
 remote one (any session but the console). The console shows them with the PC's
-Tally port, and the server refuses Tally work from companions older than 0.10.0,
-or 0.11.0 on a remote session, with "Update Minkops on *PC*". A PC that has not
-polled yet may queue work.
+Tally port, and the server refuses Tally work from companions older than 0.11.0
+with "Update Minkops on *PC*", and hands an older one none already queued. A PC
+that has not polled yet may queue work.
 
 `node scripts/verify_tally_session_live.mjs [port] [company] [guid]` prints the
 typed state on a Windows PC without changing Tally, for rehearsals.

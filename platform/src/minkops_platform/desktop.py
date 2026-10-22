@@ -45,11 +45,10 @@ def public_device(row):
     }
 
 
-# Every new native voucher is a protocol-6 plan, which companions execute from 0.10.0.
-MINIMUM_COMPANION = (0, 10, 0)
-# On a server several Windows users share, a companion must confirm that Tally on its port is its own
-# user's, not another firm's: companions do from 0.11.0.
-SHARED_SERVER_COMPANION = (0, 11, 0)
+# The companion Tally work needs, from 0.11.0. It executes protocol-6 plans; on a server several Windows users
+# share, it confirms that the Tally on its port is its own user's, not another firm's; and it reads back what a
+# bill states for Tally's GST returns, and Tally's own verdict on it.
+MINIMUM_COMPANION = (0, 11, 0)
 
 
 def companion_report(version, host, session):
@@ -71,13 +70,9 @@ def require_companion(device, *, minimum=MINIMUM_COMPANION):
 
     A PC that has never polled is allowed: work waits until it connects, and it
     reports its version then. One that polls without a version predates 0.7.0.
-    A PC in a remote session, as on a shared server, needs the companion that
-    confirms its Tally is its own user's.
     """
     if device["last_seen_at"] is None:
         return
-    if device.get("remote_session"):
-        minimum = max(minimum, SHARED_SERVER_COMPANION)
     version = device.get("companion_version")
     if version is None or tuple(int(part) for part in version.split(".")) < minimum:
         raise ServiceError(
@@ -380,7 +375,9 @@ def claim(connection, device, report=None):
         WHERE id=%s""",
         (report["companion_version"], report["hostname"], report["remote_session"], device["id"]),
     )
-    if companion_at_least(report, (0, 10, 0)):
+    # An older companion is handed no Tally work: it would write a save without the readback that verifies it.
+    current = companion_at_least(report, MINIMUM_COMPANION)
+    if current:
         from .accounts.sync import background
         from .accounts.writes import recover
         recover(connection, device)
@@ -388,10 +385,11 @@ def claim(connection, device, report=None):
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
            (state='executing' AND operation NOT IN ('tally.write','tally.supplier','tally.sync') AND lease_until<now()))
+           AND (%s OR operation NOT LIKE 'tally.%%')
            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id
                        AND t.control_state='active')
            ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1""",
-        (device["id"],),
+        (device["id"], current),
     ).fetchone()
     if not row:
         return None

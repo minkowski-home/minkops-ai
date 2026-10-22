@@ -37,7 +37,7 @@ class SyncApiTests(unittest.TestCase):
                                json={"name": "TEST-PC", "installation_id": str(uuid4())}).json()
         self.device_id = device["id"]
         self.pc = TestClient(app)
-        self.pc.headers.update({"Authorization": f"Bearer {device['credential']}", "X-Minkops-Companion-Version": "0.10.0"})
+        self.pc.headers.update({"Authorization": f"Bearer {device['credential']}", "X-Minkops-Companion-Version": "0.11.0"})
 
     def claim(self):
         self.assertEqual(self.web.post(f"{self.base}/desktop/devices/{self.device_id}/sync", headers=self.csrf).status_code, 202)

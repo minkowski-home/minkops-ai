@@ -216,7 +216,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=old, json={}).status_code, 401
         )
-        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.10.0"}
+        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.11.0"}
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()[
                 "id"
@@ -315,7 +315,7 @@ class DesktopTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         self.device = response.json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.10.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.11.0"}
         self.worker_base = "/api/desktop/worker"
         return self.device
 
@@ -514,20 +514,22 @@ class DesktopTests(unittest.TestCase):
         body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
         outdated = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
         self.assertEqual(outdated.status_code, 409, outdated.text)
-        self.assertIn("Update Minkops on Office PC to 0.10.0 or later", outdated.json()["detail"])
-        for version in ("0.6.10", "0.9.1"):  # Only protocol-6 companions receive Tally work.
+        self.assertIn("Update Minkops on Office PC to 0.11.0 or later", outdated.json()["detail"])
+        # Only a companion that confirms Tally is its user's own and reads back a bill's GST receives Tally work.
+        for version in ("0.6.10", "0.9.1", "0.10.0"):
             self.claim_as({"X-Minkops-Companion-Version": version})
             self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
-        self.claim_as({"X-Minkops-Companion-Version": "0.10.0"})
-        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
-        # On a shared server, only a companion that confirms Tally is the user's own receives Tally work.
-        self.claim_as({"X-Minkops-Companion-Version": "0.10.0", "X-Minkops-Session": "remote"})
-        body = {**body, "request_key": str(uuid.uuid4())}
-        shared = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
-        self.assertEqual(shared.status_code, 409, shared.text)
-        self.assertIn("Update Minkops on Office PC to 0.11.0 or later", shared.json()["detail"])
         self.claim_as({"X-Minkops-Companion-Version": "0.11.0", "X-Minkops-Session": "remote"})
         self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
+
+    def test_an_older_companion_is_handed_no_tally_work_already_queued(self):
+        """A save queued while the PC ran a current companion is never claimed by an older one it is replaced with."""
+        self.pair()
+        self.claim_as({"X-Minkops-Companion-Version": "0.11.0"})
+        body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
+        self.assertIsNone(self.claim_as({"X-Minkops-Companion-Version": "0.10.0"}).json())
+        self.assertEqual(self.claim_as({"X-Minkops-Companion-Version": "0.11.0"}).json()["operation"], "tally.probe")
 
     def bundle(self, **extra):
         return {

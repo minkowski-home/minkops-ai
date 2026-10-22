@@ -78,7 +78,7 @@ def request(connection, tenant, user, member, device_id, *, reason="requested"):
 
 def queue(connection, device, actor_id, *, reason):
     """The PC's queued or running sync, or a new one; callers have authorised the request."""
-    desktop.require_companion(device, minimum=(0, 10, 0))
+    desktop.require_companion(device)
     existing = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation='tally.sync' AND state IN ('queued','executing')
            ORDER BY created_at DESC LIMIT 1 FOR UPDATE""", (device["id"],)).fetchone()

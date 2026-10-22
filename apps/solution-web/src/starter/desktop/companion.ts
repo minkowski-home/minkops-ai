@@ -8,9 +8,7 @@ export interface Device {
 }
 
 /** Mirrors the server's gate for Tally work (desktop.require_companion). */
-export const MINIMUM_COMPANION = [0, 10, 0];
-/** On a shared server, the first companion that confirms Tally is this Windows user's own. */
-export const SHARED_SERVER_COMPANION = [0, 11, 0];
+export const MINIMUM_COMPANION = [0, 11, 0];
 function older(version: number[], minimum: number[]) {
   for (let i = 0; i < minimum.length; i++)
     if (version[i] !== minimum[i]) return version[i] < minimum[i];
@@ -18,7 +16,7 @@ function older(version: number[], minimum: number[]) {
 }
 export function companionNotice(device: Device) {
   if (!device.last_seen_at) return '';
-  const minimum = device.remote_session ? SHARED_SERVER_COMPANION : MINIMUM_COMPANION;
+  const minimum = MINIMUM_COMPANION;
   const version = device.companion_version?.split('.').map(Number);
   const outdated = !version || version.length !== 3 || version.some(Number.isNaN) || older(version, minimum);
   if (outdated) return `Update Minkops on ${device.name} to ${minimum.join('.')} or later before running Tally work.`;

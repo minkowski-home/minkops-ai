@@ -101,9 +101,9 @@ private directory for the new instance's credentials, such as
    uv run --all-packages python infra/deploy_hosting.py corporate --installer <installer>
    ```
 
-   Installed companions update themselves. The rebuilt server needs 0.10.0 on every
-   PC and 0.11.0 on a shared server. It neither reads nor writes a PC's Tally until
-   that PC updates, and Check Tally connection asks for the update.
+   Installed companions update themselves. The rebuilt server needs 0.11.0 on every
+   PC. It neither reads nor writes a PC's Tally until that PC updates, and Check
+   Tally connection asks for the update.
 
 ## 4. Fresh workspaces
 

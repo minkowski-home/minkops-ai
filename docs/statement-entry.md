@@ -5,7 +5,7 @@ saves reviewed rows as verified Payment, Receipt and Contra vouchers in that cli
 Tally companies. It runs on the run model (`platform/work.py`) and tool sessions
 (`runtime/openai_hosted.py`), through the handler in
 `platform/src/minkops_platform/accounts/statement_entry.py`. Writes need companion
-0.10.0 or later.
+0.11.0 or later.
 
 ## Launch
 

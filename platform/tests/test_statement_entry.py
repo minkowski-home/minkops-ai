@@ -308,7 +308,7 @@ def companion(desk, outcome="saved"):
     from minkops_platform import desktop
     db = desk["db"]
     device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
-    job = desktop.claim(db, device)
+    job = desktop.claim(db, device, desktop.companion_report("0.11.0", "Rehearsal PC", "console"))
     if job is None or job["operation"] != "tally.write":
         db.rollback()
         return None
