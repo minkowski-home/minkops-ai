@@ -26,6 +26,11 @@ accounting identities only. A negative amount is money out (Payment), a positive
 one money in (Receipt). A transfer between the client's own bank or cash
 accounts is a Contra.
 
+A row records money moving, never what the money bought: a bill's items, stock
+and taxes were booked with that bill. A payment to a supplier goes to the
+supplier's ledger, or where `practice` says, whatever invoice, order or stock
+code its narration cites.
+
 ## Finding the destination
 
 1. **Company and bank ledger.** The statement's account number identifies its
@@ -103,8 +108,8 @@ evidence plainly. The codes are:
 - `ledger_unresolved`;
 - `classification_uncertain`;
 - `branch_unresolved`;
-- `unsupported_structure`, for anything the entry cannot carry, such as
-  inventory, split cost allocations, or one row paying two bill-by-bill
+- `unsupported_structure`, for a row one Payment, Receipt or Contra cannot
+  carry, such as split cost allocations or one row paying two bill-by-bill
   parties. Never flatten it into an incorrect entry.
 
 An uncertain row never blocks its siblings. Never invent a ledger or create a
