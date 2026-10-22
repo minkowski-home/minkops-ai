@@ -82,8 +82,8 @@ SUBJECTS = {"type": "array", "minItems": 1, "maxItems": 20,
             "items": {"type": "string", "minLength": 1, "maxLength": 200}}
 COMPANY = {"type": "string", "minLength": 1, "maxLength": 100, "description": "The company's GUID."}
 FAMILIES = ("payment", "receipt", "contra", "purchase", "journal", "debit note", "credit note", "sales")
-# The oldest open bills listed per ledger; the rest are counted.
-OPEN_BILLS = 50
+# The oldest open bills listed per ledger, and the godowns listed per company; the rest are counted.
+OPEN_BILLS, GODOWNS = 50, 200
 
 
 class Desk:
@@ -201,11 +201,12 @@ def entries(data):
 
 
 def items(data):
-    """A voucher's first stock lines, when it was booked item-wise: item, billed quantity, amount and ledgers."""
+    """A voucher's first stock lines, when it was booked item-wise: item, billed quantity, amount, ledgers, godowns."""
     return [{key: value for key, value in {
-        "item": item, "quantity": quantity or None, "amount": None if cents is None else f"{abs(cents) / 100:.2f}",
-        "ledgers": ledgers or None}.items() if value is not None}
-        for item, quantity, cents, ledgers in mirror.stock_lines(data)[:5]]
+        "item": line["item"], "quantity": line["quantity"] or None,
+        "amount": None if line["cents"] is None else f"{abs(line['cents']) / 100:.2f}",
+        "ledgers": line["ledgers"] or None, "godowns": line["godowns"] or None}.items() if value is not None}
+        for line in mirror.stock_lines(data)[:5]]
 
 
 def voucher(row):
@@ -243,6 +244,29 @@ def find_ledger(call, arguments):
                                                                         "company_guid": company["guid"]})
         results.append({"subject": subject, "ledgers": ledgers})
     return {"results": results}
+
+
+def find_stock_item(call, arguments):
+    """A company's stock items matching each subject: every word of a name or alias, or an HSN code."""
+    desk = call.state
+    company = desk.company(arguments["company"])
+    results = []
+    for subject in arguments["subjects"]:
+        rows = mirror.search_masters(call.connection, company["id"], company["version"], ["STOCKITEM"], subject)
+        results.append({"subject": subject, "items": [{key: value for key, value in {
+            "name": row["name"], "guid": row["guid"], "unit": mirror.text(row["data"].get("BASEUNITS")) or None,
+            "group": row["parent"], "hsn": row["hsn"], "aliases": row["aliases"] or None,
+            "batches": mirror.text(row["data"].get("ISBATCHWISEON")).casefold() == "yes" or None,
+        }.items() if value is not None} for row in rows]})
+    return {"results": results}
+
+
+def godowns(call, arguments):
+    desk = call.state
+    company = desk.company(arguments["company"])
+    rows = mirror.masters(call.connection, company["id"], company["version"], types=["GODOWN"])
+    return {"godowns": [{"name": row["name"], "guid": row["guid"], "under": row["parent"]} for row in rows[:GODOWNS]],
+            **({"more": len(rows) - GODOWNS} if len(rows) > GODOWNS else {})}
 
 
 def voucher_types(call, arguments):
@@ -354,6 +378,11 @@ TOOLS = {tool.name: tool for tool in (
          "run's other rows already settle. A credit balance is owed to the party, and a payment settles it; a debit "
          "balance is owed by the party or was paid ahead, and a receipt settles it. Give ledger GUIDs or exact names.",
          schema({"company": COMPANY, "ledgers": {**SUBJECTS, "maxItems": 5}}, ["company", "ledgers"]), open_bills),
+    Tool("find_stock_item", "A company's stock items matching each subject: every word of a name or alias, or an "
+         "HSN code. Each names the unit its quantities are counted in; `batches` means Tally tracks its batches.",
+         schema({"company": COMPANY, "subjects": SUBJECTS}, ["company", "subjects"]), find_stock_item),
+    Tool("godowns", "A company's godowns, the stores its stock is kept in.", schema({"company": COMPANY}, ["company"]),
+         godowns),
     Tool("cost_centres", "Cost centres of a company matching each subject, with their categories.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["company", "subjects"]), cost_centres),
     Tool("memory", "What Minkops learnt about these subjects in a company, from saves a person approved: how a "

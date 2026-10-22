@@ -29,7 +29,6 @@ from minkops_platform import clients
 from minkops_platform.errors import ServiceError
 
 from . import mirror
-from .vouchers import TAXABLE_ROLES
 
 EMPLOYEE = "accounts-desk"
 EVIDENCE_LIMIT = 20
@@ -144,23 +143,24 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
 def learn_booking(connection, run, record_row, plan, voucher_guid, *, actor_id, guessed):
     """A verified save a person approved becomes one way this supplier's bills are booked.
 
-    A booking is the treatment: the voucher type and the expense ledgers, not
-    the taxes or round-off a bill happened to print. Each distinct booking of a
-    supplier is its own entry, its GUIDs the supplier's, the voucher type's and
-    the ledgers'. A best guess is kept unconfirmed: it stays under review until
-    a person approves a bill booked the same way.
+    A booking is the treatment the approval bound (vouchers.Bill.booking): the
+    voucher type, the expense ledgers and whether the bill was booked item-wise,
+    not the taxes or round-off a bill happened to print. Each distinct booking
+    of a supplier is its own entry, its GUIDs the supplier's, the voucher type's
+    and the ledgers'. A best guess is kept unconfirmed: it stays under review
+    until a person approves a bill booked the same way.
     """
     references, party = plan["references"]["ledgers"], plan["header"]["party_ledger"]
-    roles = [line["role"] for line in record_row["proposal"]["bill"]["voucher"]["lines"]]
-    expense = sorted({line["ledger"] for line, role in zip(plan["lines"][1:], roles, strict=True)
-                      if role in TAXABLE_ROLES})
+    booking = record_row["proposal"].get("booking") or {}
+    expense, items = booking.get("ledgers"), booking.get("items", False)
     guid = (references.get(party) or {}).get("GUID")
     if not guid or not expense:
         return None
     treatment = [plan["voucher_type"]["GUID"], *sorted(references[name]["GUID"] for name in expense)]
-    return record(connection, tenant_id=run["tenant_id"], client_id=run["client_id"],
-                  company_id=record_row["company_id"], kind="booking", subject=f"{guid}:{_treatment(treatment)}",
-                  value={"supplier": party, "voucher_type": plan["voucher_type"]["NAME"], "ledgers": expense},
+    return record(connection, tenant_id=run["tenant_id"], client_id=run["client_id"], company_id=record_row["company_id"],
+                  kind="booking", subject=f"{guid}:{_treatment([*treatment, 'items'] if items else treatment)}",
+                  value={"supplier": party, "voucher_type": plan["voucher_type"]["NAME"], "ledgers": expense,
+                         **({"items": True} if items else {})},
                   guids=[guid, *treatment], evidence={"kind": "outcome", "voucher": voucher_guid,
                                                       "run": str(run["id"]), "record": str(record_row["id"])},
                   status="unconfirmed" if guessed else "confirmed", actor_id=actor_id, use=True)

@@ -119,10 +119,13 @@ def _inventory(data):
 
 
 def stock_lines(data):
-    """A stored voucher's stock lines as (item, billed quantity, signed cents, ledgers they post to)."""
-    return [(text(entry.get("STOCKITEMNAME")), text(entry.get("BILLEDQTY")) or text(entry.get("ACTUALQTY")),
-             _cents(entry.get("AMOUNT")),
-             [text(a.get("LEDGERNAME")) for a in _list(entry.get("ACCOUNTINGALLOCATIONS.LIST")) if isinstance(a, dict)])
+    """A stored voucher's stock lines: item, billed quantity, signed cents, the ledgers and godowns they post to."""
+    return [{"item": text(entry.get("STOCKITEMNAME")),
+             "quantity": text(entry.get("BILLEDQTY")) or text(entry.get("ACTUALQTY")), "cents": _cents(entry.get("AMOUNT")),
+             "ledgers": [text(a.get("LEDGERNAME")) for a in _list(entry.get("ACCOUNTINGALLOCATIONS.LIST"))
+                         if isinstance(a, dict)],
+             "godowns": list(dict.fromkeys(text(b.get("GODOWNNAME")) for b in _list(entry.get("BATCHALLOCATIONS.LIST"))
+                                           if isinstance(b, dict) and text(b.get("GODOWNNAME"))))}
             for entry in _inventory(data)]
 
 
@@ -137,7 +140,7 @@ def voucher_row(record):
         raise ValueError("A voucher needs its GUID and date.")
     issued = date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:]))
     ledgers = {text(entry.get("LEDGERNAME")) for entry in _entries(data)} | {
-        ledger for *_, posted in stock_lines(data) for ledger in posted}
+        ledger for line in stock_lines(data) for ledger in line["ledgers"]}
     refs = [{"ledger": text(entry.get("LEDGERNAME")), "ledger_key": normalized(text(entry.get("LEDGERNAME"))),
              "name": text(bill.get("NAME")), "bill_type": text(bill.get("BILLTYPE")),
              "amount_cents": _cents(bill.get("AMOUNT")), "date": issued}
@@ -416,11 +419,12 @@ def open_bills(connection, company_id, version, ledgers):
 
 
 def search_masters(connection, company_id, version, types, subject, *, limit=8):
-    """Masters of these types matching one subject: by GSTIN, bank account number, or every word of a name.
+    """Masters of these types matching one subject: by GSTIN, bank account number, HSN, or every word of a name.
 
     A statement often masks an account number ("XXXXXX1234"), so its digits
-    match the end of a ledger's account number. Names match on all words,
-    in the name or any alias; an exact name sorts first.
+    match the end of a ledger's account number. An HSN heading matches the
+    codes under it. Names match on all words, in the name or any alias; an
+    exact name sorts first.
     """
     digits = re.sub(r"\D", "", subject)
     found = GSTIN.search(subject.upper())
@@ -431,6 +435,7 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
         f"""SELECT * FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE} AND type = ANY(%(types)s) AND (
                 gstin = %(gstin)s
                 OR (%(digits)s::text IS NOT NULL AND bank_account LIKE '%%' || %(digits)s)
+                OR (%(digits)s::text IS NOT NULL AND hsn LIKE %(digits)s || '%%')
                 OR (cardinality(%(words)s::text[]) > 0 AND NOT EXISTS (
                     SELECT 1 FROM unnest(%(words)s::text[]) AS word
                     WHERE position(word IN name_key || ' ' || lower(array_to_string(aliases, ' '))) = 0)))

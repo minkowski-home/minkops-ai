@@ -651,7 +651,15 @@ def test_a_scan_is_read_from_its_image_and_an_unreadable_file_holds_without_a_se
 
 DEPOT = gstin("37STRDP4321K1Z")
 STORES = [ledger("g-depot", "Stores Depot", "Sundry Creditors"),
-          ledger("g-spares", "Spares Purchase", "Purchase Accounts", DESCRIPTION="Spares received into the site stores.")]
+          ledger("g-spares", "Spares Purchase", "Purchase Accounts", DESCRIPTION="Spares received into the site stores.",
+                 AFFECTSSTOCK="Yes")]
+# The stock Stores Depot's bills carry: an item counted in whole numbers, and two godowns.
+STOCK = [{"type": "UNIT", "data": {"@_NAME": "Nos", "GUID": "u-nos", "DECIMALPLACES": "0", "ISSIMPLEUNIT": "Yes"}},
+         {"type": "STOCKITEM", "data": {"@_NAME": "Bucket tooth", "GUID": "s-tooth", "ALTERID": "2", "PARENT": "Spares",
+                                        "BASEUNITS": "Nos", "ISBATCHWISEON": "No",
+                                        "HSNDETAILS.LIST": {"APPLICABLEFROM": "20250401", "HSNCODE": "84314990"}}},
+         {"type": "GODOWN", "data": {"@_NAME": "Main Location", "GUID": "gd-main"}},
+         {"type": "GODOWN", "data": {"@_NAME": "Site Stores", "GUID": "gd-site", "PARENT": "Main Location"}}]
 # How the client booked Stores Depot's last bill: item-wise, its stock line posting to spares.
 ITEM_WISE = {"GUID": "v-depot", "MASTERID": "6", "ALTERID": "4", "DATE": "20260801", "VOUCHERTYPENAME": "Purchase",
              "REFERENCE": "SD/26/0101", "PARTYLEDGERNAME": "Stores Depot", "NARRATION": "Spares",
@@ -689,6 +697,104 @@ def test_a_supplier_booked_item_wise_shows_its_items_and_a_plain_reading_waits_f
     # approval it waits for a person.
     [proposed] = records(desk, run)
     assert (proposed["status"], proposed["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
+
+
+def depot(company):
+    """Stores Depot's bill SD/26/0150 read item-wise: 50 bucket teeth at 200.00, split between two godowns."""
+    entry = second_bill(company, 1)
+    entry["document"].update(number="SD/26/0150", supplier_name="Stores Depot", supplier_gstin=DEPOT)
+    entry["voucher"]["party"]["ledger_guid"] = "g-depot"
+    entry["voucher"]["lines"] = entry["voucher"]["lines"][1:]
+    entry["voucher"]["items"] = [{
+        "item_guid": "s-tooth", "quantity": 50, "rate": 200.0, "amount": 10000.0, "ledger_guid": "g-spares",
+        "godowns": [{"godown_guid": "gd-main", "quantity": 30, "amount": 6000.0},
+                    {"godown_guid": "gd-site", "quantity": 20, "amount": 4000.0}],
+        "evidence": "Bucket tooth 50 Nos 200.00 10,000.00"}]
+    return entry
+
+
+DEPOT_PDF = factory.text_pdf(invoice(supplier="Stores Depot", supplier_gstin=DEPOT, number="SD/26/0150",
+                                     day="02-Sep-2026", taxable="10,000.00", tax="900.00", total="11,800.00"))
+
+
+def settle_practice(desk, **values):
+    """Practices the company's books settled, as a sync's probes record them."""
+    from minkops_platform.accounts import memory
+    company = desk["company"]
+    for probe, value in values.items():
+        memory.record(desk["db"], tenant_id=company["tenant_id"], client_id=company["client_id"],
+                      company_id=company["id"], kind="practice", subject=probe, value=value,
+                      evidence={"kind": "probe"}, status="confirmed")
+    desk["db"].commit()
+
+
+def test_an_item_wise_bill_carries_its_items_to_their_godowns_and_is_learnt_item_wise(desk):
+    company, db = desk["company"]["guid"], desk["db"]
+    factory.books(db, desk["company"], masters(desk["company"]) + STORES + STOCK, [PRIOR, ITEM_WISE])
+    settle_practice(desk, receipt_notes={"in_use": False}, purchase_orders={"in_use": False})
+    fake = by_file(**{"depot.pdf": [[("find_stock_item", {"company": company, "subjects": ["bucket tooth", "8431"]}),
+                                     ("godowns", {"company": company})],
+                                    [("propose", {"count": 1, "bills": [depot(company)]})]]})
+    run = launch(desk, {"depot.pdf": DEPOT_PDF}, review_mode="only_exceptions")
+    read(desk, fake, run)
+    [session] = fake.created
+    by_name, by_hsn = answers(session, "find_stock_item")[0]["results"]
+    assert by_name["items"] == by_hsn["items"] == [{"name": "Bucket tooth", "guid": "s-tooth", "unit": "Nos",
+                                                    "group": "Spares", "hsn": "84314990"}]
+    assert answers(session, "godowns")[0] == {"godowns": [{"name": "Main Location", "guid": "gd-main", "under": None},
+                                                          {"name": "Site Stores", "guid": "gd-site",
+                                                           "under": "Main Location"}]}
+    # Booked item-wise as this supplier's earlier bill was, it needs no review under standing approval.
+    [bill] = records(desk, run)
+    assert (bill["status"], bill["review_reasons"]) == ("writing", [])
+    _, plan = companion(desk)
+    assert plan["inventory"] == [{"item": "Bucket tooth", "unit": "Nos", "quantity": "50", "rate": "200", "side": "debit",
+                                  "amount_cents": 1000000, "ledger": "Spares Purchase", "godowns": [
+                                      {"godown": "Main Location", "quantity": "30", "amount_cents": 600000},
+                                      {"godown": "Site Stores", "quantity": "20", "amount_cents": 400000}]}]
+    assert [(ln["ledger"], ln["amount_cents"]) for ln in plan["lines"]] == [
+        ("Stores Depot", 1180000), ("Spares Purchase", 1000000), ("Input CGST 9%", 90000), ("Input SGST 9%", 90000)]
+    saved = record(desk, bill)
+    assert (saved["status"], saved["current"]["inventory"][0]["godowns"][0]) == (
+        "saved", {"godown": "Main Location", "quantity": "30", "amount_cents": -600000})
+    # What the save teaches is an item-wise booking, apart from any booking of the same ledger without items.
+    learnt = db.execute("SELECT value FROM memory_entries WHERE company_id=%s AND kind='booking'",
+                        (desk["company"]["id"],)).fetchone()
+    assert learnt["value"] == {"supplier": "Stores Depot", "voucher_type": "Purchase", "ledgers": ["Spares Purchase"],
+                               "items": True}
+
+
+def test_an_item_wise_bill_waits_on_open_practice_and_holds_where_orders_track_its_goods(desk):
+    from minkops_platform import attention
+    from minkops_platform.accounts import practice
+    company, db = desk["company"]["guid"], desk["db"]
+    version = factory.books(db, desk["company"], masters(desk["company"]) + STORES + STOCK, [PRIOR, ITEM_WISE])
+    task = db.execute("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Sync') RETURNING id",
+                      (desk["tenant"]["id"],)).fetchone()
+    # Two purchases settle neither whether Receipt Notes nor purchase orders are in use.
+    practice.probe(db, desk["company"], version, {"task_id": task["id"]})
+    db.commit()
+    fake = by_file(**{"depot.pdf": [[("propose", {"count": 1, "bills": [depot(company)]})]]})
+    run = launch(desk, {"depot.pdf": DEPOT_PDF})
+    read(desk, fake, run)
+
+    def answer(probe, choice):
+        card = db.execute("""SELECT a.* FROM attention_items a JOIN practice_questions q ON q.attention_item_id=a.id
+                             WHERE q.company_id=%s AND q.probe=%s""", (desk["company"]["id"], probe)).fetchone()
+        attention.decide(db, desk["tenant"], desk["operator"], card["id"], choice)
+        db.commit()
+
+    [waiting] = records(desk, run)
+    assert (waiting["hold_codes"], waiting["checks"]["practice"]) == (["practice_question"], "receipt_notes")
+    answer("receipt_notes", "no")
+    waiting = record(desk, waiting)
+    assert (waiting["hold_codes"], waiting["checks"]["practice"]) == (["practice_question"], "purchase_orders")
+    # Orders track its goods in Tally, so the bill is entered there; no later reading can recast it.
+    answer("purchase_orders", "yes")
+    held = record(desk, waiting)
+    assert (held["status"], held["hold_codes"], held["checks"]["final"]) == ("held", ["unsupported_structure"], True)
+    assert held["review_reasons"][0] == ("Purchase orders are in use in Rehearsal Infra Private Limited, so an item-wise "
+                                         "purchase is matched to its order there. Enter this bill in Tally.")
 
 
 def repairs(company, number):

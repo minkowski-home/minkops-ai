@@ -40,14 +40,7 @@ from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
 from .desk_tools import Desk, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
-from .vouchers import (
-    TAXABLE_ROLES,
-    HoldReason,
-    check,
-    correction_reason,
-    narration_token,
-    observed_bill,
-)
+from .vouchers import HoldReason, check, correction_reason, narration_token, observed_bill
 
 KIND = "bill"
 # A proposal and at most two resubmissions, per bill.
@@ -350,15 +343,42 @@ def _propose_one(connection, desk, record, bill):
                            company_id=company["id"] if company else None, proposal={"bill": bill},
                            checks={**checks, "code": refusal.code, "error": str(refusal)[:300]})
         return {"status": "rejected", "reason": str(refusal)}
-    review += [note for note in [_precedent(connection, desk, company, bound, bill)] if note]
-    if document.get("receipt_register") and practice.settled(connection, company, "receipt_register") is None:
-        # Where this company records the stamp is a one-click question; its answer releases the bill.
-        return _hold(connection, desk, record, bill, company, "practice_question", hold("practice_question").reason,
-                     facts=facts, checks={**checks, "practice": "receipt_register"}, review=review, rules=cited)
+    review += [note for note in [_precedent(connection, desk, company, bound)] if note]
+    waits = _waits(connection, company, bill, bound)
+    if waits:
+        # An open practice is a one-click question whose answer releases the bill; a tracked one is final.
+        code, reason, probe = waits
+        return _hold(connection, desk, record, bill, company, code, reason, facts=facts, review=review, rules=cited,
+                     checks={**checks, "practice": probe, **({"final": True} if code != "practice_question" else {})})
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review, facts=facts,
                        company_id=company["id"], checks=checks, proposal=_proposal(bill, bound, rules=cited))
     # Review notes are for the person approving: told of one, a session would rebook a sound bill to avoid it.
     return {"status": "accepted"}
+
+
+# Practices that track an item-wise purchase's goods in Tally, where such a bill is entered.
+TRACKED = {
+    "receipt_notes": "Receipt Notes are in use in {company}, so an item-wise purchase follows its receipt note there. "
+                     "Enter this bill in Tally.",
+    "purchase_orders": "Purchase orders are in use in {company}, so an item-wise purchase is matched to its order "
+                       "there. Enter this bill in Tally.",
+}
+
+
+def _waits(connection, company, bill, bound):
+    """Why the company's practice holds this bill, as (code, reason, probe), or None.
+
+    A receipt-register stamp needs to know where the company records it, and an
+    item-wise purchase whether receipt notes or purchase orders track its goods.
+    """
+    probes = ["receipt_register"] if (bill.get("document") or {}).get("receipt_register") else []
+    for probe in [*probes, *(TRACKED if bound.stock else ())]:
+        settled = practice.settled(connection, company, probe)
+        if settled is None:
+            return "practice_question", hold("practice_question").reason, probe
+        if probe in TRACKED and settled.get("in_use"):
+            return "unsupported_structure", TRACKED[probe].format(company=company["name"]), probe
+    return None
 
 
 def _proposal(bill, bound, **extra):
@@ -389,30 +409,32 @@ def _offers(connection, desk, bill, company, codes):
     return offers
 
 
-def _precedent(connection, desk, company, bound, bill):
+def _precedent(connection, desk, company, bound):
     """The review a booking needs, or None when the client booked this supplier's bills this way before.
 
-    "This way" is the same voucher type and expense ledgers, without stock items. What memory learnt comes
-    first: a booking someone changed in Tally since, or one first written as a best guess, waits for a person
-    even when history repeats it; one a person approved is a precedent. Otherwise the books' history
-    decides. A bill without a precedent is a first: it goes to review, whatever the review mode.
+    "This way" is the same voucher type and expense ledgers, item-wise when the bill is and not otherwise.
+    What memory learnt comes first: a booking someone changed in Tally since, or one first written as a best
+    guess, waits for a person even when history repeats it; one a person approved is a precedent. Otherwise
+    the books' history decides. A bill without a precedent is a first: it goes to review, whatever the
+    review mode.
     """
     if bound.party not in bound.identities:
         return UNPRECEDENTED
-    wanted = {ln["ledger"] for ln, item in zip(bound.lines[1:], bill["voucher"]["lines"], strict=True)
-              if item["role"] in TAXABLE_ROLES}
+    booking = bound.booking
+    wanted = set(booking["ledgers"])
     learnt = [row["status"] for row in memory.entries(
         connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=desk.part_ids(company),
         kinds=["booking"], subjects=[bound.identities[bound.party]["GUID"]])
-        if row["value"]["voucher_type"] == bound.voucher_type["NAME"] and wanted <= set(row["value"]["ledgers"])]
+        if row["value"]["voucher_type"] == booking["voucher_type"]["NAME"] and wanted <= set(row["value"]["ledgers"])
+        and bool(row["value"].get("items")) == booking["items"]]
     if "demoted" in learnt:
         return DEMOTED
     if "confirmed" in learnt:
         return None
     if "unconfirmed" in learnt:
         return GUESSED_BOOKING
-    booked = any(row["voucher_type"] == bound.voucher_type["NAME"] and wanted <= set(row["ledgers"])
-                 and not mirror.stock_lines(row["data"])
+    booked = any(row["voucher_type"] == booking["voucher_type"]["NAME"] and wanted <= set(row["ledgers"])
+                 and bool(mirror.stock_lines(row["data"])) == booking["items"]
                  for part in desk.parts[company["guid"]]
                  for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50))
     return None if booked else UNPRECEDENTED
@@ -464,11 +486,23 @@ LINE = schema({
                             ["section", "rate"])),
     "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
     ["role", "ledger_guid", "side", "amount", "cost_centre_guid", "cost_category_guid", "tax", "tds", "evidence"])
+QUANTITY = {"type": "number", "exclusiveMinimum": 0}
+ITEM = schema({
+    "item_guid": {"type": "string", "minLength": 1, "maxLength": 100}, "quantity": QUANTITY, "rate": MONEY,
+    "amount": MONEY, "ledger_guid": {"type": "string", "minLength": 1, "maxLength": 100},
+    "godowns": {"type": "array", "minItems": 1, "maxItems": 10, "items": schema({
+        "godown_guid": {"type": "string", "minLength": 1, "maxLength": 100}, "quantity": QUANTITY, "amount": MONEY},
+        ["godown_guid", "quantity", "amount"])},
+    "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
+    ["item_guid", "quantity", "rate", "amount", "ledger_guid", "godowns", "evidence"])
 VOUCHER = schema({
     "family": {"enum": ["purchase", "journal", "debit_note"]}, "voucher_type_guid": GUID,
     "party": schema({"ledger_guid": GUID, "new_supplier": {"type": "boolean"}, "evidence": TEXT},
                     ["ledger_guid", "new_supplier", "evidence"]),
-    "lines": {"type": "array", "minItems": 1, "maxItems": 39, "items": LINE}},
+    "lines": {"type": "array", "maxItems": 39, "items": LINE},
+    "items": {"type": "array", "maxItems": 40, "items": ITEM, "description": (
+        "For a purchase the client books item-wise: each item line of the bill, in the stock item's own unit. "
+        "Items carry the taxable value their lines print, so they are not expense lines too.")}},
     ["family", "voucher_type_guid", "party", "lines"])
 SUPPLIER = schema({
     **{key: {"type": "string", "maxLength": 250} for key in ("gstin", "registration_type", "state", "state_code",
@@ -684,7 +718,8 @@ def _approve(connection, run, record, *, actor):
         work.update_record(connection, record, status="held", hold_codes=["save_waiting"],
                            review_reasons=["Another approved run is saving this bill. Retry once it finishes."])
         return {"status": "held"}
-    work.update_record(connection, record, status="writing")
+    # The booking the save teaches, as the plan was bound from it (memory.learn_booking).
+    work.update_record(connection, record, status="writing", proposal={**record["proposal"], "booking": bound.booking})
     for follower in connection.execute(
             "SELECT * FROM run_records WHERE run_id=%s AND status='proposed' AND proposal->>'repeat_of'=%s FOR UPDATE",
             (run["id"], str(record["id"]))).fetchall():
@@ -713,8 +748,15 @@ def _repropose(connection, run, record, bill, *, review, created=(), precedent=F
         work.update_record(connection, record, status="held", hold_codes=[refusal.code],
                            review_reasons=[str(refusal)[:300]])
         return False
+    waits = _waits(connection, company, bill, bound)
+    if waits:
+        code, reason, probe = waits
+        work.update_record(connection, record, status="held", hold_codes=[code], review_reasons=[reason, *review],
+                           checks={**(record["checks"] or {}), "practice": probe,
+                                   **({"final": True} if code != "practice_question" else {})})
+        return False
     if precedent:
-        review = [*review, *[note for note in [_precedent(connection, desk, company, bound, bill)] if note]]
+        review = [*review, *[note for note in [_precedent(connection, desk, company, bound)] if note]]
     kept = {key: record["proposal"][key] for key in ("rules",) if record["proposal"].get(key)}
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=review,
                        checks={**(record["checks"] or {}), "offers": []},

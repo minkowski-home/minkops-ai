@@ -122,6 +122,21 @@ Propose the voucher this client's own practice records for the document.
   and their purpose too, not only through history. A bill needs stock items
   only when the client records such purchases item-wise: this supplier's or
   that ledger's earlier bills carry `items`.
+- **Item-wise purchases.** When the client books the purchase item-wise, give
+  `voucher.items`, one per item line of the bill:
+  - the stock item (`find_stock_item`, by its name, alias or HSN code);
+  - its quantity in that item's own unit, with the rate per that unit and the
+    line's amount as printed. When the bill counts in another unit, convert
+    the quantity and the rate together, so quantity times rate still gives the
+    printed amount;
+  - the purchase ledger that carries its value, as history shows for that item;
+  - the godowns it goes to (`godowns`), each with its share of the quantity
+    and amount. Use the store the bill delivers to, or the godown this
+    supplier's goods went to before.
+
+  Items carry the bill's taxable value, so they are not also expense lines.
+  Taxes, freight and a round-off remain lines. A line discount, an item kept
+  in batches, or a free quantity beyond what is billed is `unsupported_structure`.
 - **Lines.** Each line other than the supplier's has a `role` (`expense`, `tax`,
   `round_off`, `freight`, `other_charge`, `discount` or `tds`), a ledger, a side
   (as the client's vouchers of this family post it), a positive amount, an
@@ -139,8 +154,10 @@ Propose the voucher this client's own practice records for the document.
   needs nothing more: Minkops records the bill under its invoice number. A
   credit note to such a supplier holds, because it must name the bill it
   adjusts.
-- **Unsupported structures.** Stock items and foreign currency cannot be saved
-  yet: propose `unsupported_structure` and name the structure.
+- **Unsupported structures.** Foreign currency cannot be saved yet: propose
+  `unsupported_structure` and name the structure. Minkops itself holds
+  item-wise purchases for companies that track goods against Receipt Notes or
+  purchase orders, which are entered in Tally.
 
 ## Holding a bill
 
