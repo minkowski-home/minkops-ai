@@ -67,6 +67,16 @@ Then check that the five rehearsal companies are open with their pinned GUIDs:
 node scripts/rehearsal_status.mjs
 ```
 
+`scripts/companion_dev.mjs` is a headless companion for running the stack end to end from WSL. It runs the Windows app's job executor and connectors against a local server and the relayed Tally, and keeps its credentials in `~/.local/state/minkops-dev/companion`, so never point it at production. Register it once as a member, with their password on stdin, then run it:
+
+```bash
+node scripts/companion_dev.mjs register http://127.0.0.1:8000 mock-tenant demo@example.com < password-file
+```
+
+```bash
+node scripts/companion_dev.mjs run
+```
+
 PostgreSQL 16 can run from PGDG packages extracted into the user's home without root; Node 24 can run from the official tarball. Package the Windows installer from a Windows-local copy, because WSL symlinks break the packaging tools.
 
 **Sample client files are not in git.** One ICICI statement for September 2026 and two scanned March 2026 bills were shared on 21 October; copy them to the Windows machine yourself. Keep real files in a private, encrypted fixture store, and commit only synthetic look-alikes.
