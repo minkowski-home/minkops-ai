@@ -81,10 +81,23 @@ A company is identified by PC, GUID, BooksFrom, name and company number:
 A newly seen company is `pending` and is never mirrored until one card
 authorises it for a client business.
 
+A company moves when the PC holding it is replaced. Only companies on connected
+PCs are a client's books. When a pending company has the GUID and BooksFrom of
+a company authorised for a client on a disconnected PC, authorising it for that
+client continues that company. The existing row moves to the new PC, keeping
+everything keyed to it, and the pending duplicate is deleted. `company_moves`
+records each move, and a replayed decision finds it there. Authorising for
+another client starts afresh. The same books are never authorised on two
+connected PCs: an advisory lock per tenant, GUID and BooksFrom serialises these
+decisions. Disconnecting a PC holds the saves it had begun as interrupted, and
+updates the cards of its books found elsewhere. Writes it had not begun move with
+their company.
+
 ## Mirror
 
 `mirror_versions` has one row per company and version, carrying its markers,
-coverage and state (`building`, `published`, `abandoned`). At most one version
+coverage, state (`building`, `published`, `abandoned`) and the PC it was read
+from. A run pins only versions read on the PC its company is on now. At most one version
 builds per company. `mirror_masters` and `mirror_vouchers` rows carry
 `synced_in` and `superseded_in`. A row is visible at version *V* when
 `synced_in ≤ V` and (`superseded_in` is null or `> V`). Upserting at *V*
@@ -107,7 +120,8 @@ collects.
    `companies` page.
 2. The server records identities, raises cards for new companies, applies the
    regression guard, and answers per company: `skip`, `delta` (with the stored
-   AlterIDs) or `full`, plus whether to `sweep`.
+   AlterIDs) or `full`, plus whether to `sweep`. A marker regression, an identity
+   change, or a latest version read on another PC rebuilds in full.
 3. The companion uploads bounded pages: masters per type, vouchers in date
    batches of at most 5,000 (sized by per-date counts), census pages, and
    refetches by GUID. Each page is idempotent by `(job, seq)` and digest, and is
@@ -116,8 +130,10 @@ collects.
    census count equals the independent count may tombstone a missing GUID;
    changed AlterIDs and voucher numbers are refetched.
 5. The finish receipt publishes each complete version with the markers read in
-   step 1, then runs the practice probes and revalidates memory. An incomplete
-   version is abandoned and reverted.
+   step 1, then runs the practice probes and revalidates memory. A company's
+   first version after a move is compared with the old PC's last one, and the
+   vouchers it lacks raise one card. An incomplete version is abandoned and
+   reverted.
 
 Requests to Tally are sequential with long timeouts. Nothing in a sync uses AI
 or authorises a write.

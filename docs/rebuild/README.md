@@ -228,7 +228,7 @@ Items marked † must be verified in the TallyPrime rehearsal; sources are in [e
 
 1. **Identify each company** by PC, GUID, company number, name and BooksFrom, never by GUID alone, because Split Company GUIDs are uncertain†. Also fix the companion's duplicate-GUID message, which names the wrong company.
 2. **Probe** `$AltMstId`, `$AltVchId`, `$LastVoucherDate` and `$BooksFrom`. Treat an empty AltVchId as 0. Stop if nothing changed.
-3. **Regression guard.** If a marker drops, or the identity or BooksFrom changes, rebuild in full into a new version.
+3. **Regression guard.** If a marker drops, the identity or BooksFrom changes, or the company moved to another PC, rebuild in full into a new version.
 4. **Delta.**
    - Read the markers first.
    - Fetch masters and vouchers with `$AlterID` greater than the stored values.
@@ -392,6 +392,8 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | 12. Performance | Done | Both targets met on the local stack with 12 lanes, now the default and the deployed setting: 50 labelled bills read in 5 min 30 s (target 10), and a synthetic month of 1,232 statement rows in 4 min 31 s (target 15), though with payees no rehearsal company holds, so that run measures the pipeline rather than routing ([evidence](evidence.md#performance-benchmarked-live-22-october-2026)). Lookups average 3 ms; the model is the limit. Sessions now cite companies and masters only by short references their lookups issued (migration 0031, `test_bill_entry.py`), so a guessed or mistyped GUID can no longer name another real master, and reasons a person reads name them. Every attempt's session counts toward a run's usage (migration 0030, `work.usage`, `test_lanes.py`). Round trips the benchmark exposed are gone: a bill printing no tax, an empty GSTIN check, and lookups of more than 20 subjects. 466 Python tests pass. |
 | 13. Cut-over | Done | The old build's schema is retired. Migration 0032 drops the tables, view, triggers and functions of the staged pipeline, Source Discovery and the hosted-environment runtime, and refuses a database that still holds the old build's work, so that history is never dropped. `migrate.py` refuses a database from before the baseline, and the archived upgrade path is gone (`test_migrations.py`). A client's workspace is created for its verified administrator together with its composition (`install_workflows --create-tenant`, `test_installation.py`). The deployment mounted the new instance while the runtime's secret still named the shared one; the runtime's secrets now open the new instance and sit beside the parked build's, which stay untouched for a rollback (`test_runtime_deployment.py`). Retention keeps a parked build's images. Support diagnostics describe the run model ([workflow diagnostics](../workflow-diagnostics.md)). The [runbook](cutover.md) parks the old build, provisions and deploys, creates workspaces, says where PR Infra's statements resume, and rolls back. Rolling back includes reinstalling the parked companion, because the rebuilt one cannot run the parked build's jobs. Nothing is deployed. Live on the final build, a new bill and a statement were entered from the console and verified in Tally. A supplier payment citing a stock code was held as inventory; statement entry 1.1.1 enters it ([evidence](evidence.md#cut-over-and-the-final-build-checked-live-22-october-2026)). Afterwards, bills into a GST-registered company state what Tally's GST returns need, and Tally includes them; a tax head the states rule out, or a tax ledger for another head or rate, is caught first (bill entry 1.2.0, companion 0.11.0 the minimum; [evidence](evidence.md#gst-returns-rehearsed-live-22-october-2026)). 478 Python tests pass. |
 
+**After the slices: replacing a PC** (22 October 2026). A disconnected PC's companies leave the client's books, and the PC that replaces it continues them. One click on the found company's card moves the client's company there, keeping its memory, rules, practice, statement continuity and save history (`clients.authorise_company`, migration 0034). Each mirror version records the PC it was read from (migration 0033), so the first refresh there reads the books in full, and no run pins the old copy. Vouchers an older copy lacks are named on one card, and memory learnt from them is demoted. A save the old PC had begun holds as interrupted; saves it had not begun go to the new PC. Some books are never continued: another client's, a year-split part, and books another connected PC holds, even when two admins decide at once. The console's card now decides found companies, which before needed the API (`test_clients.py`, `test_sync.py`, `test_mirror.py`, `test_statement_entry.py`, `test_sync_api.py`, `company-cards.spec.js`). See [Replacing a PC](../accounts-desk.md#replacing-a-pc). 487 Python tests pass.
+
 **Carried into later slices:**
 
 - **Upkeep:** the pinned e-invoice signing keys. IRPs 3–5 are not pinned: Clear's published certificate link refuses downloads, and the other two portals list their keys only in the browser. IRIS's newest listed key expired on 20 June 2026, and NIC's current keys run to 1 May 2027. Each new key is added as the bill entry doc describes.
@@ -407,6 +409,15 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
   1. Split a copy of a rehearsal company in Tally's UI.
   2. Open both halves and request a sync.
   3. Expect the sibling with the new BooksFrom to raise its own "New company found" card, and the original to keep its mirror.
+- **Replace a PC.** On the local stack, the rehearsal companies are authorised for "Rehearsal companies" on the
+  headless companion (`gauss-PC-Sikar-HEADLESS`), which was disconnected on 22 October.
+  1. Connect Minkops Dev on Windows with the same companies open in Tally, then refresh it under Connected PCs.
+  2. Expect one "New company found" card per company, offering Continue Rehearsal companies' books here. While the
+     old PC was still connected, the card would offer only Not a client's books.
+  3. Continue one company. Expect its memory page entries and rules unchanged, its first refresh full with reason
+     `pc_changed`, no "Older copy of the books" card, and a bill saved through Minkops Dev.
+  4. Before continuing another company, restore an older backup of it in Tally. Expect "Older copy of the books"
+     naming the vouchers entered since that backup.
 - **Interrupt a save.**
   1. Approve a statement row, and close the companion while it writes.
   2. Reopen the companion.

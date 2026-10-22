@@ -12,7 +12,8 @@ reaches the browser, the companion or a session's tools.
 1. **Books.** The Windows companion mirrors each authorised company's masters and
    vouchers into the server, read-only and without AI (`accounts/sync.py`, with
    `connectors/desktop/src/sync.js` on the PC). A newly seen company stays pending
-   until one card authorises it for a client business. A run asks the client's PCs
+   until one card authorises it for a client business, or continues the client's
+   company from a disconnected PC ([Replacing a PC](#replacing-a-pc)). A run asks the client's PCs
    to refresh, then pins one mirror version per company, so every check in the
    run reads the same books.
 2. **Items.** A run splits its inputs into items: a bill file, a statement's
@@ -71,6 +72,54 @@ the employee's workflows and looked up only when a session needs it:
 
 The memory page shows both. Every member who can reach the client reads it, and
 only admins change it. See [Bill entry](bill-entry.md#memory-and-practice).
+
+## Replacing a PC
+
+A client's companies are the ones authorised on connected PCs. When the PC holding
+them is replaced, by a new laptop, a reinstall or a hosted server, the client's
+work moves with its books:
+
+1. Connect Minkops on the new PC with the companies open in Tally. Its first
+   refresh finds each one as new, with a "New company found" card. While the old
+   PC is connected, the books are still the client's there, and the card can only
+   keep them out: a client's entries are saved to one Tally copy, never split
+   across two.
+2. Disconnect the old PC under Connected PCs. Each card now offers
+   **Continue *client*'s books here**.
+3. One click moves the client's company to the new PC (`clients.authorise_company`).
+   It is the same company: what Minkops learnt for its books, the rules people
+   wrote for it, how its books are kept, statement continuity and its save history
+   all stay with it. Each move is recorded (migration 0034).
+
+After the move:
+
+- **Refresh.** The new PC's first refresh reads the books in full (reason
+  `pc_changed`). Each mirror version records the PC it was read from (migration
+  0033), so the old copy's markers never decide what the new one fetches, and no
+  run works from the old copy.
+- **An older copy.** If the new PC's copy lacks vouchers the old PC's had, such as
+  an older backup restored there, one "Older copy of the books" card names them,
+  newest first. Minkops re-enters nothing: restore the latest copy in Tally and
+  refresh, or enter them again. Memory learnt from vouchers that are gone is
+  demoted.
+- **Saves.** A save the old PC had begun when it was disconnected holds as
+  interrupted. After the move, Retry save saves it on the new PC only if Tally
+  there does not already have it. Saves the old PC had not begun go to the new
+  PC once the company moves, each sent once.
+- **Runs.** A run waiting for the old PC's refresh waits for the new PC's, then
+  carries on.
+
+Some books are never continued:
+
+- **Another client's.** Adding books to a different client starts them afresh, so
+  one client's memory never reaches another.
+- **A year-split part.** It shares the GUID but begins its books later, so it is
+  other books, added afresh.
+- **Books two clients held.** When two clients held the same books on
+  disconnected PCs, the card offers no one-click continuation. Adding them to one
+  of those clients continues that client's company.
+
+Only admins decide. Other members see the card without the client's name.
 
 ## Recovery
 

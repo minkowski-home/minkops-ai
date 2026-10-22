@@ -52,8 +52,10 @@ directory. Original business files remain in the selected folder.
 
 Device credentials are hashed on the server, rotate on reconnect, expire after
 90 days and stop working on revocation or lost membership. Desktop logout stops
-its companion; web users can revoke a PC in Connected PCs. An operation already
-saving cannot be rolled back by logout or cancellation. Late domain receipts
+its companion; web users can revoke a PC in Connected PCs. Revoking holds any save
+it had begun as interrupted. Its companies leave their clients' books until the
+PC that replaces it continues them ([Replacing a PC](accounts-desk.md#replacing-a-pc)).
+An operation already saving cannot be rolled back by logout or cancellation. Late domain receipts
 record what was actually applied without marking a cancelled run complete.
 
 Only read jobs are automatically reclaimed after the two-minute lease. Saves
