@@ -111,8 +111,9 @@ def pc():
         db.rollback()
 
 
-def start(pc, reason="requested"):
-    job = sync.request(pc["db"], pc["tenant"], pc["owner"], pc["member"], pc["device"]["id"], reason=reason)
+def start(pc, reason="requested", device=None):
+    device = device or pc["device"]
+    job = sync.request(pc["db"], pc["tenant"], pc["owner"], pc["member"], device["id"], reason=reason)
     return pc["db"].execute("SELECT * FROM desktop_jobs WHERE id=%s", (job["id"],)).fetchone()
 
 
@@ -245,6 +246,34 @@ def test_a_marker_that_goes_backwards_rebuilds_in_full(pc):
     assert (answer["instructions"][0]["mode"], answer["instructions"][0]["reason"]) == ("full", "marker_regressed")
     version = mirror.latest(pc["db"], company["id"])["version"]
     assert len(mirror.vouchers(pc["db"], company["id"], version)) == 1
+
+
+def test_a_copy_read_on_another_pc_never_drives_a_delta_nor_a_run(pc):
+    """Markers and AlterIDs belong to one Tally copy: a company now on another PC is read there afresh, in full."""
+    import factory
+    db, tally = pc["db"], Tally()
+    tally.voucher("2026-09-01")
+    company = authorised(pc, tally)
+    Companion(db, pc["device"], start(pc)).run(tally)
+    assert mirror.latest(db, company["id"])["device_id"] == pc["device"]["id"]
+    # The company now lives on the PC that replaced its first one, whose copy has moved on since.
+    replacement = factory.device(db, pc["tenant"], pc["owner"])
+    db.execute("UPDATE companies SET device_id=%s WHERE id=%s", (replacement["id"], company["id"]))
+    tally.voucher("2026-09-02")
+    # Until the new PC is read, no run works from the old PC's copy.
+    assert mirror.pins(db, [company["id"]]) == {}
+    _, answer, summary = Companion(db, replacement, start(pc, device=replacement)).run(tally)
+    step = answer["instructions"][0]
+    # On one PC, moved markers fetch a delta; from another PC's copy they would skip whatever it lacks.
+    assert (step["mode"], step["reason"], step["after"]) == ("full", "pc_changed", None)
+    version = mirror.latest(db, company["id"])
+    assert (version["version"], version["device_id"]) == (2, replacement["id"])
+    assert mirror.pins(db, [company["id"]]) == {str(company["id"]): 2}
+    assert len(mirror.vouchers(db, company["id"], 2)) == 2
+    # From then on the new PC's own markers drive its deltas.
+    tally.voucher("2026-09-03")
+    _, answer, _ = Companion(db, replacement, start(pc, device=replacement)).run(tally)
+    assert (answer["instructions"][0]["mode"], answer["instructions"][0]["reason"]) == ("delta", "markers_moved")
 
 
 def test_a_renamed_company_rebuilds_and_a_split_sibling_is_a_new_company(pc):

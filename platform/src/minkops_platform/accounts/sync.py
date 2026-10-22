@@ -6,8 +6,9 @@ read before anything else. The server then identifies each company by PC,
 GUID, BooksFrom, name and number, and answers per company:
 - skip, when nothing changed;
 - delta, fetching AlterIDs above the stored markers;
-- full, rebuilding into a new version after a marker regression or an
-  identity change.
+- full, rebuilding into a new version after a marker regression, an
+  identity change, or a move to another PC, whose Tally copy has markers of
+  its own.
 
 Bounded pages of masters, vouchers, counts and census then build that version.
 A census may tombstone a voucher only on a date where it agrees with Tally's
@@ -199,11 +200,14 @@ def _observe(connection, device, job, observed):
     return row, "new"
 
 
-def _decide(previous, observed, change, *, last_swept, now, reason):
+def _decide(previous, observed, change, *, device_id, last_swept, now, reason):
     """skip, delta or full for one authorised company, with why and whether to sweep."""
     markers = _markers(observed)
     if previous is None:
         return "full", "first_sync", True
+    if previous["device_id"] != device_id:
+        # Markers and AlterIDs belong to one Tally copy: another PC's never measure what this one holds.
+        return "full", "pc_changed", True
     if change == "renamed":
         return "full", "identity_changed", True
     stored = previous["markers"]
@@ -235,7 +239,7 @@ def _companies(connection, device, job, page, *, now, today):
         last_swept = connection.execute(
             """SELECT * FROM mirror_versions WHERE company_id=%s AND state='published' AND swept
                ORDER BY version DESC LIMIT 1""", (company["id"],)).fetchone()
-        mode, why, sweep = _decide(previous, entry, change, last_swept=last_swept, now=now,
+        mode, why, sweep = _decide(previous, entry, change, device_id=device["id"], last_swept=last_swept, now=now,
                                    reason=job["input"].get("reason"))
         if mode == "skip":
             instructions.append({**step, "mode": "skip", "reason": why})

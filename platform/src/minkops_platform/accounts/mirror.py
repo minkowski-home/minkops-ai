@@ -161,13 +161,14 @@ def voucher_row(record):
 # --- versions -----------------------------------------------------------------
 
 def begin(connection, company, *, kind, reason, markers, coverage, job_id=None):
-    """Open the company's next version; an abandoned version's number is never reused."""
+    """Open the company's next version, read on the PC the company is on; an abandoned version's number is never
+    reused."""
     return connection.execute(
-        """INSERT INTO mirror_versions(tenant_id,company_id,version,kind,reason,markers,coverage,job_id)
-           SELECT %s,%s,coalesce(max(version),0)+1,%s,%s,%s,%s,%s FROM mirror_versions WHERE company_id=%s
+        """INSERT INTO mirror_versions(tenant_id,company_id,version,kind,reason,markers,coverage,job_id,device_id)
+           SELECT %s,%s,coalesce(max(version),0)+1,%s,%s,%s,%s,%s,%s FROM mirror_versions WHERE company_id=%s
            RETURNING *""",
         (company["tenant_id"], company["id"], kind, reason[:80], Jsonb(markers), Jsonb(coverage), job_id,
-         company["id"])).fetchone()
+         company["device_id"], company["id"])).fetchone()
 
 
 def building(connection, company_id):
@@ -182,10 +183,15 @@ def latest(connection, company_id):
 
 
 def pins(connection, company_ids):
-    """{company_id: latest published version} for the companies that have one."""
+    """{company_id: latest published version} for the companies that have one read on the PC they are on now.
+
+    A company that moved PCs has no version to pin until its new PC is read: the old PC's copy is not the one its
+    entries are saved to.
+    """
     rows = connection.execute(
-        """SELECT DISTINCT ON (company_id) company_id, version FROM mirror_versions
-           WHERE company_id = ANY(%s) AND state='published' ORDER BY company_id, version DESC""",
+        """SELECT DISTINCT ON (v.company_id) v.company_id, v.version FROM mirror_versions v
+           JOIN companies c ON c.id=v.company_id AND c.device_id=v.device_id
+           WHERE v.company_id = ANY(%s) AND v.state='published' ORDER BY v.company_id, v.version DESC""",
         (list(company_ids),)).fetchall()
     return {str(row["company_id"]): row["version"] for row in rows}
 
