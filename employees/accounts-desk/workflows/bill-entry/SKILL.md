@@ -107,9 +107,12 @@ Propose the voucher this client's own practice records for the document.
 - **What guides treatment.** In order: a legible handwritten instruction on this
   bill; the client's `rules`; what `memory` learnt about this supplier (look it up
   by the supplier ledger's reference); then history. `practice` says how the company
-  keeps its books. Tally's masters and Minkops's checks bind all of them. A
-  demoted memory entry was changed in Tally since, so prefer what the books show
-  now.
+  keeps its books, such as which GST ledgers new bills post tax to and whether a
+  printed discount is booked net or to a discount ledger: follow it. When it does
+  not say yet, post the tax to the ledgers the supplier's earlier bills used, and a
+  printed discount to a discount line; Minkops asks the client once. Tally's
+  masters and Minkops's checks bind all of them. A demoted memory entry was
+  changed in Tally since, so prefer what the books show now.
 - **Treatment.** Look at how this supplier's bills and similar purchases were
   booked before (`party_history`):
   - which voucher type (`voucher_types`) records them;

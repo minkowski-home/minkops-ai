@@ -188,7 +188,8 @@ that print different versions of one bill all hold. A proposal goes to review,
 whatever the review mode, when:
 
 - it books the supplier differently from every earlier voucher of theirs (another
-  voucher type or expense ledger, or without the stock items they carried). One
+  voucher type or expense ledger, or without the stock items they carried). The
+  note names what the supplier's last bill was booked to beside this one. One
   approval confirms the booking, which memory then holds as a precedent;
 - it books the supplier the way someone changed in Tally since Minkops saved it,
   or the way a best guess first did;
@@ -244,13 +245,19 @@ desk employee (`accounts/memory.py`):
   so a client keeps at most 30 active rules per employee.
 - **Practice.** After every sync, deterministic probes settle how a company keeps
   its books, such as where it types invoice numbers, whether it records
-  receipt-register numbers, and whether Receipt Notes or purchase orders track its
-  goods. A probe the history cannot settle raises one one-click question per
+  receipt-register numbers, whether Receipt Notes or purchase orders track its
+  goods, whether purchases post GST to the ledgers Tally sets up as GST duties or to
+  others named for the tax, and whether a printed discount is booked net or to a
+  discount ledger. A probe the history cannot settle raises one one-click question per
   company in [Attention](attention.md). Each mirror version records the probes run
   on it, so a probe added later meets books that have not changed since.
 
 Practice shapes the plan. A company that records receipt-register numbers in the
-narration gets the stamp there. While that question is open, a bill with a stamp
+narration gets the stamp there. Once settled, the gate enforces the GST ledgers and
+discounts a company uses: a GST line on a ledger merely named for the tax is refused
+where the company posts to a duty ledger for that head and rate, naming it, and a
+discount line where the company books net. A taxed bill, or one with a discount line,
+waits while that question is open. While that question is open, a bill with a stamp
 holds as `practice_question`; the answer re-checks it, and standing approval then
 writes a clean one. Duplicates are sought where the company types invoice
 numbers, or in both the reference and the narration while that is unsettled.
