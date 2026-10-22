@@ -55,6 +55,12 @@ def observed(plan, **overrides):
         "bills": [{"ledger": ln["ledger"], "name": bill.get("name"), "type": bill["type"],
                    "amount_cents": bill["amount_cents"] if ln["side"] == "credit" else -bill["amount_cents"]}
                   for ln in plan["lines"] for bill in ln.get("bills") or []],
+        # Tally reports an inward item's amounts negative, like the debit line that carries its value.
+        "inventory": [{"item": entry["item"], "unit": entry["unit"], "quantity": entry["quantity"],
+                       "rate": entry["rate"], "amount_cents": -entry["amount_cents"], "ledger": entry["ledger"],
+                       "godowns": [{"godown": place["godown"], "quantity": place["quantity"],
+                                    "amount_cents": -place["amount_cents"]} for place in entry["godowns"]]}
+                      for entry in plan.get("inventory") or []],
         "fingerprint": "v5:" + "a" * 64,
     }
     current.update(overrides)
@@ -136,7 +142,7 @@ class ReceiptTest(unittest.TestCase):
             "invoice_number": "MOCK-1", "vendor": "Supplier", "voucher_type": "Purchase GST",
             "entries": [{"ledger": "CGST", "amount": -900}, {"ledger": "Purchases", "amount": -10000},
                         {"ledger": "SGST", "amount": -900}, {"ledger": "Supplier", "amount": 11800}],
-            "bills": [], "fingerprint": "v5:" + "a" * 64,
+            "bills": [], "inventory": [], "fingerprint": "v5:" + "a" * 64,
         })
 
     def test_tampered_bill_receipts_are_rejected(self):
@@ -189,6 +195,25 @@ class ReceiptTest(unittest.TestCase):
         for bills in ([], [{"ledger": "Supplier", "name": "MOCK-2", "type": "New Ref", "amount_cents": 11800}]):
             with self.subTest(bills=bills), self.assertRaises(ValueError):
                 vouchers.observed_bill(billed, "saved", observed(billed, bills=bills), identity=IDENTITY)
+
+    def test_a_bill_booked_item_wise_must_read_back_every_item_and_godown(self):
+        stocked = {**BILL, "format_version": 6, "lines": [
+            BILL["lines"][0], {"ledger": "Purchases", "side": "debit", "amount_cents": 10000, "allocation": None},
+            *BILL["lines"][2:]], "inventory": [
+            {"item": "Cement", "unit": "Bag", "quantity": "2", "rate": "50", "side": "debit", "amount_cents": 10000,
+             "ledger": "Purchases", "godowns": [{"godown": "Main Location", "quantity": "1", "amount_cents": 5000},
+                                                {"godown": "Site Store", "quantity": "1", "amount_cents": 5000}]}]}
+        view = vouchers.observed_bill(stocked, "saved", observed(stocked), identity=IDENTITY)
+        self.assertEqual(view["inventory"][0]["godowns"][1], {"godown": "Site Store", "quantity": "1",
+                                                              "amount_cents": -5000})
+        moved = observed(stocked)
+        moved["inventory"][0]["godowns"] = [{"godown": "Main Location", "quantity": "2", "amount_cents": -10000}]
+        for current in (moved, observed(stocked, inventory=[]), observed(BILL)):
+            with self.subTest(inventory=current["inventory"]), self.assertRaises(ValueError):
+                vouchers.observed_bill(stocked, "saved", current, identity=IDENTITY)
+        # A bill booked to ledgers is not matched by a voucher that moved stock.
+        with self.assertRaises(ValueError):
+            vouchers.observed_bill(BILL, "saved", observed(stocked), identity=IDENTITY)
 
     def test_a_saved_correction_must_keep_the_voucher_it_replaced(self):
         plan = {**BILL, "operation": "update", "expected": {"guid": "a1b2c3d4-0000-4000-8000-000000000001", "fingerprint": "v5:x"}}

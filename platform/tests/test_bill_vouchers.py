@@ -39,6 +39,18 @@ def view(key="company"):
     # A supplier whose balance Tally keeps bill by bill.
     masters.append({"type": "LEDGER", "data": {"NAME": "Billwise Traders", "GUID": guid("Billwise Traders", key),
                                                "PARENT": "Sundry Creditors", "ALTERID": "5", "ISBILLWISEON": "Yes"}})
+    # Stock: a purchase ledger that affects inventory, items in their units, and two godowns.
+    masters.append({"type": "LEDGER", "data": {"NAME": "Purchase Stock 18%", "GUID": guid("Purchase Stock 18%", key),
+                                               "PARENT": "Purchase Accounts", "ALTERID": "5", "AFFECTSSTOCK": "Yes"}})
+    masters += [{"type": "UNIT", "data": {"NAME": name, "GUID": f"unit-{name}", "DECIMALPLACES": places,
+                                          "ISSIMPLEUNIT": simple}}
+                for name, places, simple in (("Bag", "0", "Yes"), ("MT", "3", "Yes"), ("Box of 10 Nos", "0", "No"))]
+    masters += [{"type": "STOCKITEM", "data": {"NAME": name, "GUID": guid(name, key), "ALTERID": "7", "BASEUNITS": unit,
+                                               "ISBATCHWISEON": batches}}
+                for name, unit, batches in (("OPC Cement 53", "Bag", "No"), ("TMT Bar 12mm", "MT", "No"),
+                                            ("Primer", "Bag", "Yes"), ("Anchor Bolts", "Box of 10 Nos", "No"))]
+    masters += [{"type": "GODOWN", "data": {"NAME": name, "GUID": guid(name, key)}}
+                for name in ("Main Location", "Site 4 Store")]
     masters += [{"type": "VOUCHERTYPE", "data": dict(t)} for t in TYPES]
     masters += [{"type": "COSTCATEGORY", "data": {"NAME": "Sites", "GUID": "cat-sites"}},
                 {"type": "COSTCENTRE", "data": {"NAME": "Site 4", "GUID": "cc-site-4", "CATEGORY": "Sites"}},
@@ -84,6 +96,25 @@ def proposal(**changes):
         for key in parents:
             target = target[int(key)] if key.isdigit() else target[key]
         target[int(last) if last.isdigit() else last] = value
+    return record
+
+
+def item(name, quantity, rate, amount, godowns, ledger="Purchase Stock 18%"):
+    return {"item_guid": guid(name), "quantity": quantity, "rate": rate, "amount": amount, "ledger_guid": guid(ledger),
+            "godowns": [{"godown_guid": guid(godown), "quantity": q, "amount": a} for godown, q, a in godowns],
+            "evidence": f"Printed item line {name}"}
+
+
+def stocked(*items, total=127440.00):
+    """Cement and steel bought item-wise: taxable 108000.00, CGST and SGST 9720.00 each."""
+    record = proposal(**{"document.total": total})
+    record["voucher"]["items"] = list(items) or [
+        item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 60, 22800.00), ("Site 4 Store", 40, 15200.00)]),
+        item("TMT Bar 12mm", 1.25, 56000, 70000.00, [("Site 4 Store", 1.25, 70000.00)])]
+    taxable = sum(entry["amount"] for entry in record["voucher"]["items"])
+    record["voucher"]["lines"] = [
+        line("tax", "Input CGST 9%", "debit", round(taxable * 0.09, 2), tax={"head": "cgst", "rate": 9, "taxable": taxable}),
+        line("tax", "Input SGST 9%", "debit", round(taxable * 0.09, 2), tax={"head": "sgst", "rate": 9, "taxable": taxable})]
     return record
 
 
@@ -258,6 +289,62 @@ class BoundBillTest(unittest.TestCase):
                                        "voucher.voucher_type_guid": "vt-debit-note"})
         note["voucher"]["lines"] = [{**line, "side": "credit"} for line in note["voucher"]["lines"]]
         self.assertEqual(held(note)[0], "unsupported_structure")
+
+    def test_a_bill_booked_item_wise_carries_each_item_to_its_godowns_and_purchase_ledger(self):
+        bill = check(stocked())
+        plan = bill.native_plan(REMOTE)
+        # Tally books the items' value on their purchase ledger: one line for both items, as its readback reports.
+        self.assertEqual([(ln["ledger"], ln["side"], ln["amount_cents"]) for ln in plan["lines"]], [
+            ("Acme Cement", "credit", 12744000), ("Purchase Stock 18%", "debit", 10800000),
+            ("Input CGST 9%", "debit", 972000), ("Input SGST 9%", "debit", 972000)])
+        self.assertEqual(plan["inventory"], [
+            {"item": "OPC Cement 53", "unit": "Bag", "quantity": "100", "rate": "380", "side": "debit",
+             "amount_cents": 3800000, "ledger": "Purchase Stock 18%", "godowns": [
+                 {"godown": "Main Location", "quantity": "60", "amount_cents": 2280000},
+                 {"godown": "Site 4 Store", "quantity": "40", "amount_cents": 1520000}]},
+            {"item": "TMT Bar 12mm", "unit": "MT", "quantity": "1.25", "rate": "56000", "side": "debit",
+             "amount_cents": 7000000, "ledger": "Purchase Stock 18%", "godowns": [
+                 {"godown": "Site 4 Store", "quantity": "1.25", "amount_cents": 7000000}]}])
+        self.assertEqual(plan["references"]["stock_items"]["TMT Bar 12mm"],
+                         {"GUID": guid("TMT Bar 12mm"), "BASEUNITS": "MT"})
+        self.assertEqual(plan["references"]["godowns"], {"Main Location": {"GUID": guid("Main Location")},
+                                                         "Site 4 Store": {"GUID": guid("Site 4 Store")}})
+        self.assertEqual(bill.booking, {"voucher_type": {"NAME": "Purchase GST", "GUID": "vt-purchase-gst"},
+                                        "ledgers": ["Purchase Stock 18%"], "items": True})
+        # A bill booked to ledgers carries no inventory, and its booking says so.
+        self.assertNotIn("inventory", check(proposal()).native_plan(REMOTE))
+        self.assertEqual(check(proposal()).booking["ledgers"], ["Freight Inward", "Purchase 18%", "Purchase 5%"])
+
+    def test_items_tally_cannot_take_as_proposed_hold_with_their_reasons(self):
+        cement = item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])
+        cases = {
+            "batches": (stocked(item("Primer", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])),
+                        "unsupported_structure", "Primer tracks batches"),
+            "compound unit": (stocked(item("Anchor Bolts", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])),
+                              "unsupported_structure", "Anchor Bolts is counted in a compound unit"),
+            "rate times quantity": (stocked(item("OPC Cement 53", 100, 390, 38000.00, [("Main Location", 100, 38000.00)])),
+                                    "source_values_conflict", "100 at 390 comes to 39000.00"),
+            "fractional bags": (stocked(item("OPC Cement 53", 100.5, 378.11, 38000.00,
+                                             [("Main Location", 100.5, 38000.00)])),
+                                "source_values_conflict", "OPC Cement 53 is counted in Bag to 0 decimal places"),
+            "godowns short": (stocked(item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 90, 34200.00)])),
+                              "classification_uncertain", "OPC Cement 53's godowns must take its 100 Bag and 38000.00"),
+            "ledger without stock": (stocked(item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 100, 38000.00)],
+                                                  ledger="Purchase 18%")),
+                                     "classification_uncertain", "Purchase 18% must have inventory values affected"),
+        }
+        for case, (record, code, reason) in cases.items():
+            with self.subTest(case):
+                found = held(record)
+                self.assertEqual(found[0], code)
+                self.assertIn(reason, found[1])
+        # Items are bought on a Purchase invoice; an item ledger is the items' own line.
+        journal = stocked(cement, total=44840.00)
+        journal["voucher"].update(family="journal", voucher_type_guid="vt-journal")
+        self.assertEqual(held(journal)[0], "unsupported_structure")
+        doubled = stocked(cement, total=44840.00)
+        doubled["voucher"]["lines"].append(line("expense", "Purchase Stock 18%", "debit", 100.00))
+        self.assertEqual(held(doubled)[0], "classification_uncertain")
 
     def test_values_the_bill_did_not_give_or_gave_malformed_never_reach_a_plan(self):
         # An unread origin is a missing value, not a foreign supplier.

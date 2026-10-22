@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, uuid5
@@ -124,7 +125,8 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
 
 
 _VIEW = {"guid", "master_id", "date", "voucher_type", "family", "reference", "number", "narration", "party_ledger",
-         "tag", "lines", "allocations", "bills", "fingerprint"}
+         "tag", "lines", "allocations", "bills", "inventory", "fingerprint"}
+_LISTS = {"lines", "allocations", "bills", "inventory"}
 BILL_TYPES = ("New Ref", "Agst Ref", "Advance", "On Account")
 
 
@@ -132,8 +134,8 @@ def _current(current):
     """Structural checks on a reported voucher; values are data, never trusted."""
     if not isinstance(current, dict) or set(current) != _VIEW:
         raise ValueError("Tally receipt must contain an observed voucher.")
-    if (any(not isinstance(current[k], str) for k in _VIEW - {"lines", "allocations", "bills", "tag"})
-            or any(len(current[k]) > 500 for k in _VIEW - {"lines", "allocations", "bills", "tag", "narration"})
+    if (any(not isinstance(current[k], str) for k in _VIEW - _LISTS - {"tag"})
+            or any(len(current[k]) > 500 for k in _VIEW - _LISTS - {"tag", "narration"})
             or len(current["narration"]) > 5000 or (current["tag"] is not None and not isinstance(current["tag"], str))):
         raise ValueError("Invalid observed voucher.")
     if not current["guid"] or not current["master_id"] or not re.fullmatch(r"\d{8}", current["date"]) or not current["fingerprint"]:
@@ -151,6 +153,15 @@ def _current(current):
             or not (b["name"] is None or isinstance(b["name"], str)) or type(b["amount_cents"]) is not int
             for b in current["bills"]):
         raise ValueError("Invalid bill reference readback.")
+    if not isinstance(current["inventory"], list) or any(
+            not isinstance(e, dict) or set(e) != {"item", "unit", "quantity", "rate", "amount_cents", "ledger", "godowns"}
+            or any(not isinstance(e[k], str) for k in ("item", "unit", "quantity", "rate", "ledger"))
+            or type(e["amount_cents"]) is not int or not isinstance(e["godowns"], list)
+            or any(not isinstance(g, dict) or set(g) != {"godown", "quantity", "amount_cents"}
+                   or not isinstance(g["godown"], str) or not isinstance(g["quantity"], str)
+                   or type(g["amount_cents"]) is not int for g in e["godowns"])
+            for e in current["inventory"]):
+        raise ValueError("Invalid inventory readback.")
     return current
 
 
@@ -176,12 +187,28 @@ def _planned_bills(plan):
                    for ln in plan["lines"] for bill in ln.get("bills") or []])
 
 
+def _inventory(entries):
+    """Inventory entries in one comparable order, each with its godowns sorted."""
+    return sorted(({**e, "godowns": sorted(e["godowns"], key=lambda g: (g["godown"], g["amount_cents"]))}
+                   for e in entries), key=lambda e: (e["item"], e["amount_cents"], e["quantity"], e["ledger"]))
+
+
+def _planned_inventory(plan):
+    """The items the plan approves, signed as Tally reports them: an inward item is a debit."""
+    sign = lambda entry: -1 if entry["side"] == "debit" else 1  # noqa: E731
+    return _inventory([{"item": e["item"], "unit": e["unit"], "quantity": e["quantity"], "rate": e["rate"],
+                    "amount_cents": sign(e) * e["amount_cents"], "ledger": e["ledger"],
+                    "godowns": [{"godown": g["godown"], "quantity": g["quantity"], "amount_cents": sign(e) * g["amount_cents"]}
+                                for g in e["godowns"]]} for e in plan.get("inventory") or []])
+
+
 def _exact(plan, current):
     if (current["date"] != plan["header"]["date"].replace("-", "")
             or sorted(current["lines"], key=lambda e: (e["ledger"], e["amount_cents"])) != _lines(plan)
             or sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != _allocations(plan)
-            or _bills(current["bills"]) != _planned_bills(plan)):
-        raise ValueError("Tally readback differs from the approved amounts, ledgers or bill references.")
+            or _bills(current["bills"]) != _planned_bills(plan)
+            or _inventory(current["inventory"]) != _planned_inventory(plan)):
+        raise ValueError("Tally readback differs from the approved amounts, ledgers, bill references or items.")
 
 
 def _entries(current):
@@ -228,7 +255,8 @@ def observed_bill(plan, outcome, current, *, identity):
                 raise ValueError("Tally saved the bill under a different voucher type.")
     return {"master_id": current["master_id"], "guid": current["guid"], "date": current["date"],
             "invoice_number": number, "vendor": current["party_ledger"], "voucher_type": current["voucher_type"],
-            "entries": _entries(current), "bills": current["bills"], "fingerprint": current["fingerprint"]}
+            "entries": _entries(current), "bills": current["bills"], "inventory": current["inventory"],
+            "fingerprint": current["fingerprint"]}
 
 
 def correction_reason(plan, current):
@@ -325,11 +353,12 @@ class Masters:
     """
 
     def __init__(self, view, created=()):
-        self.by_key = {}
+        self.by_key, self.by_name = {}, {}
         for record in [*view["masters"]["records"], *created]:
             guid = text(record["data"].get("GUID"))
             if guid:
                 self.by_key.setdefault((record["type"], guid), []).append(record["data"])
+            self.by_name.setdefault((record["type"], self.name(record["data"]).casefold()), []).append(record["data"])
         types = [d for (kind, _), found in self.by_key.items() if kind == "VOUCHERTYPE" for d in found]
         self.bases = base_types(types)
 
@@ -344,6 +373,11 @@ class Masters:
         if not found or len(found) != 1:
             raise HoldReason(code, message)
         return found[0]
+
+    def named(self, kind, name):
+        """The one master of this type with this name, or None; stock items name their units."""
+        found = self.by_name.get((kind, name.casefold()), [])
+        return found[0] if len(found) == 1 else None
 
     def identity(self, data):
         return {key: text(data.get(key)) for key in ("GUID", "PARENT", "ALTERID")}
@@ -372,34 +406,127 @@ def _tax_consistent(lines):
             raise HoldReason("source_values_conflict", "Central and state tax on the same rate and value must be equal.")
 
 
-def _printed_totals(document, lines, raw):
+def _printed_totals(document, lines, raw, items_cents=0):
     """Tax-inclusive amounts: the bill's printed taxable and tax totals bind the lines that claim them.
 
     A bill whose amount column already includes GST can balance with no tax line
-    at all, losing the input tax; its printed totals expose that.
+    at all, losing the input tax; its printed totals expose that. Items carry
+    taxable value too.
     """
     for key, roles, what in (("taxable", TAXABLE_ROLES, "taxable value"), ("tax", {"tax"}, "tax")):
         printed = document.get(key)
         if printed is None:
             continue
         cents = _money(printed, f"The bill's printed {what}")
-        claimed = sum(ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] in roles)
+        claimed = (items_cents if key == "taxable" else 0) + sum(
+            ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] in roles)
         if abs(claimed - cents) > TOLERANCE_CENTS:
             raise HoldReason("source_values_conflict", (
                 f"The lines claim {claimed / 100:.2f} of {what}, but the bill prints {cents / 100:.2f}. "
                 "Each expense line must carry its taxable value, and each tax its own line."))
 
 
+def _decimal(value, what, places, precision=None):
+    """A positive printed number with at most `places` decimals, exactly; `precision` says why more cannot be kept."""
+    if type(value) not in (int, float):
+        raise HoldReason("source_values_conflict", f"{what} must be a number printed on the bill.")
+    number = Decimal(str(value)).normalize()
+    if not number.is_finite() or number <= 0:
+        raise HoldReason("source_values_conflict", f"{what} must be a positive number printed on the bill.")
+    if -min(number.as_tuple().exponent, 0) > places:
+        raise HoldReason("source_values_conflict", precision or f"{what} has more than {places} decimal places.")
+    return number
+
+
+def _figure(number):
+    """A quantity or rate as plain text, without trailing zeros: Tally's 1.250 MT reads back as 1.25."""
+    return format(number.normalize(), "f")
+
+
+@dataclass(frozen=True)
+class Stock:
+    """A bill's items: each to its godowns and purchase ledger, and the ledger lines Tally books for them."""
+
+    entries: list
+    ledgers: dict  # purchase ledger -> paise, in the items' order
+    identities: dict  # purchase ledger -> its identity
+    items: dict  # stock item -> {GUID, BASEUNITS}, as the companion rechecks it
+    godowns: dict  # godown -> {GUID}
+
+    @property
+    def cents(self):
+        return sum(self.ledgers.values())
+
+
+def _stock(masters, items, party_name):
+    """Bind a bill's items to stock items, their godowns and the ledgers that carry their value in Tally."""
+    entries, ledgers, identities, known, godowns = [], {}, {}, {}, {}
+    if not isinstance(items, list) or len(items) > 40:
+        raise HoldReason("unsupported_structure", "A bill carries at most 40 item lines.")
+    for raw_item in items:
+        if not isinstance(raw_item, dict) or not isinstance(raw_item.get("evidence"), str) or not raw_item["evidence"].strip():
+            raise HoldReason("source_values_conflict", "Each item needs its stock item, figures and bill evidence.")
+        stock = masters.one("STOCKITEM", raw_item.get("item_guid"), "classification_uncertain",
+                            "Each item must select one stock item of the routed company.")
+        name, unit_name = masters.name(stock), masters.scalar(stock, "BASEUNITS")
+        if any(masters.scalar(stock, flag).casefold() == "yes" for flag in ("ISBATCHWISEON", "ISPERISHABLEON",
+                                                                            "HASMFGDATE")):
+            raise HoldReason("unsupported_structure", f"{name} tracks batches in Tally, so its purchase names the batch "
+                                                      "there. Enter this bill in Tally.")
+        unit = masters.named("UNIT", unit_name)
+        if unit is None or masters.scalar(unit, "ISSIMPLEUNIT").casefold() == "no":
+            raise HoldReason("unsupported_structure", f"{name} is counted in a compound unit ({unit_name}). Enter this "
+                                                      "bill in Tally.")
+        places = int(masters.scalar(unit, "DECIMALPLACES") or 0)
+        counted = f"{name} is counted in {unit_name} to {places} decimal places in Tally."
+        quantity = _decimal(raw_item.get("quantity"), f"{name}'s quantity", places, counted)
+        rate = _decimal(raw_item.get("rate"), f"{name}'s rate", 4)
+        amount = _money(raw_item.get("amount"), f"{name}'s amount")
+        priced = int((quantity * rate * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+        if abs(priced - amount) > TOLERANCE_CENTS:
+            raise HoldReason("source_values_conflict", f"{name}: {_figure(quantity)} at {_figure(rate)} comes to "
+                                                       f"{priced / 100:.2f}, but the bill prints {amount / 100:.2f}.")
+        ledger = masters.one("LEDGER", raw_item.get("ledger_guid"), "classification_uncertain",
+                             "Each item must select one purchase ledger of the routed company.")
+        ledger_name = masters.name(ledger)
+        if ledger_name == party_name:
+            raise HoldReason("classification_uncertain", "An item's value goes to a purchase ledger, not the supplier.")
+        if masters.scalar(ledger, "AFFECTSSTOCK").casefold() != "yes":
+            raise HoldReason("classification_uncertain", f"{ledger_name} must have inventory values affected in Tally "
+                                                         "to carry stock items.")
+        split, taken, taken_quantity = [], 0, Decimal(0)
+        for place in raw_item.get("godowns") if isinstance(raw_item.get("godowns"), list) else []:
+            godown = masters.one("GODOWN", (place or {}).get("godown_guid"), "classification_uncertain",
+                                 "Each godown must be one godown of the routed company.")
+            godown_name = masters.name(godown)
+            moved = _decimal(place.get("quantity"), f"{name}'s quantity in {godown_name}", places, counted)
+            cents = _money(place.get("amount"), f"{name}'s amount in {godown_name}")
+            if any(entry["godown"] == godown_name for entry in split):
+                raise HoldReason("classification_uncertain", f"{name} names {godown_name} twice.")
+            split.append({"godown": godown_name, "quantity": _figure(moved), "amount_cents": cents})
+            godowns[godown_name] = {"GUID": masters.scalar(godown, "GUID")}
+            taken, taken_quantity = taken + cents, taken_quantity + moved
+        if not 1 <= len(split) <= 10 or taken != amount or taken_quantity != quantity:
+            raise HoldReason("classification_uncertain", f"{name}'s godowns must take its {_figure(quantity)} "
+                                                         f"{unit_name} and {amount / 100:.2f} between them.")
+        entries.append({"item": name, "unit": unit_name, "quantity": _figure(quantity), "rate": _figure(rate),
+                        "side": "debit", "amount_cents": amount, "ledger": ledger_name, "godowns": split})
+        ledgers[ledger_name] = ledgers.get(ledger_name, 0) + amount
+        identities[ledger_name] = masters.identity(ledger)
+        known[name] = {"GUID": masters.scalar(stock, "GUID"), "BASEUNITS": unit_name}
+    return Stock(entries, ledgers, identities, known, godowns)
+
+
 class Bill:
     """A proposal bound to the company's identities; the single source of its plan."""
 
     def __init__(self, company, record, family, voucher_type, party, party_identity, lines, identities, *,
-                 billwise=False):
+                 billwise=False, stock=None, expense=()):
         document = record["document"]
         self.company, self.family, self.voucher_type, self.party = company, family, voucher_type, party
         self.kind, self.number, self.date = document["kind"], document["number"], document["date"]
         self.total_cents = _money(document["total"], "The bill total")
-        self.lines = lines
+        self.lines, self.stock, self.expense = lines, stock, sorted(expense)
         self.identities = {party: party_identity, **identities} if party_identity else dict(identities)
         # A supplier kept bill by bill is owed a New Ref named by the invoice.
         self.billwise = billwise
@@ -409,6 +536,11 @@ class Bill:
     @property
     def destination_key(self):
         return f"bill:{self.company['guid']}"
+
+    @property
+    def booking(self):
+        """How the bill is booked, as confirmation by use compares it: voucher type, expense ledgers, item-wise."""
+        return {"voucher_type": self.voucher_type, "ledgers": self.expense, "items": bool(self.stock)}
 
     def native_plan(self, remote_id, *, number_fields=("REFERENCE",), note=None):
         """The approved voucher; `note` adds what the company's practice records in the narration."""
@@ -423,7 +555,9 @@ class Bill:
             "lines": [{**self.lines[0], "bills": [{"name": self.number, "type": "New Ref",
                                                     "amount_cents": self.lines[0]["amount_cents"]}]},
                       *self.lines[1:]] if self.billwise else self.lines,
-            "references": {"company_guid": self.company["guid"], "ledgers": self.identities},
+            "references": {"company_guid": self.company["guid"], "ledgers": self.identities,
+                           **({"stock_items": self.stock.items, "godowns": self.stock.godowns} if self.stock else {})},
+            **({"inventory": self.stock.entries} if self.stock else {}),
             "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice"
                           else ["debit_note"], "party_ledger": self.party, "number": self.number,
                           "number_fields": list(number_fields), "window": invoice_window(date.fromisoformat(self.date))},
@@ -436,7 +570,11 @@ class Bill:
         return {"company": self.company["name"], "voucher_type": self.voucher_type["NAME"], "family": self.family,
                 "date": self.date, "number": self.number, "party": self.party, "total": self.total_cents / 100,
                 "lines": [{"ledger": ln["ledger"], "side": ln["side"], "amount": ln["amount_cents"] / 100}
-                          for ln in self.lines]}
+                          for ln in self.lines],
+                **({"items": [{"item": entry["item"], "quantity": entry["quantity"], "unit": entry["unit"],
+                               "rate": entry["rate"], "amount": entry["amount_cents"] / 100, "ledger": entry["ledger"],
+                               "godowns": [place["godown"] for place in entry["godowns"]]}
+                              for entry in self.stock.entries]} if self.stock else {})}
 
 
 def _document(record):
@@ -503,10 +641,16 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                                                   "name the bill it adjusts. Enter it in Tally.")
     if not isinstance(party.get("evidence"), str) or not party["evidence"].strip():
         raise HoldReason("supplier_unresolved", "The supplier selection needs evidence.")
+    stock = None
+    if voucher.get("items"):
+        if family != "purchase":
+            raise HoldReason("unsupported_structure", "Stock items are entered on a Purchase invoice. Goods returned on "
+                                                      "a credit note, or items on a Journal, are entered in Tally.")
+        stock = _stock(masters, voucher["items"], party_name)
     raw = voucher.get("lines")
-    if not isinstance(raw, list) or not 1 <= len(raw) <= 39:
+    if not isinstance(raw, list) or not (0 if stock else 1) <= len(raw) <= 39 - (len(stock.ledgers) if stock else 0):
         raise HoldReason("unsupported_structure", "A bill voucher carries 1–39 lines besides the supplier.")
-    lines, identities, taxes, tds, round_offs = [], {}, [], [], 0
+    lines, identities, taxes, tds, round_offs = [], dict(stock.identities) if stock else {}, [], [], 0
     for item in raw:
         if (not isinstance(item, dict) or item.get("role") not in LINE_ROLES or item.get("side") not in ("debit", "credit")
                 or not isinstance(item.get("evidence"), str) or not item["evidence"].strip()):
@@ -516,7 +660,8 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                              "Each line must select one ledger of the routed company.")
         name = masters.name(ledger)
         if name == party_name or name in identities:
-            raise HoldReason("classification_uncertain", "The supplier and every line need distinct ledgers.")
+            raise HoldReason("classification_uncertain", "The supplier, every line and the items' purchase ledgers need "
+                                                         "distinct ledgers.")
         identities[name] = masters.identity(ledger)
         allocation = None
         if item.get("cost_centre_guid") or item.get("cost_category_guid"):
@@ -549,9 +694,11 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
             taxes.append({"head": tax["head"], "rate": Decimal(str(tax["rate"])), "amount_cents": cents,
                           "taxable_cents": _money(tax.get("taxable"), "The taxable value")})
         lines.append(_line(name, item["side"], cents, allocation))
+    items_cents = stock.cents if stock else 0
     if tds:
-        # Deducted on the contract value, the expense lines, never on GST.
-        base = sum(ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] == "expense")
+        # Deducted on the contract value, the expense lines and items, never on GST.
+        base = items_cents + sum(ln["amount_cents"] for ln, item in zip(lines, raw, strict=True)
+                                 if item["role"] == "expense")
         for rule, cents in tds:
             expected = (Decimal(str(rule["rate"])) * base / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
             if abs(cents - int(expected)) > TOLERANCE_CENTS:
@@ -560,18 +707,22 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     if round_offs > 1:
         raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
     _tax_consistent(taxes)
-    _printed_totals(document, lines, raw)
+    _printed_totals(document, lines, raw, items_cents)
     # The supplier's line is computed from the total, so the other lines must reach it exactly: what they
     # charge, less what they take off on the supplier's side. TDS only reduces what the supplier is owed.
     total, side = _money(document["total"], "The bill total"), PARTY_SIDE[family]
-    reached = sum(ln["amount_cents"] if ln["side"] != side else -ln["amount_cents"]
-                  for ln, item in zip(lines, raw, strict=True) if item["role"] != "tds")
+    reached = items_cents + sum(ln["amount_cents"] if ln["side"] != side else -ln["amount_cents"]
+                                for ln, item in zip(lines, raw, strict=True) if item["role"] != "tds")
     if reached != total:
         raise HoldReason("source_values_conflict", (
             f"The lines come to {reached / 100:.2f}, but the bill's printed total is {total / 100:.2f}. A round-off "
             "the bill prints, of at most one rupee, is its own line; any other difference means the bill's own "
             "figures conflict."))
-    native = [_line(party_name, side, total - sum(cents for _, cents in tds)), *lines]
+    # Tally books the items' value on their purchase ledgers, one line each, ahead of the bill's own lines.
+    native = [_line(party_name, side, total - sum(cents for _, cents in tds)),
+              *(_line(ledger, "debit", cents) for ledger, cents in (stock.ledgers.items() if stock else ())), *lines]
+    expense = {*(stock.ledgers if stock else ()),
+               *(ln["ledger"] for ln, item in zip(lines, raw, strict=True) if item["role"] in TAXABLE_ROLES)}
     voucher_type_ref = {"NAME": masters.name(voucher_type), "GUID": masters.scalar(voucher_type, "GUID")}
     return Bill(company, record, family, voucher_type_ref, party_name, party_identity, native, identities,
-                billwise=billwise)
+                billwise=billwise, stock=stock, expense=expense)

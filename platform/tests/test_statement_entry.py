@@ -281,7 +281,7 @@ def readback(plan, guid="tally-1"):
     return {"guid": guid, "master_id": "71", "date": plan["header"]["date"].replace("-", ""),
             "voucher_type": plan["voucher_type"]["NAME"], "family": plan["family"],
             "reference": plan["header"]["reference"], "number": "", "narration": plan["header"]["narration"],
-            "party_ledger": "", "tag": plan["remote_id"], "fingerprint": f"fp-{guid}", "allocations": [],
+            "party_ledger": "", "tag": plan["remote_id"], "fingerprint": f"fp-{guid}", "allocations": [], "inventory": [],
             "lines": [{"ledger": line["ledger"],
                        "amount_cents": line["amount_cents"] * (1 if line["side"] == "credit" else -1)}
                       for line in plan["lines"]],

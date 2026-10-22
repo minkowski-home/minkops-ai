@@ -221,13 +221,23 @@ def by_file(**scripts):
 
 
 def readback(plan, guid="tally-1", lines=None):
-    """What the companion reads back from Tally for this bill: the plan's voucher, or one with other lines."""
+    """What the companion reads back from Tally for this bill: the plan's voucher, or one with other lines.
+
+    Tally signs debits negative, an inward item's amounts included.
+    """
+    sign = lambda side: 1 if side == "credit" else -1  # noqa: E731
     return {"guid": guid, "master_id": "71", "date": plan["header"]["date"].replace("-", ""),
             "voucher_type": plan["voucher_type"]["NAME"], "family": plan["family"], "reference": plan["header"]["reference"],
             "number": "", "narration": plan["header"]["narration"], "party_ledger": plan["header"]["party_ledger"],
-            "tag": None, "fingerprint": f"fp-{guid}", "allocations": [], "bills": [],
-            "lines": lines or [{"ledger": ln["ledger"], "amount_cents": ln["amount_cents"] * (1 if ln["side"] == "credit"
-                                                                                               else -1)}
+            "tag": None, "fingerprint": f"fp-{guid}", "allocations": [],
+            "bills": [{"ledger": ln["ledger"], "name": bill.get("name"), "type": bill["type"],
+                       "amount_cents": sign(ln["side"]) * bill["amount_cents"]}
+                      for ln in plan["lines"] for bill in ln.get("bills") or []],
+            "inventory": [{**{key: e[key] for key in ("item", "unit", "quantity", "rate", "ledger")},
+                           "amount_cents": sign(e["side"]) * e["amount_cents"],
+                           "godowns": [{**g, "amount_cents": sign(e["side"]) * g["amount_cents"]} for g in e["godowns"]]}
+                          for e in plan.get("inventory") or []],
+            "lines": lines or [{"ledger": ln["ledger"], "amount_cents": sign(ln["side"]) * ln["amount_cents"]}
                                for ln in plan["lines"]]}
 
 
