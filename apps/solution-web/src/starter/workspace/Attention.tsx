@@ -256,8 +256,10 @@ function CompanyChoices({ item, admin, clients, chosen, choose, busy, pending, d
   const card = item.card;
   if (!admin || !card) return <p className="quiet-state">A workspace admin decides whose books these are.</p>;
   const id = card.company_id, continues = card.continues;
-  const client = chosen || continues?.client || clients[0]?.slug || "";
-  const named = clients.find((c) => c.slug === client)?.name ?? client;
+  // Adding the books to the client they continue is the continuation itself, offered on its own button.
+  const others = clients.filter((c) => c.slug !== continues?.client);
+  const client = chosen || others[0]?.slug || "";
+  const named = others.find((c) => c.slug === client)?.name ?? client;
   const paths = { continue: `/${item.id}/company/continue`, add: `/${item.id}/company/add`,
     decline: `/${item.id}/company/decline` };
   const label = (path: string, idle: string, working: string) => (
@@ -271,22 +273,23 @@ function CompanyChoices({ item, admin, clients, chosen, choose, busy, pending, d
           {label(paths.continue, `Continue ${continues.client_name}'s books here`, "Continuing…")}
         </button>
       )}
-      {!card.held_on && clients.length > 0 && (
+      {!card.held_on && others.length > 0 && (
         <>
           <label className="config-field">
-            Client
+            {continues ? "Another client" : "Client"}
             <select aria-label={`Client for ${card.name}`} value={client} disabled={busy} onChange={(e) => choose(e.target.value)}>
-              {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+              {others.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
             </select>
           </label>
           <button className={continues ? "button button-ghost" : "button"} disabled={busy || !client}
-            onClick={() => decide(paths.add, `/companies/${id}/authorise`,
-              client === continues?.client ? `Continued ${named}'s books on ${card.device}` : `Added to ${named}`, { client })}>
-            {label(paths.add, client === continues?.client ? `Continue for ${named}` : `Add to ${named}`, "Adding…")}
+            onClick={() => decide(paths.add, `/companies/${id}/authorise`, `Added to ${named}`, { client })}>
+            {label(paths.add, `Add to ${named}`, "Adding…")}
           </button>
         </>
       )}
-      {!card.held_on && !clients.length && <p className="quiet-state">Add a client business before adding its companies.</p>}
+      {!card.held_on && !continues && !clients.length && (
+        <p className="quiet-state">Add a client business before adding its companies.</p>
+      )}
       <button className="button button-ghost" disabled={busy}
         onClick={() => decide(paths.decline, `/companies/${id}/decline`, "Kept out of every client's books")}>
         {label(paths.decline, "Not a client's books", "Keeping out…")}

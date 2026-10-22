@@ -47,6 +47,10 @@ test('an admin continues a client\'s books from the card, adds new books to a cl
   const moved = page.locator('article').filter({hasText:'Pradeep Infra'});
   await expect(moved).toContainText('These books were on OLD-PC, which is disconnected.');
   await expect(moved.getByRole('button', {name:'Mark as Done'})).toHaveCount(0);
+  // Adding them to another client is offered apart; the client they continue is the one-click button alone.
+  await expect(moved.getByRole('combobox', {name:'Client for Pradeep Infra'}).locator('option')).toHaveText(['Sunrise Group']);
+  await expect(moved.getByRole('button')).toHaveText(["Continue PR Infra's books here", 'Add to Sunrise Group',
+    "Not a client's books"]);
   // Books another connected PC holds are not added here; they can only be kept out.
   const held = page.locator('article').filter({hasText:'Third Company'});
   await expect(held.getByRole('combobox')).toHaveCount(0);
