@@ -22,13 +22,13 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import best_match
 from psycopg import Rollback
 from psycopg.types.json import Jsonb
 
 log = logging.getLogger(__name__)
 ANSWER_LIMIT = 64_000
 ARGUMENTS_LIMIT = 16_000
+REFUSAL_LIMIT = 1_000
 
 
 class ToolError(Exception):
@@ -52,22 +52,31 @@ class Tool:
 
 
 def _refusal(tool, arguments):
-    """Why the arguments break the tool's contract, naming each fault where it is; None when they keep it.
+    """Every way the arguments break the tool's contract, each named where it is; None when they keep it.
 
-    best_match finds the most specific error, but stops at a nullable value whose own schema reports several,
-    naming the whole value. A value that is given is held to its non-null schema, so those errors are the cause.
+    Refused one fault at a time, a model corrects one per attempt, so all are named at once, by path. A nullable
+    value that is given is held to its non-null schema, so the errors inside it are the causes; a choice between
+    real alternatives is not ours to guess, and is named as a whole.
     """
-    found = [best_match(Draft202012Validator(tool.input_schema).iter_errors(arguments))]
-    if found[0] is None:
+    faults = {}
+    for error in Draft202012Validator(tool.input_schema).iter_errors(arguments):
+        for cause in _causes(error):
+            messages = faults.setdefault("/".join(str(part) for part in cause.absolute_path) or "arguments", [])
+            if cause.message not in messages:
+                messages.append(cause.message)
+    if not faults:
         return None
-    while found[0].validator == "anyOf" and found[0].context:
-        causes = [e for e in found[0].context if not (e.validator == "type" and e.validator_value == "null")]
-        if not causes or len(causes) == len(found[0].context):
-            break  # not a nullable value: which alternative was meant is not ours to guess
-        best = best_match(causes)
-        found = [best, *(e for e in causes if e is not best and e.absolute_path == best.absolute_path)]
-    where = "/".join(str(part) for part in found[0].absolute_path) or "arguments"
-    return f"Invalid {where}: {'; '.join(e.message for e in found[:3])}"[:500]
+    text = ". ".join(f"Invalid {where}: {'; '.join(messages)}" for where, messages in faults.items())
+    return text if len(text) <= REFUSAL_LIMIT else f"{text[:REFUSAL_LIMIT - 1]}…"
+
+
+def _causes(error):
+    """The errors an error stands for: inside a nullable value that was given, its own."""
+    if error.validator == "anyOf" and error.context:
+        causes = [e for e in error.context if not (e.validator == "type" and e.validator_value == "null")]
+        if causes and len(causes) < len(error.context):
+            return [found for cause in causes for found in _causes(cause)]
+    return [error]
 
 
 def compute(tools, context, name, arguments):

@@ -51,8 +51,12 @@ TOOLS = {"find_ledger": Tool("find_ledger", "Find ledgers by name.", SUBJECTS, f
     # Several errors inside it are each named where they are, never the whole value instead.
     ("record", {"entry": {"lines": [{"amount": 1}]}}, (False, "Invalid entry/lines/0: 'tds' is a required property; "
                                                               "'tax' is a required property")),
+    # Faults in different places are all named at once: refused one at a time, a model corrects one per attempt.
+    ("record", {"entry": {"lines": [{"tax": None}, {"tds": None, "tax": 5}]}}, (
+        False, "Invalid entry/lines/0: 'tds' is a required property. Invalid entry/lines/1/tax: 5 is not of type "
+               "'object', 'null'")),
 ], ids=["answer", "json-text", "unknown-tool", "bad-json", "not-an-object", "schema", "extra-field", "refusal",
-        "too-large", "nested", "nested-several"])
+        "too-large", "nested", "nested-several", "several-places"])
 def test_the_model_is_told_exactly_why_a_call_was_refused(name, arguments, expected):
     ran.clear()
     assert tools.compute(TOOLS, None, name, arguments) == expected
