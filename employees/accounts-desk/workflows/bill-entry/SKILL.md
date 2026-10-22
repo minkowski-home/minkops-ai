@@ -67,6 +67,10 @@ Record the document as printed:
 - `date`: the issue date, as YYYY-MM-DD;
 - `total`: the gross amount payable;
 - `supplier_name` and `supplier_gstin` (null when absent);
+- `buyer_gstin`: the buyer GSTIN the bill is addressed to (null when absent). A
+  company with several GST registrations needs it to know which one bought;
+- `place_of_supply`: the place of supply as printed, such as `Delhi (07)`; null
+  when the bill prints none;
 - `origin`: `domestic`, or `foreign` for an import or a supplier outside India;
 - `taxable` and `tax`: the printed taxable total and tax total, when the bill
   prints them; otherwise null.
@@ -155,7 +159,17 @@ Propose the voucher this client's own practice records for the document.
   optional cost centre with its category, and evidence quoting the bill. Minkops
   computes the supplier's line from the total.
 - **Taxes.** A tax line states `{head: cgst|sgst|igst|cess, rate, taxable}`
-  exactly as printed, with one line per head and rate.
+  exactly as printed, with one line per head and rate. Its ledger is the one for
+  that head and rate: a ledger Tally marks as a GST duty says so in `find_ledger`
+  (`gst_duty`, such as `CGST at 9%`), and Minkops refuses one for another head
+  or rate.
+- **GST on each line.** Tally's GST returns count a purchase by what each taxed
+  line states. Give each taxed expense, freight or other charge its `supply`:
+  `goods` for HSN-coded goods, `services` for SAC-coded services. When the bill
+  taxes its lines at more than one rate, give each such line its `gst_rate` as
+  printed (CGST plus SGST, or IGST), and 0 for a line it does not tax; at one
+  rate, leave `gst_rate` null. Minkops checks that the lines at each rate come
+  to the value taxed at it.
 - **Taxable values.** Expense lines carry taxable values. When the bill's amount
   column includes the tax, use the taxable value and give the tax its own line.
 - **Adjustments.** A round-off line records a printed round-off of at most one

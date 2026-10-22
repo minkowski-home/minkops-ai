@@ -15,6 +15,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, uuid5
 
+from . import gst
 from .mirror import text
 from .voucher_types import base_types
 
@@ -127,13 +128,21 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
 _VIEW = {"guid", "master_id", "date", "voucher_type", "family", "reference", "number", "narration", "party_ledger",
          "tag", "lines", "allocations", "bills", "inventory", "fingerprint"}
 _LISTS = {"lines", "allocations", "bills", "inventory"}
+# What a companion from 0.11.0 reads back of a voucher's GST: what it states, and Tally's verdict for its returns.
+_GST = {"party_gstin", "registration_type", "state", "country", "place_of_supply", "company_gstin", "status"}
+GST_STATUSES = ("included", "uncertain", "excluded", "not_applicable", "unknown")
 BILL_TYPES = ("New Ref", "Agst Ref", "Advance", "On Account")
 
 
 def _current(current):
     """Structural checks on a reported voucher; values are data, never trusted."""
-    if not isinstance(current, dict) or set(current) != _VIEW:
+    if not isinstance(current, dict) or set(current) - {"gst"} != _VIEW:
         raise ValueError("Tally receipt must contain an observed voucher.")
+    gst_view = current.get("gst")
+    if "gst" in current and (not isinstance(gst_view, dict) or set(gst_view) != _GST
+                             or any(not isinstance(v, str) or len(v) > 100 for v in gst_view.values())
+                             or gst_view["status"] not in GST_STATUSES):
+        raise ValueError("Invalid GST readback.")
     if (any(not isinstance(current[k], str) for k in _VIEW - _LISTS - {"tag"})
             or any(len(current[k]) > 500 for k in _VIEW - _LISTS - {"tag", "narration"})
             or len(current["narration"]) > 5000 or (current["tag"] is not None and not isinstance(current["tag"], str))):
@@ -247,6 +256,7 @@ def observed_bill(plan, outcome, current, *, identity):
     if outcome in ("saved", "duplicate"):
         _exact(plan, current)
         if outcome == "saved":
+            _stated(plan, current)
             expected = plan.get("expected")
             if expected and current["guid"] != expected["guid"]:
                 raise ValueError("Tally returned a different voucher identifier.")
@@ -256,7 +266,21 @@ def observed_bill(plan, outcome, current, *, identity):
     return {"master_id": current["master_id"], "guid": current["guid"], "date": current["date"],
             "invoice_number": number, "vendor": current["party_ledger"], "voucher_type": current["voucher_type"],
             "entries": _entries(current), "bills": current["bills"], "inventory": current["inventory"],
-            "fingerprint": current["fingerprint"]}
+            "fingerprint": current["fingerprint"], **({"gst": current["gst"]} if "gst" in current else {})}
+
+
+def _stated(plan, current):
+    """A save writing GST details must read them back as written: the supplier's, and the registration Tally used."""
+    planned = plan.get("gst")
+    if not planned:
+        return
+    read = current.get("gst")
+    party = planned["party"]
+    wanted = {"party_gstin": party["gstin"], "registration_type": party["registration_type"], "state": party["state"],
+              "country": party["country"], "place_of_supply": party["place_of_supply"],
+              "company_gstin": planned["company_gstin"]}
+    if read is None or any(read[key] != value for key, value in wanted.items()):
+        raise ValueError("Tally's readback does not show the GST details Minkops wrote for this bill.")
 
 
 def correction_reason(plan, current):
@@ -539,12 +563,14 @@ class Bill:
     """A proposal bound to the company's identities; the single source of its plan."""
 
     def __init__(self, company, record, family, voucher_type, party, party_identity, lines, identities, *,
-                 billwise=False, stock=None, expense=()):
+                 billwise=False, stock=None, expense=(), returns=None, notes=()):
         document = record["document"]
         self.company, self.family, self.voucher_type, self.party = company, family, voucher_type, party
         self.kind, self.number, self.date = document["kind"], document["number"], document["date"]
         self.total_cents = _money(document["total"], "The bill total")
         self.lines, self.stock, self.expense = lines, stock, sorted(expense)
+        # What Tally's GST returns need on the voucher (`_gst`), and the notes a person reviews before approving.
+        self.returns, self.notes = returns, list(notes)
         self.identities = {party: party_identity, **identities} if party_identity else dict(identities)
         # A supplier kept bill by bill is owed a New Ref named by the invoice.
         self.billwise = billwise
@@ -576,6 +602,7 @@ class Bill:
             "references": {"company_guid": self.company["guid"], "ledgers": self.identities,
                            **({"stock_items": self.stock.items, "godowns": self.stock.godowns} if self.stock else {})},
             **({"inventory": self.stock.entries} if self.stock else {}),
+            **({"gst": self.returns} if self.returns else {}),
             "duplicate": {"strategy": "document", "families": list(KIND_FAMILIES[self.kind]) if self.kind == "invoice"
                           else ["debit_note"], "party_ledger": self.party, "number": self.number,
                           "number_fields": list(number_fields), "window": invoice_window(date.fromisoformat(self.date))},
@@ -649,10 +676,14 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
         if not assume_new_supplier:
             raise HoldReason("supplier_missing", f"Supplier '{document.get('supplier_name')}' has no ledger in "
                                                  f"{company['name']}. Create it, then this bill can be saved.")
-        party_name, party_identity = document.get("supplier_name"), None
+        party_name, party_identity, supplier = document.get("supplier_name"), None, None
     else:
         ledger = masters.one("LEDGER", party["ledger_guid"], "supplier_unresolved", "The supplier must be one ledger.")
-        party_name, party_identity = masters.name(ledger), masters.identity(ledger)
+        party_name, party_identity, supplier = masters.name(ledger), masters.identity(ledger), ledger
+        printed, held = (document.get("supplier_gstin") or "").strip().upper(), gst.supplier_gstins(ledger)
+        if printed and held and printed not in held:
+            raise HoldReason("supplier_unresolved", f"The bill's supplier GSTIN {printed} is not {party_name}'s in Tally. "
+                                                    "Choose the supplier ledger with this GSTIN, or propose supplier_unresolved.")
     billwise = party_identity is not None and masters.scalar(ledger, "ISBILLWISEON").casefold() == "yes"
     if billwise and document["kind"] == "credit_note":
         raise HoldReason("unsupported_structure", f"{party_name} keeps bill-by-bill balances, so its debit note must "
@@ -711,6 +742,9 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                 raise HoldReason("source_values_conflict", "Each tax line needs its tax head and printed rate.")
             taxes.append({"head": tax["head"], "rate": Decimal(str(tax["rate"])), "amount_cents": cents,
                           "taxable_cents": _money(tax.get("taxable"), "The taxable value")})
+            problem = gst.tax_ledger_problem(ledger, tax["head"], taxes[-1]["rate"])
+            if problem:
+                raise HoldReason("classification_uncertain", problem)
         lines.append(_line(name, item["side"], cents, allocation))
     items_cents = stock.cents if stock else 0
     if tds:
@@ -736,6 +770,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
             f"The lines come to {rupees(reached)}, but the bill's printed total is {rupees(total)}. A round-off "
             "the bill prints, of at most one rupee, is its own line; any other difference means the bill's own "
             "figures conflict."))
+    returns, notes = _gst(view, masters, company, document, family, raw, lines, taxes, supplier, party_name, stock)
     # Tally books the items' value on their purchase ledgers, one line each, ahead of the bill's own lines.
     native = [_line(party_name, side, total - sum(cents for _, cents in tds)),
               *(_line(ledger, "debit", cents) for ledger, cents in (stock.ledgers.items() if stock else ())), *lines]
@@ -743,4 +778,68 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                *(ln["ledger"] for ln, item in zip(lines, raw, strict=True) if item["role"] in TAXABLE_ROLES)}
     voucher_type_ref = {"NAME": masters.name(voucher_type), "GUID": masters.scalar(voucher_type, "GUID")}
     return Bill(company, record, family, voucher_type_ref, party_name, party_identity, native, identities,
-                billwise=billwise, stock=stock, expense=expense)
+                billwise=billwise, stock=stock, expense=expense, returns=returns, notes=notes)
+
+
+def _gst(view, masters, company, document, family, raw, lines, taxes, ledger, party_name, stock):
+    """What the voucher carries for Tally's GST returns, and the notes a person reviews, as (returns, notes).
+
+    Only a company with GST switched on files returns. Its purchase states the supplier's registration and the
+    place of supply, and each taxable line its rates, as TallyPrime needs to include it (gst.py); a debit note
+    states the supplier's. Raises a HoldReason for a buyer, place or rate the bill does not settle. Lines gain
+    their `gst` details in place.
+    """
+    registrations = gst.registrations(view)
+    buyer = (document.get("buyer_gstin") or "").strip().upper()
+    registration = None
+    if registrations:
+        if buyer:
+            registration = next((r for r in registrations if r["gstin"] == buyer), None)
+            if registration is None:
+                raise HoldReason("company_unresolved", f"The bill is addressed to GSTIN {buyer}, which is not one of "
+                                                       f"{company['name']}'s GST registrations in Tally.")
+        elif len(registrations) == 1:
+            registration = registrations[0]
+        else:
+            raise HoldReason("company_unresolved", f"{company['name']} has {len(registrations)} GST registrations in "
+                                                   "Tally: give the buyer GSTIN the bill is addressed to.")
+    place, problem = gst.place_of_supply(document, registration, masters.scalar(view["identity"], "STATENAME"))
+    if problem:
+        raise HoldReason("source_values_conflict", problem)
+    on = document["date"].replace("-", "")
+    registered = gst.supplier(ledger, on) if ledger is not None else None
+    printed = (document.get("supplier_gstin") or "").strip().upper()
+    notes = [note for note in [gst.heads_note(taxes, printed or (registered or {}).get("gstin"), place)] if note]
+    if registration is None or family not in ("purchase", "debit_note") or ledger is None:
+        return None, notes
+    if registered is None:
+        if taxes:
+            notes.append(f"Tally's GST returns cannot claim this bill's tax: {party_name} has no GSTIN in Tally. Add the "
+                         "supplier's GSTIN to its ledger there.")
+        return None, notes
+    returns = {"party": {**registered, "place_of_supply": gst.tally_state(place, registration["state"],
+                                                                            registered["state"])},
+               "company_gstin": registration["gstin"],
+               # Tally attaches a company's only registration itself; of several, the voucher names its own.
+               "registration": ({"name": registration["name"], "gstin": registration["gstin"]}
+                                if len(registrations) > 1 and registration["name"] else None)}
+    if family != "purchase" or stock or not taxes:
+        return returns, notes
+    taxable = [(index, line["amount_cents"], raw[index].get("gst_rate")) for index, line in enumerate(lines)
+               if raw[index]["role"] in TAXABLE_ROLES]
+    try:
+        rates = gst.line_rates(taxable, taxes)
+    except ValueError as error:
+        raise HoldReason("source_values_conflict", str(error)) from None
+    cesses = {tax["rate"] for tax in taxes if tax["head"] == "cess"}
+    cess = next(iter(cesses)) if len(cesses) == 1 and len(set(rates.values()) - {Decimal(0)}) == 1 else Decimal(0)
+    for index, rate in rates.items():
+        if not rate:
+            continue
+        supply = gst.SUPPLIES.get(raw[index].get("supply")) or masters.scalar(
+            masters.one("LEDGER", raw[index]["ledger_guid"], "classification_uncertain", "Select one ledger."),
+            "GSTTYPEOFSUPPLY").title() or None
+        if supply not in ("Goods", "Services"):
+            raise HoldReason("classification_uncertain", "Say whether each taxed line supplies goods or services.")
+        lines[index]["gst"] = gst.line_details(rate, supply, cess)
+    return returns, notes

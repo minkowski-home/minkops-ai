@@ -90,7 +90,9 @@ and proves it:
 - the supplier's line is computed from the printed total, and the other lines
   reach it exactly;
 - each tax line matches its printed rate and taxable value within a rupee, and
-  central and state halves agree;
+  central and state halves agree. Its ledger is one for its head and rate: as
+  Tally marks a GST duty ledger, or else as its name says;
+- the bill's supplier GSTIN is the supplier ledger's, when the ledger has one;
 - the bill's printed taxable and tax totals bind the lines that claim them, so a
   tax-inclusive amount column cannot drop the input tax;
 - a printed round-off of at most a rupee is its own line, never folded into the purchase;
@@ -250,6 +252,40 @@ The memory page shows a client's entries, with their status and the evidence
 behind them, and its rules. Every member who can reach the client reads it, and
 only admins disable, enable or delete entries or change rules
 (`/api/tenants/{slug}/clients/{client}/memory`).
+
+## GST returns
+
+Tally's GST returns read a purchase from the voucher itself. Rehearsed on
+TallyPrime (22 October 2026), an imported purchase without the supplier's GST
+details, or without each taxed line's rates stated in the voucher, is filed
+under Uncertain Transactions, whatever its masters say. With them it is
+included. Tally also accepted a tax head its states rule out, and a line rate
+its tax does not bear, so `accounts/gst.py` checks both first.
+
+For a company with GST switched on in Tally:
+
+- **The registration.** The bill's `buyer_gstin` names which of the company's
+  registrations bought; among several it is required, and must be one of them.
+- **The supplier.** The voucher states the supplier's GSTIN, registration type,
+  state and country, from its ledger as of the bill's date. A taxed bill whose
+  supplier ledger has no GSTIN waits for review: Tally cannot claim its tax.
+- **The place of supply.** As the bill prints it, else the state of the
+  registration it is addressed to.
+- **Tax heads.** CGST and SGST apply within one state and IGST between two. A
+  bill charging the other waits for review, since a supply from a special
+  economic zone, or an import, is the usual exception.
+- **Each taxed line.** A Purchase's expense, freight and other-charge lines
+  state their taxability, goods or services, and their rate for every duty
+  head. A bill at one rate gives it to every line; at several, each line gives
+  its `gst_rate`, and the lines at each rate must come to the value its tax
+  lines tax.
+
+A Debit Note states the supplier's details; an item-wise purchase does too, its
+items' rates being Tally's own. After a save, the readback must show the
+details as written, and carries Tally's verdict. A bill saved but not included,
+such as an item-wise purchase whose stock items carry no GST details, keeps a
+note saying so: its entry is sound, and its tax is completed in Tally from
+GSTR-3B's uncertain transactions.
 
 ## Saving
 

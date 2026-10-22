@@ -1,6 +1,7 @@
 """The bill gate: a proposal's identities bound to its company's pinned masters, its values checked against the bill."""
 
 import copy
+import re
 import unittest
 from datetime import date
 
@@ -364,6 +365,152 @@ class BoundBillTest(unittest.TestCase):
                        proposal(**{"voucher.lines.0.side": "sideways"}), proposal(**{"document.date": "14/10/2026"})):
             with self.subTest(line=record["voucher"]["lines"][0], date=record["document"]["date"]):
                 self.assertIn(held(record)[0], ("source_values_conflict", "required_value_missing"))
+
+
+# A GST-registered company as TallyPrime keeps it: GST switched on, a registration as a tax unit, tax ledgers marked
+# as GST duties with their heads and rates, and a supplier whose ledger holds its registration and mailing state.
+BUYER, ACME = "27ABCDE1234F1Z5", "27AAACA1234A1Z5"
+
+
+def gst_view(*, registrations=(("Test Maharashtra", BUYER),), supplier=ACME):
+    gst = view()
+    gst["identity"] = {**gst["identity"], "ISGSTON": "Yes", "STATENAME": "Maharashtra"}
+    for record in gst["masters"]["records"]:
+        data = record["data"]
+        match = re.fullmatch(r"Input ([CS])GST ([\d.]+)%", data.get("NAME", ""))
+        if match:
+            data.update(TAXTYPE="GST", GSTDUTYHEAD="CGST" if match[1] == "C" else "SGST/UTGST", RATEOFTAXCALCULATION=match[2])
+        if data.get("NAME") == "Acme Cement" and supplier:
+            data["LEDGSTREGDETAILS.LIST"] = [{"APPLICABLEFROM": "20170701", "GSTIN": supplier, "GSTREGISTRATIONTYPE": "Regular",
+                                              "PLACEOFSUPPLY": "Maharashtra"}]
+            data["LEDMAILINGDETAILS.LIST"] = {"APPLICABLEFROM": "20170701", "STATE": "Maharashtra", "COUNTRY": "India"}
+    gst["masters"]["records"] += [{"type": "TAXUNIT", "data": {"@_NAME": name, "GSTREGNUMBER": number}}
+                                  for name, number in registrations]
+    return gst
+
+
+def gst_proposal(**changes):
+    """The two-rate bill with its lines' GST rates and supply: freight is untaxed."""
+    record = proposal(**{"voucher.lines.0.gst_rate": 18, "voucher.lines.0.supply": "goods",
+                         "voucher.lines.1.gst_rate": 5, "voucher.lines.1.supply": "goods",
+                         "voucher.lines.6.gst_rate": 0, **changes})
+    return record
+
+
+def gst_check(record, **options):
+    return vouchers.check(copy.deepcopy(record), options.pop("in_view", None) or gst_view(), COMPANY, **options)
+
+
+def gst_held(record, **options):
+    try:
+        gst_check(record, **options)
+    except HoldReason as refusal:
+        return refusal.code, str(refusal)
+    raise AssertionError("The proposal passed the gate.")
+
+
+class GstReturnsTest(unittest.TestCase):
+    """What a purchase into a GST-registered company states for Tally's returns, and the GST checks before it."""
+
+    def test_a_purchase_states_the_suppliers_registration_the_place_of_supply_and_each_taxed_lines_rates(self):
+        bound = gst_check(gst_proposal())
+        plan = bound.native_plan(REMOTE)
+        self.assertEqual(plan["gst"], {"party": {"gstin": ACME, "registration_type": "Regular", "state": "Maharashtra",
+                                                 "country": "India", "place_of_supply": "Maharashtra"},
+                                       "company_gstin": BUYER, "registration": None})
+        stated = {ln["ledger"]: ln.get("gst") for ln in plan["lines"]}
+        self.assertEqual(stated["Purchase 18%"], {"taxability": "Taxable", "supply": "Goods",
+                                                  "rates": {"cgst": "9", "sgst": "9", "igst": "18", "cess": "0"}})
+        self.assertEqual(stated["Purchase 5%"]["rates"], {"cgst": "2.5", "sgst": "2.5", "igst": "5", "cess": "0"})
+        # The untaxed freight, the tax lines and the supplier state nothing of their own.
+        self.assertEqual({ln for ln, details in stated.items() if details}, {"Purchase 18%", "Purchase 5%"})
+        self.assertEqual(bound.notes, [])
+        # A company without GST switched on states nothing for returns, whatever the bill charges.
+        self.assertNotIn("gst", check(proposal()).native_plan(REMOTE))
+
+    def test_each_taxed_line_carries_a_rate_the_bills_tax_lines_charge(self):
+        one = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 5000.00),
+                                            line("tax", "Input CGST 9%", "debit", 450.00, tax={"head": "cgst", "rate": 9, "taxable": 5000.00}),
+                                            line("tax", "Input SGST 9%", "debit", 450.00, tax={"head": "sgst", "rate": 9, "taxable": 5000.00})],
+                          "document.total": 5900.00, "voucher.lines.0.gst_rate": None, "voucher.lines.0.supply": "services"})
+        # At one rate, every line that does not say otherwise is taxed at it.
+        [taxed] = [ln for ln in gst_check(one).native_plan(REMOTE)["lines"] if ln.get("gst")]
+        self.assertEqual((taxed["ledger"], taxed["gst"]["supply"], taxed["gst"]["rates"]["igst"]), ("Purchase 18%", "Services", "18"))
+        # At several, each line says its own, and the lines at each rate must come to the value taxed at it.
+        self.assertIn("more than one GST rate", gst_held(proposal())[1])
+        code, reason = gst_held(gst_proposal(**{"voucher.lines.0.gst_rate": 5, "voucher.lines.1.gst_rate": 18}))
+        self.assertEqual(code, "source_values_conflict")
+        self.assertIn("taxed at 18% come to 1500.00", reason)
+        self.assertIn("rate the bill's tax lines charge", gst_held(gst_proposal(**{"voucher.lines.6.gst_rate": 12}))[1])
+        # Goods or services: the line says, or its ledger does in Tally.
+        self.assertEqual(gst_held(gst_proposal(**{"voucher.lines.0.supply": None}))[0], "classification_uncertain")
+        typed = gst_view()
+        next(r for r in typed["masters"]["records"] if r["data"].get("NAME") == "Purchase 18%")["data"]["GSTTYPEOFSUPPLY"] = "Goods"
+        self.assertTrue(gst_check(gst_proposal(**{"voucher.lines.0.supply": None}), in_view=typed))
+
+    def test_of_several_registrations_the_bill_names_the_one_it_is_addressed_to(self):
+        several = gst_view(registrations=(("Test Maharashtra", BUYER), ("Test Karnataka", "29ABCDE1234F1Z1")))
+        self.assertIn("give the buyer GSTIN", gst_held(gst_proposal(), in_view=several)[1])
+        self.assertEqual(gst_held(gst_proposal(**{"document.buyer_gstin": "07ABCDE1234F1Z9"}), in_view=several)[0],
+                         "company_unresolved")
+        plan = gst_check(gst_proposal(**{"document.buyer_gstin": "29abcde1234f1z1"}), in_view=several).native_plan(REMOTE)
+        self.assertEqual(plan["gst"]["registration"], {"name": "Test Karnataka", "gstin": "29ABCDE1234F1Z1"})
+        # Addressed to the Karnataka registration from a Maharashtra supplier, the supply is inter-state.
+        self.assertEqual(plan["gst"]["party"]["place_of_supply"], "Karnataka")
+
+    def test_tax_heads_the_supplys_states_rule_out_go_to_a_person(self):
+        igst = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 5000.00, ),
+                                             line("tax", "Electricity", "debit", 900.00, tax={"head": "igst", "rate": 18, "taxable": 5000.00})],
+                           "document.total": 5900.00, "voucher.lines.0.supply": "goods"})
+        [note] = gst_check(igst).notes
+        self.assertIn("charges IGST, but its supplier and place of supply are both in Maharashtra", note)
+        # CGST and SGST on a supply printed as delivered to another state.
+        [note] = gst_check(gst_proposal(**{"document.place_of_supply": "Karnataka (29)"})).notes
+        self.assertIn("its supplier is in Maharashtra and its place of supply is in Karnataka, where IGST applies", note)
+        self.assertEqual(gst_check(gst_proposal(**{"document.place_of_supply": "Maharashtra"})).notes, [])
+        self.assertEqual(gst_held(gst_proposal(**{"document.place_of_supply": "Atlantis"}))[0], "source_values_conflict")
+
+    def test_a_tax_line_is_carried_by_a_ledger_for_its_head_and_rate(self):
+        # Tally marks a GST duty ledger with its head and rate.
+        swapped = gst_proposal(**{"voucher.lines.2.ledger_guid": guid("Input SGST 9%"),
+                                  "voucher.lines.3.ledger_guid": guid("Input CGST 9%")})
+        self.assertEqual(gst_held(swapped), ("classification_uncertain", "Input SGST 9% is a SGST/UTGST ledger in Tally, so "
+                                             "it cannot carry CGST at 9%. Choose the CGST ledger."))
+        rated = gst_proposal(**{"voucher.lines.4.ledger_guid": guid("Input CGST 9%"), "voucher.lines.2.ledger_guid": guid("Input CGST 2.5%")})
+        self.assertIn("Input CGST 2.5% is set to 2.5% in Tally, but the bill charges CGST at 9%", gst_held(rated)[1])
+        # A ledger Tally does not mark is read by what its name claims; a central or state ledger may name the combined rate.
+        self.assertIn("named for SGST", held(proposal(**{"voucher.lines.2.ledger_guid": guid("Input SGST 9%"),
+                                                          "voucher.lines.3.ledger_guid": guid("Input CGST 9%")}))[1])
+        self.assertIn("named for another rate", held(proposal(**{"voucher.lines.4.ledger_guid": guid("Input CGST 9%"),
+                                                                 "voucher.lines.2.ledger_guid": guid("Input CGST 2.5%")}))[1])
+        combined = view()
+        for record in combined["masters"]["records"]:
+            if record["data"]["NAME"] in ("Input CGST 9%", "Input SGST 9%"):
+                record["data"]["NAME"] = record["data"]["NAME"].replace("9%", "18%")
+        self.assertTrue(vouchers.check(copy.deepcopy(proposal()), combined, COMPANY))
+
+    def test_a_bills_supplier_gstin_is_its_ledgers(self):
+        self.assertEqual(gst_held(gst_proposal(**{"document.supplier_gstin": "27AAACZ9999Z1Z9"}))[0], "supplier_unresolved")
+
+    def test_tally_is_told_only_what_it_can_use(self):
+        # A supplier whose ledger has no GSTIN: Tally cannot claim the bill's tax, and the person is told why.
+        unregistered = gst_check(gst_proposal(), in_view=gst_view(supplier=None))
+        self.assertNotIn("gst", unregistered.native_plan(REMOTE))
+        self.assertEqual(unregistered.notes, ["Tally's GST returns cannot claim this bill's tax: Acme Cement has no GSTIN in "
+                                              "Tally. Add the supplier's GSTIN to its ledger there."])
+        # An item-wise purchase states the supplier's registration; its items' rates are Tally's own.
+        items = gst_check(stocked()).native_plan(REMOTE)
+        self.assertEqual(items["gst"]["party"]["gstin"], ACME)
+        self.assertFalse(any(ln.get("gst") for ln in items["lines"]))
+        # A debit note states the supplier's registration too; a journal, neither.
+        note = gst_proposal(**{"document.kind": "credit_note", "voucher.family": "debit_note",
+                               "voucher.voucher_type_guid": "vt-debit-note"})
+        for ln in note["voucher"]["lines"]:
+            ln["side"] = "credit"
+        debit = gst_check(note).native_plan(REMOTE)
+        self.assertEqual((debit["gst"]["party"]["gstin"], any(ln.get("gst") for ln in debit["lines"])), (ACME, False))
+        journal = gst_check(gst_proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal"}))
+        self.assertNotIn("gst", journal.native_plan(REMOTE))
 
 
 if __name__ == "__main__":

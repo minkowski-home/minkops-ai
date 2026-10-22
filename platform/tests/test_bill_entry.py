@@ -111,9 +111,10 @@ def reproposing(names, *bills, count=1):
     return by_reference("propose", {"count": count, "bills": list(bills)}, names)
 
 
-def line(role, ledger_guid, amount, *, side="debit", tax=None):
+def line(role, ledger_guid, amount, *, side="debit", tax=None, supply=None):
     return {"role": role, "ledger_guid": ledger_guid, "side": side, "amount": amount, "cost_centre_guid": None,
-            "cost_category_guid": None, "tax": tax, "tds": None, "evidence": f"Printed {role} {amount}"}
+            "cost_category_guid": None, "tax": tax, "tds": None, "gst_rate": None, "supply": supply,
+            "evidence": f"Printed {role} {amount}"}
 
 
 def proposal(company, n=1, **changes):
@@ -122,10 +123,11 @@ def proposal(company, n=1, **changes):
         "bill": n, "company_guid": company, "company_evidence": f"Billed to GSTIN {BUYER}.",
         "document": {"kind": "invoice", "number": "SOS/26/0412", "date": "2026-09-01", "total": 188800.0,
                      "supplier_name": "Sunrise Office Systems", "supplier_gstin": SUNRISE, "origin": "domestic",
-                     "taxable": 160000.0, "tax": None, "receipt_register": None},
+                     "buyer_gstin": BUYER, "place_of_supply": None, "taxable": 160000.0, "tax": None,
+                     "receipt_register": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "g-purchase",
                     "party": {"ledger_guid": "g-sunrise", "new_supplier": False, "evidence": "GSTIN matches."},
-                    "lines": [line("expense", "g-cabins", 160000.0),
+                    "lines": [line("expense", "g-cabins", 160000.0, supply="goods"),
                               line("tax", "g-cgst", 14400.0, tax={"head": "cgst", "rate": 9, "taxable": 160000.0}),
                               line("tax", "g-sgst", 14400.0, tax={"head": "sgst", "rate": 9, "taxable": 160000.0})]},
         "supplier_details": None, "exception": None, "rules": [],
@@ -155,16 +157,36 @@ def quick(monkeypatch):
     monkeypatch.setattr(openai_hosted.time, "sleep", lambda seconds: None)
 
 
+def gst_masters(company):
+    """The company's books with GST switched on, as TallyPrime keeps a registered company's."""
+    found = masters(company)
+    for record in found:
+        data = record["data"]
+        if record["type"] == "COMPANY":
+            data["ISGSTON"] = "Yes"
+        if data.get("GUID") in ("g-cgst", "g-sgst"):
+            data.update(TAXTYPE="GST", GSTDUTYHEAD="CGST" if data["GUID"] == "g-cgst" else "SGST/UTGST",
+                        RATEOFTAXCALCULATION="9")
+        if data.get("GUID") == "g-sunrise":
+            data["LEDGSTREGDETAILS.LIST"] = {"APPLICABLEFROM": "20170701", "GSTIN": SUNRISE, "GSTREGISTRATIONTYPE": "Regular"}
+            data["LEDMAILINGDETAILS.LIST"] = {"APPLICABLEFROM": "20170701", "STATE": "Andhra Pradesh", "COUNTRY": "India"}
+    return [*found, {"type": "TAXUNIT", "data": {"@_NAME": company["name"], "GUID": "g-taxunit", "GSTREGNUMBER": BUYER}}]
+
+
 @pytest.fixture
-def desk():
-    """A client business with one authorised company on one PC, its books mirrored with one prior bill."""
+def desk(request):
+    """A client business with one authorised company on one PC, its books mirrored with one prior bill.
+
+    Marked `gst`, the company has GST switched on in Tally.
+    """
+    books = gst_masters if request.node.get_closest_marker("gst") else masters
     with factory.connect() as db:
         tenant = factory.tenant(db)
         operator = factory.user(db, tenant, role="admin")
         client = factory.client(db, tenant)
         device = factory.device(db, tenant, operator)
         company = factory.company(db, tenant, device, client, name="Rehearsal Infra Private Limited")
-        factory.books(db, company, masters(company), [PRIOR])
+        factory.books(db, company, books(company), [PRIOR])
         flow = {**factory.workflow(db, tenant), "config_values": {"review_mode": "all_outputs"}}
         db.commit()
         yield {"db": db, "tenant": tenant, "operator": operator, "client": client, "device": device,
@@ -392,6 +414,53 @@ def test_a_bill_cites_only_masters_its_session_was_given(desk):
     from minkops_platform.runtime.tools import compute
     assert compute(bill_entry.BILL_TOOLS, None, tool, arguments) == (
         False, "Invalid bills/0/voucher/lines/0/ledger: 'g-cabins' does not match '^[A-Z][1-9][0-9]{0,4}$'")
+
+
+def stored(plan, status):
+    """What a companion from 0.11.0 reads back of a GST save: the details it wrote, and Tally's verdict."""
+    party = plan["gst"]["party"]
+    return {"party_gstin": party["gstin"], "registration_type": party["registration_type"], "state": party["state"],
+            "country": party["country"], "place_of_supply": party["place_of_supply"],
+            "company_gstin": plan["gst"]["company_gstin"], "status": status}
+
+
+@pytest.mark.gst
+def test_a_bill_for_a_gst_registered_company_states_what_tallys_returns_need_and_says_when_tally_leaves_it_out(desk):
+    names, company = names_of(desk["company"]), desk["company"]["guid"]
+    fake = by_file(**{"sunrise.pdf": proposing(names, proposal(company)),
+                      "next.pdf": proposing(names, proposal(company, **{"document.number": "SOS/26/0413",
+                                                                       "document.date": "2026-09-02"}))})
+    first = launch(desk, {"sunrise.pdf": B01})
+    read(desk, fake, first)
+    [bill] = records(desk, first)
+    assert (bill["status"], bill["review_reasons"]) == ("proposed", [])
+    decide(desk, bill, "approve")
+
+    def uncertain(operation, plan):
+        receipt = saved(operation, plan)
+        return {**receipt, "current": {**receipt["current"], "gst": stored(plan, "uncertain")}}
+    _, plan = companion(desk, uncertain)
+    assert plan["gst"] == {"party": {"gstin": SUNRISE, "registration_type": "Regular", "state": "Andhra Pradesh",
+                                     "country": "India", "place_of_supply": "Andhra Pradesh"},
+                           "company_gstin": BUYER, "registration": None}
+    assert {ln["ledger"]: ln.get("gst") for ln in plan["lines"]}["Office Cabins"] == {
+        "taxability": "Taxable", "supply": "Goods", "rates": {"cgst": "9", "sgst": "9", "igst": "18", "cess": "0"}}
+    # Saved and verified, but Tally leaves it out of its returns: the person is told, never left to find out.
+    bill = record(desk, bill)
+    assert (bill["status"], bill["current"]["gst"]["status"]) == ("saved", "uncertain")
+    assert bill["review_reasons"] == [bill_entry.RETURNS_NOTES["uncertain"]]
+    # Included, the save needs nothing more; a readback without what was written is never taken as saved.
+    second = launch(desk, {"next.pdf": factory.text_pdf(invoice(number="SOS/26/0413", day="02-Sep-2026"))})
+    read(desk, fake, second)
+    [nxt] = records(desk, second)
+    decide(desk, nxt, "approve")
+    with pytest.raises(ServiceError, match="GST details Minkops wrote"):
+        companion(desk)
+    desk["db"].rollback()
+    assert record(desk, nxt)["status"] == "writing"
+    companion(desk, lambda operation, plan: {**saved(operation, plan),
+                                             "current": {**readback(plan), "gst": stored(plan, "included")}})
+    assert (record(desk, nxt)["status"], record(desk, nxt)["review_reasons"]) == ("saved", [])
 
 
 def test_an_approved_bill_is_saved_once_and_tally_holding_another_version_is_never_overwritten(desk):

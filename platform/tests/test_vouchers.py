@@ -165,6 +165,25 @@ class ReceiptTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             vouchers.observed_bill(self.bill, "correction", observed(self.bill, reference="MOCK-2"), identity=IDENTITY)
 
+    def test_a_save_stating_gst_reads_back_what_it_wrote_and_keeps_tallys_verdict(self):
+        party = {"gstin": "27AAACA1234A1Z5", "registration_type": "Regular", "state": "Maharashtra", "country": "India",
+                 "place_of_supply": "Maharashtra"}
+        bill = {**self.bill, "format_version": 6, "gst": {"party": party, "company_gstin": "27ABCDE1234F1Z5",
+                                                          "registration": None}}
+        stored = {"party_gstin": party["gstin"], "registration_type": "Regular", "state": "Maharashtra", "country": "India",
+                  "place_of_supply": "Maharashtra", "company_gstin": "27ABCDE1234F1Z5", "status": "uncertain"}
+        view = vouchers.observed_bill(bill, "saved", observed(bill, gst=stored), identity=IDENTITY)
+        self.assertEqual(view["gst"]["status"], "uncertain")
+        # A companion that cannot read GST back, a detail Tally did not keep, or another registration, is not verified.
+        for current in (observed(bill), observed(bill, gst={**stored, "place_of_supply": ""}),
+                        observed(bill, gst={**stored, "company_gstin": "29ABCDE1234F1Z1"}),
+                        observed(bill, gst={**stored, "status": "maybe"}), observed(bill, gst={"status": "included"})):
+            with self.subTest(current=current.get("gst")), self.assertRaises(ValueError):
+                vouchers.observed_bill(bill, "saved", current, identity=IDENTITY)
+        # Found already in Tally, a person's own entry is judged on its accounting alone.
+        self.assertEqual(vouchers.observed_bill(bill, "duplicate", observed(bill), identity=IDENTITY)["guid"],
+                         observed(bill)["guid"])
+
     def test_a_correction_says_how_the_voucher_tally_already_has_differs(self):
         def reason(**overrides):
             current = observed(self.bill, **overrides)

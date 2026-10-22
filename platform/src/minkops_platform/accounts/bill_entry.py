@@ -448,7 +448,7 @@ def _propose_one(connection, desk, record, bill, count):
     if registered:
         # The reviewer sees which IRP registered the bill, and whether its signature verified.
         facts = {**facts, "einvoice": {key: registered[key] for key in ("status", "signer", "irn", "page")}}
-    review += [note for note in [_precedent(connection, desk, company, bound)] if note]
+    review += [*bound.notes, *[note for note in [_precedent(connection, desk, company, bound)] if note]]
     waits = _waits(connection, company, bill, bound)
     if waits:
         # An open practice is a one-click question whose answer releases the bill; a tracked one is final.
@@ -565,8 +565,8 @@ TEXT = {"type": "string", "minLength": 1, "maxLength": 1000}
 LEDGER = reference("A ledger's reference, as find_ledger gives it.")
 MONEY = {"type": "number", "exclusiveMinimum": 0}
 PRINTED = {"type": ["number", "null"], "exclusiveMinimum": 0}
-FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "taxable", "tax", "round_off", "note",
-          "receipt_register", "other")
+FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "place_of_supply", "taxable", "tax",
+          "round_off", "note", "receipt_register", "other")
 EVIDENCE = {"type": "array", "maxItems": 40, "items": schema({
     "field": {"enum": list(FIELDS)}, "page": {"type": "integer", "minimum": 1, "maximum": 12},
     "quote": {"type": "string", "minLength": 1, "maxLength": 300}}, ["field", "page", "quote"])}
@@ -575,11 +575,16 @@ DOCUMENT = schema({
     "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}, "total": PRINTED,
     "supplier_name": {"type": ["string", "null"], "maxLength": 200},
     "supplier_gstin": {"type": ["string", "null"], "maxLength": 20}, "origin": {"enum": ["domestic", "foreign", None]},
+    "buyer_gstin": {"type": ["string", "null"], "maxLength": 20,
+                    "description": "The buyer GSTIN the bill is addressed to, as printed."},
+    "place_of_supply": {"type": ["string", "null"], "maxLength": 60,
+                        "description": "The place of supply as the bill prints it, such as Delhi (07); null if it prints none."},
     "taxable": PRINTED, "tax": {"type": ["number", "null"], "minimum": 0},
     "receipt_register": _nullable(schema({
         "label": {"type": "string", "minLength": 1, "maxLength": 20},
         "number": {"type": "string", "minLength": 1, "maxLength": 40},
         "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}}, ["label", "number", "date"]))},
+    # The buyer GSTIN and place of supply are optional: a company with GST switched on asks for what it needs.
     ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "taxable", "tax",
      "receipt_register"])
 LINE = schema({
@@ -590,7 +595,13 @@ LINE = schema({
                             ["head", "rate", "taxable"])),
     "tds": _nullable(schema({"section": {"type": "string", "minLength": 2, "maxLength": 10}, "rate": MONEY},
                             ["section", "rate"])),
+    "gst_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "description": (
+        "For an expense, freight or other charge on a bill taxing its lines at more than one rate: the line's GST "
+        "rate as printed (CGST plus SGST, or IGST); 0 for an untaxed line. Otherwise null.")},
+    "supply": {"enum": ["goods", "services", None], "description": (
+        "For a taxed expense, freight or other charge: whether it supplies goods (HSN) or services (SAC).")},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 500}},
+    # A line's GST rate and supply are optional: only a taxed purchase into a GST-registered company needs them.
     ["role", "ledger", "side", "amount", "cost_centre", "tax", "tds", "evidence"])
 QUANTITY = {"type": "number", "exclusiveMinimum": 0}
 ITEM = schema({
@@ -862,6 +873,7 @@ def _repropose(connection, run, record, bill, *, review, created=(), precedent=F
                            checks={**(record["checks"] or {}), "practice": probe,
                                    **({"final": True} if code != "practice_question" else {})})
         return False
+    review = [*review, *[note for note in bound.notes if note not in review]]
     if precedent:
         review = [*review, *[note for note in [_precedent(connection, desk, company, bound)] if note]]
     kept = {key: record["proposal"][key] for key in ("rules",) if record["proposal"].get(key)}
@@ -1006,8 +1018,9 @@ def written(connection, run, record, write, receipt):
             raise ServiceError("invalid", str(error)) from error
     if outcome in ("saved", "duplicate"):
         guessed = bool(record["proposal"].get("guess"))
+        returns = [note for note in [_returns_note(write["plan"], current)] if outcome == "saved" and note]
         work.update_record(connection, record, status=outcome, current=current, hold_codes=[],
-                           review_reasons=[GUESSED] if guessed else [])
+                           review_reasons=[*([GUESSED] if guessed else []), *returns])
         # A verified save a person approved is how this supplier's bills are booked.
         memory.learn_booking(connection, run, record, write["plan"], current["guid"],
                              actor_id=memory.approver(connection, run, record), guessed=guessed)
@@ -1027,6 +1040,29 @@ def written(connection, run, record, write, receipt):
         work.update_record(connection, follower, **follow)
     return {"verified": outcome in ("saved", "duplicate"),
             "outcome": outcome if outcome in ("saved", "duplicate") else "held"}
+
+
+# How a saved bill stands in Tally's GST returns, when it is not counted, for the person who completes it there.
+RETURNS_NOTES = {
+    "uncertain": "Saved in Tally, but Tally's GST returns list it under Uncertain Transactions, so its tax is not "
+                 "claimed yet. Complete its GST details in Tally from GSTR-3B's uncertain transactions.",
+    "excluded": "Saved in Tally, but Tally excludes it from its GST returns, so its tax is not claimed. Check its GST "
+                "details in Tally.",
+    "not_applicable": "Saved in Tally, but Tally treats it as outside GST, so its tax is not claimed. Check that its "
+                      "purchase ledger has GST applicable in Tally.",
+    "unknown": "Saved in Tally, but Tally did not say whether its GST returns include it. Check it in GSTR-3B.",
+}
+
+
+def _returns_note(plan, current):
+    """Why a bill saved for a GST-registered company is not in Tally's returns yet, or None.
+
+    Tally judges the voucher against its own masters, as it stores it: item-wise bills whose items carry no GST
+    details, or a supplier ledger set up otherwise, can leave a sound entry out of the returns.
+    """
+    if not plan.get("gst"):
+        return None
+    return RETURNS_NOTES.get((current.get("gst") or {}).get("status", "unknown"))
 
 
 def stopped(connection, run):

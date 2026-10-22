@@ -305,12 +305,17 @@ class Desk:
     def ledger(self, connection, company, row, ref):
         data = row["data"]
         yes = lambda field: mirror.text(data.get(field)).casefold() == "yes"  # noqa: E731
+        # A GST duty ledger as Tally marks it: its head, and the rate it is set to.
+        duty = mirror.text(data.get("GSTDUTYHEAD")) if mirror.text(data.get("TAXTYPE")).casefold() == "gst" else ""
+        rate = mirror.text(data.get("RATEOFTAXCALCULATION"))
         # A ledger's description is the client's own note on what it records.
         return {key: value for key, value in {
             "name": row["name"], "ref": ref, "group": self.path(connection, company, row["parent"]),
             "aliases": row["aliases"] or None, "gstin": row["gstin"],
             "bank_account_ends": row["bank_account"][-4:] if row["bank_account"] else None, "ifsc": row["ifsc"],
             "cost_centres": yes("ISCOSTCENTRESON") or None, "bill_by_bill": yes("ISBILLWISEON") or None,
+            "gst_duty": (f"{duty} at {rate}%" if duty and rate not in ("", "0") else duty) or None,
+            "supply": mirror.text(data.get("GSTTYPEOFSUPPLY")).casefold() or None,
             "description": mirror.text(data.get("DESCRIPTION"))[:300] or None,
         }.items() if value is not None}
 

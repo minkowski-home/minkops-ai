@@ -18,3 +18,5 @@ dev = ["ruff==0.17.1", "pillow==12.0.0", "qrcode==8.2", "cryptography==50.0.2"]
 # root conftest and leaves database tests pointed at the server's own database.
 testpaths = ["platform/tests", "apps/solution-api/tests", "connectors/tests", "db/tests",
              "apps/corporate-website/api/tests", "infra/tests", "scripts/tests"]
+# A bill-entry desk whose company has GST switched on in Tally.
+markers = ["gst: the desk's company is GST-registered in Tally"]
