@@ -476,3 +476,5 @@ the API, a worker with 12 lanes, the console, companion 0.11.0, TallyPrime in Ed
   Manual entry needed. Statement entry 1.1.1 says a row records money moving, never what it bought. Rerun, the
   payment was proposed to the supplier's ledger and saved, and the first run's two saved rows were found in
   Tally, never written twice.
+- **A finished run still said Saving.** "3 entries approved. Saving in Tally." stayed under the completed run. A
+  notice that something is saving now goes once the run shows nothing approved or saving.
