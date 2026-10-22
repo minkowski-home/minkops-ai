@@ -153,6 +153,7 @@ def billwise(ledgers, groups, purchases, **_):
 
 
 PROBES = (receipt_notes, purchase_orders, receipt_register, invoice_number_field, bank_payments, billwise)
+NAMES = tuple(probe.__name__ for probe in PROBES)
 
 
 def findings(connection, company, version):
@@ -169,22 +170,39 @@ def findings(connection, company, version):
 
 
 def probe(connection, company, version, job):
-    """Record what the mirror settles and ask once about what it cannot."""
+    """Record what the mirror settles and ask once about what it cannot.
+
+    The version remembers which probes ran on it, so a probe added later still
+    meets books that have not changed since (unprobed). Bills waiting on a
+    practice the books now settle are checked again, as after an answer.
+    """
     if company["status"] != "authorised":
         return []
     results = findings(connection, company, version["version"])
+    settled = []
     for found in results:
         evidence = {"kind": "probe", "version": version["version"], **found.evidence}
         if found.value is not None:
             memory.record(connection, tenant_id=company["tenant_id"], client_id=company["client_id"],
                           company_id=company["id"], kind="practice", subject=found.probe, value=found.value,
                           evidence=evidence, guids=found.guids, status="confirmed")
+            settled.append(found.probe)
             continue
         if memory.live(connection, company["tenant_id"], company["client_id"], company_id=company["id"],
                        kind="practice", subject=found.probe):
             continue  # Already settled by a person's answer or earlier evidence.
         ask(connection, company, job, found)
+    connection.execute("UPDATE mirror_versions SET stats = stats || %s WHERE company_id=%s AND version=%s",
+                       (Jsonb({"probed": list(NAMES)}), company["id"], version["version"]))
+    from .bill_entry import practice_settled
+    for name in settled:
+        practice_settled(connection, company["tenant_id"], company["id"], name)
     return results
+
+
+def unprobed(version):
+    """Whether a published version has not met every probe: one added since its books last changed."""
+    return bool(set(NAMES) - set((version["stats"] or {}).get("probed") or ()))
 
 
 def ask(connection, company, job, found):

@@ -388,12 +388,19 @@ def finish(connection, device, job, result):
         else:
             mirror.abandon(connection, version, "incomplete")
             abandoned.append(key)
+    from .practice import probe, unprobed
     for version in published:
         company = connection.execute("SELECT * FROM companies WHERE id=%s", (version["company_id"],)).fetchone()
-        from .practice import probe
         memory.revalidate(connection, company, version)
         probe(connection, company, version, job)
         mirror.collect(connection, company["id"])
+    # Books unchanged since a probe was added have not met it yet.
+    for company in connection.execute(
+            "SELECT * FROM companies WHERE device_id=%s AND status='authorised' AND NOT (id = ANY(%s)) ORDER BY id",
+            (device["id"], [version["company_id"] for version in published])).fetchall():
+        latest = mirror.latest(connection, company["id"])
+        if latest and unprobed(latest):
+            probe(connection, company, latest, job)
     released = work.release(connection, device["tenant_id"], blocker(device["id"]))
     summary = {"published": [str(v["company_id"]) for v in published], "abandoned": abandoned, "released": released}
     observe_task(connection, tenant_id=device["tenant_id"], task_id=job["task_id"], run_id=job["id"], state="completed",

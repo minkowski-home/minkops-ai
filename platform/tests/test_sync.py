@@ -163,6 +163,27 @@ def test_unchanged_markers_skip_and_moved_markers_fetch_only_the_delta(pc):
     assert version["version"] == 2 and len(mirror.vouchers(pc["db"], company["id"], 2)) == 2
 
 
+def test_a_probe_the_books_have_not_met_runs_on_them_though_nothing_changed(pc):
+    from minkops_platform.accounts import practice
+    tally = Tally()
+    tally.ledger("Supplier")
+    tally.voucher("2026-09-01")
+    company = authorised(pc, tally)
+    Companion(pc["db"], pc["device"], start(pc)).run(tally)
+    db, version = pc["db"], mirror.latest(pc["db"], company["id"])
+    probed = lambda: db.execute(  # noqa: E731
+        "SELECT stats->'probed' AS names FROM mirror_versions WHERE company_id=%s AND version=%s",
+        (company["id"], version["version"])).fetchone()["names"]
+    assert probed() == list(practice.NAMES)
+    # A release adds a probe: the published books have not met it, and an unchanged sync runs it on them.
+    db.execute("UPDATE mirror_versions SET stats = stats - 'probed' WHERE company_id=%s", (company["id"],))
+    db.execute("DELETE FROM practice_questions WHERE company_id=%s AND probe='purchase_orders'", (company["id"],))
+    _, _, summary = Companion(db, pc["device"], start(pc)).run(tally)
+    assert summary["published"] == [] and probed() == list(practice.NAMES)
+    assert db.execute("SELECT status FROM practice_questions WHERE company_id=%s AND probe='purchase_orders'",
+                      (company["id"],)).fetchone()["status"] == "open"
+
+
 def test_a_deletion_found_by_the_census_becomes_a_tombstone(pc):
     tally = Tally()
     first, second = tally.voucher("2026-09-01"), tally.voucher("2026-09-02")

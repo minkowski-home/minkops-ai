@@ -797,6 +797,27 @@ def test_an_item_wise_bill_waits_on_open_practice_and_holds_where_orders_track_i
                                          "purchase is matched to its order there. Enter this bill in Tally.")
 
 
+def test_a_practice_the_books_settle_later_releases_the_bills_that_waited_on_it(desk):
+    from minkops_platform.accounts import practice
+    company, db = desk["company"]["guid"], desk["db"]
+    factory.books(db, desk["company"], masters(desk["company"]) + STORES + STOCK, [PRIOR, ITEM_WISE])
+    settle_practice(desk, receipt_notes={"in_use": False})
+    fake = by_file(**{"depot.pdf": [[("propose", {"count": 1, "bills": [depot(company)]})]]})
+    run = launch(desk, {"depot.pdf": DEPOT_PDF})
+    read(desk, fake, run)
+    [waiting] = records(desk, run)
+    assert (waiting["hold_codes"], waiting["checks"]["practice"]) == (["practice_question"], "purchase_orders")
+    # Ten more purchases, none of them against an order: the next sync settles the practice, and the bill goes on.
+    later = [{**PRIOR, "GUID": f"v-later-{n}", "REFERENCE": f"SOS/26/1{n:02d}"} for n in range(10)]
+    version = factory.books(db, desk["company"], masters(desk["company"]) + STORES + STOCK, [PRIOR, ITEM_WISE, *later])
+    task = db.execute("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Sync') RETURNING id",
+                      (desk["tenant"]["id"],)).fetchone()
+    practice.probe(db, desk["company"], version, {"task_id": task["id"]})
+    db.commit()
+    released = record(desk, waiting)
+    assert (released["status"], released["hold_codes"], released["review_reasons"]) == ("proposed", [], [])
+
+
 def repairs(company, number):
     """A Sunrise bill of 10,000.00 and 9% CGST and SGST, booked to repairs: unlike Sunrise's earlier bills."""
     entry = second_bill(company, 1)
