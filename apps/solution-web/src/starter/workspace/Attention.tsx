@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, type Client } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { useRead } from "../useRead";
@@ -25,6 +25,18 @@ interface Item {
   /** The client business whose work it is; none for a tenant's own items. */
   client: string | null;
   updated_at: string;
+  /** A newly found company, shown to those who reach every client: the client's company it continues, if any. */
+  card?: CompanyCard;
+}
+
+interface CompanyCard {
+  company_id: string;
+  name: string;
+  device: string;
+  /** Another connected PC holds these books for a client: they are not added here. */
+  held_on?: string;
+  /** The client's company these books continue, from a PC that is disconnected. */
+  continues?: { client: string; client_name: string; device: string };
 }
 
 /** Shared list across workflows. Detailed diagnostics stay in the audit store. */
@@ -40,6 +52,10 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
   const scope = `${user?.id ?? ""}:${tenant}`;
   const { data: items = [], error: loadError, loading, refresh, setData: setItems } = useRead<Item[]>(scope, base + query, { interval: 5000 });
   const { data: notice = "", setData: setNotice } = useRead<string>(scope, base + "#notice", { enabled: false });
+  const admin = Boolean(user?.is_platform_admin || user?.memberships.some((m) => m.slug === tenant && m.role === "admin"));
+  const deciding = admin && items.some((item) => item.kind === "company" && item.card && item.status === "pending");
+  const { data: clients = [] } = useRead<Client[]>(scope, `/api/tenants/${tenant}/clients`, { enabled: deciding });
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const busy = pending.size > 0;
   useEffect(() => {
     const id = window.location.hash.slice(1);
@@ -47,7 +63,8 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
   }, [items]);
   const actionKey = (path: string, body?: Record<string, string>) => path + (body?.action ?? "");
   const itemBusy = (id: string) => [...pending].some(key => key.startsWith(`/${id}/`));
-  async function action(path: string, body?: Record<string, string>, itemId?: string) {
+  /** Post one action on an item. `url` sends it elsewhere than the item, such as a company decision, saying `done`. */
+  async function action(path: string, body?: Record<string, string>, itemId?: string, to?: { url: string; done: string }) {
     if (!user) return;
     const key = actionKey(path, body);
     if (pending.has(key)) return;
@@ -55,11 +72,11 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
     setNotice("");
     try {
       const result = await api<{ status?: string }>(
-        base + path,
+        to?.url ?? base + path,
         { method: "POST", ...(body ? { body: JSON.stringify(body) } : {}) },
         user.csrf_token
       );
-      setNotice(["active", "answered"].includes(result.status ?? "") ? "Confirmed; waiting work continues"
+      setNotice(to ? to.done : ["active", "answered"].includes(result.status ?? "") ? "Confirmed; waiting work continues"
         : result.status === "done" ? "Marked done" : "Left for manual handling");
       if (itemId) {
         setItems(current => status === "pending" ? (current ?? []).filter(item => item.id !== itemId)
@@ -69,6 +86,12 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
       // invalidation also fences polls started before the committed decision.
       reads.invalidate(scope, resource => !resource.endsWith("#notice"));
     } catch (caught) {
+      if (to) {
+        // A company decision is refused with its reason, such as books another PC holds; nothing changed.
+        setNotice(caught instanceof Error ? caught.message : "Could not decide this company. Refresh and try again.");
+        reads.invalidate(scope, resource => !resource.endsWith("#notice"));
+        return;
+      }
       let receipt: { action: string; status: string } | null = null;
       if (itemId && path.endsWith("/decision")) {
         try { receipt = await api(`${base}/${itemId}/decision`); } catch { /* An unreadable receipt remains uncertain. */ }
@@ -164,7 +187,12 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
                     ))}</ul>}
                   </div>
                 )}
-                {i.status === "pending" && i.question ? (
+                {i.status === "pending" && i.kind === "company" ? (
+                  <CompanyChoices item={i} admin={admin} clients={clients} chosen={chosen[i.id] ?? ""}
+                    choose={(slug) => setChosen((current) => ({ ...current, [i.id]: slug }))}
+                    busy={itemBusy(i.id)} pending={(path) => pending.has(path)}
+                    decide={(path, url, done, body) => void action(path, body, i.id, { url: `/api/tenants/${tenant}${url}`, done })} />
+                ) : i.status === "pending" && i.question ? (
                   <div className="accounts-toolbar">
                     {i.question.options.map(({ action: answer, label }) => (
                       <button key={answer} className={answer === "nothing" ? "button button-ghost" : "button"} disabled={itemBusy(i.id)}
@@ -207,5 +235,62 @@ export function Attention({ tenant, routeSlug }: { tenant: string; routeSlug: st
         Next
       </button>
     </section>
+  );
+}
+
+/**
+ * A newly found company's decision, for admins: continue the client's company these books were (keeping what was
+ * learnt, rules and history), add them to a client, or keep them out of every client's books. Marking the card done
+ * would leave the company undecided, so it is not offered.
+ */
+function CompanyChoices({ item, admin, clients, chosen, choose, busy, pending, decide }: {
+  item: Item;
+  admin: boolean;
+  clients: Client[];
+  chosen: string;
+  choose: (slug: string) => void;
+  busy: boolean;
+  pending: (path: string) => boolean;
+  decide: (path: string, url: string, done: string, body?: Record<string, string>) => void;
+}) {
+  const card = item.card;
+  if (!admin || !card) return <p className="quiet-state">A workspace admin decides whose books these are.</p>;
+  const id = card.company_id, continues = card.continues;
+  const client = chosen || continues?.client || clients[0]?.slug || "";
+  const named = clients.find((c) => c.slug === client)?.name ?? client;
+  const paths = { continue: `/${item.id}/company/continue`, add: `/${item.id}/company/add`,
+    decline: `/${item.id}/company/decline` };
+  const label = (path: string, idle: string, working: string) => (
+    <>{pending(path) && <Spinner />}{pending(path) ? working : idle}</>
+  );
+  return (
+    <div className="accounts-toolbar">
+      {continues && (
+        <button className="button" disabled={busy}
+          onClick={() => decide(paths.continue, `/companies/${id}/authorise`, `Continued ${continues.client_name}'s books on ${card.device}`, { client: continues.client })}>
+          {label(paths.continue, `Continue ${continues.client_name}'s books here`, "Continuing…")}
+        </button>
+      )}
+      {!card.held_on && clients.length > 0 && (
+        <>
+          <label className="config-field">
+            Client
+            <select aria-label={`Client for ${card.name}`} value={client} disabled={busy} onChange={(e) => choose(e.target.value)}>
+              {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+            </select>
+          </label>
+          <button className={continues ? "button button-ghost" : "button"} disabled={busy || !client}
+            onClick={() => decide(paths.add, `/companies/${id}/authorise`,
+              client === continues?.client ? `Continued ${named}'s books on ${card.device}` : `Added to ${named}`, { client })}>
+            {label(paths.add, client === continues?.client ? `Continue for ${named}` : `Add to ${named}`, "Adding…")}
+          </button>
+        </>
+      )}
+      {!card.held_on && !clients.length && <p className="quiet-state">Add a client business before adding its companies.</p>}
+      <button className="button button-ghost" disabled={busy}
+        onClick={() => decide(paths.decline, `/companies/${id}/decline`, "Kept out of every client's books")}>
+        {label(paths.decline, "Not a client's books", "Keeping out…")}
+      </button>
+    </div>
   );
 }
