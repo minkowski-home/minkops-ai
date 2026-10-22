@@ -11,15 +11,18 @@
     "test:http": "node tests/http-smoke.mjs",
     "build": "node scripts/build.js",
     "start": "npm run build && electron .",
-    "package:win": "npm run build && electron-builder --win nsis --x64"
+    "package:win": "npm run build && node scripts/package.js",
+    "package:win:candidate": "npm run build && node scripts/package.js --unsigned"
   },
   "devDependencies": {
     "@minkops/desktop-connectors": "file:../../connectors/desktop",
     "@minkops/desktop-runtime": "file:../../platform/desktop-runtime",
+    "builder-util-runtime": "9.7.0",
     "electron": "42.11.10",
     "electron-builder": "^26.0.12",
     "electron-updater": "6.8.10",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "js-yaml": "4.3.2"
   },
   "build": {
     "appId": "com.minkops.desktop",
