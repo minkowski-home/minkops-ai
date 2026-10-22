@@ -6,7 +6,8 @@ served by a remote MCP server. Handlers are read-only or record a proposal for t
 review, and scope themselves to the run through their context. Every call is
 validated against its schema, logged once per session and call ID, bounded in
 size, and answered without internal error text: the model reads a short reason
-it can act on, never a stack trace.
+it can act on, never a stack trace. A call that fails leaves only its log: its
+handler's writes roll back with it.
 """
 
 import json
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
+from psycopg import Rollback
 from psycopg.types.json import Jsonb
 
 log = logging.getLogger(__name__)
@@ -86,7 +88,10 @@ def answer(connection, item, session_id, call, tools, context):
     if stored:
         return stored["success"], stored["answer"]
     started = time.monotonic()
-    success, text = compute(tools, context, call.name, call.arguments)
+    with connection.transaction() as attempt:
+        success, text = compute(tools, context, call.name, call.arguments)
+        if not success:
+            raise Rollback(attempt)
     connection.execute(
         """INSERT INTO tool_calls(tenant_id,item_id,session_id,call_id,turn_id,name,arguments,success,answer,duration_ms)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",

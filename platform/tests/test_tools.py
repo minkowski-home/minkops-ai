@@ -87,3 +87,31 @@ def test_a_repeated_call_gets_its_logged_answer_without_running_again():
         assert [(r["call_id"], r["name"], r["arguments"], r["success"]) for r in logged] == [
             ("call_1", "find_ledger", {"subjects": ["Acme"]}, True),
             ("call_2", "unknown", {"unparsed": "{oops"}, False)]
+
+
+@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is required")
+def test_a_call_that_fails_leaves_nothing_behind_but_its_log():
+    import factory
+    with factory.connect() as db:
+        tenant = factory.tenant(db)
+        operator = factory.user(db, tenant, role="admin")
+        run = factory.run(db, tenant, factory.client(db, tenant), factory.workflow(db, tenant), operator,
+                          [work.ItemSpec("bill", {"file_id": "a"})])
+        item = db.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
+
+        def half_done(context, arguments):
+            context.connection.execute("UPDATE run_items SET attempt=attempt+1 WHERE id=%s", (item["id"],))
+            if arguments["subjects"] == ["refused"]:
+                raise ToolError("Refused after a write.")
+            context.connection.execute("SELECT 1/0")
+
+        failing = {"record": Tool("record", "Record an entry.", SUBJECTS, half_done)}
+        for n, subject in enumerate(["refused", "broken"]):
+            call = SimpleNamespace(call_id=f"call_{n}", turn_id="turn_1", name="record", arguments={"subjects": [subject]})
+            assert not tools.answer(db, item, "sess_failing", call, failing, SimpleNamespace(connection=db))[0]
+        # Neither call's write survives, and a statement that broke does not break the transaction logging it.
+        assert db.execute("SELECT attempt FROM run_items WHERE id=%s", (item["id"],)).fetchone()["attempt"] == \
+            item["attempt"]
+        assert [r["call_id"] for r in db.execute(
+            "SELECT call_id FROM tool_calls WHERE item_id=%s AND NOT success ORDER BY call_id", (item["id"],))] == [
+            "call_0", "call_1"]
