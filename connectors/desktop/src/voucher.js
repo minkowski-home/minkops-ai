@@ -36,6 +36,12 @@ const scalar = v => raw(v).trim();
 const norm = v => scalar(v).toLowerCase();
 const nameOf = r => scalar(r?.['@_NAME'] ?? r?.NAME);
 const hash = v => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+// What a voucher states for Tally's GST returns, and Tally's own verdict on it. Read back to verify a save,
+// never part of a voucher's fingerprint: Tally restates its verdict when masters change.
+const GST_FIELDS = ['PARTYGSTIN', 'GSTREGISTRATIONTYPE', 'STATENAME', 'COUNTRYOFRESIDENCE', 'PLACEOFSUPPLY', 'CMPGSTIN',
+  'VCHGSTSTATUSISINCLUDED', 'VCHGSTSTATUSISUNCERTAIN', 'VCHGSTSTATUSISEXCLUDED', 'VCHGSTSTATUSISAPPLICABLE'];
+const GSTIN = /^[0-9]{2}[0-9A-Z]{13}$/, GST_RATE = /^\d{1,3}(\.\d{1,4})?$/;
+const GST_HEADS = [['cgst', 'CGST'], ['sgst', 'SGST/UTGST'], ['igst', 'IGST'], ['cess', 'Cess']];
 const xml = v => String(v).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'}[c]));
 const compact = date => date.replaceAll('-', '');
 const isoDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
@@ -175,6 +181,13 @@ export function validatePlan(plan) {
   if (header.party_ledger != null && !safeText(header.party_ledger)) fail('party');
   if (header.narration != null && (typeof header.narration !== 'string' || header.narration.length > 500)) fail('narration');
   if (header.tag != null && !/^[a-z]{1,20}$/.test(header.tag)) fail('tag');
+  if (plan.gst != null) {
+    // Protocol 6 only: the supplier's registration and the place of supply, for a purchase or debit note.
+    const {party = {}, company_gstin: company, registration} = plan.gst;
+    if (plan.format_version < 6 || !['purchase', 'debit_note'].includes(plan.family) || !GSTIN.test(party.gstin ?? '')
+        || !GSTIN.test(company ?? '') || ['registration_type', 'state', 'country', 'place_of_supply'].some(k => !safeText(party[k], 60))) fail('gst');
+    if (registration != null && (!safeText(registration.name) || registration.gstin !== company)) fail('gst registration');
+  }
 
   const lines = plan.lines;
   if (!Array.isArray(lines) || lines.length < 2 || lines.length > 40) fail('line count');
@@ -182,6 +195,9 @@ export function validatePlan(plan) {
   for (const line of lines) {
     if (!safeText(line?.ledger) || !['debit', 'credit'].includes(line.side) || !Number.isSafeInteger(line.amount_cents) || line.amount_cents <= 0) fail('line');
     if (line.allocation != null && !['category', 'category_guid', 'centre', 'centre_guid'].every(k => safeText(line.allocation[k]))) fail('allocation');
+    // A taxed purchase line states its rates in the voucher: Tally reads none from masters for an import.
+    if (line.gst != null && (plan.gst == null || plan.family !== 'purchase' || line.gst.taxability !== 'Taxable'
+        || !['Goods', 'Services'].includes(line.gst.supply) || GST_HEADS.some(([k]) => !GST_RATE.test(line.gst.rates?.[k] ?? '')))) fail('line gst');
     if (line.bills != null) {
       // Protocol 6 only: references that name their bill (On Account names none) and add up to the line.
       if (plan.format_version < 6 || !Array.isArray(line.bills) || !line.bills.length || line.bills.length > 20) fail('bills');
@@ -250,7 +266,7 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
   if (!isoDate(window?.from) || !isoDate(window?.to)) throw new Error('Invalid voucher window.');
   const from = compact(window.from), to = compact(window.to);
   const day = '($$YearOfDate:$Date * 10000 + $$MonthOfDate:$Date * 100 + $$DayOfDate:$Date)';
-  const body = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsVouchers</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${xml(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">${from}</SVFROMDATE><SVTODATE TYPE="Date">${to}</SVTODATE><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsVouchers"><TYPE>Voucher</TYPE><FETCH>MasterID,GUID,AlterID,Date,VoucherNumber,Reference,Narration,PartyLedgerName,VoucherTypeName,IsInvoice,AllLedgerEntries.*,LedgerEntries.*,AllInventoryEntries.*,InventoryEntries.*</FETCH><FILTER>MinkopsVoucherWindow</FILTER></COLLECTION><SYSTEM TYPE="Formulae" NAME="MinkopsVoucherWindow">(${day} >= ${from}) AND (${day} &lt;= ${to})</SYSTEM></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+  const body = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsVouchers</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${xml(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">${from}</SVFROMDATE><SVTODATE TYPE="Date">${to}</SVTODATE><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsVouchers"><TYPE>Voucher</TYPE><FETCH>MasterID,GUID,AlterID,Date,VoucherNumber,Reference,Narration,PartyLedgerName,VoucherTypeName,IsInvoice,${GST_FIELDS.join(',')},AllLedgerEntries.*,LedgerEntries.*,AllInventoryEntries.*,InventoryEntries.*</FETCH><FILTER>MinkopsVoucherWindow</FILTER></COLLECTION><SYSTEM TYPE="Formulae" NAME="MinkopsVoucherWindow">(${day} >= ${from}) AND (${day} &lt;= ${to})</SYSTEM></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
   const envelope = (await tallyExchange(company, port, body, request)).ENVELOPE;
   if (scalar(envelope?.HEADER?.STATUS) !== '1' || !Object.hasOwn(envelope?.BODY?.DATA ?? {}, 'COLLECTION'))
     throw new Error('Tally did not confirm the voucher collection.');
@@ -289,7 +305,10 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
       guid: scalar(v.GUID), master_id: scalar(v.MASTERID), date, voucher_type: scalar(v.VOUCHERTYPENAME),
       reference: scalar(v.REFERENCE), number: scalar(v.VOUCHERNUMBER), narration: scalar(v.NARRATION),
       party_ledger: scalar(v.PARTYLEDGERNAME), tag: scalar(v.NARRATION).match(/\[Minkops [a-z]+:([a-f0-9-]{36})\]/)?.[1] ?? null,
-      unsupported, fingerprint: `v5:${hash(v)}`,
+      unsupported, fingerprint: `v5:${hash(Object.fromEntries(Object.entries(v).filter(([k]) => !GST_FIELDS.includes(k))))}`,
+      gst: {party_gstin: scalar(v.PARTYGSTIN), registration_type: scalar(v.GSTREGISTRATIONTYPE), state: scalar(v.STATENAME),
+        country: scalar(v.COUNTRYOFRESIDENCE), place_of_supply: scalar(v.PLACEOFSUPPLY), company_gstin: scalar(v.CMPGSTIN),
+        status: gstStatus(v)},
       entries: entries.map(e => ({ledger: scalar(e.LEDGERNAME), amount_cents: nativeCents(e.AMOUNT)})).sort(byLedger),
       allocations: allocations.sort(byLedger), bills: bills.sort(byBill), inventory: inventory.sort(byItem),
     };
@@ -366,7 +385,17 @@ function documentMatches(voucher, duplicate) {
 function observedVoucher(v, family) {
   return {guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family,
     reference: v.reference, number: v.number, narration: v.narration, party_ledger: v.party_ledger, tag: v.tag,
-    lines: v.entries, allocations: v.allocations, bills: v.bills ?? [], inventory: v.inventory ?? [], fingerprint: v.fingerprint};
+    lines: v.entries, allocations: v.allocations, bills: v.bills ?? [], inventory: v.inventory ?? [], fingerprint: v.fingerprint,
+    ...(v.gst ? {gst: v.gst} : {})};
+}
+
+/** Tally's own verdict on a voucher for its GST returns, as it stores it. */
+function gstStatus(v) {
+  const yes = key => norm(v[key]) === 'yes';
+  if (yes('VCHGSTSTATUSISINCLUDED')) return 'included';
+  if (yes('VCHGSTSTATUSISUNCERTAIN')) return 'uncertain';
+  if (yes('VCHGSTSTATUSISEXCLUDED')) return 'excluded';
+  return norm(v.VCHGSTSTATUSISAPPLICABLE) === 'no' ? 'not_applicable' : 'unknown';
 }
 
 const hold = (code, message) => ({outcome: 'attention', hold: code, ...(message ? {message} : {})});
@@ -421,14 +450,19 @@ function importBody(plan, typeName, current) {
     const amount = signed(line), deemed = amount < 0 ? 'Yes' : 'No', a = line.allocation;
     const allocation = a ? `<CATEGORYALLOCATIONS.LIST><CATEGORY>${xml(a.category)}</CATEGORY><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><COSTCENTREALLOCATIONS.LIST><NAME>${xml(a.centre)}</NAME><AMOUNT>${money(amount)}</AMOUNT></COSTCENTREALLOCATIONS.LIST></CATEGORYALLOCATIONS.LIST>` : '';
     const bills = lineBills(line).map(b => `<BILLALLOCATIONS.LIST>${b.name != null ? `<NAME>${xml(b.name)}</NAME>` : ''}<BILLTYPE>${xml(b.type)}</BILLTYPE><AMOUNT>${money(b.amount_cents)}</AMOUNT></BILLALLOCATIONS.LIST>`).join('');
-    return `<${entryTag}><LEDGERNAME>${xml(line.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><AMOUNT>${money(amount)}</AMOUNT>${allocation}${bills}</${entryTag}>`;
+    const rates = line.gst ? [...GST_HEADS.map(([k, head]) => [head, line.gst.rates[k]]), ['State Cess', '0']] : [];
+    const gst = line.gst ? `<GSTOVRDNTAXABILITY>${xml(line.gst.taxability)}</GSTOVRDNTAXABILITY><GSTOVRDNTYPEOFSUPPLY>${xml(line.gst.supply)}</GSTOVRDNTYPEOFSUPPLY><GSTRATEINFERAPPLICABILITY>Specify in Voucher</GSTRATEINFERAPPLICABILITY>${rates.map(([head, rate]) => `<RATEDETAILS.LIST><GSTRATEDUTYHEAD>${head}</GSTRATEDUTYHEAD><GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE><GSTRATE>${xml(rate)}</GSTRATE></RATEDETAILS.LIST>`).join('')}` : '';
+    return `<${entryTag}><LEDGERNAME>${xml(line.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><AMOUNT>${money(amount)}</AMOUNT>${gst}${allocation}${bills}</${entryTag}>`;
   }).join('');
   const items = stock.map(e => {
     const quantity = q => `${xml(q)} ${xml(e.unit)}`;
     const batches = e.godowns.map(g => `<BATCHALLOCATIONS.LIST><GODOWNNAME>${xml(g.godown)}</GODOWNNAME><BATCHNAME>${PRIMARY_BATCH}</BATCHNAME><AMOUNT>${money(-g.amount_cents)}</AMOUNT><ACTUALQTY>${quantity(g.quantity)}</ACTUALQTY><BILLEDQTY>${quantity(g.quantity)}</BILLEDQTY></BATCHALLOCATIONS.LIST>`).join('');
     return `<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>${xml(e.item)}</STOCKITEMNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><RATE>${xml(e.rate)}/${xml(e.unit)}</RATE><ACTUALQTY>${quantity(e.quantity)}</ACTUALQTY><BILLEDQTY>${quantity(e.quantity)}</BILLEDQTY><AMOUNT>${money(-e.amount_cents)}</AMOUNT>${batches}<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>${xml(e.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><AMOUNT>${money(-e.amount_cents)}</AMOUNT></ACCOUNTINGALLOCATIONS.LIST></ALLINVENTORYENTRIES.LIST>`;
   }).join('');
-  return `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="${xml(type)}" OBJVIEW="${view}"><GUID>${xml(guid)}</GUID><DATE>${compact(header.date)}</DATE><VOUCHERTYPENAME>${xml(type)}</VOUCHERTYPENAME>${header.reference ? `<REFERENCE>${xml(header.reference)}</REFERENCE>` : ''}${header.party_ledger ? `<PARTYLEDGERNAME>${xml(header.party_ledger)}</PARTYLEDGERNAME>` : ''}<PERSISTEDVIEW>${view}</PERSISTEDVIEW><ISINVOICE>${invoice ? 'Yes' : 'No'}</ISINVOICE><NARRATION>${xml(narration)}</NARRATION>${lines}${items}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
+  // The supplier's registration and the place of supply, as Tally's returns read them from the voucher.
+  const g = plan.gst, party = g?.party;
+  const gst = g ? `<STATENAME>${xml(party.state)}</STATENAME><COUNTRYOFRESIDENCE>${xml(party.country)}</COUNTRYOFRESIDENCE><GSTREGISTRATIONTYPE>${xml(party.registration_type)}</GSTREGISTRATIONTYPE><PARTYGSTIN>${xml(party.gstin)}</PARTYGSTIN><PLACEOFSUPPLY>${xml(party.place_of_supply)}</PLACEOFSUPPLY>${g.registration ? `<GSTREGISTRATION>${xml(g.registration.name)}</GSTREGISTRATION><CMPGSTIN>${xml(g.registration.gstin)}</CMPGSTIN>` : ''}` : '';
+  return `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="${xml(type)}" OBJVIEW="${view}"><GUID>${xml(guid)}</GUID><DATE>${compact(header.date)}</DATE><VOUCHERTYPENAME>${xml(type)}</VOUCHERTYPENAME>${header.reference ? `<REFERENCE>${xml(header.reference)}</REFERENCE>` : ''}${header.party_ledger ? `<PARTYLEDGERNAME>${xml(header.party_ledger)}</PARTYLEDGERNAME>` : ''}${gst}<PERSISTEDVIEW>${view}</PERSISTEDVIEW><ISINVOICE>${invoice ? 'Yes' : 'No'}</ISINVOICE><NARRATION>${xml(narration)}</NARRATION>${lines}${items}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
 }
 
 /** One approved voucher. `fence: "strict"` requires a durable local intent

@@ -264,6 +264,26 @@ Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
 
+### Companion 0.11.0 contracts
+
+0.11.0 is the minimum for all Tally work. It confirms that the Tally on its port
+is its own Windows user's ([Hosted Tally](hosted-tally.md)), and a protocol 6
+bill may state its GST for Tally's returns:
+
+- **GST.** A Purchase or Debit Note into a GST-registered company may carry
+  `gst`: the supplier's GSTIN, registration type, state and country, the place
+  of supply, the company's GSTIN, and, among several registrations, the one the
+  bill is addressed to. A Purchase's taxed ledger lines may carry `gst`: their
+  taxability, goods or services, and each duty head's rate. The companion writes
+  them as Tally's party details and, on the line, rates "Specify in Voucher": an
+  imported voucher without them is one Tally's returns list as uncertain (see
+  [Bill entry](bill-entry.md#gst-returns)).
+- **Readback.** Every voucher read back carries `gst`: the party details Tally
+  stored, the company GSTIN it attached, and its own verdict for its returns
+  (`included`, `uncertain`, `excluded`, `not_applicable` or `unknown`). None of
+  it enters the voucher's fingerprint, because Tally restates its verdict when
+  masters change.
+
 ### Companion 0.10.0 contracts
 
 Plan protocol 6 is protocol 5 plus bill references and inventory:

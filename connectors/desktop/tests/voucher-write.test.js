@@ -90,6 +90,42 @@ function harness(reads, {reply = accepted, references: refs = snapshot(), fence 
   return io;
 }
 
+// A purchase into a GST-registered company: the supplier's registration, the place of supply and each taxed line's
+// rates, stated in the voucher as Tally's returns need them.
+const gstPurchase = {
+  ...purchase, format_version: 6,
+  gst: {party: {gstin: '37AAQCS1234F1Z9', registration_type: 'Regular', state: 'Andhra Pradesh', country: 'India',
+    place_of_supply: 'Andhra Pradesh'}, company_gstin: '37ABCPR1234Q1ZB', registration: null},
+  lines: purchase.lines.map(l => l.ledger === 'Purchase 18%'
+    ? {...l, gst: {taxability: 'Taxable', supply: 'Goods', rates: {cgst: '9', sgst: '9', igst: '18', cess: '0'}}} : l),
+};
+
+test('a GST purchase states what Tally\'s returns need, and its receipt carries Tally\'s verdict', async () => {
+  const io = harness([[], [observed(gstPurchase, {gst: {status: 'included'}})]]);
+  const result = await saveVoucher(gstPurchase, io.options);
+  assert.equal(result.outcome, 'saved');
+  assert.equal(result.current.gst.status, 'included');
+  const body = io.imports[0];
+  assert.ok(body.includes('<PARTYLEDGERNAME>Supplier A</PARTYLEDGERNAME><STATENAME>Andhra Pradesh</STATENAME><COUNTRYOFRESIDENCE>India'
+    + '</COUNTRYOFRESIDENCE><GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE><PARTYGSTIN>37AAQCS1234F1Z9</PARTYGSTIN>'
+    + '<PLACEOFSUPPLY>Andhra Pradesh</PLACEOFSUPPLY><PERSISTEDVIEW>'));
+  // The company's only registration is Tally's to attach; the voucher names one only among several.
+  assert.ok(!body.includes('<CMPGSTIN>'));
+  const taxed = body.match(/<ALLLEDGERENTRIES\.LIST><LEDGERNAME>Purchase 18%<\/LEDGERNAME>.*?<\/ALLLEDGERENTRIES\.LIST>/)[0];
+  assert.ok(taxed.includes('<GSTOVRDNTAXABILITY>Taxable</GSTOVRDNTAXABILITY><GSTOVRDNTYPEOFSUPPLY>Goods</GSTOVRDNTYPEOFSUPPLY>'
+    + '<GSTRATEINFERAPPLICABILITY>Specify in Voucher</GSTRATEINFERAPPLICABILITY>'));
+  assert.deepEqual([...taxed.matchAll(/<GSTRATEDUTYHEAD>([^<]+)<\/GSTRATEDUTYHEAD><GSTRATEVALUATIONTYPE>Based on Value<\/GSTRATEVALUATIONTYPE><GSTRATE>([^<]+)</g)]
+    .map(m => [m[1], m[2]]), [['CGST', '9'], ['SGST/UTGST', '9'], ['IGST', '18'], ['Cess', '0'], ['State Cess', '0']]);
+  // The cost allocation still follows the line's own fields.
+  assert.ok(taxed.includes('<CATEGORYALLOCATIONS.LIST><CATEGORY>Sites</CATEGORY>'));
+  const tax = body.match(/<ALLLEDGERENTRIES\.LIST><LEDGERNAME>Input CGST<\/LEDGERNAME>.*?<\/ALLLEDGERENTRIES\.LIST>/)[0];
+  assert.ok(!tax.includes('GSTRATE'));
+  const several = {...gstPurchase, gst: {...gstPurchase.gst, registration: {name: 'Andhra Pradesh Registration', gstin: '37ABCPR1234Q1ZB'}}};
+  const named = harness([[], [observed(several)]]);
+  await saveVoucher(several, named.options);
+  assert.ok(named.imports[0].includes('<GSTREGISTRATION>Andhra Pradesh Registration</GSTREGISTRATION><CMPGSTIN>37ABCPR1234Q1ZB</CMPGSTIN>'));
+});
+
 test('plans are validated before any native call', async () => {
   const bad = [
     {...purchase, format_version: 4},
@@ -112,6 +148,15 @@ test('plans are validated before any native call', async () => {
     {...payment, duplicate: {...payment.duplicate, match: {ledger: 'HDFC', side: 'debit', amount_cents: 1770}}},
     {...payment, duplicate: {...contra.duplicate, match: payment.duplicate.match}},
     {...payment, remote_id: 'not-a-uuid'},
+    // GST details: protocol 6, a purchase or debit note, a valid GSTIN, every party field, and stated rates.
+    {...gstPurchase, format_version: 5},
+    {...gstPurchase, family: 'journal', voucher_type: {NAME: 'Journal', GUID: 'j'}, lines: purchase.lines},
+    {...gstPurchase, gst: {...gstPurchase.gst, party: {...gstPurchase.gst.party, gstin: '37AAQCS1234'}}},
+    {...gstPurchase, gst: {...gstPurchase.gst, party: {...gstPurchase.gst.party, place_of_supply: ''}}},
+    {...gstPurchase, gst: {...gstPurchase.gst, registration: {name: 'Other', gstin: '07ABCPR1234Q1ZB'}}},
+    {...purchase, format_version: 6, lines: gstPurchase.lines},
+    {...gstPurchase, lines: gstPurchase.lines.map(l => l.gst ? {...l, gst: {...l.gst, supply: 'Both'}} : l)},
+    {...gstPurchase, lines: gstPurchase.lines.map(l => l.gst ? {...l, gst: {...l.gst, rates: {...l.gst.rates, igst: '18%'}}} : l)},
   ];
   for (const plan of bad) {
     const io = harness([[]]);
@@ -119,6 +164,7 @@ test('plans are validated before any native call', async () => {
     assert.equal(io.companyChecks + io.imports.length, 0);
   }
   assert.equal(validatePlan(purchase), purchase);
+  assert.equal(validatePlan(gstPurchase), gstPurchase);
 });
 
 test('one import carries every line with native signs, allocations and the pinned voucher type', async () => {
@@ -273,8 +319,19 @@ test('voucher reads are bounded to the calendar window and parsed into comparabl
     narration: `[Minkops statement:${id}] UPI`, party_ledger: 'Supplier A', tag: id, unsupported: false, fingerprint: undefined,
     entries: [{ledger: 'Purchase 18%', amount_cents: -118040}, {ledger: 'Supplier A', amount_cents: 118040}],
     allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}], bills: [], inventory: [],
+    gst: {party_gstin: '', registration_type: '', state: '', country: '', place_of_supply: '', company_gstin: '', status: 'unknown'},
   });
   assert.match(record.fingerprint, /^v5:[a-f0-9]{64}$/);
+  // Tally's GST verdict and the party details it stored are read back, and never move the fingerprint.
+  assert.ok(bodies[0].includes('PARTYGSTIN,') && bodies[0].includes('VCHGSTSTATUSISINCLUDED'));
+  const verdict = (flag, value = 'Yes') => voucher('20261001').replace('<VOUCHERTYPENAME>', '<PARTYGSTIN>37AAQCS1234F1Z9</PARTYGSTIN>'
+    + `<PLACEOFSUPPLY>Andhra Pradesh</PLACEOFSUPPLY><VCHGSTSTATUSISAPPLICABLE>Yes</VCHGSTSTATUSISAPPLICABLE><${flag}>${value}</${flag}><VOUCHERTYPENAME>`);
+  const read = async xmlText => (await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(xmlText)}))[0];
+  const included = await read(verdict('VCHGSTSTATUSISINCLUDED'));
+  assert.equal(included.fingerprint, record.fingerprint);
+  assert.deepEqual([included.gst.party_gstin, included.gst.place_of_supply, included.gst.status], ['37AAQCS1234F1Z9', 'Andhra Pradesh', 'included']);
+  assert.equal((await read(verdict('VCHGSTSTATUSISUNCERTAIN'))).gst.status, 'uncertain');
+  assert.equal((await read(verdict('VCHGSTSTATUSISINCLUDED', 'No'))).gst.status, 'unknown');
   // Bill references are read with their ledger; they no longer make a voucher unsupported.
   const referenced = voucher('20261001').replace('<AMOUNT>1180.40</AMOUNT></ALLLEDGERENTRIES.LIST>',
     '<AMOUNT>1180.40</AMOUNT><BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>New Ref</BILLTYPE><AMOUNT>1180.40</AMOUNT>'
