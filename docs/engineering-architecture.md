@@ -69,9 +69,9 @@ modules, independently of workflow keys. Accounts keeps its business checks and
 verified Tally write reconciliation in those handlers. The worker serves lanes
 that follow each run item's session.
 
-`runs`, `run_items` and `run_records` hold every run. The retired pipeline's tables
-(`workflow_runs` and its kin) stay, unread, until the cut-over drops them (rebuild
-slice 13).
+`runs`, `run_items` and `run_records` hold every run, with each item's sessions
+(`item_sessions`), tool calls (`tool_calls`) and references (`item_refs`). The
+retired pipeline's tables left with migration `0032`.
 
 See [workflow authoring](workflow-authoring.md) for contracts, installation,
 extension points, and migration/rollback guidance.

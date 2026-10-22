@@ -1,6 +1,13 @@
 # Data warehouse plan
 
 Status: **approved plan, not yet implemented** (17 October 2026).
+
+> **Schema since superseded.** This plan predates the accounts desk rebuild, which
+> replaced `workflow_runs` and its kin with `runs`, `run_items`, `run_records`,
+> `record_decisions`, `item_sessions`, `tool_calls`, `item_refs` and `native_writes`
+> (migrations `0020`–`0032`), and dropped the old tables. The architecture, layers
+> and gates below stand; re-derive Phase 0's corrections, the extraction manifest
+> and the run facts from the current schema before building them.
 Execution scope now: **local PostgreSQL warehouse for development and testing.**
 Production tools (BigQuery, Datastream, Airflow, BI) are described as the next
 step and must not be built until their gates in [Phase 5](#phase-5--production-path-next-not-now) are met.

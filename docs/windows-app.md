@@ -144,9 +144,9 @@ typed state on a Windows PC without changing Tally, for rehearsals.
 
 ## Build and run
 
-Run `db/migrate.py` before starting a new revision; it installs the baseline or
-adopts archived upgrade history without resetting run history (see
-[database upgrades](../db/README.md)). See [workflow authoring](workflow-authoring.md)
+Run `db/migrate.py` before starting a new revision; it installs the baseline on a
+fresh database and applies every later migration in order (see
+[database migrations](../db/README.md)). See [workflow authoring](workflow-authoring.md)
 for installation and recovery.
 
 Use Node 24 and the existing Python/uv workspace. From the repository root:
@@ -172,7 +172,7 @@ default is `https://app.minkops.com`. Packaged releases accept HTTPS only.
 Development can use localhost HTTP. The web host must serve existing `/api/`
 routes at the same origin; Vite already supports this through `VITE_API_TARGET`.
 A build does not deploy or prove that the default production host serves this
-branch. Install or adopt the final baseline before using bill entry. Use normal
+branch. Run the migrations before using bill entry. Use normal
 production email verification and secure session settings; never production
 `AUTH_DEV_MODE` or demo seeding.
 
