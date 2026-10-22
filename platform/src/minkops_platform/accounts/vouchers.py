@@ -714,9 +714,12 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
         ledger = masters.one("LEDGER", item.get("ledger_guid"), "classification_uncertain",
                              "Each line must select one ledger of the routed company.")
         name = masters.name(ledger)
-        if name == party_name or name in identities:
-            raise HoldReason("classification_uncertain", "The supplier, every line and the items' purchase ledgers need "
-                                                         "distinct ledgers.")
+        if name == party_name:
+            raise HoldReason("classification_uncertain", f"{name} is the supplier's ledger: Minkops writes its line "
+                                                         "from the bill's total.")
+        if name in identities:
+            raise HoldReason("classification_uncertain", f"{name} is on more than one line: give it one line with the "
+                                                         "sum of the bill's amounts it carries.")
         identities[name] = masters.identity(ledger)
         allocation = None
         if item.get("cost_centre_guid") or item.get("cost_category_guid"):

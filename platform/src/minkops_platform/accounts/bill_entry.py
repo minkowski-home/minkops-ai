@@ -669,7 +669,9 @@ VOUCHER = schema({
         "type": "boolean", "description": "True only once no ledger is this supplier; the ledger is then null."},
         "evidence": TEXT},
                     ["ledger", "new_supplier", "evidence"]),
-    "lines": {"type": "array", "maxItems": 39, "items": LINE},
+    "lines": {"type": "array", "maxItems": 39, "items": LINE, "description": (
+        "One line per ledger other than the supplier's: a ledger carrying several of the bill's lines gets their "
+        "sum.")},
     "items": {**_nullable({"type": "array", "maxItems": 40, "items": ITEM}), "description": (
         "For a purchase the client books item-wise: each item line of the bill, in the stock item's own unit. "
         "Items carry the taxable value their lines print, so they are not expense lines too. Otherwise null.")}},

@@ -551,3 +551,19 @@ def test_a_company_that_books_discounts_net_refuses_a_discount_line():
     assert str(refused.value) == ("Test books a printed discount net: book each line at its discounted value, with no "
                                   "discount line.")
     assert vouchers.check(discounted, practised({"discounts": {"booked": "separately"}}, trade), COMPANY)
+
+
+def test_a_ledger_on_several_lines_is_refused_with_how_to_book_it():
+    """A bill's items to one ledger are one voucher line: the session is told to add them up."""
+    split = proposal()
+    split["voucher"]["lines"][1]["ledger_guid"] = guid("Purchase 18%")
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(split, view(), COMPANY)
+    assert (refused.value.code, str(refused.value)) == (
+        "classification_uncertain", "Purchase 18% is on more than one line: give it one line with the sum of the "
+                                    "bill's amounts it carries.")
+    supplier = proposal()
+    supplier["voucher"]["lines"][0]["ledger_guid"] = guid("Acme Cement")
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(supplier, view(), COMPANY)
+    assert str(refused.value) == "Acme Cement is the supplier's ledger: Minkops writes its line from the bill's total."
