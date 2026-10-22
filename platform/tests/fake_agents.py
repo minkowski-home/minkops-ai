@@ -70,6 +70,7 @@ class _Session:
         # The final answers given, how many came from scripted rounds rather than `answers`, and a round's answer
         # held until its calls are answered.
         self.finals, self.from_rounds, self.answer_after_calls = [], 0, None
+        self.starts_in = 0
         self.usage, self.reads = None, 0
         self.round = 0
         self.turns = []
@@ -163,11 +164,25 @@ class _Session:
             raise _error(400, "The session already has an active turn.")
         self.keys.add(key)
         self.messages.append(event["input"][0]["content"][0]["text"])
+        # Live, the turn a message starts can begin a few reads later: the session stays idle meanwhile.
+        self.starts_in = self.fake.turn_delay
+        if not self.starts_in:
+            self.begin()
+
+    def begin(self):
         self.fake.clock += 1
         self.new_turn(self.fake.clock)
         self.status = "in_progress"
         self.turn_event("agent.session.turn.created")
         self.advance()
+
+    def read(self):
+        """The session as a retrieve sees it; a message's delayed turn begins once enough reads have passed."""
+        if self.starts_in:
+            self.starts_in -= 1
+            if not self.starts_in:
+                self.begin()
+        return self.snapshot()
 
     def end(self, status):
         usage = Usage(**USAGE)
@@ -305,7 +320,8 @@ class _Sessions:
         return _Stream(self.fake, session)
 
     def retrieve(self, session_id):
-        return self.fake.get(session_id).snapshot()
+        with self.fake.lock:
+            return self.fake.get(session_id).read()
 
     def list(self, *, order, limit):
         assert order == "desc" and limit <= 100
@@ -332,6 +348,7 @@ class FakeAgents:
         self.store, self.created = {}, []
         self.drops = []  # each new stream drops after this many events
         self.lose_creation = 0
+        self.turn_delay = 0  # reads before the turn a user message starts begins
         self.unregistered_once = False
         self.resent = 0
         self.streams = self.waits = self.cancels = 0

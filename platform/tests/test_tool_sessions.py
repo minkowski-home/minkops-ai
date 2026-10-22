@@ -265,3 +265,16 @@ def test_a_final_answer_listed_after_its_turn_ends_is_read_not_refused(monkeypat
     answered(fake, checker)
     [session] = fake.sessions
     assert checker.checked == [(session.turn.id, {"amount": "1180.00"})] and len(reads) == 2
+
+
+def test_a_correction_whose_turn_starts_late_is_waited_for_and_never_sent_again():
+    """Live, the turn a correction starts began after the stream had ended, and a stream opened on the idle session
+    never delivered it. The driver waits until the session shows the new turn, then follows it."""
+    fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}, {"amount": "1280.00"}]))
+    fake.turn_delay = 3
+    checker = Checker()
+    result, _ = answered(fake, checker)
+    [session] = fake.sessions
+    first, second = session.turns
+    assert session.messages == ["The bill total is 1,280.00."] and fake.resent == 0
+    assert [turn for turn, _ in checker.checked] == [first.id, second.id] and result["turn_id"] == second.id

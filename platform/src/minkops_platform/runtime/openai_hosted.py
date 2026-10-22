@@ -61,6 +61,9 @@ CLOCK_SKEW = 300
 SEARCH_LIMIT = 500
 # Pauses before reading a finished turn's messages again, when its final answer is not listed yet.
 LISTING_DELAYS = (0.5, 1, 2)
+# Seconds between looks for the turn a correction starts, and how many looks before the session is given up.
+CORRECTION_POLL = 1
+CORRECTION_LOOKS = 120
 # Turn failures worth a new attempt; any other code needs a person.
 TRANSIENT = frozenset({"rate_limit_exceeded", "server_overloaded", "server_error", "connection_failed",
                        "request_timeout", "internal_error"})
@@ -130,6 +133,8 @@ class _ToolSession:
         self.turn_id = None
         self.ended = self.finished = False
         self.answered, self.seen = set(), set()
+        # The turn whose correction was sent, until the session shows the turn the correction started.
+        self.corrected = None
         # Each ended turn's usage as reported with its end; None for a turn that reported none.
         self.usages = {}
 
@@ -170,7 +175,7 @@ class _ToolSession:
                 self.saved(self.id, None)
         if self.id is None:
             return self._create()
-        session = self.api.retrieve(self.id)
+        session = self._corrected_turn() if self.corrected else self.api.retrieve(self.id)
         if session.status == "failed":
             raise SessionFailed(session.error or "The AI session failed.")
         turn = self._root_turn() if self.turn_id is None or session.status == "idle" else None
@@ -180,11 +185,28 @@ class _ToolSession:
                 self._end(turn.id, turn.status, turn.error, turn.usage)
                 if self.ended:
                     return None
-                # A correction started the next turn: follow it.
+                return self._attach()  # a correction was sent: follow the turn it starts
         events = self.api.events.stream(self.id)
         if session.status == "requires_action":
             self._respond(session.required_actions)
         return events
+
+    def _corrected_turn(self):
+        """The session once it shows the turn a correction started.
+
+        The turn can begin after the stream that carried the earlier one has ended, and a stream opened on the
+        idle session meanwhile was measured never to deliver it, held open by the provider's keep-alives.
+        """
+        for _ in range(CORRECTION_LOOKS):
+            self._check()
+            session = self.api.retrieve(self.id)
+            turn = self._root_turn()
+            if turn is not None and turn.id != self.corrected:
+                self.corrected = None
+                self._note_turn(turn.id)
+                return session
+            time.sleep(CORRECTION_POLL)
+        raise SessionFailed("The AI session did not start the turn its correction asked for.", "server_error")
 
     def _create(self):
         self.requested_at = self.requesting()
@@ -221,7 +243,8 @@ class _ToolSession:
                     self.seen.add(event.event_id)
                     progressed = True
                     self._observe(event)
-                    if self.finished:
+                    # A sent correction is followed from a fresh attachment, once its turn has begun.
+                    if self.finished or self.corrected:
                         break
                     self._check()
             except (RateLimitError, InternalServerError):
@@ -268,6 +291,7 @@ class _ToolSession:
         self.api.events.create(self.id, events=[{"type": "agent.session.input.message", "input": [
             {"role": "user", "content": [{"type": "input_text", "text": correction}]}]}],
             idempotency_key=f"minkops-correction-{self.id}-{turn_id}")
+        self.corrected = turn_id
 
     def _final_text(self, turn_id):
         """The turn's final answer: its last assistant message, which the answer schema constrains.
