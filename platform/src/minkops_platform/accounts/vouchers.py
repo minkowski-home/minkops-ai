@@ -351,13 +351,14 @@ def rupees(cents):
     return f"{'-' if cents < 0 else ''}{','.join([*pairs, tail])}.{paise:02d}"
 
 
-def _money(value, what):
-    """Exact positive paise from a bill amount, or a coded hold."""
+def _money(value, what, *, zero=False):
+    """Exact positive paise from a bill amount, or zero where a bill may print none (`zero`); else a coded hold."""
     if type(value) not in (int, float):
         raise HoldReason("source_values_conflict", f"{what} must be a number printed on the bill.")
     cents = _cents(value)
-    if cents is None or cents <= 0 or cents > 2**53 - 1:
-        raise HoldReason("source_values_conflict", f"{what} must be a positive amount with at most two decimal places.")
+    if cents is None or cents < (0 if zero else 1) or cents > 2**53 - 1:
+        least = "zero or more" if zero else "a positive amount"
+        raise HoldReason("source_values_conflict", f"{what} must be {least}, with at most two decimal places.")
     return cents
 
 
@@ -433,7 +434,8 @@ def _printed_totals(document, lines, raw, items_cents=0):
         printed = document.get(key)
         if printed is None:
             continue
-        cents = _money(printed, f"The bill's printed {what}")
+        # An exempt or unregistered supply prints no tax at all, which binds the bill to no tax lines.
+        cents = _money(printed, f"The bill's printed {what}", zero=key == "tax")
         claimed = (items_cents if key == "taxable" else 0) + sum(
             ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] in roles)
         if abs(claimed - cents) > TOLERANCE_CENTS:

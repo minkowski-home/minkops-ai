@@ -574,7 +574,7 @@ DOCUMENT = schema({
     "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}, "total": PRINTED,
     "supplier_name": {"type": ["string", "null"], "maxLength": 200},
     "supplier_gstin": {"type": ["string", "null"], "maxLength": 20}, "origin": {"enum": ["domestic", "foreign", None]},
-    "taxable": PRINTED, "tax": PRINTED,
+    "taxable": PRINTED, "tax": {"type": ["number", "null"], "minimum": 0},
     "receipt_register": _nullable(schema({
         "label": {"type": "string", "minLength": 1, "maxLength": 20},
         "number": {"type": "string", "minLength": 1, "maxLength": 40},

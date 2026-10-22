@@ -193,6 +193,13 @@ class BoundBillTest(unittest.TestCase):
         self.assertEqual(code, "source_values_conflict")
         self.assertIn("The lines claim 6,355.00 of taxable value, but the bill prints 5,560.00.", message)
         self.assertEqual(check(proposal(**printed)).lines[0]["amount_cents"], 635500)
+        # A bill printing no tax at all (an exempt or unregistered supply) binds its lines to none.
+        exempt = proposal(**{"document.total": 6355.00, "document.tax": 0, "voucher.lines": [
+            line("expense", "Purchase 18%", "debit", 6355.00)]})
+        self.assertEqual(check(exempt).lines[0]["amount_cents"], 635500)
+        code, message = held({**inclusive, "document": {**inclusive["document"], "tax": 0},
+                              "voucher": {**inclusive["voucher"], "lines": proposal()["voucher"]["lines"]}})
+        self.assertIn("but the bill prints 0.00", message)
 
     def test_an_expense_bill_can_be_a_journal_and_a_supplier_credit_note_a_debit_note(self):
         journal = proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal",
