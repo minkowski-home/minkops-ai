@@ -328,6 +328,8 @@ class Host:
                 if not work.wait(connection, item["id"], lease.token, parked.blocker):
                     raise Superseded() from None
                 return
+            # The task moves on from 'getting ready' as soon as reading starts, not when the first session ends.
+            work.refresh(connection, item["tenant_id"], item["run_id"], describe=getattr(handler, "describe", None))
         if session is None:
             self._finish(item, lease, "done", Outcome(), run, handler)
             return

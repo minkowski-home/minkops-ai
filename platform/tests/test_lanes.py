@@ -147,6 +147,22 @@ def test_a_released_blocker_wakes_idle_lanes_at_once(desk):
         until(lambda: items(desk, run)[0]["state"] == "done", timeout=5)
 
 
+def test_the_task_says_reading_has_begun_once_a_lane_starts_its_item(desk):
+    import factory
+    fake = FakeAgents(Script(PROPOSE))
+    run = factory.run(desk["db"], desk["tenant"], desk["client"], desk["workflow"], desk["operator"],
+                      [work.ItemSpec("bill", {"file_id": "a"}, waiting_on=BLOCKER)])
+    desk["db"].commit()
+    with host(desk, fake) as lanes_:
+        assert work.release(desk["db"], desk["tenant"]["id"], BLOCKER) == 1
+        desk["db"].commit()
+        until(lambda: items(desk, run)[0]["state"] == "done")
+        until(lambda: lanes_.settled(desk["db"]))
+    events = desk["db"].execute("SELECT summary FROM task_events WHERE task_id=%s ORDER BY id", (run["task_id"],))
+    # Not 'Getting ready.' until the session ends: the task moves on as soon as a lane starts reading.
+    assert [event["summary"] for event in events][:2] == ["Getting ready.", "0 of 1 input read."]
+
+
 def test_a_successor_resumes_the_session_its_predecessor_left(desk):
     first = None
 
