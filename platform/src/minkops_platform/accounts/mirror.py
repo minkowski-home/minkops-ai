@@ -349,6 +349,28 @@ def collect(connection, company_id):
                for table in ("mirror_masters", "mirror_vouchers", "mirror_bill_refs"))
 
 
+def lost(connection, company_id, before, after, *, examples=5):
+    """What one version holds that a later one lacks, within the dates both cover.
+
+    {missing, older, examples}: vouchers visible at `before` and absent at `after`, the latest few of them, and
+    vouchers whose AlterID at `after` is lower, an earlier edit. Used when a company moved PCs: the new PC's copy
+    may be an older backup.
+    """
+    span = {"c": company_id, "b": before["version"], "a": after["version"], "limit": examples,
+            "from": max(before["coverage"]["from"], after["coverage"]["from"]),
+            "to": min(before["coverage"]["to"], after["coverage"]["to"])}
+    visible = "{t}.synced_in <= %({v})s AND ({t}.superseded_in IS NULL OR {t}.superseded_in > %({v})s)"
+    pairs = f"""FROM mirror_vouchers b LEFT JOIN mirror_vouchers a ON a.company_id=b.company_id AND a.guid=b.guid
+                    AND {visible.format(t="a", v="a")}
+                WHERE b.company_id=%(c)s AND {visible.format(t="b", v="b")} AND b.date BETWEEN %(from)s AND %(to)s"""
+    counts = connection.execute(
+        f"""SELECT count(*) FILTER (WHERE a.guid IS NULL) AS missing,
+                   count(*) FILTER (WHERE a.alter_id < b.alter_id) AS older {pairs}""", span).fetchone()
+    rows = connection.execute(
+        f"SELECT b.* {pairs} AND a.guid IS NULL ORDER BY b.date DESC, b.guid LIMIT %(limit)s", span).fetchall()
+    return {"missing": counts["missing"], "older": counts["older"], "examples": rows}
+
+
 # --- reads at a pinned version -----------------------------------------------------
 
 def masters(connection, company_id, version, *, types=None, guids=None):

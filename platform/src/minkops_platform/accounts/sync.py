@@ -31,7 +31,7 @@ from minkops_platform import attention, clients, desktop, work
 from minkops_platform.errors import ServiceError
 from minkops_platform.run_controls import observe_task
 
-from . import memory, mirror
+from . import memory, mirror, writes
 
 PROTOCOL = 1
 BATCH = 5000
@@ -194,10 +194,51 @@ def _observe(connection, device, job, observed):
            RETURNING *""", (device["tenant_id"], device["id"], identity["guid"], identity["books_from"],
                             identity["name"], identity["company_number"])).fetchone()
     attention.record(connection, job, f"company:{row['id']}", row["name"][:200], "New company found", kind="company",
-                     target={"company_id": str(row["id"]), "device_id": str(device["id"]), "device": device["name"],
-                             "books_from": identity["books_from"],
-                             "prompt": f"{row['name']} is open in Tally on {device['name']}. Add it to a client's books?"})
+                     target=_card(connection, row, device))
     return row, "new"
+
+
+def _card(connection, company, device):
+    """What a newly found company's card says, and the client's company it continues, when there is one.
+
+    `card` is for admins, who decide: it names the client. The reason any member reads names only PCs.
+    """
+    card = {"company_id": str(company["id"]), "name": company["name"], "books_from": company["books_from"].isoformat(),
+            "device": device["name"]}
+    live, previous = clients.live_copy(connection, company), clients.predecessor(connection, company)
+    found = f"{company['name']} is open in Tally on {device['name']}."
+    if live:
+        card["held_on"] = live["device_name"]
+        reason = (f"{found} These books are already a client's on {live['device_name']}, and a client's books are "
+                  f"saved to one copy. To move them here, disconnect {live['device_name']} first.")
+    elif previous:
+        card["continues"] = {"client": previous["client_slug"], "client_name": previous["client_name"],
+                             "device": previous["device_name"]}
+        reason = (f"{found} These books were on {previous['device_name']}, which is disconnected. Continue them here "
+                  "to keep what Minkops learnt for them, their rules and their history.")
+    else:
+        reason = f"{found} Add it to a client's books?"
+    return {"company_id": str(company["id"]), "device_id": str(device["id"]), "device": device["name"],
+            "books_from": company["books_from"].isoformat(), "reason": reason, "card": card}
+
+
+def disconnected(connection, device):
+    """A PC being disconnected: settle the saves it had begun, and offer its companies to the PCs that find them.
+
+    A company found on another PC before this one was disconnected had no continuation to offer; its card now does.
+    """
+    writes.disconnected(connection, device)
+    for found in connection.execute(
+            """SELECT f.*, d.name AS device_name FROM companies c
+               JOIN companies f ON f.tenant_id=c.tenant_id AND f.guid=c.guid AND f.books_from=c.books_from
+                   AND f.status='pending'
+               JOIN desktop_devices d ON d.id=f.device_id AND d.revoked_at IS NULL
+               WHERE c.device_id=%s AND c.status='authorised' ORDER BY f.id""", (device["id"],)).fetchall():
+        connection.execute(
+            """UPDATE attention_items SET target=%s,updated_at=now() WHERE tenant_id=%s AND event_key=%s
+               AND status='pending'""",
+            (Jsonb(_card(connection, found, {"id": found["device_id"], "name": found["device_name"]})),
+             found["tenant_id"], f"company:{found['id']}"))
 
 
 def _decide(previous, observed, change, *, device_id, last_swept, now, reason):
@@ -395,6 +436,7 @@ def finish(connection, device, job, result):
     from .practice import probe, unprobed
     for version in published:
         company = connection.execute("SELECT * FROM companies WHERE id=%s", (version["company_id"],)).fetchone()
+        _compare_copies(connection, job, company, version)
         memory.revalidate(connection, company, version)
         probe(connection, company, version, job)
         mirror.collect(connection, company["id"])
@@ -411,6 +453,40 @@ def finish(connection, device, job, result):
                  summary=f"Tally copy refreshed: {len(published)} compan{'y' if len(published) == 1 else 'ies'} updated.",
                  progress=100, event_prefix="sync")
     return summary
+
+
+def _compare_copies(connection, job, company, version):
+    """After a company moves PCs, name the vouchers the old PC's copy held that this PC's copy lacks.
+
+    A copy restored from an older backup misses what was entered since, including saves Minkops verified. Tally's
+    copy is the books Minkops works from, so nothing is re-entered on its own: one card lists what is missing, for
+    the accountant to restore the latest copy or enter it again.
+    """
+    before = connection.execute(
+        """SELECT v.*, d.name AS device_name FROM mirror_versions v JOIN desktop_devices d ON d.id=v.device_id
+           WHERE v.company_id=%s AND v.state='published' AND v.version < %s ORDER BY v.version DESC LIMIT 1""",
+        (company["id"], version["version"])).fetchone()
+    if not before or before["device_id"] == version["device_id"]:
+        return
+    lost = mirror.lost(connection, company["id"], before, version)
+    if not (lost["missing"] or lost["older"]):
+        return
+    here = connection.execute("SELECT name FROM desktop_devices WHERE id=%s", (version["device_id"],)).fetchone()["name"]
+    parts = []
+    if lost["missing"]:
+        examples = "; ".join(f"{row['voucher_type']} {row['number'] or '(no number)'} of {row['date'].isoformat()}"
+                             + (f" ({row['party_ledger']})" if row["party_ledger"] else "") for row in lost["examples"])
+        parts.append(f"{lost['missing']} voucher{'s' if lost['missing'] != 1 else ''} in the copy Minkops read on "
+                     f"{before['device_name']} {'are' if lost['missing'] != 1 else 'is'} missing here, such as "
+                     f"{examples}.")
+    if lost["older"]:
+        parts.append(f"{lost['older']} voucher{'s' if lost['older'] != 1 else ''} here "
+                     f"{'show' if lost['older'] != 1 else 'shows'} an earlier edit than {before['device_name']} had.")
+    attention.record(connection, job, f"company:{company['id']}:copy:{version['version']}", company["name"][:200],
+                     "Older copy of the books", target={"reason": (
+                         f"{company['name']} on {here} looks older than on {before['device_name']}. " + " ".join(parts)
+                         + f" Restore the latest copy in Tally on {here} and refresh, or enter them again: Minkops now "
+                         f"reads and saves to the copy on {here}.")[:1000]})
 
 
 def fail(connection, device, job, error):
@@ -464,15 +540,37 @@ def set_port(connection, tenant, user, member, device_id, port):
 
 
 def authorise(connection, tenant, user, member, company_id, client_slug):
-    """One decision adds a company to a client's books, closes its card and mirrors it."""
+    """One decision adds a company to a client's books, closes its card and mirrors it.
+
+    When it continues the client's company from a disconnected PC (`clients.authorise_company`), what was left on
+    that PC follows: saves it had not begun are sent from here, and the client's runs that waited for it wait for
+    this PC's first refresh, which reads the books in full (`_decide`).
+    """
     company = clients.authorise_company(connection, tenant, user, member, company_id, client_slug)
+    moved = company.get("continued_from")
+    _close(connection, tenant, user, company_id, "confirmed",
+           f"Company continued here from another PC, for {client_slug}." if moved else f"Company added to {client_slug}.")
+    if moved:
+        previous = connection.execute("SELECT * FROM desktop_devices WHERE id=%s", (moved,)).fetchone()
+        writes.continued(connection, company, previous)
+        work.rewait(connection, tenant["id"], blocker(moved), blocker(company["device_id"]), client_id=company["client_id"])
+    # An outdated or offline PC syncs once it updates or reconnects.
+    with suppress(ServiceError):
+        request(connection, tenant, user, member, company["device_id"], reason="authorised")
+    return company
+
+
+def decline(connection, tenant, user, member, company_id):
+    """One decision keeps a newly found company out of every client's books, and closes its card."""
+    company = clients.decline_company(connection, tenant, user, member, company_id)
+    _close(connection, tenant, user, company_id, "declined", "Company kept out of every client's books.")
+    return company
+
+
+def _close(connection, tenant, user, company_id, action, summary):
     item = connection.execute(
         """UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now()
            WHERE tenant_id=%s AND event_key=%s AND status='pending' RETURNING *""",
         (user["id"], tenant["id"], f"company:{company_id}")).fetchone()
     if item:
-        attention.audit(connection, item, user["id"], "confirmed", f"Company added to {client_slug}.")
-    # An outdated or offline PC syncs once it updates or reconnects.
-    with suppress(ServiceError):
-        request(connection, tenant, user, member, company["device_id"], reason="authorised")
-    return company
+        attention.audit(connection, item, user["id"], action, summary)

@@ -124,16 +124,32 @@ def interrupted(connection, device, job, error):
 
 
 def disconnected(connection, device):
-    """A PC being disconnected never reports again: a save it had begun holds as interrupted.
+    """A PC being disconnected never reports again: each save it had begun holds as interrupted.
 
-    Whether that save reached Tally is unknown, so it is never re-sent on its own. A write the PC had not begun
-    stays pending, and nothing is sent to a PC that is gone (`dispatch`).
+    A save is begun once the PC claimed its job. Whether it reached Tally is unknown, so it is never re-sent on its
+    own. A write the PC had not begun stays pending, and nothing is sent to a PC that is gone (`dispatch`); when
+    its company is continued on the PC that replaces it, the write goes there (`continued`).
     """
     for job in connection.execute(
-            """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation = ANY(%s) AND state='executing'
-               ORDER BY created_at FOR UPDATE""", (device["id"], list(OPERATIONS))).fetchall():
+            """SELECT j.* FROM desktop_jobs j JOIN native_writes w ON w.id::text=j.input->>'write_id'
+                   AND w.device_id=j.device_id
+               WHERE j.device_id=%s AND j.operation = ANY(%s) AND j.attempts > 0 AND w.finished_at IS NULL
+               ORDER BY j.created_at FOR UPDATE OF j""", (device["id"], list(OPERATIONS))).fetchall():
         interrupted(connection, device, job, "This PC was disconnected before Tally confirmed the save. Retry save "
                                              "saves it only if Tally does not already have it.")
+
+
+def continued(connection, company, previous):
+    """The company now saves on the PC that replaced `previous`: the writes that PC had not begun go there.
+
+    Each is the plan a person approved, sent once; the companion rechecks its masters and reads Tally for the
+    voucher before importing it, as it does for every save.
+    """
+    disconnected(connection, previous)  # Including a PC disconnected before saves it had begun were held.
+    if connection.execute(
+            "UPDATE native_writes SET device_id=%s WHERE company_id=%s AND device_id=%s AND finished_at IS NULL",
+            (company["device_id"], company["id"], previous["id"])).rowcount:
+        dispatch(connection, company["tenant_id"], company["device_id"])
 
 
 def recover(connection, device):

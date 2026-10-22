@@ -276,6 +276,127 @@ def test_a_copy_read_on_another_pc_never_drives_a_delta_nor_a_run(pc):
     assert (answer["instructions"][0]["mode"], answer["instructions"][0]["reason"]) == ("delta", "markers_moved")
 
 
+def found_on(pc, device, tally):
+    """A refresh on this PC finds the books as a new company, raising its card."""
+    _, answer, _ = Companion(pc["db"], device, start(pc, device=device)).run(tally)
+    assert answer["instructions"][0]["reason"] == "pending"
+    found = pc["db"].execute("SELECT * FROM companies WHERE device_id=%s AND guid=%s",
+                             (device["id"], tally.identity["guid"])).fetchone()
+    card = pc["db"].execute("SELECT * FROM attention_items WHERE tenant_id=%s AND event_key=%s",
+                            (pc["tenant"]["id"], f"company:{found['id']}")).fetchone()
+    return found, card
+
+
+def test_the_pc_that_replaces_a_disconnected_one_continues_its_company_with_its_history(pc):
+    import factory
+
+    from minkops_platform import attention, clients, desktop
+    db, tenant, client = pc["db"], pc["tenant"], pc["client"]
+    tally = Tally()
+    supplier = tally.ledger("Supplier")
+    paid = tally.voucher("2026-09-01")
+    company = authorised(pc, tally)
+    Companion(db, pc["device"], start(pc)).run(tally)
+    learnt = {"tenant_id": tenant["id"], "client_id": client["id"], "company_id": company["id"], "kind": "booking",
+              "subject": "supplier"}
+    memory.record(db, **learnt, value={"voucher_type": "Payment", "ledgers": ["Bank"]}, guids=[supplier],
+                  evidence={"kind": "outcome", "voucher": paid}, status="confirmed")
+    rule = memory.write_instruction(db, tenant, pc["owner"], pc["member"], client["slug"], company_id=company["id"],
+                                    text="Book this company's freight to Freight Inward.")
+    flow = factory.workflow(db, tenant)
+    run = factory.run(db, tenant, client, flow, pc["owner"],
+                      [work.ItemSpec("bill", {"file_id": "a"}, waiting_on=sync.blocker(pc["device"]["id"]))])
+    # The replacement is set up while the old PC still holds the books: they are a client's there, not offered here.
+    replacement = factory.device(db, tenant, pc["owner"])
+    found, card = found_on(pc, replacement, tally)
+    assert card["target"]["card"]["held_on"] == pc["device"]["name"] and "continues" not in card["target"]["card"]
+    # Disconnecting the old PC offers its books to the PC that found them, naming the client only to admins.
+    desktop.revoke(db, tenant, pc["owner"], pc["device"]["id"])
+    card = db.execute("SELECT * FROM attention_items WHERE id=%s", (card["id"],)).fetchone()
+    assert card["target"]["card"]["continues"] == {"client": client["slug"], "client_name": client["name"],
+                                                   "device": pc["device"]["name"]}
+    assert pc["device"]["name"] in card["target"]["reason"] and client["name"] not in card["target"]["reason"]
+    [shown] = [i for i in attention.listing(db, tenant["id"]) if i["id"] == card["id"]]
+    assert shown["card"]["continues"]["client"] == client["slug"]
+    [scoped] = [i for i in attention.listing(db, tenant["id"], visible=set()) if i["id"] == card["id"]]
+    assert "card" not in scoped
+    # Meanwhile the client's memory page shows nothing of books no connected PC holds.
+    assert memory.page(db, tenant, pc["owner"], pc["member"], client["slug"])["entries"] == []
+    # One decision continues the company: the same company, on the new PC, with what was learnt and written for it.
+    continued = sync.authorise(db, tenant, pc["owner"], pc["member"], found["id"], client["slug"])
+    assert (continued["id"], continued["device_id"]) == (company["id"], replacement["id"])
+    assert db.execute("SELECT status FROM attention_items WHERE id=%s", (card["id"],)).fetchone()["status"] == "done"
+    assert db.execute("SELECT from_device_id, to_device_id, moved_by FROM company_moves WHERE found_id=%s",
+                      (found["id"],)).fetchone() == {"from_device_id": pc["device"]["id"],
+                                                     "to_device_id": replacement["id"], "moved_by": pc["owner"]["id"]}
+    page = memory.page(db, tenant, pc["owner"], pc["member"], client["slug"])
+    # Bookings and the practice the probes settled come with it.
+    assert {(e["kind"], e["company"]) for e in page["entries"]} == {("booking", company["name"]),
+                                                                    ("practice", company["name"])}
+    assert [(r["id"], r["company"]) for r in page["rules"]] == [(str(rule["id"]), company["name"])]
+    # The run that waited for the old PC now waits for this one's first refresh, which reads the books in full.
+    waiting = lambda: db.execute("SELECT state, waiting_on FROM run_items WHERE run_id=%s",  # noqa: E731
+                                 (run["id"],)).fetchone()
+    assert waiting() == {"state": "waiting", "waiting_on": sync.blocker(replacement["id"])}
+    _, answer, summary = Companion(db, replacement, start(pc, device=replacement)).run(tally)
+    assert (answer["instructions"][0]["mode"], answer["instructions"][0]["reason"]) == ("full", "pc_changed")
+    assert summary["published"] == [str(company["id"])] and waiting()["state"] == "queued"
+    assert mirror.latest(db, company["id"])["device_id"] == replacement["id"]
+    # The same copy: nothing is missing, so nothing is raised, and what was learnt stands.
+    assert not db.execute("SELECT 1 FROM attention_items WHERE event_key LIKE %s", (f"company:{company['id']}:copy:%",)
+                          ).fetchone()
+    assert memory.live(db, **learnt)["status"] == "confirmed"
+    # The decision sent again finds the company it continued.
+    assert sync.authorise(db, tenant, pc["owner"], pc["member"], found["id"], client["slug"])["id"] == company["id"]
+    assert clients.companies(db, tenant, client)[0]["device_id"] == replacement["id"]
+
+
+def test_an_older_copy_on_the_replacing_pc_is_read_in_full_and_what_it_lacks_is_named(pc):
+    import copy
+
+    import factory
+
+    from minkops_platform import desktop
+    db, tenant, client = pc["db"], pc["tenant"], pc["client"]
+    tally = Tally()
+    tally.ledger("Supplier")
+    edited = tally.voucher("2026-09-01")
+    backup = copy.deepcopy(tally)  # The copy restored on the new PC was taken here.
+    tally.voucher("2026-09-10")
+    last = tally.voucher("2026-09-20")
+    tally.vouchers[edited]["ALTERID"] = str(tally.bump())
+    company = authorised(pc, tally)
+    Companion(db, pc["device"], start(pc)).run(tally)
+    learnt = {"tenant_id": tenant["id"], "client_id": client["id"], "company_id": company["id"], "kind": "booking",
+              "subject": "supplier"}
+    memory.record(db, **learnt, value={"voucher_type": "Payment", "ledgers": ["Bank"]},
+                  evidence={"kind": "outcome", "voucher": last}, status="confirmed")
+    desktop.revoke(db, tenant, pc["owner"], pc["device"]["id"])
+    replacement = factory.device(db, tenant, pc["owner"])
+    found, _ = found_on(pc, replacement, backup)
+    sync.authorise(db, tenant, pc["owner"], pc["member"], found["id"], client["slug"])
+    # The backup's markers are below the old copy's: measured against them, a delta would fetch nothing at all.
+    _, answer, _ = Companion(db, replacement, start(pc, device=replacement)).run(backup)
+    step = answer["instructions"][0]
+    assert (step["mode"], step["reason"], step["after"]) == ("full", "pc_changed", None)
+    version = mirror.latest(db, company["id"])
+    assert [v["guid"] for v in mirror.vouchers(db, company["id"], version["version"])] == [edited]
+    # What the copy lacks is named, newest first, for the accountant to restore or enter again; nothing is re-entered.
+    card = db.execute("SELECT * FROM attention_items WHERE event_key=%s",
+                      (f"company:{company['id']}:copy:{version['version']}",)).fetchone()
+    assert (card["label"], card["status"]) == ("Older copy of the books", "pending")
+    reason = card["target"]["reason"]
+    assert "2 vouchers in the copy Minkops read on" in reason
+    assert reason.index("Payment 1 of 2026-09-20") < reason.index("Payment 1 of 2026-09-10")
+    assert "1 voucher here shows an earlier edit" in reason
+    # What was learnt from a voucher this copy lacks no longer stands unchecked.
+    assert memory.live(db, **learnt)["status"] == "demoted"
+    # From now on the new PC's own markers measure its copy: a new voucher is a delta.
+    backup.voucher("2026-09-25")
+    _, answer, _ = Companion(db, replacement, start(pc, device=replacement)).run(backup)
+    assert (answer["instructions"][0]["mode"], answer["instructions"][0]["reason"]) == ("delta", "markers_moved")
+
+
 def test_a_renamed_company_rebuilds_and_a_split_sibling_is_a_new_company(pc):
     tally = Tally()
     tally.voucher("2026-09-01")

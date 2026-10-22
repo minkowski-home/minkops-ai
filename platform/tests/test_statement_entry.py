@@ -411,7 +411,9 @@ def test_an_approved_row_writes_once_and_an_interrupted_save_is_never_resent(des
                                                 subjects=["QA ACME STEEL TRADERS"])] == [learnt["id"]]
 
 
-def test_a_disconnected_pc_holds_the_save_it_began_and_sends_none_it_had_not(desk):
+def test_a_disconnected_pcs_saves_hold_or_wait_and_the_pc_continuing_its_company_takes_them_over(desk):
+    import factory
+
     from minkops_platform import desktop
     company = desk["company"]["guid"]
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
@@ -445,6 +447,24 @@ def test_a_disconnected_pc_holds_the_save_it_began_and_sends_none_it_had_not(des
     decide(desk, held, "retry_save")
     assert db.execute("""SELECT count(*) AS n FROM desktop_jobs WHERE device_id=%s AND operation='tally.write'
                          AND state IN ('queued','executing')""", (device["id"],)).fetchone()["n"] == 0
+    # The PC that replaces it finds the books, and an admin continues the company there.
+    replacement = factory.device(db, desk["tenant"], desk["operator"])
+    found = factory.company(db, desk["tenant"], replacement, guid=desk["company"]["guid"], status="pending")
+    sync.authorise(db, desk["tenant"], desk["operator"], factory.member(db, desk["tenant"], desk["operator"]),
+                   found["id"], desk["client"]["slug"])
+    db.commit()
+    # The saves left waiting go to the new PC, each once, in the order they were approved; each saves there.
+    desk["device"] = replacement
+    db.execute("UPDATE desktop_jobs SET state='completed' WHERE device_id=%s AND operation='tally.sync'",
+               (replacement["id"],))
+    saved = [companion(desk)["remote_id"], companion(desk)["remote_id"]]
+    assert companion(desk) is None
+    plans = {r["record_id"]: r["plan"]["remote_id"] for r in db.execute(
+        "SELECT record_id, plan FROM native_writes WHERE run_id=%s AND outcome='saved'", (run["id"],)).fetchall()}
+    assert saved == [plans[waiting["id"]], plans[begun["id"]]]
+    assert {work.get_record(db, desk["tenant"]["id"], r["id"])["status"] for r in (begun, waiting)} == {"saved"}
+    assert db.execute("SELECT DISTINCT device_id FROM native_writes WHERE run_id=%s AND outcome='saved'",
+                      (run["id"],)).fetchall() == [{"device_id": replacement["id"]}]
 
 
 def test_an_unsettled_date_order_waits_for_one_answer_then_reads_the_rows(desk):

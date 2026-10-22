@@ -91,6 +91,9 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
         row["reason"] = target.get("reason") or PROMPTS.get(row["kind"]) or row["label"]
         if row["kind"] in QUESTIONS:
             row["question"] = importlib.import_module(QUESTIONS[row["kind"]]).question(target)
+        # A card's own details, such as the client a found company continues, are for those who reach every client.
+        if visible is None and target.get("card"):
+            row["card"] = target["card"]
     return rows
 
 

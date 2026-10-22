@@ -303,6 +303,14 @@ def release(connection, tenant_id, blocker):
         (tenant_id, Jsonb(blocker))).rowcount
 
 
+def rewait(connection, tenant_id, blocker, to, *, client_id):
+    """Move one client's runs' items waiting on a blocker to wait on another, such as a PC that replaced theirs."""
+    return connection.execute(
+        """UPDATE run_items i SET waiting_on=%s, updated_at=now() FROM runs r
+           WHERE r.id=i.run_id AND r.client_id=%s AND i.tenant_id=%s AND i.state='waiting' AND i.waiting_on @> %s""",
+        (Jsonb(to), client_id, tenant_id, Jsonb(blocker))).rowcount
+
+
 def requeue_item(connection, tenant_id, item_id):
     """An explicit Recheck: a new attempt for a finished item, never a replay of a live one."""
     row = connection.execute(

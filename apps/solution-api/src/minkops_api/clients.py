@@ -67,7 +67,8 @@ def companies(slug: str, client: str, user: User, connection: Db):
 def authorise(slug: str, company_id: UUID, body: Authorise, request: Request, user: User, connection: Db):
     require_csrf(request)
     tenant, member = tenant_access(slug, user, connection)
-    # Authorising also closes the company's card and queues its first full sync.
+    # Authorising also closes the company's card and queues its first full sync. For the client that holds the
+    # same books on a disconnected PC, it continues that company here.
     return _call(sync.authorise, connection, tenant, user, member, company_id, body.client)
 
 
@@ -75,4 +76,4 @@ def authorise(slug: str, company_id: UUID, body: Authorise, request: Request, us
 def decline(slug: str, company_id: UUID, request: Request, user: User, connection: Db):
     require_csrf(request)
     tenant, member = tenant_access(slug, user, connection)
-    return _call(clients.decline_company, connection, tenant, user, member, company_id)
+    return _call(sync.decline, connection, tenant, user, member, company_id)

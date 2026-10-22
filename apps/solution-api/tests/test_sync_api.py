@@ -118,3 +118,46 @@ class SyncApiTests(unittest.TestCase):
         self.assertEqual(plan["port"], 9999)
         self.assertEqual(self.web.patch(f"{self.base}/desktop/devices/{self.device_id}", headers=self.csrf,
                                         json={"tally_port": 0}).status_code, 422)
+
+    def test_the_card_of_books_found_on_a_replacing_pc_continues_the_clients_company_there(self):
+        books = {"name": "Moved Co", "guid": str(uuid4()), "company_number": "100000", "books_from": "2026-04-01",
+                 "markers": {"alt_mst_id": 1, "alt_vch_id": 0}}
+        stray = {**books, "name": "Practice Co", "guid": str(uuid4())}
+        job = self.claim()
+        self.page(job, 0, "companies", companies=[books])
+        self.finish(job, [])
+        (company,) = self.web.get(f"{self.base}/desktop/devices/{self.device_id}/companies").json()
+        self.web.post(f"{self.base}/companies/{company['id']}/authorise", headers=self.csrf,
+                      json={"client": self.client_row["slug"]})
+        # The PC that replaces it is connected, refreshed, and finds the same books and one more company.
+        device = self.web.post(self.base + "/desktop/devices", headers=self.csrf,
+                               json={"name": "NEW-PC", "installation_id": str(uuid4())}).json()
+        new = TestClient(app)
+        new.headers.update({"Authorization": f"Bearer {device['credential']}", "X-Minkops-Companion-Version": "0.11.0"})
+        self.assertEqual(self.web.post(f"{self.base}/desktop/devices/{device['id']}/sync", headers=self.csrf).status_code,
+                         202)
+        job = new.post("/api/desktop/worker/claim").json()
+        steps = new.post(f"/api/desktop/worker/jobs/{job['id']}/sync", json={
+            "claim_token": job["claim_token"], "seq": 0, "kind": "companies", "companies": [books, stray]}).json()
+        self.assertEqual({s["reason"] for s in steps["instructions"]}, {"pending"})
+        new.post(f"/api/desktop/worker/jobs/{job['id']}/finish",
+                 json={"claim_token": job["claim_token"], "result": {"protocol": 1, "companies": []}})
+        found = {c["name"]: c for c in self.web.get(f"{self.base}/desktop/devices/{device['id']}/companies").json()}
+        self.assertEqual(self.web.delete(f"{self.base}/desktop/devices/{self.device_id}", headers=self.csrf).status_code,
+                         200)
+        cards = {i["identifier"]: i for i in self.web.get(f"{self.base}/attention").json()
+                 if i["label"] == "New company found"}
+        self.assertEqual(cards["Moved Co"]["card"]["continues"],
+                         {"client": self.client_row["slug"], "client_name": self.client_row["name"], "device": "TEST-PC"})
+        self.assertIn("TEST-PC, which is disconnected", cards["Moved Co"]["reason"])
+        continued = self.web.post(f"{self.base}/companies/{found['Moved Co']['id']}/authorise", headers=self.csrf,
+                                  json={"client": self.client_row["slug"]})
+        self.assertEqual(continued.status_code, 200, continued.text)
+        self.assertEqual((continued.json()["id"], continued.json()["continued_from"]), (company["id"], self.device_id))
+        (listed,) = self.web.get(f"{self.base}/clients/{self.client_row['slug']}/companies").json()
+        self.assertEqual((listed["id"], listed["device_id"]), (company["id"], device["id"]))
+        # Keeping a company out of every client's books closes its card too.
+        declined = self.web.post(f"{self.base}/companies/{found['Practice Co']['id']}/decline", headers=self.csrf)
+        self.assertEqual(declined.json()["status"], "declined")
+        self.assertEqual([i["identifier"] for i in self.web.get(f"{self.base}/attention").json()
+                          if i["label"] == "New company found"], [])

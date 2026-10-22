@@ -69,9 +69,9 @@ def company():
         db.rollback()
 
 
-def build(db, company, *, kind="delta", masters=(), vouchers=(), tombstones=()):
+def build(db, company, *, kind="delta", masters=(), vouchers=(), tombstones=(), coverage=None):
     version = mirror.begin(db, company, kind=kind, reason="test", markers={"alt_mst_id": 1, "alt_vch_id": 1},
-                           coverage={"from": "2026-04-01", "to": "2027-03-31"})
+                           coverage=coverage or {"from": "2026-04-01", "to": "2027-03-31"})
     mirror.upsert_masters(db, version, list(masters))
     mirror.upsert_vouchers(db, version, list(vouchers))
     if tombstones:
@@ -114,6 +114,22 @@ def test_a_full_rebuild_tombstones_what_it_did_not_see(company):
     assert [m["guid"] for m in mirror.masters(db, row["id"], 2)] == ["g-1"]
     assert [v["guid"] for v in mirror.vouchers(db, row["id"], 2)] == ["v-1"]
     assert {m["guid"] for m in mirror.masters(db, row["id"], 1)} == {"g-1", "g-2"}
+
+
+@DB
+def test_what_a_later_copy_lacks_is_counted_only_on_dates_both_copies_cover(company):
+    db, row = company
+    before = build(db, row, kind="full", coverage={"from": "2025-04-01", "to": "2026-03-31"}, vouchers=[
+        voucher("v-old", "20250901"), voucher("v-gone", "20260110"), voucher("v-edit", "20260201", alter=5),
+        voucher("v-kept", "20260301"), voucher("v-late", "20260315")])
+    # A year later the window moved on: September 2025 is no longer read, so its absence says nothing.
+    after = build(db, row, kind="full", coverage={"from": "2026-01-01", "to": "2027-03-31"}, vouchers=[
+        voucher("v-edit", "20260201", alter=3, NARRATION="An earlier edit"), voucher("v-kept", "20260301"),
+        voucher("v-new", "20260401")])
+    lost = mirror.lost(db, row["id"], before, after)
+    assert (lost["missing"], lost["older"]) == (2, 1)
+    assert [v["guid"] for v in lost["examples"]] == ["v-late", "v-gone"]
+    assert mirror.lost(db, row["id"], after, after) == {"missing": 0, "older": 0, "examples": []}
 
 
 @DB
