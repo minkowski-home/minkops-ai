@@ -1,17 +1,24 @@
-"""Install scoped runtime identities/secrets without displaying secret payloads."""
+"""Install scoped runtime identities/secrets without displaying secret payloads.
 
+The runtime's database secrets are named for the instance they open. The parked
+pre-rebuild build's (minkops-database-url, minkops-migration-url) keep naming the
+shared instance, so a rollback to it still connects; a secret that exists is never
+rewritten, so a new database always gets new secrets.
+"""
+
+import argparse
 import base64
 import json
 import subprocess
 from pathlib import Path
 
+from deploy_runtime import INSTANCE, PROJECT
 from dotenv import dotenv_values
 from google_api import GoogleApi
 from psycopg.conninfo import make_conninfo
 
-PROJECT = "minkops-ai-prod"
-SQL_PROJECT = "myndral-prod"
-INSTANCE = "myndral-prod:us-central1:myndral-db"
+# The mail credentials both products send with.
+SMTP_PROJECT = "myndral-prod"
 
 
 def command(*arguments):
@@ -40,18 +47,19 @@ def ensure_service_accounts(api, identities):
                                "serviceAccount": {"displayName": f"Minkops {name}"}})
 
 
-def main():
+def main(state_dir):
     api = GoogleApi(PROJECT)
     identities = {name: f"minkops-{name}@{PROJECT}.iam.gserviceaccount.com"
                   for name in ("api", "worker", "ops", "interest")}
     ensure_service_accounts(api, identities)
     for name in ("api", "worker", "ops"):
-        command("projects", "add-iam-policy-binding", SQL_PROJECT,
+        command("projects", "add-iam-policy-binding", PROJECT,
                 f"--member=serviceAccount:{identities[name]}", "--role=roles/cloudsql.client")
-    state = json.loads((Path.home() / ".local/state/minkops-deployment/database.json").read_text())
+    # The credentials provision_database.py created on that instance.
+    state = json.loads((state_dir / "database.json").read_text())
     for name, user, password, recipients, options in (
-        ("minkops-database-url", "minkops_app", state["runtime_password"], [identities["api"], identities["worker"], identities["ops"]], ""),
-        ("minkops-migration-url", "minkops_migrate", state["migration_password"], [identities["ops"]], "-c role=minkops_owner"),
+        ("minkops-books-database-url", "minkops_app", state["runtime_password"], [identities["api"], identities["worker"], identities["ops"]], ""),
+        ("minkops-books-migration-url", "minkops_migrate", state["migration_password"], [identities["ops"]], "-c role=minkops_owner"),
     ):
         value = make_conninfo(host=f"/cloudsql/{INSTANCE}", dbname="minkops", user=user,
                              password=password, connect_timeout=10, options=options)
@@ -62,10 +70,12 @@ def main():
     secret(api, "minkops-openai-key", key, [identities["worker"], identities["api"]])
     for name in ("host", "port", "user", "password"):
         for identity in (identities["api"], identities["interest"]):
-            command("secrets", "add-iam-policy-binding", f"myndral-smtp-{name}", f"--project={SQL_PROJECT}",
+            command("secrets", "add-iam-policy-binding", f"myndral-smtp-{name}", f"--project={SMTP_PROJECT}",
                     f"--member=serviceAccount:{identity}", "--role=roles/secretmanager.secretAccessor")
     print("Cloud SQL client roles and per-secret SMTP access configured; no service-account keys created.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--state-dir", type=Path, required=True, help="The state provision_database.py wrote.")
+    main(parser.parse_args().state_dir)

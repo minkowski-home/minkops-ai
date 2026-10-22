@@ -53,7 +53,7 @@ of truth for these settings; the table summarises them.
 | Worker | Cloud Run Job `minkops-worker`: one task, twelve bounded lanes, no retries, 1 CPU / 1 GiB; the 60-minute task timeout leaves the 45-minute active-processing budget time to stop and reconcile |
 | Recovery service | IAM-private Cloud Run `minkops-operations`: min 0 / max 1, 1 CPU / 256 MiB, concurrency 1, runtime database secret only, 60 s |
 | Recovery schedule | Scheduler `minkops-worker-recovery`: every five minutes, OIDC using ops identity, service URL audience, no retries; calls `/reconcile`, never the raw worker-job API |
-| Database | Isolated `minkops` PostgreSQL 16 database on the shared Cloud SQL instance `myndral-prod:us-central1:myndral-db` |
+| Database | `minkops` PostgreSQL 16 database on Minkops' own Cloud SQL instance `minkops-ai-prod:us-central1:minkops-books`, created at the [cut-over](../docs/rebuild/cutover.md); the runtime connects through the `minkops-books-database-url` secret |
 
 Each service has its own service account and per-secret IAM. Only the two public
 HTTP services disable the Cloud Run invoker check; the application still enforces
@@ -64,22 +64,22 @@ database connection uses the runtime role, and it receives no model key.
 Production sets
 `AUTH_DEV_MODE=0` and secure cookies, and API responses are private, no-store.
 
-The rebuild's fresh start moves Minkops to its own Cloud SQL instance,
-`minkops-ai-prod:us-central1:minkops-books` (PostgreSQL 16, zonal, encrypted
-connections only, daily backups with point-in-time recovery, deletion
-protection). It isolates client books, including the Tally mirror, from other
-products and gives the worker lanes connection headroom; it is not a speed
-fix. Create it once with `provision_database.py --create-instance --tier <tier>`:
-the tier is the operator's recorded cost decision, and this instance replaces
-Minkops' half of the shared SQL allocation below, so revise the envelope
-before creating it. The parked pre-rebuild build still deploys to the shared
-instance from its tag.
+The instance (PostgreSQL 16, zonal, encrypted connections only, daily backups
+with point-in-time recovery, deletion protection) isolates client books,
+including the Tally mirror, from other products and gives the worker lanes
+connection headroom; it is not a speed fix. Create it once with
+`provision_database.py --create-instance --tier <tier>`: the tier is the
+operator's recorded cost decision, and this instance replaces Minkops' half of
+the shared SQL allocation below, so revise the envelope before creating it.
+Until the cut-over, production runs the parked pre-rebuild build on the shared
+instance `myndral-prod:us-central1:myndral-db`, through the `minkops-database-url`
+secret; it still deploys there from its tag.
 
-Database roles are separate from Myndral's: runtime `minkops_app` (16 connections,
-no DDL), `minkops_owner` (NOLOGIN, owns the schema) and `minkops_migrate`
-(migrations only). Test a restore by loading a logical backup into a new
-disposable database with `verify_database_restore.py`, using PostgreSQL 16 client
-tools to match production; never restore over the shared instance as a test.
+Database roles: runtime `minkops_app` (16 connections, no DDL), `minkops_owner`
+(NOLOGIN, owns the schema) and `minkops_migrate` (migrations only). Test a restore
+by loading a logical backup into a new disposable database with
+`verify_database_restore.py`, using PostgreSQL 16 client tools to match
+production; never restore over a live database as a test.
 
 Cost envelope: **CAD 20/month including Minkops' share of shared SQL**. Reserve
 CAD 8 for half the fixed SQL footprint (two products share it), target CAD 10 for
@@ -113,12 +113,18 @@ are no service-account keys. Use `uv sync --frozen --all-packages`, Node 24 with
 `npm ci`, gcloud, Docker and the Cloud SQL Auth Proxy.
 
 1. `bootstrap_hosting.py` creates the budgets and Hosting sites (initial setup).
-2. `provision_database.py --create-instance --tier <tier>` creates the dedicated
-   instance once. Then, through a loopback proxy to it, `provision_database.py`
-   creates roles, the database, migrations and runtime grants (initial setup),
-   then `verify_database_restore.py`.
-3. `configure_runtime.py` sets named Secret Manager versions and scoped IAM. Rotate
-   a secret by adding a version and updating both the API and worker references.
+2. `provision_database.py --sql-project minkops-ai-prod --instance minkops-books
+   --state-dir DIR --create-instance --tier <tier>` creates the dedicated instance
+   once. Then, through a loopback proxy to it, the same command without
+   `--create-instance` creates roles, the database, migrations and runtime grants
+   (initial setup), and `verify_database_restore.py` with the same three flags
+   proves a restore. DIR is a private directory holding the instance's credentials.
+   `provision_database.py` applies `db/migrations`, so it runs with the repository
+   root on `PYTHONPATH`. The [cut-over](../docs/rebuild/cutover.md) gives each
+   command in full.
+3. `configure_runtime.py --state-dir DIR` sets named Secret Manager versions and
+   scoped IAM. Rotate a secret by adding a version and updating every deployment's
+   reference to it.
 4. Build and push images tagged with a reviewed commit, record the previous
    revision, then run `deploy_runtime.py --image ... --interest-image ...`. Check
    Ready, traffic and Job success rather than only gcloud's exit status.

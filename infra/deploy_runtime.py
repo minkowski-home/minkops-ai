@@ -11,6 +11,8 @@ REGION = "us-central1"
 # The rebuild runs on its own instance (provision_database.py --create-instance).
 # The parked pre-rebuild build keeps deploying to the shared one from its tag.
 INSTANCE = f"{PROJECT}:{REGION}:minkops-books"
+# The runtime role's connection to it, written by configure_runtime.py.
+DATABASE = "DATABASE_URL=minkops-books-database-url:1"
 JOB = f"projects/{PROJECT}/locations/{REGION}/jobs/minkops-worker"
 
 
@@ -53,7 +55,7 @@ def private_invoker(service, identity):
 def main(image, interest_image):
     scope = (f"--project={PROJECT}", f"--region={REGION}", "--cpu=1")
     common = (*scope, "--memory=512Mi")
-    database = "DATABASE_URL=minkops-database-url:1,OPENAI_API_KEY=minkops-openai-key:1"
+    database = f"{DATABASE},OPENAI_API_KEY=minkops-openai-key:1"
     run("run", "jobs", "deploy", "minkops-worker", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-worker@{PROJECT}.iam.gserviceaccount.com",
         f"--set-cloudsql-instances={INSTANCE}", "--command=python",
@@ -66,8 +68,8 @@ def main(image, interest_image):
         run("run", "jobs", "add-iam-policy-binding", "minkops-worker", f"--project={PROJECT}",
             f"--region={REGION}", f"--member=serviceAccount:minkops-{account}@{PROJECT}.iam.gserviceaccount.com",
             "--role=roles/run.invoker")
-    sql_number = output("projects", "describe", "myndral-prod", "--format=value(projectNumber)")
-    smtp = ",".join(f"SMTP_{key.upper()}=projects/{sql_number}/secrets/myndral-smtp-{key}:latest"
+    smtp_project = output("projects", "describe", "myndral-prod", "--format=value(projectNumber)")
+    smtp = ",".join(f"SMTP_{key.upper()}=projects/{smtp_project}/secrets/myndral-smtp-{key}:latest"
                     for key in ("host", "port", "user", "password"))
     run("run", "deploy", "minkops-solution-api", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-api@{PROJECT}.iam.gserviceaccount.com",
@@ -89,7 +91,7 @@ def main(image, interest_image):
         "--args=minkops_api.operations:app,--host,0.0.0.0,--port,8080",
         "--min=0", "--max=1", "--max-instances=1", "--concurrency=1", "--timeout=60s",
         "--no-cpu-boost", "--invoker-iam-check", "--no-allow-unauthenticated",
-        "--set-secrets=DATABASE_URL=minkops-database-url:1", f"--set-env-vars=WORKER_JOB_RESOURCE={JOB}")
+        f"--set-secrets={DATABASE}", f"--set-env-vars=WORKER_JOB_RESOURCE={JOB}")
     private_invoker("minkops-operations", ops_identity)
     operations_url = output("run", "services", "describe", "minkops-operations", f"--project={PROJECT}",
                             f"--region={REGION}", "--format=value(status.url)")
