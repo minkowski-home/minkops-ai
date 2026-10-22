@@ -635,8 +635,8 @@ BILL_TOOLS = {tool.name: tool for tool in (
                  "bills": {"type": "array", "minItems": 1, "maxItems": MAX_BILLS, "items": BILL_SCHEMA}},
                 ["count", "bills"]), propose),
     Tool("check_gstin", "Whether each value is a valid GSTIN (format, state code and check character), and its state.",
-         schema({"values": {"type": "array", "minItems": 1, "maxItems": 20,
-                            "items": {"type": "string", "maxLength": 30}}}, ["values"]), check_gstin),
+         schema({"values": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 30}}},
+                ["values"]), check_gstin),
 )}
 
 

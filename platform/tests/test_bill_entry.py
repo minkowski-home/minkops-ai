@@ -302,6 +302,8 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     fake = by_file(**{"sunrise-0412.pdf": [
         [("find_company", {"subjects": [BUYER]}), ("find_ledger", {"subjects": [SUNRISE]}),
          ("check_gstin", {"values": [SUNRISE, SUNRISE[:-1] + ("A" if SUNRISE[-1] != "A" else "B")]}),
+         # A bill printing no GSTIN has none to check: an empty list is answered, not refused.
+         ("check_gstin", {"values": []}),
          ("party_history", {"company": "C1", "ledgers": ["L1", "Sunrise"]})],
         *proposing(names, misread), reproposing(names, proposal(company))]})
     run = launch(desk, {"sunrise-0412.pdf": B01})
@@ -323,7 +325,8 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     assert answers(session, "find_ledger")[0]["results"][0]["ledgers"] == [{
         "name": "Sunrise Office Systems", "ref": "L1", "group": "Sundry Creditors", "gstin": SUNRISE,
         "company": "Rehearsal Infra Private Limited", "company_ref": "C1"}]
-    assert [r["valid"] for r in answers(session, "check_gstin")[0]["results"]] == [True, False]
+    checked, nothing = answers(session, "check_gstin")
+    assert ([r["valid"] for r in checked["results"]], nothing) == ([True, False], {"results": []})
     # History is asked for by the references find_ledger gives; a subject that is no ledger is named, never dropped.
     [history] = answers(session, "party_history")
     assert ([v["reference"] for v in history["vouchers"]], history["unknown_ledgers"]) == (["SOS/26/0007"], ["Sunrise"])
