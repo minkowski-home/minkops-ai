@@ -870,7 +870,10 @@ def test_a_supplier_booked_item_wise_shows_its_items_and_a_plain_reading_waits_f
     # Booked without the items this supplier's bills carried, the bill has no precedent: even under standing
     # approval it waits for a person.
     [proposed] = records(desk, run)
-    assert (proposed["status"], proposed["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
+    # The note sets what the books did beside this booking.
+    assert (proposed["status"], proposed["review_reasons"]) == ("proposed", [
+        f"{bill_entry.UNPRECEDENTED} Its last bill, SD/26/0101, was a Purchase item-wise to Input CGST 9%, "
+        "Input SGST 9%, Spares Purchase; this one is a Purchase to Spares Purchase."])
 
 
 def depot(company):
@@ -1079,7 +1082,9 @@ def test_an_approved_verified_booking_is_learnt_and_an_edit_in_tally_sends_its_n
 
     # A first booking for the supplier waits for a person; their approval and Tally's readback teach it.
     first = bill("SOS/26/0501")
-    assert first["review_reasons"] == [bill_entry.UNPRECEDENTED]
+    assert first["review_reasons"] == [
+        f"{bill_entry.UNPRECEDENTED} Its last bill, SOS/26/0007, was a Purchase to Input CGST 9%, Input SGST 9%, "
+        "Office Cabins; this one is a Purchase to Repairs and Maintenance."]
     decide(desk, first, "approve")
     companion(desk)
     learnt = db.execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking'",
@@ -1162,6 +1167,34 @@ def test_a_bill_waits_on_its_companys_open_practice_and_the_answer_releases_it(d
     assert plan["duplicate"]["number_fields"] == ["REFERENCE", "NARRATION"]
 
 
+@pytest.mark.gst
+def test_a_taxed_bill_waits_while_its_company_has_not_said_which_gst_ledgers_it_uses_and_the_answer_releases_it(desk):
+    """Books with GST duty ledgers and older ledgers named for the tax leave the choice to the client, once."""
+    from minkops_platform import attention
+    from minkops_platform.accounts import mirror, practice
+    names, company, db = names_of(desk["company"]), desk["company"]["guid"], desk["db"]
+    older = {"type": "LEDGER", "data": {"@_NAME": "Old Input CGST 9%", "GUID": "g-old-cgst", "PARENT": "Duties & Taxes",
+                                       "ALTERID": "1"}}
+    factory.books(db, desk["company"], [*gst_masters(desk["company"]), older], [PRIOR])
+    task = db.execute("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Sync') RETURNING id",
+                      (desk["tenant"]["id"],)).fetchone()
+    practice.probe(db, desk["company"], mirror.latest(db, desk["company"]["id"]), {"task_id": task["id"]})
+    db.commit()
+    fake = by_file(**{"sunrise.pdf": proposing(names, proposal(company))})
+    run = launch(desk, {"sunrise.pdf": B01})
+    read(desk, fake, run)
+    [waiting] = records(desk, run)
+    assert (waiting["status"], waiting["hold_codes"], waiting["checks"]["practice"]) == (
+        "held", ["practice_question"], "gst_ledgers")
+    card = db.execute("""SELECT a.* FROM attention_items a JOIN practice_questions q ON q.attention_item_id=a.id
+                         WHERE q.company_id=%s AND q.probe='gst_ledgers'""", (desk["company"]["id"],)).fetchone()
+    assert [option["action"] for option in practice.question(card["target"])["options"]] == ["gst_duty", "history"]
+    assert attention.decide(db, desk["tenant"], desk["operator"], card["id"], "gst_duty")["status"] == "answered"
+    db.commit()
+    # The bill posts to the duty ledgers, as the answer says new bills do: it is released.
+    assert (record(desk, waiting)["status"], record(desk, waiting)["hold_codes"]) == ("proposed", [])
+
+
 def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the_rest(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
@@ -1174,7 +1207,9 @@ def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the
     read(desk, fake, run)
     usual, unprecedented = records(desk, run)
     assert usual["status"] == "writing"
-    assert (unprecedented["status"], unprecedented["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
+    assert (unprecedented["status"], unprecedented["review_reasons"]) == ("proposed", [
+        f"{bill_entry.UNPRECEDENTED} Its last bill, SOS/26/0007, was a Purchase to Input CGST 9%, Input SGST 9%, "
+        "Office Cabins; this one is a Purchase to Repairs and Maintenance."])
     # The note is the reviewer's: the session only learns its bill was accepted, so it never bends a sound
     # proposal to avoid review.
     session = next(s for s in fake.created if header(s)["file"] == "first-time.pdf")

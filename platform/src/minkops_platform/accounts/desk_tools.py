@@ -26,6 +26,7 @@ from minkops_platform.lanes import Wait
 from minkops_platform.runtime.tools import Tool, ToolError
 
 from . import memory, mirror, settlement, sync
+from . import practice as practices
 from .voucher_types import base_types
 from .vouchers import HoldReason
 
@@ -249,11 +250,13 @@ class Desk:
         return (later[0]["books_from"] - timedelta(days=1)).isoformat() if later else None
 
     def view(self, connection, company):
-        """The company in the shape the voucher gates read, built once per item."""
+        """The company in the shape the voucher gates read, built once per item, with the practices they enforce."""
         if company["id"] not in self._views:
             view = mirror.company_view(connection, company, company["version"])
             self._views[company["id"]] = {**view, "port": company["tally_port"],
-                                          "books_from": company["books_from"].isoformat()}
+                                          "books_from": company["books_from"].isoformat(),
+                                          "practices": {probe: practices.settled(connection, company, probe)
+                                                        for probe in practices.ENFORCED}}
         return self._views[company["id"]]
 
     def category(self, connection, company, centre):

@@ -409,6 +409,10 @@ class Masters:
     def scalar(self, data, key):
         return text(data.get(key))
 
+    def all(self, kind):
+        """Every master of this type."""
+        return [data for (found, _), records in self.by_key.items() if found == kind for data in records]
+
     def one(self, kind, guid, code, message):
         found = self.by_key.get((kind, guid)) if isinstance(guid, str) else None
         if not found or len(found) != 1:
@@ -657,6 +661,8 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     """
     document, voucher = _document(record)
     masters = Masters(view, created)
+    # How the company keeps its books, as its books or its client settled it (practice.py): absent when unsettled.
+    practices = {key: value for key, value in (view.get("practices") or {}).items() if value}
     books_from = company["books_from"].isoformat()
     if document["date"] < books_from:
         raise HoldReason("date_before_books", f"Bill date {document['date']} is before {company['name']}'s books begin on "
@@ -745,6 +751,17 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
             problem = gst.tax_ledger_problem(ledger, tax["head"], taxes[-1]["rate"])
             if problem:
                 raise HoldReason("classification_uncertain", problem)
+            # A company whose purchases post GST to its duty ledgers, which Tally's returns read, uses one where
+            # the books have it for this head and rate.
+            duty = None if gst.is_duty(ledger) or practices.get("gst_ledgers", {}).get("use") != "gst_duty" else \
+                gst.duty_ledger(masters.all("LEDGER"), tax["head"], taxes[-1]["rate"])
+            if duty:
+                raise HoldReason("classification_uncertain", (
+                    f"{company['name']} posts GST to the ledgers Tally sets up as GST duties: use {duty} for "
+                    f"{gst.HEAD_NAMES[tax['head']]} at {taxes[-1]['rate'].normalize():f}%."))
+        if item["role"] == "discount" and practices.get("discounts", {}).get("booked") == "net":
+            raise HoldReason("classification_uncertain", f"{company['name']} books a printed discount net: book each "
+                                                         "line at its discounted value, with no discount line.")
         lines.append(_line(name, item["side"], cents, allocation))
     items_cents = stock.cents if stock else 0
     if tds:

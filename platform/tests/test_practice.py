@@ -164,3 +164,60 @@ def test_an_answer_settles_the_practice_and_no_later_sync_asks_again(books):
     practice.probe(db, company, version, books["job"])
     assert db.execute("""SELECT count(*) AS n FROM practice_questions WHERE company_id=%s
                          AND probe='invoice_number_field' AND status='open'""", (company["id"],)).fetchone()["n"] == 0
+
+
+def ledger(name, guid, parent="Duties & Taxes", **extra):
+    return {"type": "LEDGER", "data": {"@_NAME": name, "GUID": guid, "PARENT": parent, **extra}}
+
+
+DUTY = ledger("Input CGST 9% - UAT", "l-duty", TAXTYPE="GST", GSTDUTYHEAD="CGST", RATEOFTAXCALCULATION="9")
+NAMED = ledger("QA18 Input CGST 9%", "l-named")
+DISCOUNT = ledger("Trade Discount Received", "l-discount", parent="Indirect Incomes")
+TAXES = ("Duties & Taxes", "Current Liabilities")
+
+
+def posting(n, *ledgers):
+    """A purchase posting to these ledgers besides the supplier's and the purchase ledger."""
+    return {"GUID": f"p-{n}", "ALTERID": str(n), "DATE": "20260901", "VOUCHERTYPENAME": "Purchase",
+            "PARTYLEDGERNAME": "Supplier", "ALLLEDGERENTRIES.LIST": [
+                {"LEDGERNAME": "Supplier", "AMOUNT": "118"}, {"LEDGERNAME": "Purchases", "AMOUNT": "-100"},
+                *({"LEDGERNAME": name, "AMOUNT": "-9"} for name in ledgers)]}
+
+
+def with_taxes(*extra):
+    return [{"type": "GROUP", "data": {"@_NAME": TAXES[0], "GUID": "grp-taxes", "PARENT": TAXES[1]}}, *masters(*extra)]
+
+
+def test_where_a_company_posts_gst_is_read_from_its_books_and_asked_once_when_they_show_both(books):
+    duty_only, _ = found(books, with_taxes(DUTY), [posting(1, "Input CGST 9% - UAT")])
+    assert (duty_only["gst_ledgers"].value, duty_only["gst_ledgers"].question) == ({"use": "gst_duty"}, None)
+    # No ledger is set up as a GST duty: the ledgers named for the tax are all there is.
+    named_only, _ = found(books, with_taxes(NAMED), [posting(1, "QA18 Input CGST 9%")])
+    assert named_only["gst_ledgers"].value == {"use": "history"}
+    # Both kinds, and the books post to the named one: only the client can say which new bills use.
+    both, _ = found(books, with_taxes(DUTY, NAMED), [posting(n, "QA18 Input CGST 9%") for n in range(12)])
+    assert both["gst_ledgers"].value is None
+    assert [option["value"] for option in both["gst_ledgers"].question["options"]] == ["gst_duty", "history"]
+    assert both["gst_ledgers"].evidence == {"duty_ledgers": 1, "named_ledgers": 1, "purchases_to_duty": 0,
+                                            "purchases_to_named": 12}
+    # Both kinds, but every purchase of many uses the duty ledgers: the books settle it.
+    settled, _ = found(books, with_taxes(DUTY, NAMED), [posting(n, "Input CGST 9% - UAT") for n in range(12)])
+    assert settled["gst_ledgers"].value == {"use": "gst_duty"}
+    # A company with no GST ledgers has nothing to settle.
+    assert "gst_ledgers" not in found(books, masters(), [posting(1)])[0]
+
+
+def test_how_a_company_books_a_printed_discount_is_read_from_its_books_and_asked_once_when_they_cannot_say(books):
+    # No discount ledger: a purchase can only be booked net of its discount.
+    net, _ = found(books, masters(), [posting(1)])
+    assert net["discounts"].value == {"booked": "net"}
+    used, _ = found(books, masters(DISCOUNT), [posting(1, "Trade Discount Received"), posting(2)])
+    assert used["discounts"].value == {"booked": "separately", "ledger_guid": "l-discount",
+                                       "ledger": "Trade Discount Received"}
+    # A discount the client allows its customers is the sales side, and says nothing about purchases.
+    allowed = ledger("Discount Allowed", "l-allowed", parent="Indirect Expenses")
+    assert found(books, masters(allowed), [posting(1)])[0]["discounts"].value == {"booked": "net"}
+    # A discount ledger the purchases never use: either is possible.
+    unused, _ = found(books, masters(DISCOUNT), [posting(n) for n in range(12)])
+    assert unused["discounts"].value is None
+    assert [option["value"] for option in unused["discounts"].question["options"]] == ["net", "separately"]

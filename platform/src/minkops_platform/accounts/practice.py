@@ -4,7 +4,8 @@ After every published sync the probes ask how this company keeps its books:
 are Receipt Notes or purchase orders in use, do purchase narrations carry
 receipt-register numbers, where is the supplier's invoice number recorded, are
 bank payments booked to each party's ledger or to one ledger with cost centres,
-is bill-wise tracking on. A probe that settles the question records a
+is bill-wise tracking on, does GST go to the ledgers Tally sets up as GST duties,
+is a printed discount booked net or to a discount ledger. A probe that settles the question records a
 confirmed structured entry, a fact about the books with the counts behind it.
 An inconclusive probe raises one one-click question per company, and the
 chosen option becomes the entry. No question ever blocks a run: only the items
@@ -69,6 +70,14 @@ QUESTIONS = {
     "bank_payments": ("How does this company book payments made from the bank?", (
         ("party_ledgers", "To each payee's own ledger", {"style": "party_ledgers"}),
         ("one_ledger_cost_centres", "To one ledger, split by cost centre", {"style": "one_ledger_cost_centres"}))),
+    "gst_ledgers": (
+        "This company has ledgers set up as GST duties in Tally, and others named for GST that its purchases have "
+        "used. Which should new bills post GST to?", (
+            ("gst_duty", "The ledgers set up as GST duties", {"use": "gst_duty"}),
+            ("history", "The ledgers each supplier's earlier bills used", {"use": "history"}))),
+    "discounts": ("A bill prints a trade discount. How does this company book it in Tally?", (
+        ("net", "Net: each line at its discounted value", {"booked": "net"}),
+        ("separately", "To a discount ledger", {"booked": "separately"}))),
 }
 
 
@@ -152,7 +161,60 @@ def billwise(ledgers, groups, purchases, **_):
     return Finding("billwise", {"in_use": bool(on), "share": round(len(on) / len(suppliers), 2)}, evidence)
 
 
-PROBES = (receipt_notes, purchase_orders, receipt_register, invoice_number_field, bank_payments, billwise)
+GST_WORDS = {"cgst", "sgst", "utgst", "igst", "cess"}
+
+
+def gst_ledgers(ledgers, groups, purchases, **_):
+    """Whether purchases post GST to the ledgers Tally sets up as GST duties, which its returns read, or to others
+    named for the tax. Books with only one kind settle it; books with both ask, unless they always use the duty
+    ledgers."""
+    taxes = [row for row in ledgers if _under(row["parent"], ["Duties & Taxes"], groups)]
+    duty = {row["name"] for row in taxes if str(row["data"].get("TAXTYPE", "")).casefold() == "gst"}
+    named = {row["name"] for row in taxes if row["name"] not in duty and GST_WORDS & set(mirror.words(row["name"]))}
+    if not duty and not named:
+        return None
+    to_duty = sum(1 for v in purchases if duty & set(v["ledgers"]))
+    to_named = sum(1 for v in purchases if named & set(v["ledgers"]))
+    evidence = {"duty_ledgers": len(duty), "named_ledgers": len(named), "purchases_to_duty": to_duty,
+                "purchases_to_named": to_named}
+    if not named or (to_duty >= ENOUGH and not to_named):
+        return Finding("gst_ledgers", {"use": "gst_duty"}, evidence)
+    if not duty:
+        return Finding("gst_ledgers", {"use": "history"}, evidence)
+    return Finding("gst_ledgers", None, evidence, _question("gst_ledgers"))
+
+
+# Where a discount a supplier gives is booked; a Discount Allowed ledger under expenses is the sales side.
+DISCOUNT_GROUPS = ("Indirect Incomes", "Direct Incomes", "Purchase Accounts")
+
+
+def discounts(ledgers, groups, purchases, **_):
+    """Whether a printed discount is booked net or to a discount ledger: a company without one books net."""
+    named = {row["name"]: row for row in ledgers
+             if "discount" in mirror.words(row["name"]) and _under(row["parent"], DISCOUNT_GROUPS, groups)}
+    used = Counter(name for v in purchases for name in v["ledgers"] if name in named)
+    evidence = {"discount_ledgers": len(named), "purchases_with_discount": sum(used.values())}
+    if not named:
+        return Finding("discounts", {"booked": "net"}, evidence)
+    if used:
+        ledger = named[used.most_common(1)[0][0]]
+        return Finding("discounts", {"booked": "separately", "ledger_guid": ledger["guid"], "ledger": ledger["name"]},
+                       evidence, guids=(ledger["guid"],))
+    return Finding("discounts", None, evidence, _question("discounts"))
+
+
+# Practices the voucher gate enforces once settled (vouchers.check), and a bill waits on while their question is open.
+ENFORCED = ("gst_ledgers", "discounts")
+
+
+def is_open(connection, company, probe):
+    """Whether a question about this practice waits for the company's answer."""
+    return connection.execute("SELECT 1 FROM practice_questions WHERE tenant_id=%s AND company_id=%s AND probe=%s "
+                              "AND status='open'", (company["tenant_id"], company["id"], probe)).fetchone() is not None
+
+
+PROBES = (receipt_notes, purchase_orders, receipt_register, invoice_number_field, bank_payments, billwise, gst_ledgers,
+          discounts)
 NAMES = tuple(probe.__name__ for probe in PROBES)
 
 

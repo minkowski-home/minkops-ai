@@ -5,6 +5,8 @@ import re
 import unittest
 from datetime import date
 
+import pytest
+
 from minkops_platform.accounts import vouchers
 from minkops_platform.accounts.vouchers import HoldReason
 
@@ -515,3 +517,37 @@ class GstReturnsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def practised(practices, *extra):
+    """The company's view with practices its books or its client settled, and any further masters."""
+    company = view()
+    company["masters"]["records"] += [{"type": "LEDGER", "data": {"ALTERID": "5", **data}} for data in extra]
+    return {**company, "practices": practices}
+
+
+DUTY_CGST = {"NAME": "CGST Input 9% (GST)", "GUID": guid("CGST Input 9% (GST)"), "PARENT": "Duties & Taxes",
+             "TAXTYPE": "GST", "GSTDUTYHEAD": "CGST", "RATEOFTAXCALCULATION": "9"}
+
+
+def test_a_company_that_posts_gst_to_its_duty_ledgers_refuses_one_merely_named_for_the_tax():
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(proposal(), practised({"gst_ledgers": {"use": "gst_duty"}}, DUTY_CGST), COMPANY)
+    assert (refused.value.code, str(refused.value)) == (
+        "classification_uncertain", "Test posts GST to the ledgers Tally sets up as GST duties: use CGST Input 9% (GST) "
+                                    "for CGST at 9%.")
+    # Where no duty ledger carries a head and rate, the ledger named for it stays right; as it does for a company
+    # whose bills follow each supplier's earlier ones.
+    assert vouchers.check(proposal(), practised({"gst_ledgers": {"use": "gst_duty"}}), COMPANY)
+    assert vouchers.check(proposal(), practised({"gst_ledgers": {"use": "history"}}, DUTY_CGST), COMPANY)
+
+
+def test_a_company_that_books_discounts_net_refuses_a_discount_line():
+    discounted = proposal(**{"voucher.lines.0.amount": 4100.00})
+    discounted["voucher"]["lines"].append(line("discount", "Trade Discount", "credit", 100.00))
+    trade = {"NAME": "Trade Discount", "GUID": guid("Trade Discount"), "PARENT": "Indirect Incomes"}
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(discounted, practised({"discounts": {"booked": "net"}}, trade), COMPANY)
+    assert str(refused.value) == ("Test books a printed discount net: book each line at its discounted value, with no "
+                                  "discount line.")
+    assert vouchers.check(discounted, practised({"discounts": {"booked": "separately"}}, trade), COMPANY)

@@ -129,6 +129,22 @@ def tax_ledger_problem(ledger, head, rate):
     return None
 
 
+def duty_ledger(ledgers, head, rate):
+    """The name of the one ledger Tally sets up as a GST duty for this head and rate, or None.
+
+    `ledgers` are native ledger records. A duty ledger without a rate of its own carries any rate of its head.
+    """
+    found = [scalar(ledger.get("@_NAME") or ledger.get("NAME")) for ledger in ledgers
+             if scalar(ledger.get("TAXTYPE")).casefold() == "gst"
+             and scalar(ledger.get("GSTDUTYHEAD")).casefold() in DUTY_HEADS[head]
+             and _percent(scalar(ledger.get("RATEOFTAXCALCULATION"))) in (Decimal(0), rate)]
+    return found[0] if len(found) == 1 else None
+
+
+def is_duty(ledger):
+    return scalar(ledger.get("TAXTYPE")).casefold() == "gst"
+
+
 def heads_note(taxes, supplier_gstin, place):
     """A review note when the bill's tax heads are not the ones its states call for, or None.
 

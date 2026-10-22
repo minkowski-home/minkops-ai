@@ -44,6 +44,7 @@ from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
 from .desk_tools import COMPANY, Desk, reference, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
+from .voucher_types import base_types
 from .vouchers import HoldReason, check, correction_reason, narration_token, observed_bill, rupees
 
 KIND = "bill"
@@ -70,6 +71,8 @@ DEMOTED = ("Someone changed a bill booked this way in Tally after Minkops saved 
 GUESSED_BOOKING = ("This supplier's bills were last booked this way as a best guess. Review the voucher type and "
                    "ledgers before approving.")
 BOOKING_REVIEWS = (UNPRECEDENTED, DEMOTED, GUESSED_BOOKING)
+# The voucher families a supplier's bill is booked in, as Tally's base voucher types name them.
+PURCHASE_SIDE = {"purchase", "journal", "debit note"}
 
 
 # --- launch ---------------------------------------------------------------------------
@@ -477,9 +480,14 @@ def _waits(connection, company, bill, bound):
 
     A receipt-register stamp needs to know where the company records it, and an
     item-wise purchase whether receipt notes or purchase orders track its goods.
+    A taxed bill needs to know which GST ledgers the company uses, and one with a
+    discount line how it books discounts, while the books leave that to its client.
     """
     probes = ["receipt_register"] if (bill.get("document") or {}).get("receipt_register") else []
-    for probe in [*probes, *(TRACKED if bound.stock else ())]:
+    roles = {line["role"] for line in (bill.get("voucher") or {}).get("lines") or []}
+    enforced = [probe for probe, role in (("gst_ledgers", "tax"), ("discounts", "discount"))
+                if role in roles and practice.is_open(connection, company, probe)]
+    for probe in [*probes, *enforced, *(TRACKED if bound.stock else ())]:
         settled = practice.settled(connection, company, probe)
         if settled is None:
             return "practice_question", hold("practice_question").reason, probe
@@ -541,11 +549,28 @@ def _precedent(connection, desk, company, bound):
         return None
     if "unconfirmed" in learnt:
         return GUESSED_BOOKING
+    history = [row for part in desk.parts[company["guid"]]
+               for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50)]
     booked = any(row["voucher_type"] == booking["voucher_type"]["NAME"] and wanted <= set(row["ledgers"])
-                 and bool(mirror.stock_lines(row["data"])) == booking["items"]
-                 for part in desk.parts[company["guid"]]
-                 for row in mirror.ledger_history(connection, part["id"], part["version"], [bound.party], limit=50))
-    return None if booked else UNPRECEDENTED
+                 and bool(mirror.stock_lines(row["data"])) == booking["items"] for row in history)
+    return None if booked else _departure(connection, desk, company, bound, history)
+
+
+def _departure(connection, desk, company, bound, history):
+    """The review a booking that departs from the books needs: what the supplier's last bill was booked to, beside
+    what this one is, so a person sees the difference at once; the bare note when the books hold no earlier bill."""
+    types = [r["data"] for r in desk.view(connection, company)["masters"]["records"] if r["type"] == "VOUCHERTYPE"]
+    bases = {name.casefold(): str(base or "").casefold() for name, base in base_types(types).items()}
+    earlier = max((row for row in history if bases.get(row["voucher_type"].casefold()) in PURCHASE_SIDE),
+                  key=lambda row: row["date"], default=None)
+    if earlier is None:
+        return UNPRECEDENTED
+    before = ", ".join(sorted(set(earlier["ledgers"]) - {bound.party}))
+    itemwise = {True: " item-wise", False: ""}
+    return (f"{UNPRECEDENTED} Its last bill, {earlier['reference'] or earlier['date']}, was a "
+            f"{earlier['voucher_type']}{itemwise[bool(mirror.stock_lines(earlier['data']))]} to {before}; this one "
+            f"is a {bound.booking['voucher_type']['NAME']}{itemwise[bound.booking['items']]} to "
+            f"{', '.join(bound.booking['ledgers']) or 'its stock items'}.")
 
 
 def check_gstin(call, arguments):
@@ -950,7 +975,7 @@ def practice_settled(connection, tenant_id, company_id, probe):
                ORDER BY r.id FOR UPDATE OF r""", (tenant_id, company_id, KIND, probe)).fetchall():
         run = work.get_run(connection, tenant_id, record["run_id"])
         # The hold's own reason and any earlier booking review are restated by the check.
-        review = [reason for reason in record["review_reasons"][1:] if reason not in BOOKING_REVIEWS]
+        review = [reason for reason in record["review_reasons"][1:] if not reason.startswith(BOOKING_REVIEWS)]
         if (_repropose(connection, run, record, record["proposal"]["bill"], review=review, precedent=True)
                 and run["config"].get("review_mode") == "only_exceptions" and not review
                 and control_state(connection, tenant_id, run["task_id"]) == "active"):
