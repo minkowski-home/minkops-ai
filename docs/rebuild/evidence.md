@@ -514,3 +514,24 @@ GST switched on. TallyPrime stores its own verdict for its returns on each vouch
   refusal named the whole voucher, cut off: `best_match` stops at a nullable value whose schema reports more
   than one error. Refusals now name each fault where it is, and the new GST fields are optional, asked for only
   where a company needs them.
+
+## Replacing a PC, rehearsed live (22 October 2026)
+
+The move was rehearsed against TallyPrime in Educational mode, with the five rehearsal companies open, on a scratch
+database migrated through 0034 and its own API. Two headless companions (`scripts/companion_dev.mjs`, companion
+0.11.0) stood in for the two PCs. Each kept its own state, and they read the same Tally through the WSL relay, one
+after the other.
+
+- **The old PC.** OLD-PC found the five companies, and an admin authorised them for "Rehearsal companies". Its first
+  sync mirrored them in full in 10 s: 7 to 23 vouchers and 119 to 134 masters each. The probes raised 21 practice
+  questions.
+- **The replacement.** OLD-PC was disconnected, and NEW-PC registered and refreshed. Each of its five "New company
+  found" cards offered to continue the client's company from OLD-PC.
+- **Continued.** One decision per card returned the client's existing company, now on NEW-PC, and the duplicates
+  were removed. The sync the decisions queued rebuilt all five in full in 10 s, with reason `pc_changed`. Each
+  rebuild matched the old copy's voucher and master counts exactly. The copies were identical, so no voucher row
+  was rewritten and no "Older copy of the books" card was raised. The 21 practice questions stayed with their
+  companies, and none was raised again.
+
+Restoring an older backup on the new PC, and a bill saved through Minkops Dev after the move, need a person at
+Windows. Both are on the manual testing list.
