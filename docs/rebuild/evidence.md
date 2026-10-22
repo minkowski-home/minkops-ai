@@ -444,3 +444,35 @@ in Educational mode and `gpt-6-luna`.
   subjects (18 times). Each cost a model round trip; all three now answer.
 - **References in reviewers' text.** Held rows read "no matching ledger was found in C5". Reasons a person reads
   now name the company or master each reference stands for.
+
+## Cut-over and the final build, checked live (22 October 2026)
+
+Slice 13 rehearsed the cut-over's new step, then ran the final build end to end on the restarted local stack:
+the API, a worker with 12 lanes, the console, companion 0.11.0, TallyPrime in Educational mode and `gpt-6-luna`.
+
+- **A client's workspace created.** A scratch database migrated from empty through 0032. There,
+  `install_workflows pr-infra --create-tenant "PR Infra"` created PR Infra for its verified administrator, with
+  its client business, both workflows bound to the Accounts desk, and the agreed rule. A dry run left nothing
+  behind, and a repeat changed nothing. Another administrator and an unverified owner were refused.
+- **A bill, from the console.** A new item-wise invoice from QA18 Inventory Depot (QA18/INV/STK/003) was read in
+  about 60 s and approved with one click. It was saved and verified in Tally 3 s later, its spares booked as
+  three of that supplier's four earlier purchases were.
+- **A statement, from the console.** A three-row October statement for the synthetic ICICI account continued
+  September's closing balance and was read in one session. Save ready entries saved and verified its receipt and
+  a payment.
+
+**Usage.** Three sessions: 252,859 input tokens (79% cached) and 6,786 output.
+
+**Found and fixed along the way:**
+
+- **The runtime could not have reached its database.** The deployment mounted the new instance, while
+  `configure_runtime.py` still wrote the shared instance's socket into secrets that already exist and are never
+  rewritten. The runtime's secrets are now named for the new instance, beside the parked build's.
+- **A rollback could have lost its images.** Retention kept only the three newest; images tagged `parked-…` are
+  now kept. A rollback also reinstalls the parked companion, which the rebuilt one cannot stand in for.
+- **A refusal printed a traceback.** The install command now prints the reason and exits 1.
+- **A supplier payment held as inventory.** The statement's payment to QA18 Inventory Depot cited
+  QA18-INV-STK-003. The skill listed inventory among what an entry cannot carry, so the session held the row as
+  Manual entry needed. Statement entry 1.1.1 says a row records money moving, never what it bought. Rerun, the
+  payment was proposed to the supplier's ledger and saved, and the first run's two saved rows were found in
+  Tally, never written twice.
