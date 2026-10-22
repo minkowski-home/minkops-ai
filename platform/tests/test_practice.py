@@ -68,7 +68,13 @@ def test_settled_practices_are_read_from_the_books(books):
     assert findings["invoice_number_field"].value == {"fields": ["REFERENCE"]}
     assert findings["bank_payments"].value == {"style": "party_ledgers"}
     assert findings["billwise"].value == {"in_use": True, "share": 0.25}
-    assert findings["receipt_notes"].value == {"in_use": False}
+    assert findings["receipt_notes"].value == findings["purchase_orders"].value == {"in_use": False}
+    # One order in the books says the company tracks them.
+    order = {"type": "VOUCHERTYPE", "data": {"@_NAME": "Purchase Order", "@_RESERVEDNAME": "Purchase Order",
+                                             "GUID": "vt-po", "PARENT": "Purchase Order", "ISACTIVE": "Yes"}}
+    findings, _ = found(books, masters(*suppliers, order), [*vouchers, {
+        **purchase(99), "GUID": "po-1", "VOUCHERTYPENAME": "Purchase Order"}])
+    assert findings["purchase_orders"].value == {"in_use": True}
 
 
 def test_one_ledger_with_cost_centres_is_recognised(books):

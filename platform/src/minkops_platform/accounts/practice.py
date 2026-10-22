@@ -1,14 +1,14 @@
 """Deterministic practice probes over the mirror, and one-click practice questions.
 
 After every published sync the probes ask how this company keeps its books:
-are Receipt Notes in use, do purchase narrations carry receipt-register
-numbers, where is the supplier's invoice number recorded, are bank payments
-booked to each party's ledger or to one ledger with cost centres, is bill-wise
-tracking on. A probe that settles the question records a confirmed structured
-entry, a fact about the books with the counts behind it. An inconclusive probe
-raises one one-click question per company, and the chosen option becomes the
-entry. No question ever blocks a run: only the items that depend on it wait,
-and answering releases them.
+are Receipt Notes or purchase orders in use, do purchase narrations carry
+receipt-register numbers, where is the supplier's invoice number recorded, are
+bank payments booked to each party's ledger or to one ledger with cost centres,
+is bill-wise tracking on. A probe that settles the question records a
+confirmed structured entry, a fact about the books with the counts behind it.
+An inconclusive probe raises one one-click question per company, and the
+chosen option becomes the entry. No question ever blocks a run: only the items
+that depend on it wait, and answering releases them.
 """
 
 import re
@@ -57,6 +57,8 @@ def _under(parent, wanted, groups):
 QUESTIONS = {
     "receipt_notes": ("Does this company record goods received as Receipt Notes in Tally before the purchase?", (
         ("yes", "Yes, Receipt Notes", {"in_use": True}), ("no", "No, purchases only", {"in_use": False}))),
+    "purchase_orders": ("Does this company record purchase orders in Tally before the purchase?", (
+        ("yes", "Yes, purchase orders", {"in_use": True}), ("no", "No, purchases only", {"in_use": False}))),
     "receipt_register": (
         "Bills carry a receipt-register (DMR) stamp. Where does this company record that number in Tally?", (
             ("narration", "In the purchase narration", {"recorded_in": "narration"}),
@@ -82,6 +84,15 @@ def receipt_notes(families, purchases, **_):
     if len(purchases) >= ENOUGH:
         return Finding("receipt_notes", {"in_use": False}, {"receipt_notes": 0, "purchases": len(purchases)})
     return Finding("receipt_notes", None, {"purchases": len(purchases)}, _question("receipt_notes"))
+
+
+def purchase_orders(families, purchases, **_):
+    orders = sum(1 for v in families.values() if v == "purchase order")
+    if orders:
+        return Finding("purchase_orders", {"in_use": True}, {"purchase_orders": orders})
+    if len(purchases) >= ENOUGH:
+        return Finding("purchase_orders", {"in_use": False}, {"purchase_orders": 0, "purchases": len(purchases)})
+    return Finding("purchase_orders", None, {"purchases": len(purchases)}, _question("purchase_orders"))
 
 
 def receipt_register(purchases, **_):
@@ -141,7 +152,7 @@ def billwise(ledgers, groups, purchases, **_):
     return Finding("billwise", {"in_use": bool(on), "share": round(len(on) / len(suppliers), 2)}, evidence)
 
 
-PROBES = (receipt_notes, receipt_register, invoice_number_field, bank_payments, billwise)
+PROBES = (receipt_notes, purchase_orders, receipt_register, invoice_number_field, bank_payments, billwise)
 
 
 def findings(connection, company, version):
