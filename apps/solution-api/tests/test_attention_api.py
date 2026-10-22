@@ -79,6 +79,18 @@ class AttentionApiTests(unittest.TestCase):
         self.assertEqual((event["actor_id"], event["action"]), (self.member["id"], "manual_done"))
         self.assertEqual([item["kind"] for item in member.get(self.base).json()], ["layout"])
 
+    def test_an_item_of_a_client_the_member_cannot_reach_is_not_found_by_its_id(self):
+        member, csrf = self.login(self.member)
+        theirs = self.items[self.other]
+        for response in (member.post(f"{self.base}/{theirs['gap']['id']}/done", headers=csrf),
+                         member.get(f"{self.base}/{theirs['question']['id']}/decision"),
+                         member.post(f"{self.base}/{theirs['question']['id']}/decision", json={"action": "dmy"},
+                                     headers=csrf)):
+            self.assertEqual(response.status_code, 404, response.text)
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            self.assertEqual(db.execute("SELECT status FROM attention_items WHERE id=%s",
+                                        (theirs["gap"]["id"],)).fetchone()["status"], "pending")
+
     def test_a_question_is_answered_once_per_member_and_a_replay_returns_its_receipt(self):
         admin, csrf = self.login(self.admin)
         mine = self.items[self.granted]

@@ -159,5 +159,47 @@ class WorkspaceTests(unittest.TestCase):
         ).status_code, 404)
 
 
+
+@unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
+class ClientTaskTests(unittest.TestCase):
+    """A run's task belongs to its client: reaching it by its ID needs that client too."""
+
+    def setUp(self):
+        from psycopg.rows import dict_row
+        from pwdlib import PasswordHash
+        sys.path.insert(0, str(ROOT / "platform/tests"))
+        import factory
+
+        from minkops_platform import work
+        os.environ["DATABASE_URL"] = URL
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            self.tenant = factory.tenant(db, scoping=True)
+            self.member = factory.user(db, self.tenant)
+            db.execute("UPDATE users SET password_hash=%s WHERE id=%s",
+                       (PasswordHash.recommended().hash(PASSWORD), self.member["id"]))
+            granted, other = factory.client(db, self.tenant), factory.client(db, self.tenant)
+            db.execute("INSERT INTO client_access(tenant_id,client_id,user_id) VALUES (%s,%s,%s)",
+                       (self.tenant["id"], granted["id"], self.member["id"]))
+            flow = factory.workflow(db, self.tenant)
+            self.runs = {client["slug"]: factory.run(db, self.tenant, client, flow, self.member,
+                                                     [work.ItemSpec("bill", {"file_id": "a"})])
+                         for client in (granted, other)}
+            self.granted, self.other = granted["slug"], other["slug"]
+
+    def test_a_task_of_a_client_the_member_cannot_reach_is_not_found_by_its_id(self):
+        client = TestClient(app)
+        self.assertEqual(client.post("/api/auth/login", json={"email": self.member["email"], "password": PASSWORD})
+                         .status_code, 200)
+        csrf = {"x-csrf-token": client.get("/api/auth/me").json()["csrf_token"]}
+        base = f"/api/tenants/{self.tenant['slug']}/tasks"
+        mine, theirs = self.runs[self.granted], self.runs[self.other]
+        # A run's task names its run and client, so its page can show the run's review.
+        detail = client.get(f"{base}/{mine['task_id']}").json()
+        self.assertEqual(detail["run"], {"id": str(mine["id"]), "client": self.granted})
+        self.assertEqual(client.get(f"{base}/{theirs['task_id']}").status_code, 404)
+        self.assertEqual(client.post(f"{base}/{theirs['task_id']}/control", json={"action": "pause"},
+                                     headers=csrf).status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

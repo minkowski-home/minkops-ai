@@ -57,9 +57,12 @@ def record(connection, run, event_key, identifier, title, *, kind="manual", targ
     return row
 
 
-def get(connection, tenant_id, item_id):
-    row = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND id=%s FOR UPDATE",
-                             (tenant_id, item_id)).fetchone()
+def get(connection, tenant_id, item_id, visible=None):
+    """One item; an item of a client outside `visible` is indistinguishable from none."""
+    row = connection.execute(
+        """SELECT a.* FROM attention_items a JOIN tasks t ON t.tenant_id=a.tenant_id AND t.id=a.task_id
+           WHERE a.tenant_id=%s AND a.id=%s AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
+           FOR UPDATE OF a""", (tenant_id, item_id, *(2 * [None if visible is None else list(visible)]))).fetchone()
     if not row:
         raise ServiceError("not_found", "Attention item not found.")
     return row
@@ -90,8 +93,8 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     return rows
 
 
-def done(connection, tenant_id, user, item_id):
-    item = get(connection, tenant_id, item_id)
+def done(connection, tenant_id, user, item_id, visible=None):
+    item = get(connection, tenant_id, item_id, visible)
     if item["status"] != "done":
         connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
                            (user["id"], item["id"]))
@@ -99,17 +102,17 @@ def done(connection, tenant_id, user, item_id):
     return {"status": "done"}
 
 
-def decide(connection, tenant, user, item_id, action):
+def decide(connection, tenant, user, item_id, action, visible=None):
     """Answer a question card once per member; the same answer again returns its receipt."""
     # Serialize exact replays before examining the mutable item.
     connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                        (f"attention-decision:{tenant['id']}:{item_id}",))
-    receipt = decision_receipt(connection, tenant["id"], user["id"], item_id)
+    receipt = decision_receipt(connection, tenant["id"], user["id"], item_id, visible)
     if receipt:
         if receipt["action"] != action:
             raise ServiceError("conflict", "This item already has a different decision from you.")
         return receipt
-    item = get(connection, tenant["id"], item_id)
+    item = get(connection, tenant["id"], item_id, visible)
     if item["kind"] not in QUESTIONS or item["status"] != "pending":
         raise ServiceError("conflict", "This item is no longer awaiting a decision.")
     outcome = importlib.import_module(QUESTIONS[item["kind"]]).decide(connection, tenant, user, item, action)
@@ -119,8 +122,8 @@ def decide(connection, tenant, user, item_id, action):
         (tenant["id"], item_id, user["id"], action, outcome["status"])).fetchone()
 
 
-def decision_receipt(connection, tenant_id, actor_id, item_id):
-    get(connection, tenant_id, item_id)  # Scope even an absent receipt.
+def decision_receipt(connection, tenant_id, actor_id, item_id, visible=None):
+    get(connection, tenant_id, item_id, visible)  # Scope even an absent receipt.
     return connection.execute("""SELECT item_id,actor_id,action,status,applied_at
         FROM attention_decision_receipts WHERE tenant_id=%s AND actor_id=%s AND item_id=%s""",
         (tenant_id, actor_id, item_id)).fetchone()

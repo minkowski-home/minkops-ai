@@ -25,8 +25,9 @@ def items(slug: str, user: User, connection: Db, status: Literal["pending", "don
 @router.post("/{item_id}/done")
 def mark_done(slug: str, item_id: UUID, request: Request, user: User, connection: Db):
     require_csrf(request)
-    tenant, _ = tenant_access(slug, user, connection)
-    return _call(attention.done, connection, tenant["id"], user, item_id)
+    tenant, member = tenant_access(slug, user, connection)
+    return _call(attention.done, connection, tenant["id"], user, item_id,
+                 clients.visible_ids(connection, tenant, user, member))
 
 
 class Answer(BaseModel):
@@ -36,13 +37,15 @@ class Answer(BaseModel):
 
 @router.get("/{item_id}/decision")
 def decision_receipt(slug: str, item_id: UUID, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
-    return _call(attention.decision_receipt, connection, tenant["id"], user["id"], item_id)
+    tenant, member = tenant_access(slug, user, connection)
+    return _call(attention.decision_receipt, connection, tenant["id"], user["id"], item_id,
+                 clients.visible_ids(connection, tenant, user, member))
 
 
 @router.post("/{item_id}/decision")
 def decide(slug: str, item_id: UUID, body: Answer, request: Request, user: User, connection: Db):
     """Answer a question card, such as how to read a statement's dates."""
     require_csrf(request)
-    tenant, _ = tenant_access(slug, user, connection)
-    return _call(attention.decide, connection, tenant, user, item_id, body.action)
+    tenant, member = tenant_access(slug, user, connection)
+    return _call(attention.decide, connection, tenant, user, item_id, body.action,
+                 clients.visible_ids(connection, tenant, user, member))
