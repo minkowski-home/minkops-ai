@@ -478,3 +478,39 @@ the API, a worker with 12 lanes, the console, companion 0.11.0, TallyPrime in Ed
   Tally, never written twice.
 - **A finished run still said Saving.** "3 entries approved. Saving in Tally." stayed under the completed run. A
   notice that something is saving now goes once the run shows nothing approved or saving.
+
+## GST returns, rehearsed live (22 October 2026)
+
+Whether Tally's GST returns count what Minkops enters was checked in Pradeepraj Infra, the rehearsal company with
+GST switched on. TallyPrime stores its own verdict for its returns on each voucher (`VCHGSTSTATUSISINCLUDED`,
+`…ISUNCERTAIN`), so throwaway purchases dated 31 October were imported, read for it, and deleted.
+
+- **What Minkops wrote was left out.** All 8 purchases Minkops had saved there were Uncertain. So was every other
+  purchase in the company: their suppliers and ledgers are synthetic, without GST registrations.
+- **Tally does not fill the supplier's details.** An imported purchase from a registered supplier kept only its
+  registration type. Sent, the GSTIN, state, country and place of supply were all kept. Without them, the purchase
+  stayed Uncertain.
+- **Nor does it take rates from the masters.** With the supplier's details, a purchase stayed Uncertain until its
+  taxed line stated its taxability, type of supply and each duty head's rate under "Specify in Voucher". Then it
+  was included. "Specify Details Here" and "Use GST Classification" stayed Uncertain. So did a line on a ledger
+  configured at 18%, until the voucher stated the rate.
+- **Tally checks neither the tax head nor the rate.** A Delhi supplier's purchase charging CGST and SGST was included,
+  and so was a line stating 12% while its tax lines charged 9%. The bill gate checks both first.
+- **Inter-state.** A Delhi supplier's purchase charging IGST at 18% was included.
+- **Item-wise purchases stayed Uncertain.** The stock item carries no GST details, and neither stated rates nor an
+  HSN on the item entry or its ledger allocation changed that. Minkops states the supplier's details for such a
+  bill, and a saved one Tally leaves out keeps a note saying so.
+- **A bill, end to end.** For the rehearsal, Pradeepraj Infra gained a synthetic registered supplier, MKQA GST
+  Supplies (Andhra Pradesh, Regular). Its synthetic invoice MKQA/GST/001 (1 October 2026, CGST and SGST at 9% on
+  10,000.00) was read with its buyer GSTIN, place of supply and type of supply, approved in the console and
+  saved. Tally kept the supplier's details and includes the purchase in its returns; Minkops read both back and
+  recorded the verdict.
+
+**Usage.** Two sessions: 445,386 input tokens (88% cached) and 17,280 output.
+
+**Found and fixed along the way:**
+
+- **A session gave up on a refusal it could not read.** Its tax lines lacked several required keys, and the
+  refusal named the whole voucher, cut off: `best_match` stops at a nullable value whose schema reports more
+  than one error. Refusals now name each fault where it is, and the new GST fields are optional, asked for only
+  where a company needs them.
