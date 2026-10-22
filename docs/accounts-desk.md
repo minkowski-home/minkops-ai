@@ -103,8 +103,9 @@ AUTH_DEV_MODE=1 uv run --all-packages uvicorn minkops_api.main:app --host 127.0.
 ```
 
 In another terminal with the same `DATABASE_URL`, start the worker:
-`uv run --all-packages python -m minkops_api.accounts_worker --lanes 8`. `--lanes`
-sets how many sessions run at once (1–16, default 8), and `--drain` exits once idle
+`uv run --all-packages python -m minkops_api.accounts_worker`. `--lanes` sets how
+many sessions run at once (1–16, default 12, which reads 50 bills in under six
+minutes; see [the benchmarks](rebuild/evidence.md#performance-benchmarked-live-22-october-2026)), and `--drain` exits once idle
 for scale-to-zero hosting. Start the Vite app in `apps/solution-web` (`npm run dev`,
 port 3000) and sign in at `/login` as `demo@example.com` with the password the seed
 prints. The seed installs the mock-client composition, Statement entry and Bill

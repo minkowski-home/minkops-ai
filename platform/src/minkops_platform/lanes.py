@@ -51,7 +51,7 @@ from .runtime.openai_hosted import (
 
 log = logging.getLogger(__name__)
 # Lanes per worker by default; slice 12 measures how far this can go.
-LANES = 8
+LANES = 12
 HEARTBEAT_SECONDS = 60
 POLL_SECONDS = 30
 # Finished sessions are closed on this cadence; usage not reported within USAGE_WAIT stays unknown.

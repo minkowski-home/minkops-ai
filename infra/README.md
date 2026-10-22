@@ -50,7 +50,7 @@ of truth for these settings; the table summarises them.
 | Console | Firebase Hosting `minkops-ai-console`: app.minkops.com |
 | API | Cloud Run `minkops-solution-api`: min 0 / max 1, 1 CPU / 1 GiB, concurrency 2 (native evidence validation plus independent presence), 60 s |
 | Interest form | Cloud Run `minkops-interest-api`: min 0 / max 1, 1 CPU / 512 MiB, concurrency 8, 30 s |
-| Worker | Cloud Run Job `minkops-worker`: one task, four bounded lanes, no retries, 1 CPU / 1 GiB; the 60-minute task timeout leaves the 45-minute active-processing budget time to stop and reconcile |
+| Worker | Cloud Run Job `minkops-worker`: one task, twelve bounded lanes, no retries, 1 CPU / 1 GiB; the 60-minute task timeout leaves the 45-minute active-processing budget time to stop and reconcile |
 | Recovery service | IAM-private Cloud Run `minkops-operations`: min 0 / max 1, 1 CPU / 256 MiB, concurrency 1, runtime database secret only, 60 s |
 | Recovery schedule | Scheduler `minkops-worker-recovery`: every five minutes, OIDC using ops identity, service URL audience, no retries; calls `/reconcile`, never the raw worker-job API |
 | Database | Isolated `minkops` PostgreSQL 16 database on the shared Cloud SQL instance `myndral-prod:us-central1:myndral-db` |

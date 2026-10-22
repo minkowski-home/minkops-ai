@@ -57,7 +57,7 @@ def main(image, interest_image):
     run("run", "jobs", "deploy", "minkops-worker", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-worker@{PROJECT}.iam.gserviceaccount.com",
         f"--set-cloudsql-instances={INSTANCE}", "--command=python",
-        "--args=-m,minkops_api.accounts_worker,--drain,--lanes,4", "--tasks=1", "--parallelism=1",
+        "--args=-m,minkops_api.accounts_worker,--drain,--lanes,12", "--tasks=1", "--parallelism=1",
         # Leave time for the shared 45-minute budget to stop and reconcile
         # before the infrastructure's hard wall-time cutoff.
         "--max-retries=0", "--task-timeout=3600s", f"--set-secrets={database}",
