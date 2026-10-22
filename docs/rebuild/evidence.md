@@ -411,3 +411,36 @@ Slice 10 ran the console against the dev stack, the companion and Third Tally Co
 - **A worker on mixed code.** A worker started before an edit loaded the new bill handler beside the old run module, and its lane failed. The lane left the item for a successor, which resumed it after the restart. Only a checkout edited under a running worker mixes code like this.
 
 **Found, carried to slice 12:** the session read the supplier's confirmed booking (QA18 Plant Repairs, by name) and proposed a ledger GUID it was never given, which named QA18 Equipment Hire. Tally numbers a company's masters in sequence, so a guessed GUID can name another real master. The booking differed from the confirmed one, so it went to review as designed. The rehearsal approved it to exercise the button, so Third Tally Company holds QA18/INV/STK/002 with its spares under QA18 Equipment Hire; the booking memory learnt from it is disabled.
+
+## Performance, benchmarked live (22 October 2026)
+
+Slice 12 ran both targets on the local stack: the API, a worker with 12 lanes, the headless companion, TallyPrime
+in Educational mode and `gpt-6-luna`.
+
+- **Bills: 50 read in 5 min 30 s** (target 10 min). Fifty labelled synthetic bills, ten from each rehearsal
+  company's package, ran as one run routed by addressee. The PC's refresh took about 5 s. Sessions took 68 s at
+  the median and 112 s at most. The fixture scorer graded 44 of 50 as labelled. The five conflicting versions were
+  proposed, as they are until a save meets the other version in Tally and holds. One bill followed the booking
+  Tally now holds for that very bill, re-booked by slice 6's demotion rehearsal, rather than its original label.
+- **Statements: 1,232 rows in 4 min 31 s** (target 15 min). The synthetic month
+  (`icici-detailed-statement-sep-2026.xlsx`) ran as 13 chunks of up to 100 rows, the 13th waiting for a free lane.
+  Chunk sessions took 129 s at the median and 162 s at most. Its 881 payees are made up and no rehearsal company
+  holds them, so 1,227 rows held as `ledger_unresolved` after their lookups: the run measures the pipeline, not
+  routing. For it, Third Tally Company gained one bank ledger with the statement's account number,
+  QA18 ICICI Synthetic Current.
+- **Where the time goes.** The 529 lookups and proposals of the bill run averaged 3 ms and took 14 ms at most, so
+  neither the database nor the four-connection pool is the limit: the model is.
+
+**Usage.**
+
+- Bills: 50 sessions, 5,336,041 input tokens (79% cached) and 104,934 output; about 107,000 input and 2,100
+  output per bill.
+- Statements: 13 sessions, 3,602,452 input tokens (86% cached) and 150,328 output.
+
+**Found and fixed along the way:**
+
+- **Round trips the contract caused.** A bill printing no tax was refused for its zero tax (five times), an empty
+  GSTIN check was refused (three times), and statement chunks looking up their payees were refused above 20
+  subjects (18 times). Each cost a model round trip; all three now answer.
+- **References in reviewers' text.** Held rows read "no matching ledger was found in C5". Reasons a person reads
+  now name the company or master each reference stands for.
