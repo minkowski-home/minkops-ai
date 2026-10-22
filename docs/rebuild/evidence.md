@@ -382,3 +382,13 @@ Slice 8 ran on Third Tally Company's synthetic QA18 books, whose stock items hav
 
 - **A probe the books never met.** Probes ran only on newly published versions, so a probe added in a release never ran on a company whose books did not change. A bill could wait on its question with no card to answer. Each version now records the probes run on it, and a sync that publishes nothing runs any missing probe on the latest version.
 - **A settled practice released nothing.** A practice the books settled after a bill began waiting on it left the bill waiting. Settling one now checks those bills again, as an answer does.
+
+## Signed e-invoice QR codes (22 October 2026)
+
+Slice 9 began as a feasibility check, and each question came out in favour:
+
+- **Decoding.** `zxing-cpp` (a 1 MB wheel) decodes QR codes from rendered pages; a dense e-invoice code needs about 300 DPI. On the client's own sample bills it found one QR code, a 75-character payment code rather than an e-invoice. Reading a file costs 0.1–0.35 s, of which decoding is 10–20 ms. None of the PR Infra UAT bills carries a QR code.
+- **Verification.** An e-invoice QR code is a JWS (RS256) whose `kid` is the SHA-1 thumbprint of the IRP's signing certificate, and whose payload holds the registered invoice. NIC publishes its production keys per IRN generation period (six for IRP 1 since August 2020, three for IRP 2 since April 2023), and IRIS publishes two for IRP 6. NIC's own published sample signed code verifies against the key NIC lists for August 2020, and fails once its contents change.
+- **Coverage.** Clear's certificate link (IRP 4) refuses downloads. IRPs 3 and 5 list their keys only in the browser. Their codes read as unverified: still the invoice's own data, but no proof of registration. The trust store holds production keys only; a sandbox-signed code proves nothing.
+
+No live run used a real e-invoice: no available bill carries one. The tests cover NIC's real sample code and synthetic codes signed by a test key. A real e-invoice from a PR Infra supplier is on the manual testing list.

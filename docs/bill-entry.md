@@ -43,7 +43,8 @@ pins that mirror version: every check in the run reads the same books.
 ## Reading a file
 
 Each file is read in its own tool session: every page as an image, plus the
-PDF's text layer where it has one. The session looks things up in the pinned
+PDF's text layer where it has one and what any signed e-invoice QR code on it
+registers (see [Signed e-invoices](#signed-e-invoices)). The session looks things up in the pinned
 books with read-only tools, each logged per call:
 
 - `find_company`: the client's companies, with every GSTIN each is registered under;
@@ -98,6 +99,37 @@ saved yet. The session proposes such a bill as `unsupported_structure`, naming
 the structure. A bill that merely lists goods with HSN codes and quantities is
 booked to the ledger the client uses, unless the client books such purchases
 item-wise.
+
+## Signed e-invoices
+
+An e-invoice carries a QR code its Invoice Registration Portal (IRP) signed. Bill
+reading decodes every QR code on a page (`minkops_connectors/documents.py`, from a
+300 DPI render) and keeps those that are signed e-invoices
+(`minkops_connectors/einvoice.py`). Each is:
+
+- **verified** when a pinned IRP key verifies its signature, within the IRN
+  generation period that key signed;
+- **altered** when it names a pinned certificate whose signature fails: the bill
+  holds at once for a person to check with the supplier;
+- **unverified** when its key is not pinned. It is still the invoice's own
+  machine-readable data, but no proof the IRP registered it.
+
+The session is told what each code registers. A code belongs to the bill with its
+number, or to a file's only bill when it is the file's only code. That bill's
+reading must agree with its number, kind, date, total and seller GSTIN; a reading
+that does not is refused, saying what the code registers. Its buyer GSTIN must be
+one the routed company is registered under, or the bill holds as
+`company_unresolved`. A verified code is kept on the bill's facts with its IRP and
+IRN.
+
+The pinned keys are production signing keys only, in
+`connectors/src/minkops_connectors/einvoice_signers/`, each listed in
+`signers.json` with its IRP, IRN generation period, SHA-1 thumbprint (the code's
+`kid`) and the official URL it came from. They cover NIC's IRP 1 (August 2020
+onwards) and IRP 2 (April 2023 onwards), and IRIS's IRP 6 until June 2026. To add a
+key, download it from the IRP's own key page, check its thumbprint against a real
+code it signed, and add its entry. Codes from the IRPs not pinned yet (3, 4 and 5),
+or from a newer IRIS key, read as unverified.
 
 ## Item-wise purchases
 
