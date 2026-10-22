@@ -397,6 +397,7 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 **Carried into later slices:**
 
 - **Upkeep:** the pinned e-invoice signing keys. IRPs 3–5 are not pinned: Clear's published certificate link refuses downloads, and the other two portals list their keys only in the browser. IRIS's newest listed key expired on 20 June 2026, and NIC's current keys run to 1 May 2027. Each new key is added as the bill entry doc describes.
+- **Deferred: admins disconnecting a member's PC.** Only a PC's owner can disconnect it (`desktop.revoke` checks ownership). A client's books continue on a replacing PC only once the old one is disconnected, so a PC whose owner has left blocks the move. The decision to let workspace admins disconnect any member's PC was deferred on 22 October 2026.
 
 **For the next manual testing phase** (steps that need a person at Tally or Windows):
 
