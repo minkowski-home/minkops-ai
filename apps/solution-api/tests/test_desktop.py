@@ -497,11 +497,11 @@ class DesktopTests(unittest.TestCase):
 
     def test_each_poll_records_the_companion_version_pc_and_session(self):
         self.pair()
-        self.claim_as({"X-Minkops-Companion-Version": "0.7.0", "X-Minkops-Host": "PRAHLAD-GADHWAL",
+        self.claim_as({"X-Minkops-Companion-Version": "0.7.0", "X-Minkops-Host": "OFFICE-PC-07",
                        "X-Minkops-Session": "remote"})
         [device] = self.client.get(self.base + "/devices").json()
         self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
-                         ("0.7.0", "PRAHLAD-GADHWAL", True))
+                         ("0.7.0", "OFFICE-PC-07", True))
         self.claim_as({"X-Minkops-Companion-Version": "not a version", "X-Minkops-Host": "x" * 81})
         [device] = self.client.get(self.base + "/devices").json()
         self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
@@ -525,7 +525,7 @@ class DesktopTests(unittest.TestCase):
         return {
             "collected_at": "2026-10-14T07:47:18.907Z",
             "companion": {"version": "0.7.0"},
-            "windows": {"hostname": "PRAHLAD-GADHWAL", "remote_session": False},
+            "windows": {"hostname": "OFFICE-PC-07", "remote_session": False},
             "tally": {"session": {"state": "not_running"}, "processes": []},
             **extra,
         }
@@ -545,7 +545,7 @@ class DesktopTests(unittest.TestCase):
         self.assertRegex(sent.json()["reference"], r"^D-[0-9A-HJKMNP-TV-Z]{6}$")
         [(reference, kind, job_id, payload)] = self.stored_diagnostics()
         self.assertEqual((reference, kind, job_id), (sent.json()["reference"], "requested", None))
-        self.assertEqual(payload["windows"]["hostname"], "PRAHLAD-GADHWAL")
+        self.assertEqual(payload["windows"]["hostname"], "OFFICE-PC-07")
         for invalid in (self.bundle(bills=["private"]), self.bundle(tally={"x": "y" * 70_000}), []):
             self.assertEqual(self.client.post(route, headers=self.worker, json=invalid).status_code, 422)
         self.assertEqual(self.client.post(route, json=self.bundle()).status_code, 401)

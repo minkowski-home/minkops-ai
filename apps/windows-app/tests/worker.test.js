@@ -279,7 +279,7 @@ test("write failures direct reconciliation to Tally without folder instructions"
 });
 
 test("a typed Tally state reaches the user verbatim instead of a generic guess", async () => {
-  const typed = Object.assign(new Error("Tally isn't open on PRAHLAD-GADHWAL. Open it and your companies, then try again."), {
+  const typed = Object.assign(new Error("Tally isn't open on OFFICE-PC-07. Open it and your companies, then try again."), {
     userSafe: true, tallyState: "not_running",
   });
   for (const operation of ["tally.probe", "tally.sync", "tally.write", "tally.supplier", "files.refresh"])

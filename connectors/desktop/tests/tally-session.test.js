@@ -64,11 +64,11 @@ test("duplicate open names or GUIDs block because requests address companies by 
     [{ company: "Original", company_guid: "a" }, { company: "Backup", company_guid: "a" }],
   ])
     assert.throws(
-      () => openCompanyScope(pair, { pc: "PRAHLAD-GADHWAL" }),
+      () => openCompanyScope(pair, { pc: "OFFICE-PC-07" }),
       (error) =>
         error instanceof TallyUnavailable &&
         error.tallyState === "duplicate_company" &&
-        /Close one in Tally on PRAHLAD-GADHWAL/.test(error.message),
+        /Close one in Tally on OFFICE-PC-07/.test(error.message),
     );
   // A repeated GUID names both companies, not the first one twice.
   assert.throws(() => openCompanyScope([{ company: "Original", company_guid: "a" }, { company: "Backup", company_guid: "a" }]),
@@ -313,12 +313,12 @@ test("only whitelisted tally.ini settings are read for diagnostics", async () =>
   const { parseTallyIni, readTallyIni } = await import("../src/tally-session.js");
   const ini = [
     ";;TallyPrime workstation specific parameters file", "[TALLY]",
-    "Tally Gateway Server=PRAHLAD-GADHWAL:9999", "User TDL=Yes", "Default Companies=Yes", "Load=100000",
+    "Tally Gateway Server=OFFICE-PC-07:9999", "User TDL=Yes", "Default Companies=Yes", "Load=100000",
     "Data=D:\\TALLY PRIME\\SACHIN INFRA ORIGINAL DATA", "Client Server=None", "ServerPort=9000",
-    "Enable ODBC Server=Yes", "LicTimeout=", "Tally Gold License Server=secret-host", "Export Path=F:\\PRAHLAD\\BLR",
+    "Enable ODBC Server=Yes", "LicTimeout=", "Tally Gold License Server=secret-host", "Export Path=F:\\OFFICE\\EXPORTS",
   ].join("\r\n");
   assert.deepEqual(parseTallyIni(ini), {
-    "Tally Gateway Server": "PRAHLAD-GADHWAL:9999", "User TDL": "Yes", "Default Companies": "Yes", Load: "100000",
+    "Tally Gateway Server": "OFFICE-PC-07:9999", "User TDL": "Yes", "Default Companies": "Yes", Load: "100000",
     Data: "D:\\TALLY PRIME\\SACHIN INFRA ORIGINAL DATA", "Client Server": "None", ServerPort: "9000",
     "Enable ODBC Server": "Yes",
   });
