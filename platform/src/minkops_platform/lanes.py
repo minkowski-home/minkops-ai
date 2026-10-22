@@ -30,7 +30,6 @@ A handler (work.HANDLER_MODULES) provides:
 import logging
 import threading
 import time
-from contextlib import suppress
 from dataclasses import dataclass
 
 import psycopg
@@ -390,12 +389,9 @@ class Host:
     def _failed(self, item, lease, run, handler, code, message, transient):
         if transient and item["attempt"] < ATTEMPTS:
             delay = RETRY_DELAYS[min(item["attempt"], len(RETRY_DELAYS)) - 1]
+            # The retry starts a new session; the closer records this one's usage, then deletes it.
             self._fenced(lambda connection: work.retry(connection, item["id"], lease.token, delay=delay,
                                                        error_code=code, error=message))
-            if lease.session_id:
-                # The retry starts a new session; this one is closed now, its usage unrecorded.
-                with suppress(APIError):
-                    close_session(lease.session_id, client=self.client)
             return
         self._finish(item, lease, "failed", Outcome(error=message), run, handler, error_code=code)
 

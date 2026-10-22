@@ -102,6 +102,13 @@ def items(desk, run):
     return desk["db"].execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
 
 
+def sessions(desk, run):
+    """Every provider session the run's items opened, in item order and then as opened."""
+    desk["db"].commit()  # a fresh snapshot
+    return desk["db"].execute("""SELECT s.* FROM item_sessions s JOIN run_items i ON i.id=s.item_id
+                                 WHERE i.run_id=%s ORDER BY i.ordinal, s.opened_at""", (run["id"],)).fetchall()
+
+
 def until(check, timeout=10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -119,9 +126,9 @@ def test_items_run_in_parallel_sessions_and_settle_with_their_usage(desk):
         assert not lanes_.settled(desk["db"])
         until(lambda: all(i["state"] == "done" for i in items(desk, run)))
         until(lambda: lanes_.settled(desk["db"]))
-        until(lambda: all(i["session_closed"] for i in items(desk, run)))
-    rows = items(desk, run)
-    assert [(i["attempt"], i["usage"], i["session_closed"]) for i in rows] == [(1, USAGE, True)] * 3
+        until(lambda: len(sessions(desk, run)) == 3 and all(s["closed"] for s in sessions(desk, run)))
+    assert [i["attempt"] for i in items(desk, run)] == [1] * 3
+    assert [(s["attempt"], s["usage"], s["closed"]) for s in sessions(desk, run)] == [(1, USAGE, True)] * 3
     calls = desk["db"].execute("""SELECT i.ordinal, c.name, c.success FROM tool_calls c JOIN run_items i ON i.id=c.item_id
                                   WHERE i.run_id=%s ORDER BY i.ordinal, c.created_at""", (run["id"],)).fetchall()
     assert [(c["ordinal"], c["name"], c["success"]) for c in calls] == [
@@ -180,9 +187,11 @@ def test_a_successor_resumes_the_session_its_predecessor_left(desk):
     assert item["state"] == "running" and item["session_id"] == session.id and session.status == "requires_action"
     assert fake.cancels == 0  # the paid session was left for a successor, not cancelled
     with host(desk, fake, lanes=1):
-        until(lambda: items(desk, run)[0]["session_closed"])
+        until(lambda: sessions(desk, run)[0]["closed"])
     [item] = items(desk, run)
-    assert (item["state"], item["attempt"], item["usage"]) == ("done", 1, USAGE)
+    assert (item["state"], item["attempt"]) == ("done", 1)
+    # The successor carried on the same session: one session, its usage counted once.
+    assert [(s["session_id"], s["usage"]) for s in sessions(desk, run)] == [(session.id, USAGE)]
     assert len(fake.store) == 0 and fake.cancels == 0 and fake.resent == 0
     assert [(a["name"], a["success"]) for a in session.answers] == [("find_ledger", True), ("propose", True)]
     logged = desk["db"].execute("SELECT name FROM tool_calls WHERE item_id=%s ORDER BY created_at",
@@ -220,7 +229,7 @@ def test_stopping_the_task_cancels_its_running_session(desk):
     run = launch(desk, {"file_id": "a"})
     stopper = host(desk, fake, lanes=1, heartbeat_seconds=60)
     with stopper:
-        until(lambda: items(desk, run)[0]["session_closed"])
+        until(lambda: sessions(desk, run) and sessions(desk, run)[0]["closed"])
     assert items(desk, run)[0]["state"] == "cancelled"
     assert fake.cancels == 1 and fake.store == {}
     assert desk["handler"].settled["a"].stopped
@@ -239,6 +248,7 @@ def test_retries_start_a_new_session_and_a_refusal_fails_only_its_item(desk):
     run = launch(desk, {"file_id": "flaky"}, {"file_id": "huge"})
     with host(desk, fake):
         until(lambda: {i["state"] for i in items(desk, run)} == {"done", "failed"})
+        until(lambda: len(sessions(desk, run)) == 3 and all(s["closed"] for s in sessions(desk, run)))
     flaky, huge = items(desk, run)
     assert (flaky["state"], flaky["attempt"], flaky["error_code"]) == ("done", 2, None)
     assert (huge["state"], huge["attempt"], huge["error_code"]) == ("failed", 1, "context_length_exceeded")
@@ -246,6 +256,10 @@ def test_retries_start_a_new_session_and_a_refusal_fails_only_its_item(desk):
     # Each attempt had its own session; the retried item's first session was closed, not resumed.
     attempts = sorted((s.content[0]["text"], s.metadata["minkops_attempt"]) for s in fake.created)
     assert attempts == [("flaky", "1"), ("flaky", "2"), ("huge", "1")]
+    # Every session's usage counts, the retried attempt's included, so a run's spend is never under-counted.
+    assert [(s["attempt"], s["usage"]) for s in sessions(desk, run)] == [(1, USAGE), (2, USAGE), (1, USAGE)]
+    spent = work.usage(desk["db"], desk["tenant"]["id"], run["id"])
+    assert (spent["sessions"], spent["input_tokens"], spent["cached_tokens"], spent["output_tokens"]) == (3, 2700, 1800, 120)
 
 
 def test_a_drain_waits_for_a_finished_session_to_close_unless_it_finished_long_ago(desk):
@@ -254,11 +268,14 @@ def test_a_drain_waits_for_a_finished_session_to_close_unless_it_finished_long_a
     for item, finished in ((fresh, "now()"), (stale, "now() - interval '1 hour'")):
         desk["db"].execute(f"""UPDATE run_items SET state='done', session_id=%s, finished_at={finished}
                                WHERE id=%s""", (f"session-{item['id']}", item["id"]))
+        desk["db"].execute(f"""INSERT INTO item_sessions (tenant_id, item_id, session_id, attempt, finished_at)
+                               VALUES (%s, %s, %s, 1, {finished})""",
+                           (item["tenant_id"], item["id"], f"session-{item['id']}"))
     desk["db"].commit()
     # A closer that never runs here: the drain's verdict rests on the sessions' state alone.
     with host(desk, FakeAgents(), close_seconds=3600) as lanes_:
         assert not lanes_.settled(desk["db"])
-        desk["db"].execute("UPDATE run_items SET session_closed=true WHERE id=%s", (fresh["id"],))
+        desk["db"].execute("UPDATE item_sessions SET closed=true WHERE item_id=%s", (fresh["id"],))
         desk["db"].commit()
         # A session that still could not be deleted an hour on is the provider's to expire, not a reason to stay up.
         assert lanes_.settled(desk["db"])
@@ -272,6 +289,6 @@ def test_a_drain_acknowledges_its_wake_up_only_after_the_lanes_finish(desk):
         assert drain(os.environ["TEST_DATABASE_URL"], lanes_)
         # Acknowledged only once both items finished and their sessions were closed with their usage.
         assert {i["state"] for i in items(desk, run)} == {"done"}
-        assert all(i["session_closed"] for i in items(desk, run))
+        assert [(s["closed"], s["usage"]) for s in sessions(desk, run)] == [(True, USAGE)] * 2
     wakeup = desk["db"].execute("SELECT generation, acknowledged, lease_until FROM worker_wakeup").fetchone()
     assert wakeup["generation"] == wakeup["acknowledged"] and wakeup["lease_until"] is None

@@ -196,27 +196,57 @@ def request_session(connection, item_id, token):
 
 
 def save_session(connection, item_id, token, session_id, turn_id):
-    """Persist provider IDs as soon as they exist, so a restart reattaches instead of resubmitting."""
-    return _fenced(connection, item_id, token, "session_id=coalesce(%s,session_id), turn_id=coalesce(%s,turn_id)",
-                   (session_id, turn_id))
+    """Persist provider IDs as soon as they exist, so a restart reattaches instead of resubmitting.
+
+    The session is recorded on its own too, so its usage counts once however many attempts follow.
+    """
+    row = connection.execute(
+        """UPDATE run_items SET session_id=coalesce(%s,session_id), turn_id=coalesce(%s,turn_id), updated_at=now()
+           WHERE id=%s AND lease_token=%s AND state='running' RETURNING tenant_id, session_id, turn_id, attempt""",
+        (session_id, turn_id, item_id, token)).fetchone()
+    if row is None:
+        return False
+    if row["session_id"]:
+        connection.execute(
+            """INSERT INTO item_sessions (tenant_id, item_id, session_id, attempt, turn_id) VALUES (%s,%s,%s,%s,%s)
+               ON CONFLICT (item_id, session_id) DO UPDATE SET turn_id=coalesce(EXCLUDED.turn_id, item_sessions.turn_id)""",
+            (row["tenant_id"], item_id, row["session_id"], row["attempt"], row["turn_id"]))
+    return True
+
+
+def _ended(connection, item_id, token, assignments, values=(), usage=None):
+    """A fenced change that ends the item's current session: the closer records its usage, if not given, and
+    deletes it at the provider."""
+    row = connection.execute(
+        f"""UPDATE run_items i SET {assignments}, updated_at=now()
+            FROM run_items before WHERE before.id=i.id AND i.id=%s AND i.lease_token=%s AND i.state='running'
+            RETURNING before.session_id""",
+        (*values, item_id, token)).fetchone()
+    if row is None:
+        return False
+    if row["session_id"]:
+        connection.execute(
+            """UPDATE item_sessions SET finished_at=coalesce(finished_at,now()), usage=coalesce(%s,usage)
+               WHERE item_id=%s AND session_id=%s""",
+            (Jsonb(usage) if usage else None, item_id, row["session_id"]))
+    return True
 
 
 def finish(connection, item_id, token, state, *, error_code=None, error=None, usage=None):
     if state not in ("done", "failed", "cancelled"):
         raise ValueError("An item finishes done, failed or cancelled.")
-    return _fenced(connection, item_id, token,
-                   "state=%s, error_code=%s, error=%s, usage=coalesce(%s,usage), finished_at=now(), "
-                   "lease_token=NULL, lease_until=NULL",
-                   (state, error_code, (error or "")[:400] or None, Jsonb(usage) if usage else None))
+    return _ended(connection, item_id, token,
+                  "state=%s, error_code=%s, error=%s, finished_at=now(), lease_token=NULL, lease_until=NULL",
+                  (state, error_code, (error or "")[:400] or None), usage=usage)
 
 
 def retry(connection, item_id, token, *, delay, error_code, error):
     """Queue a new attempt with a fresh session after `delay` seconds, keeping why the last one failed."""
-    return _fenced(connection, item_id, token,
-                   "state='queued', queued_at=now()+make_interval(secs=>%s), session_id=NULL, turn_id=NULL, "
-                   "session_requested_at=NULL, session_closed=false, error_code=%s, error=%s, started_at=NULL, "
-                   "lease_token=NULL, lease_until=NULL",
-                   (delay, error_code, (error or "")[:400] or None))
+    return _ended(connection, item_id, token,
+                  "state='queued', queued_at=now()+make_interval(secs=>%s), session_id=NULL, turn_id=NULL, "
+                  "session_requested_at=NULL, error_code=%s, error=%s, started_at=NULL, "
+                  "lease_token=NULL, lease_until=NULL",
+                  (delay, error_code, (error or "")[:400] or None))
 
 
 def wait(connection, item_id, token, waiting_on):
@@ -235,23 +265,34 @@ def hand_off(connection, held):
 
 
 def unclosed(connection, *, tenant_id=None, limit=20, within=None):
-    """Finished items whose provider session is still open, oldest first, with seconds since they finished.
+    """Ended sessions still open at the provider, oldest first, with seconds since each ended.
 
-    `within` keeps only items that finished in the last so many seconds.
+    `within` keeps only sessions that ended in the last so many seconds.
     """
     return connection.execute(
-        """SELECT id, session_id, turn_id, usage, extract(epoch FROM now()-finished_at)::float8 AS age
-           FROM run_items WHERE state IN ('done','failed','cancelled') AND session_id IS NOT NULL
-               AND NOT session_closed AND (%(tenant)s::uuid IS NULL OR tenant_id=%(tenant)s::uuid)
+        """SELECT item_id AS id, session_id, turn_id, usage, extract(epoch FROM now()-finished_at)::float8 AS age
+           FROM item_sessions WHERE finished_at IS NOT NULL AND NOT closed
+               AND (%(tenant)s::uuid IS NULL OR tenant_id=%(tenant)s::uuid)
                AND (%(within)s::float8 IS NULL OR finished_at > now() - make_interval(secs => %(within)s))
            ORDER BY finished_at LIMIT %(limit)s""",
         {"tenant": tenant_id, "within": within, "limit": limit}).fetchall()
 
 
 def closed(connection, item_id, session_id, usage):
-    """Record that the session was deleted at the provider, keeping its usage if the item had none."""
-    connection.execute("UPDATE run_items SET session_closed=true, usage=coalesce(usage,%s) WHERE id=%s AND session_id=%s",
+    """Record that the session was deleted at the provider, with its usage if it had none yet."""
+    connection.execute("UPDATE item_sessions SET closed=true, usage=coalesce(usage,%s) WHERE item_id=%s AND session_id=%s",
                        (Jsonb(usage) if usage else None, item_id, session_id))
+
+
+def usage(connection, tenant_id, run_id):
+    """What a run's sessions used, every attempt counted, and how many have not reported yet."""
+    return connection.execute(
+        """SELECT count(*) AS sessions, count(*) FILTER (WHERE s.usage IS NULL) AS unreported,
+                  coalesce(sum((s.usage->>'input_tokens')::bigint), 0)::bigint AS input_tokens,
+                  coalesce(sum((s.usage->'input_tokens_details'->>'cached_tokens')::bigint), 0)::bigint AS cached_tokens,
+                  coalesce(sum((s.usage->>'output_tokens')::bigint), 0)::bigint AS output_tokens
+           FROM item_sessions s JOIN run_items i ON i.id=s.item_id
+           WHERE i.tenant_id=%s AND i.run_id=%s""", (tenant_id, run_id)).fetchone()
 
 
 def release(connection, tenant_id, blocker):
@@ -265,7 +306,7 @@ def release(connection, tenant_id, blocker):
 def requeue_item(connection, tenant_id, item_id):
     """An explicit Recheck: a new attempt for a finished item, never a replay of a live one."""
     row = connection.execute(
-        """UPDATE run_items SET state='queued', queued_at=now(), session_id=NULL, turn_id=NULL, session_closed=false,
+        """UPDATE run_items SET state='queued', queued_at=now(), session_id=NULL, turn_id=NULL,
            session_requested_at=NULL, error_code=NULL, error=NULL, started_at=NULL, finished_at=NULL, updated_at=now()
            WHERE tenant_id=%s AND id=%s AND state IN ('done','failed') RETURNING *""",
         (tenant_id, item_id)).fetchone()

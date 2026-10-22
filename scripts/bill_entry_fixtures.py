@@ -26,6 +26,8 @@ from statistics import median
 import psycopg
 from psycopg.rows import dict_row
 
+from minkops_platform import work
+
 # The hold codes that correctly express each labelled reason a bill needs a person.
 ATTENTION_CODES = {
     "ambiguous_supplier": {"supplier_unresolved", "company_unresolved", "classification_uncertain"},
@@ -143,21 +145,17 @@ def _duration(seconds):
     return f"{minutes}m{seconds:02d}s"
 
 
-def timing(run, items):
-    """Launch to the last file read, each file's session, and the tokens the sessions used."""
+def timing(run, items, spent):
+    """Launch to the last file read, each file's session, and the tokens every attempt's sessions used."""
     finished = [item["finished_at"] for item in items if item["finished_at"]]
     sessions = [(item["finished_at"] - item["started_at"]).total_seconds() for item in items
                 if item["finished_at"] and item["started_at"]]
-    usage = Counter()
-    for item in items:
-        for key, value in (item["usage"] or {}).items():
-            if isinstance(value, int):
-                usage[key] += value
-        usage["cached"] += ((item["usage"] or {}).get("input_tokens_details") or {}).get("cached_tokens", 0)
     read = _duration((max(finished) - run["created_at"]).total_seconds()) if len(finished) == len(items) else "not yet"
     spread = f"p50 {_duration(median(sessions))}, max {_duration(max(sessions))}" if sessions else "none"
-    return (f"Read {len(finished)} of {len(items)} files in {read} from launch (sessions {spread}); tokens: "
-            f"input {usage['input_tokens']} ({usage['cached']} cached), output {usage['output_tokens']}.")
+    unreported = f", {spent['unreported']} not reported yet" if spent["unreported"] else ""
+    return (f"Read {len(finished)} of {len(items)} files in {read} from launch (sessions {spread}); "
+            f"{spent['sessions']} sessions{unreported}; tokens: input {spent['input_tokens']} "
+            f"({spent['cached_tokens']} cached), output {spent['output_tokens']}.")
 
 
 def score(url, run_id, expected, *, rerun=False, dry=False):
@@ -170,6 +168,7 @@ def score(url, run_id, expected, *, rerun=False, dry=False):
         records = connection.execute(
             """SELECT r.*, c.guid AS company_guid FROM run_records r LEFT JOIN companies c ON c.id=r.company_id
                WHERE r.run_id=%s ORDER BY r.item_id, r.position""", (run_id,)).fetchall()
+        spent = work.usage(connection, run["tenant_id"], run_id)
     rows, verdicts, outcomes = [], Counter(), []
     for item in items:
         bill = expected.get(item["sha256"])
@@ -195,7 +194,7 @@ def score(url, run_id, expected, *, rerun=False, dry=False):
     passed = sum(n for verdict, n in verdicts.items() if verdict.startswith("correct"))
     print(f"\nRun {run_id} ({run['state']}, {run['config'].get('review_mode')}): {passed}/{total} pass; "
           + ", ".join(f"{verdict} {n}" for verdict, n in sorted(verdicts.items())))
-    print(timing(run, items))
+    print(timing(run, items, spent))
     return 1 if any(verdict.endswith("!") for verdict in verdicts) else 0
 
 

@@ -66,6 +66,8 @@ class WorkerRecoveryTests(unittest.TestCase):
         with psycopg.connect(self.url) as c:
             c.execute("""UPDATE run_items SET state='done', finished_at=now(), session_id='open-session'
                          WHERE id=%s""", (item["id"],))
+            c.execute("""INSERT INTO item_sessions (tenant_id, item_id, session_id, attempt, finished_at)
+                         VALUES (%s, %s, 'open-session', 1, now())""", (item["tenant_id"], item["id"]))
             c.execute("UPDATE worker_wakeup SET acknowledged=generation,lease_until=NULL")
         self.assertTrue(self.recover())
 

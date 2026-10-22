@@ -143,6 +143,9 @@ or authorises a write.
   `(destination_key, identity)`, which reserves each company bill.
 - `tool_calls` logs every lookup and proposal per session and call ID, with
   bounded results.
+- `item_sessions` records every provider session an item opened, one per
+  attempt, with the usage its turn reported. A run's spend is their sum
+  (`work.usage`): a retry or a recheck adds a session rather than replacing one.
 
 A trigger bumps `worker_wakeup` and `pg_notify('minkops_work')` whenever an item
 becomes `queued`. Releasing a dependency is therefore a committed state change,
@@ -177,8 +180,9 @@ is found.
 
 Turn usage is recorded seconds after the turn ends. The lane finishes the item
 at once; a closer pass records the usage from the turn, then deletes the
-session. It works from the database, so a restarted worker closes what its
-predecessor left.
+session. A session a retry abandons is closed the same way, so its usage counts
+too. The closer works from `item_sessions`, so a restarted worker closes what
+its predecessor left.
 
 `propose` is checked immediately. The agent gets at most two resubmissions,
 and a resubmission that changes printed facts is flagged for review. A hold
