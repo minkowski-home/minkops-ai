@@ -2,7 +2,9 @@
 import {test, expect} from '@playwright/test';
 
 const workflow = {id:'w-1', key:'bill-entry', name:'Bill entry', description:'Enter purchase bills in Tally.',
-  status:'active', employee_ids:[], config_schema:{properties:{}}, config_values:{}, config_version:1,
+  status:'active', employee_ids:[], config_schema:{properties:{}}, config_version:1,
+  // The tenant's default locks one company; the launch starts on it, and the person may change it.
+  config_values:{review_mode:'only_exceptions', company_mode:'locked', locked_company_guid:'g-test'},
   presentation:'desk-review', run_defaults:{company_mode:'infer'},
   run_schema:{properties:{review_mode:{enum:['all_outputs', 'only_exceptions']}, company_mode:{enum:['locked', 'infer']},
     locked_company_guid:{type:['string', 'null']}}}};
@@ -114,13 +116,14 @@ test('a run starts from its workflow with the client, the files and the settings
   // A company split by year is offered once: each bill goes to the part whose books cover its date.
   await expect(form.getByRole('combobox', {name:'Company'}).locator('option')).toHaveText([
     'The company each bill is addressed to', 'Test Company']);
+  await expect(form.getByRole('combobox', {name:'Company'})).toHaveValue('g-test');
   await form.getByLabel('Files').setInputFiles({name:'sunrise.pdf', mimeType:'application/pdf', buffer:Buffer.from('%PDF-1.4')});
-  await form.getByRole('combobox', {name:'Company'}).selectOption('g-test');
+  // The option says each bill goes where it is addressed, so the run asks for exactly that, whatever the default.
+  await form.getByRole('combobox', {name:'Company'}).selectOption({label:'The company each bill is addressed to'});
   await form.getByRole('button', {name:'Start run'}).click();
   await expect(page).toHaveURL(/\/mock-tenant\/tasks\/t-1$/);
   const [upload, [, launch]] = calls;
   expect(upload).toEqual(['upload', true]);
-  expect(launch).toMatchObject({workflow:'bill-entry', file_ids:['f-1'],
-    config:{company_mode:'locked', locked_company_guid:'g-test'}});
-  expect(launch.request_key).toMatch(/^[0-9a-f-]{36}$/);
+  expect(launch).toEqual({workflow:'bill-entry', file_ids:['f-1'], config:{company_mode:'infer'},
+    request_key:expect.stringMatching(/^[0-9a-f-]{36}$/)});
 });

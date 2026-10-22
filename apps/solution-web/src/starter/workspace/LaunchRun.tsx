@@ -21,21 +21,25 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
   const [files, setFiles] = useState<File[]>([]);
   const [mapping, setMapping] = useState<File | null>(null);
   const [review, setReview] = useState("");
-  const [company, setCompany] = useState("");
+  // A tenant default that locks one company starts the form on it; it applies only to the client that owns it.
+  const defaults = (workflow.config_values ?? {}) as { company_mode?: string; locked_company_guid?: string | null };
+  const [company, setCompany] = useState(defaults.company_mode === "locked" ? defaults.locked_company_guid ?? "" : "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   // One request key per launch: a retry after a lost response returns the same run instead of a second one.
   const request = useRef<string>("");
   const settings = ((workflow.run_schema ?? {}) as { properties?: Record<string, { enum?: string[] }> }).properties ?? {};
   const scope = `${user?.id ?? ""}:${tenant}`;
-  const { data: companies = [] } = useRead<Company[]>(scope,
+  const { data: companies = [], loading: listing } = useRead<Company[]>(scope,
     `/api/tenants/${encodeURIComponent(tenant)}/clients/${encodeURIComponent(client)}/companies`,
     { enabled: Boolean(client && settings.company_mode) });
+  // The company every bill goes to, or "" to route each bill by whom it is addressed to.
+  const lockedTo = companies.some((item) => item.guid === company) ? company : "";
   if (workflow.status !== "active" || !workflow.run_schema || !clients.length) return null;
 
   async function start(event: FormEvent) {
     event.preventDefault();
-    if (!user || busy || !files.length) return;
+    if (!user || busy || !files.length || (settings.company_mode && listing)) return;
     const names = [...files, ...(mapping ? [mapping] : [])].map((file) => file.name);
     const repeated = names.find((name, n) => names.indexOf(name) !== n);
     if (repeated) {
@@ -46,16 +50,18 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
     setMessage("");
     try {
       const form = new FormData();
-      const chosen = mapping ? [...files, mapping] : files;
-      form.append("paths", JSON.stringify(chosen.map((file) => file.name)));
+      const uploads = mapping ? [...files, mapping] : files;
+      form.append("paths", JSON.stringify(uploads.map((file) => file.name)));
       form.append("label", `${workflow.name} files`);
-      chosen.forEach((file) => form.append("files", file));
+      uploads.forEach((file) => form.append("files", file));
       const source = await api<Uploaded>(`/api/tenants/${encodeURIComponent(tenant)}/accounts/sources`,
         { method: "POST", body: form }, user.csrf_token);
       const byPath = new Map(source.files.map((file) => [file.path, file.id]));
       const config: Record<string, unknown> = {
         ...(review ? { review_mode: review } : {}),
-        ...(company ? { company_mode: "locked", locked_company_guid: company } : {}),
+        // Always the company mode the form shows, so a tenant default never overrides what the person chose.
+        ...(settings.company_mode ? lockedTo ? { company_mode: "locked", locked_company_guid: lockedTo }
+          : { company_mode: "infer" } : {}),
         ...(mapping ? { branch_mapping_file_id: byPath.get(mapping.name) } : {}),
       };
       request.current ||= crypto.randomUUID();
@@ -87,7 +93,7 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
         onChange={(event) => setReview(event.target.value)}>
         <option value="">As the workflow is set</option>
         {settings.review_mode.enum.map((mode) => <option key={mode} value={mode}>{REVIEW[mode] ?? mode}</option>)}</select></label>}
-      {settings.company_mode && <label>Company<select aria-label="Company" value={company}
+      {settings.company_mode && <label>Company<select aria-label="Company" value={lockedTo}
         onChange={(event) => setCompany(event.target.value)}>
         <option value="">The company each bill is addressed to</option>
         {/* A company split by year keeps one GUID: each bill goes to the part whose books cover its date. */}
@@ -95,7 +101,7 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
           .map((item) => <option key={item.guid} value={item.guid}>{item.name}</option>)}
       </select></label>}
     </div>
-    <button className="button button-primary" disabled={busy || !files.length}>{busy && <Spinner />}{busy ? "Starting…" : "Start run"}</button>
+    <button className="button button-primary" disabled={busy || !files.length || Boolean(settings.company_mode && listing)}>{busy && <Spinner />}{busy ? "Starting…" : "Start run"}</button>
     {message && <p role="alert" className="form-message">{message}</p>}
   </form>;
 }
