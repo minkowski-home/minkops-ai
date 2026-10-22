@@ -5,7 +5,7 @@ import os
 
 import psycopg
 
-from minkops_platform.installation import install, load_solution
+from minkops_platform.installation import install, load_solution, provision_tenant
 from minkops_platform.resources import REPOSITORY_ROOT
 
 
@@ -16,6 +16,10 @@ def main():
         "--actor-email", help="Existing verified administrator; required for installation"
     )
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument(
+        "--create-tenant", metavar="NAME",
+        help="Create the solution's workspace, named NAME, for --actor-email, who signed up and verified first",
+    )
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate against tenant state and roll back"
     )
@@ -30,6 +34,8 @@ def main():
         psycopg.connect(os.environ["DATABASE_URL"]) as connection,
         connection.transaction(force_rollback=args.dry_run),
     ):
+        if args.create_tenant:
+            provision_tenant(connection, composition, name=args.create_tenant, owner_email=args.actor_email)
         installed = install(connection, composition, actor_email=args.actor_email)
     print(
         f"{'Validated' if args.dry_run else 'Installed'}: {', '.join(installed) or '(empty composition)'}."

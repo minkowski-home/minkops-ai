@@ -268,6 +268,31 @@ def register_employee(connection, tenant_id, definition):
         ).fetchone()[0]
 
 
+def provision_tenant(connection, installation: Installation, *, name: str, owner_email: str):
+    """Create a composition's workspace for its first administrator, who signed up and verified themselves.
+
+    An operator's decision: the workspace takes the composition's slug, which self-service sign-up never
+    gives. Repeating it for the same administrator returns the same workspace; anyone else is refused.
+    """
+    with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
+        owner = cursor.execute("SELECT id, email_verified_at FROM users WHERE lower(email)=lower(%s)",
+                               (owner_email,)).fetchone()
+        if not owner or not owner["email_verified_at"]:
+            raise ServiceError("forbidden", "The owner must sign up and verify their email first.")
+        created = cursor.execute("INSERT INTO tenants(slug, name) VALUES (%s, %s) ON CONFLICT (slug) DO NOTHING "
+                                 "RETURNING id", (installation.tenant_slug, name)).fetchone()
+        if created:
+            cursor.execute("INSERT INTO memberships(tenant_id, user_id, role) VALUES (%s, %s, 'admin')",
+                           (created["id"], owner["id"]))
+            return created["id"]
+        tenant = cursor.execute(
+            """SELECT t.id, m.role FROM tenants t LEFT JOIN memberships m ON m.tenant_id=t.id AND m.user_id=%s
+               WHERE t.slug=%s""", (owner["id"], installation.tenant_slug)).fetchone()
+        if tenant["role"] != "admin":
+            raise ServiceError("conflict", "This workspace exists and belongs to another administrator.")
+        return tenant["id"]
+
+
 def install(connection, installation: Installation, *, actor_email: str):
     """Authorize installation, then apply the entire composition in one transaction."""
     with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:

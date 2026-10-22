@@ -120,6 +120,30 @@ class InstallationDatabaseTests(unittest.TestCase):
         with self.assertRaises(ServiceError):
             install(self.connection, composition, actor_email="installer@example.com")
 
+    def test_an_operator_provisions_a_clients_workspace_for_its_verified_owner_once(self):
+        from minkops_platform.errors import ServiceError
+        from minkops_platform.installation import provision_tenant
+
+        composition = load_solution(REPOSITORY_ROOT, "pr-infra")
+        self.connection.execute("""INSERT INTO users(email,name,password_hash) VALUES
+            ('owner@client.example','Owner','unused'), ('other@client.example','Other','unused')""")
+        # The client's administrator signs up and verifies first: an operator never creates their account.
+        with self.assertRaisesRegex(ServiceError, "verify"):
+            provision_tenant(self.connection, composition, name="PR Infra", owner_email="owner@client.example")
+        self.connection.execute("UPDATE users SET email_verified_at=now()")
+        tenant = provision_tenant(self.connection, composition, name="PR Infra", owner_email="OWNER@client.example")
+        self.assertEqual(provision_tenant(self.connection, composition, name="PR Infra",
+                                          owner_email="owner@client.example"), tenant)
+        self.assertEqual(self.connection.execute(
+            """SELECT t.slug, t.name, u.email, m.role FROM tenants t JOIN memberships m ON m.tenant_id=t.id
+               JOIN users u ON u.id=m.user_id WHERE t.id=%s""", (tenant,)).fetchall(),
+            [("pr-infra", "PR Infra", "owner@client.example", "admin")])
+        # Someone else cannot take over an existing workspace by provisioning it again.
+        with self.assertRaisesRegex(ServiceError, "another administrator"):
+            provision_tenant(self.connection, composition, name="PR Infra", owner_email="other@client.example")
+        self.assertEqual(install(self.connection, composition, actor_email="owner@client.example"),
+                         ["statement-entry", "bill-entry"])
+
     def test_dry_run_really_rolls_back_registration(self):
         composition = self.composition()
         with self.connection.transaction(force_rollback=True):
