@@ -5,9 +5,9 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.10.0 (plan protocol 5; see its contracts below);
+This revision builds companion 0.10.0 (plan protocol 6; see its contracts below);
 the last release recorded in `windows-release.json` is 0.9.1. The server refuses
-Tally work from companions older than 0.9.0. The companion works only with the
+Tally work from companions older than 0.10.0. The companion works only with the
 companies open in the user's Tally, reports typed session states, sends
 diagnostics and updates itself. Its Tally sync uses HTTP/XML exports and needs no
 ODBC driver. Windows 10 device testing was deferred by the owner; compatibility
@@ -238,6 +238,19 @@ Native suites pass on Linux and Windows; Windows skips only a file-symlink test
 that requires creation privileges (the same guard runs on Linux). A fresh
 Windows 10/11 device matrix, screen-reader audit and signed distribution have
 not been verified.
+
+### Companion 0.10.0 contracts
+
+Plan protocol 6 is protocol 5 plus bill references. A line may carry `bills`:
+New Ref, Agst Ref, Advance and On Account amounts that add up to the line's
+amount. Every type but On Account names its bill. A bill to a supplier that
+keeps bill-by-bill balances opens a New Ref under its invoice number, and a
+payment or receipt settles the party's open bills (see
+[Statement entry](statement-entry.md#bill-by-bill-parties)). The readback must
+carry exactly the approved references, signed as Tally signs their line. The
+server sends a protocol 6 plan only to a companion that runs it, 0.10.0 or
+later; a protocol 5 plan approved before the upgrade stays executable.
+Inventory entries come with rebuild slice 8.
 
 ### Companion 0.9.0 contracts
 

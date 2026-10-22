@@ -135,9 +135,12 @@ Propose the voucher this client's own practice records for the document.
   rupee. A TDS line states its `tds: {section, rate}`.
 - **Families.** An invoice is a Purchase or Journal voucher, and a supplier's
   credit note a Debit Note.
-- **Unsupported structures.** Stock items, bill-wise references and foreign
-  currency cannot be saved yet: propose `unsupported_structure` and name the
-  structure.
+- **Bill-by-bill suppliers.** A supplier that keeps its balances bill by bill
+  needs nothing more: Minkops records the bill under its invoice number. A
+  credit note to such a supplier holds, because it must name the bill it
+  adjusts.
+- **Unsupported structures.** Stock items and foreign currency cannot be saved
+  yet: propose `unsupported_structure` and name the structure.
 
 ## Holding a bill
 

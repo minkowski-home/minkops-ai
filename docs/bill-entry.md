@@ -83,15 +83,19 @@ and proves it:
 - cost centres belong to their category, on a ledger that enables them;
 - TDS follows its section and rate, on the expense value only;
 - the date falls within the company's books. A bill before they begin, or after
-  a year-split sibling takes over, holds at once.
+  a year-split sibling takes over, holds at once;
+- a supplier that keeps bill-by-bill balances gets the bill recorded under its
+  invoice number (a New Ref on the supplier's line). Its credit note holds as
+  `unsupported_structure`, because it must name the bill it adjusts: enter it in
+  Tally.
 
 Some holds no later attempt may change, only a person's recheck: a date
 outside the books, a foreign supplier's invoice (whose numbering year is
-unknown), or a missing supplier. Stock items, bill-wise references and foreign
-currency cannot be saved yet. The session proposes such a bill as
-`unsupported_structure`, naming the structure. A bill that merely lists goods
-with HSN codes and quantities is booked to the ledger the client uses, unless
-the client books such purchases item-wise.
+unknown), or a missing supplier. Stock items and foreign currency cannot be
+saved yet. The session proposes such a bill as `unsupported_structure`, naming
+the structure. A bill that merely lists goods with HSN codes and quantities is
+booked to the ledger the client uses, unless the client books such purchases
+item-wise.
 
 ## Review
 
@@ -169,7 +173,8 @@ only admins disable, enable or delete entries or change rules
 ## Saving
 
 An approved bill becomes a durable native write (`accounts/writes.py`): a
-protocol 5 plan with the header, balanced lines and the identities they name.
+protocol 6 plan with the header, balanced lines, the identities they name and
+any bill reference.
 The PC runs one `tally.write` at a time. The companion searches the bill's
 invoice year for the same supplier and document number, among Purchase and
 Journal vouchers for an invoice and Debit Notes for a credit note, then reports

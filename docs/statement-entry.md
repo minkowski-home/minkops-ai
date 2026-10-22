@@ -62,6 +62,7 @@ own session with the lookup tools:
 | `find_ledger` | Ledgers by name, alias, GSTIN or bank account number (a masked number matches by its last digits) |
 | `voucher_types` | Active Payment, Receipt and Contra types |
 | `party_history` | How the client booked similar transactions before |
+| `open_bills` | A bill-by-bill ledger's open bills, less what the run's other rows settle |
 | `cost_centres` | Cost centres with their categories |
 | `find_transfer` | Rows in the run that could be the other leg of a transfer |
 | `pair_return` | For a returned payment's UTR, the original in the run or in Tally |
@@ -85,7 +86,8 @@ in Tally to the saved voucher demotes it (see [Bill entry](bill-entry.md#memory-
 - the ledgers are distinct;
 - cost centres belong to their category;
 - split lines add up exactly to the bank amount;
-- the date is on or after the books' beginning.
+- the date is on or after the books' beginning;
+- a counter ledger that keeps bill-by-bill balances settles open bills, as below.
 
 A rejected row is told why and can be resubmitted twice. The model may instead hold
 a row with a coded exception:
@@ -117,6 +119,34 @@ When the last item settles:
 - **Standing approval.** With review mode `only_exceptions`, every clean proposal is
   approved; the exceptions wait for review.
 
+## Bill-by-bill parties
+
+A counter ledger that keeps its balances bill by bill takes the bills each row
+settles on its line (`accounts/settlement.py`):
+
+- **Open bills** come from the run's pinned books. Each bill starts at its New Ref or
+  Advance, or at the ledger's opening bill when the books begin inside the mirror's
+  window, and every Agst Ref settles part of it. Cancelled and optional vouchers
+  settle nothing. A bill opened before that window is never offered, because what
+  settled it is not mirrored. A run's rows claim what they settle, so two rows never
+  settle one balance twice; repeats of a transaction in overlapping statements
+  claim it once.
+- **Evident allocations are proposed.** A row settles the bills its narration or
+  reference names, or the only open bills, at most three, whose balances add up to
+  its amount. It goes on account when nothing is open. The session may give `bills`
+  itself (Agst Ref, Advance or On Account), and the same rule decides whether they
+  stand.
+- **Anything else holds** as `bill_unresolved`, with one Settle button per
+  allocation: the session's, the named bills, exact matches, oldest first, and on
+  account. `settle` with `{"choice": n}` approves the row with that allocation. If
+  another row of the run settled one of those bills meanwhile, the row stays held
+  and offers what is open now.
+- **Limits.** A bill-by-bill ledger can only be the counter line, so a row paying two
+  such parties is `unsupported_structure`, and a bank row never opens a bill. Bills
+  entered in Tally after a run read the books are not offered to it; start a new
+  run once they are entered. Two runs that settle the same bill at the same time do
+  not see each other's claims.
+
 ## Review and writes
 
 The runs API serves:
@@ -125,7 +155,8 @@ The runs API serves:
 - pages of record summaries;
 - each record's detail;
 - idempotent decisions per record version: `approve`, `nothing` (Do nothing),
-  `retry` (Recheck the row in a new attempt of its chunk) and `retry_save`;
+  `retry` (Recheck the row in a new attempt of its chunk), `retry_save`, and
+  `settle` with the chosen allocation;
 - `POST .../runs/{run}/approve`, which approves every ready row that needs no review.
 
 Approving a transfer leg, or a row repeated in another statement, approves the one
@@ -138,8 +169,8 @@ An approved row becomes a durable `native_writes` intent before anything is sent
   other run can write the same transaction until it is verified or released. Each
   PC gets one `tally.write` job at a time, in approval order.
 - **Readback.** The companion fences each import locally by the voucher's remote ID,
-  writes the v5 voucher and reads it back; the server checks that readback
-  exactly against the plan.
+  writes the protocol 6 voucher and reads it back; the server checks that readback,
+  bill references included, exactly against the plan.
 - **Native holds.** A hold the companion reports (Tally not running, company not
   open, possible existing voucher, uncertain import) holds the row. Retry save sends
   the same plan, which the companion either finds already in Tally or refuses to

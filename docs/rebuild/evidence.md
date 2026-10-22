@@ -338,3 +338,31 @@ The same local stack ran slice 6 against the rehearsal companies:
 - **Rules missed by subject.** A session searched rules by its company's name, which no rule mentions, and missed the rule its supplier followed. `rules` now returns every active rule, bounded at 30 per client and employee.
 - **A booking that changed value.** A supplier's second bill printed a round-off, so the booking learnt from its first changed value. Bookings are now the treatment alone, one entry for each way a supplier is booked.
 - **Payees named two ways.** Some payees were named with the statement's code prefix and some without. A lookup now also matches a routing whose name contains the asked name, or is contained in it.
+
+## Bill-wise settlement, rehearsed live (21 October 2026)
+
+Slice 7 ran on Third Tally Company, whose synthetic QA18 books gained one supplier that keeps bill-by-bill balances. It was imported through Tally's XML interface with:
+
+- an opening bill of 5,000.00;
+- two purchases with New Refs, QA18/BW/101 for 11,800.00 and QA18/BW/102 for 5,900.00;
+- a 6,000.00 part payment against QA18/BW/101.
+
+The Educational dates are the 1st, 2nd or 31st.
+
+- **The mirror balanced the bills as Tally does.** The sync's master and voucher collections already carry a ledger's opening bills and each line's references. `mirror.open_bills` reported 5,000.00, 5,800.00 and 5,900.00 open, matching Tally.
+- **A statement settled them.** Four payment rows went through one session:
+  - the row naming QA18/BW/102 settled it in full;
+  - an unnamed 5,800.00, the only bill of that amount, settled QA18/BW/101;
+  - a payment to a supplier that keeps no bills carried none;
+  - an unnamed 2,000.00 the session put on account held for one click, because the opening bill was still open. Choosing "2,000.00 of QA18/OB/001" approved it.
+  All four saved and verified in 9 s. Tally's own export shows each Agst Ref, and the next sync left only 3,000.00 of the opening bill open.
+- **Bill to payment, both by Minkops.** A synthetic invoice, QA18/BW/103 for 11,800.00, was proposed in 48 s and saved with a New Ref under its invoice number; the readback carried it. A July statement row naming it was proposed as an Agst Ref and saved, and the next sync showed the bill settled.
+
+**Usage.** Three runs used 3 sessions: 250,007 input tokens (80% cached) and 5,769 output tokens.
+
+**Found and fixed along the way:**
+
+- **A changed practice broke its sync.** Adding the first bill-by-bill supplier changed the company's bill-wise practice. The sync's probe then sent a NULL actor that PostgreSQL typed as text, so the publish failed and the PC retried it every tick. The actor is now typed, and a test changes a settled fact.
+- **A failed tool call kept part of its work.** A propose call that failed partway had already saved its first rows. A failing call now rolls back to a savepoint, so only its log remains. That also keeps a database error inside a handler from aborting the session's transaction.
+- **Sums came back as decimals.** PostgreSQL sums bigint amounts as numeric, which broke serialising a session's choices. Both bill sums are now cast back to bigint.
+- **Company GUIDs mistyped.** Sessions mistyped the 36-character company GUID about once per tool and recovered when told. That is one wasted round trip per tool, carried to slice 12.
