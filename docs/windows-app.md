@@ -241,16 +241,27 @@ not been verified.
 
 ### Companion 0.10.0 contracts
 
-Plan protocol 6 is protocol 5 plus bill references. A line may carry `bills`:
-New Ref, Agst Ref, Advance and On Account amounts that add up to the line's
-amount. Every type but On Account names its bill. A bill to a supplier that
-keeps bill-by-bill balances opens a New Ref under its invoice number, and a
-payment or receipt settles the party's open bills (see
-[Statement entry](statement-entry.md#bill-by-bill-parties)). The readback must
-carry exactly the approved references, signed as Tally signs their line. The
-server sends a protocol 6 plan only to a companion that runs it, 0.10.0 or
-later; a protocol 5 plan approved before the upgrade stays executable.
-Inventory entries come with rebuild slice 8.
+Plan protocol 6 is protocol 5 plus bill references and inventory:
+
+- **Bill references.** A line may carry `bills`: New Ref, Agst Ref, Advance and
+  On Account amounts that add up to the line's amount. Every type but On Account
+  names its bill. A bill to a supplier that keeps bill-by-bill balances opens a
+  New Ref under its invoice number, and a payment or receipt settles the party's
+  open bills (see [Statement entry](statement-entry.md#bill-by-bill-parties)).
+- **Inventory.** A Purchase may carry `inventory`: each stock item with its
+  quantity in its own unit, rate, amount and godowns, and the purchase ledger
+  line that carries its value. Each such line carries exactly its items' value.
+  The companion writes the purchase in Tally's invoice view, each godown as a
+  primary batch, after rechecking that the stock items keep their unit and no
+  batches and that the godowns are the ones the run read (see
+  [Bill entry](bill-entry.md#item-wise-purchases)).
+
+The readback must carry exactly the approved references and items, signed as
+Tally signs their line. A voucher with tracked batches, orders or receipt
+notes, or with more than one purchase ledger per item, is more than a plan
+states. The server sends a protocol 6 plan only to a companion that runs it,
+0.10.0 or later; a protocol 5 plan approved before the upgrade stays
+executable.
 
 ### Companion 0.9.0 contracts
 

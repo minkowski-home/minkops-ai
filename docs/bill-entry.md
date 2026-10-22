@@ -49,7 +49,9 @@ books with read-only tools, each logged per call:
 - `find_company`: the client's companies, with every GSTIN each is registered under;
 - `find_ledger`: by name, alias, GSTIN or bank account, with each ledger's group and description;
 - `voucher_types` and `cost_centres`;
-- `party_history`: how the client booked a supplier's or a ledger's earlier vouchers, including their stock items;
+- `party_history`: how the client booked a supplier's or a ledger's earlier vouchers, including their stock items
+  and the godowns those went to;
+- `find_stock_item` and `godowns`: stock items by name, alias or HSN code, with their units, and the company's stores;
 - `check_gstin`: whether a GSTIN read from the bill is valid, and its state;
 - `memory`, `rules` and `practice`: what Minkops learnt about a supplier, the client's own rules, and how a
   company keeps its books (see [Memory and practice](#memory-and-practice)).
@@ -96,6 +98,38 @@ saved yet. The session proposes such a bill as `unsupported_structure`, naming
 the structure. A bill that merely lists goods with HSN codes and quantities is
 booked to the ledger the client uses, unless the client books such purchases
 item-wise.
+
+## Item-wise purchases
+
+A supplier whose purchases the client books item-wise in Tally gets its bills booked
+the same way. For each item line of the bill the session proposes, in `voucher.items`:
+
+- the stock item;
+- its quantity in that item's own unit, with the printed rate and amount;
+- the purchase ledger that carries its value;
+- the godowns it goes to.
+
+The gate (`accounts/vouchers.py`) proves:
+
+- each item is a stock item of the company, counted in a simple unit and not kept in
+  batches;
+- the quantity keeps to its unit's decimal places, and quantity times rate reaches the
+  printed amount within a rupee;
+- the purchase ledger has inventory values affected, as Tally requires;
+- the godowns take the item's whole quantity and amount between them.
+
+Items carry the bill's taxable value. Tally books each purchase ledger's items as one
+ledger line, so the plan does too, and its readback must carry every item, godown,
+quantity, rate and amount. Only a Purchase invoice carries items; goods returned on a
+credit note are entered in Tally.
+
+An item-wise purchase also depends on the company's practice. Where Receipt Notes or
+purchase orders track the goods, the purchase must name the note or order it follows,
+so the bill holds for entry in Tally, and no later reading can recast it. While either
+practice is open, the bill waits on its question, and the answer, or a later sync that
+settles it, releases the bill. Confirmation by use tells the two treatments apart: a
+supplier booked item-wise before has no precedent for a bill booked to ledgers, and the
+reverse.
 
 ## Review
 
@@ -144,7 +178,8 @@ the gate bind all of them. Memory belongs to the client business and the Account
 desk employee (`accounts/memory.py`):
 
 - **Bookings.** A verified save a person approved is one way its supplier's bills
-  are booked: the voucher type and expense ledgers, by GUID. Approving the same
+  are booked: the voucher type and expense ledgers, by GUID, and whether it was
+  booked item-wise. Approving the same
   booking again uses its entry; a supplier booked two ways has two. A best guess
   stays unconfirmed until a person approves a bill booked that way.
 - **Upkeep.** Every sync revalidates the entries. An edit made in Tally to a voucher
@@ -155,9 +190,11 @@ desk employee (`accounts/memory.py`):
   company, versioned and cited by ID. Sessions read every active rule in scope,
   so a client keeps at most 30 active rules per employee.
 - **Practice.** After every sync, deterministic probes settle how a company keeps
-  its books, such as where it types invoice numbers and whether it records
-  receipt-register numbers. A probe the history cannot settle raises one
-  one-click question per company in [Attention](attention.md).
+  its books, such as where it types invoice numbers, whether it records
+  receipt-register numbers, and whether Receipt Notes or purchase orders track its
+  goods. A probe the history cannot settle raises one one-click question per
+  company in [Attention](attention.md). Each mirror version records the probes run
+  on it, so a probe added later meets books that have not changed since.
 
 Practice shapes the plan. A company that records receipt-register numbers in the
 narration gets the stamp there. While that question is open, a bill with a stamp
@@ -173,8 +210,8 @@ only admins disable, enable or delete entries or change rules
 ## Saving
 
 An approved bill becomes a durable native write (`accounts/writes.py`): a
-protocol 6 plan with the header, balanced lines, the identities they name and
-any bill reference.
+protocol 6 plan with the header, balanced lines, the identities they name, any
+bill reference, and the items of an item-wise purchase.
 The PC runs one `tally.write` at a time. The companion searches the bill's
 invoice year for the same supplier and document number, among Purchase and
 Journal vouchers for an invoice and Debit Notes for a credit note, then reports

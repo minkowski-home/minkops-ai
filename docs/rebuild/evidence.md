@@ -366,3 +366,19 @@ The Educational dates are the 1st, 2nd or 31st.
 - **A failed tool call kept part of its work.** A propose call that failed partway had already saved its first rows. A failing call now rolls back to a savepoint, so only its log remains. That also keeps a database error inside a handler from aborting the session's transaction.
 - **Sums came back as decimals.** PostgreSQL sums bigint amounts as numeric, which broke serialising a session's choices. Both bill sums are now cast back to bigint.
 - **Company GUIDs mistyped.** Sessions mistyped the 36-character company GUID about once per tool and recovered when told. That is one wasted round trip per tool, carried to slice 12.
+
+## Item-wise purchases, rehearsed live (22 October 2026)
+
+Slice 8 ran on Third Tally Company's synthetic QA18 books, whose stock items have simple units and no batches.
+
+- **Tally's own shape first.** A probe purchase was imported through XML with three items, one of them split between two godowns. Tally books each purchase ledger once among the voucher's ledger entries, with its items as inventory allocations. Each item reports its quantity, rate, amount, godown batches and one accounting allocation. The probe voucher was then deleted.
+- **A bill booked item-wise.** A synthetic invoice from QA18 Inventory Depot listed two spares and cement, shipped to two named stores. One session looked up the stock items and godowns. It proposed each item with its quantity, rate, godown and purchase ledger, and its taxes as lines.
+- **Waiting on a new probe.** The bill then waited on whether purchase orders track goods. That probe is new in this slice, and the company's unchanged books had never met it, so no card existed to release the bill. Fixed below. The next sync settled the practice from the books and released the bill.
+- **Saved and verified.** The bill went to review because cement was a new ledger for that supplier. Approved, it was saved and verified in 3 s. Tally's own export shows the invoice view, each item in its godown, and each purchase ledger once.
+
+**Usage.** One session: 91,171 input tokens (76% cached) and 3,581 output tokens.
+
+**Found and fixed along the way:**
+
+- **A probe the books never met.** Probes ran only on newly published versions, so a probe added in a release never ran on a company whose books did not change. A bill could wait on its question with no card to answer. Each version now records the probes run on it, and a sync that publishes nothing runs any missing probe on the latest version.
+- **A settled practice released nothing.** A practice the books settled after a bill began waiting on it left the bill waiting. Settling one now checks those bills again, as an answer does.
