@@ -44,7 +44,8 @@ from .holds import actions as hold_actions
 from .statement_routing import validated_plan
 from .vouchers import narration_token, observed_statement, rupees, statement_voucher
 
-CHUNK = 100
+# Rows per chunk: its session answers for all of them in one message, which the old tool capped at 50 rows.
+CHUNK = 50
 # A proposal and at most two resubmissions, per row and per layout.
 ATTEMPTS = 3
 MAX_BYTES = 30_000_000

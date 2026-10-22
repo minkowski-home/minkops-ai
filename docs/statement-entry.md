@@ -57,7 +57,7 @@ IFSC), so the rows can be matched to the right bank ledger.
 
 ## Routing
 
-Rows become records, chunked into items of up to 100 rows. Each chunk is routed in its
+Rows become records, chunked into items of up to 50 rows, one answer each. Each chunk is routed in its
 own session with the lookup tools:
 
 | Tool | What it answers |

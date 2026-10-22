@@ -248,3 +248,20 @@ def test_an_answer_a_departed_worker_left_unchecked_is_checked_by_its_successor(
     result, _ = answered(fake, checker, session_id=session.id)
     assert checker.checked == [(session.turn.id, {"amount": "1180.00"})] and len(fake.created) == 1
     assert result["turn_id"] == session.turn.id
+
+
+def test_a_final_answer_listed_after_its_turn_ends_is_read_not_refused(monkeypatch):
+    """The provider may report a turn's end before it lists the turn's message: the answer is read again."""
+    fake = FakeAgents(Script(LOOKUPS, answers=[{"amount": "1180.00"}]))
+    items = fake.beta.agents.sessions.items
+    listed, reads = items.list, []
+
+    def late(session_id, **options):
+        reads.append(session_id)
+        return [] if len(reads) == 1 else listed(session_id, **options)
+
+    monkeypatch.setattr(items, "list", late)
+    checker = Checker(corrections=())
+    answered(fake, checker)
+    [session] = fake.sessions
+    assert checker.checked == [(session.turn.id, {"amount": "1180.00"})] and len(reads) == 2

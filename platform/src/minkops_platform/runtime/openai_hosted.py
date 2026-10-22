@@ -59,6 +59,8 @@ REATTACHMENTS = 5
 CLOCK_SKEW = 300
 # Sessions scanned, newest first, for a lost creation.
 SEARCH_LIMIT = 500
+# Pauses before reading a finished turn's messages again, when its final answer is not listed yet.
+LISTING_DELAYS = (0.5, 1, 2)
 # Turn failures worth a new attempt; any other code needs a person.
 TRANSIENT = frozenset({"rate_limit_exceeded", "server_overloaded", "server_error", "connection_failed",
                        "request_timeout", "internal_error"})
@@ -268,11 +270,18 @@ class _ToolSession:
             idempotency_key=f"minkops-correction-{self.id}-{turn_id}")
 
     def _final_text(self, turn_id):
-        """The turn's final answer: its last assistant message, which the answer schema constrains."""
-        for item in self.api.items.list(self.id, order="desc", limit=100):
-            if getattr(item, "type", None) == "message" and getattr(item, "role", None) == "assistant" \
-                    and item.turn_id == turn_id and getattr(item, "phase", None) != "commentary":
-                return "".join(getattr(part, "text", "") for part in item.content)
+        """The turn's final answer: its last assistant message, which the answer schema constrains.
+
+        A turn's end can be reported before its message is listed, so an absent answer is read again before it is
+        taken as none: refused, it would cost the session one of its corrections.
+        """
+        for delay in (*LISTING_DELAYS, None):
+            for item in self.api.items.list(self.id, order="desc", limit=100):
+                if getattr(item, "type", None) == "message" and getattr(item, "role", None) == "assistant" \
+                        and item.turn_id == turn_id and getattr(item, "phase", None) != "commentary":
+                    return "".join(getattr(part, "text", "") for part in item.content)
+            if delay is not None:
+                time.sleep(delay)
         return ""
 
     def _note_turn(self, turn_id):

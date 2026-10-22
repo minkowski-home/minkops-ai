@@ -21,7 +21,7 @@ reaches the browser, the companion or a session's tools.
    to refresh, then pins one mirror version per company, so every check in the
    run reads the same books.
 2. **Items.** A run splits its inputs into items: a bill file, a statement's
-   layout, or a chunk of up to 100 statement rows. The worker's lanes claim items
+   layout, or a chunk of up to 50 statement rows. The worker's lanes claim items
    and run each in its own tool session.
 3. **Proposals.** A session looks things up with read-only tools scoped to the
    run, each call logged, and proposes. Its lookups include the client's memory:
