@@ -46,6 +46,25 @@ class Tool:
                 "parameters": self.input_schema}
 
 
+def _refusal(tool, arguments):
+    """Why the arguments break the tool's contract, naming each fault where it is; None when they keep it.
+
+    best_match finds the most specific error, but stops at a nullable value whose own schema reports several,
+    naming the whole value. A value that is given is held to its non-null schema, so those errors are the cause.
+    """
+    found = [best_match(Draft202012Validator(tool.input_schema).iter_errors(arguments))]
+    if found[0] is None:
+        return None
+    while found[0].validator == "anyOf" and found[0].context:
+        causes = [e for e in found[0].context if not (e.validator == "type" and e.validator_value == "null")]
+        if not causes or len(causes) == len(found[0].context):
+            break  # not a nullable value: which alternative was meant is not ours to guess
+        best = best_match(causes)
+        found = [best, *(e for e in causes if e is not best and e.absolute_path == best.absolute_path)]
+    where = "/".join(str(part) for part in found[0].absolute_path) or "arguments"
+    return f"Invalid {where}: {'; '.join(e.message for e in found[:3])}"[:500]
+
+
 def compute(tools, context, name, arguments):
     """(success, answer text) for one call."""
     tool = tools.get(name)
@@ -58,11 +77,9 @@ def compute(tools, context, name, arguments):
             return False, "Arguments must be a JSON object."
     if not isinstance(arguments, dict):
         return False, "Arguments must be a JSON object."
-    # The most specific error: inside a nullable object it names the missing field, not the whole value.
-    error = best_match(Draft202012Validator(tool.input_schema).iter_errors(arguments))
-    if error is not None:
-        where = "/".join(str(part) for part in error.absolute_path) or "arguments"
-        return False, f"Invalid {where}: {error.message}"[:500]
+    refusal = _refusal(tool, arguments)
+    if refusal is not None:
+        return False, refusal
     try:
         result = tool.handler(context, arguments)
     except ToolError as refusal:
