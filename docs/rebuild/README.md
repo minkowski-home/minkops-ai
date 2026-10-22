@@ -14,20 +14,17 @@ on from another machine. The evidence behind each decision is in
 - **`platform/workflow-reliability` is left untouched and will most likely be discarded.**
   - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
-- **The build is under way.** [Progress](#progress) records each slice's state and evidence; [design.md](design.md) maps the modules, tables and protocols.
+- **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
 
 ## Continue on Windows
 
-**Do this before cloning.** The repository has no `.gitattributes`, and CRLF line endings change the bytes that migration checksums and the archived-migration hashes in `db/tests/test_branch_upgrade.py` are computed from:
+**Clone.** `.gitattributes` keeps LF line endings in every checkout: migration checksums are taken over exact bytes, so a CRLF checkout would make an unchanged migration look edited.
 
 ```powershell
-git config --global core.autocrlf false
 git clone git@github.com:minkowski-home/minkops-ai.git
 cd minkops-ai
 git switch accounts-desk/rebuild
 ```
-
-Adding a `.gitattributes` (`* text=auto eol=lf`) is a good first commit.
 
 **Tools you need:**
 - `uv`, which manages Python 3.12 (see `.python-version`);
@@ -326,7 +323,7 @@ Each slice works end to end against a real TallyPrime company before the next on
 - **Accounts checks** (`platform/src/minkops_platform/accounts/`): `vouchers.py`, `statement_layouts.py`, `validated_plan` in `statement_routing.py` and `supplier_gst.py`. `tally_writes.py` and `posting_profiles.py` were retired with the staged pipeline; the checks of theirs that still apply live in `vouchers.py` and `writes.py`.
 - **Platform:** `attention.py`, `run_controls.py`, `desktop.py` and `runtime/openai_hosted.py`.
 - **Workflow installation:** `minkops_api.install_workflows`, with variants.
-- **Infrastructure:** `infra/provision_database.py`, `deploy_runtime.py` and `verify_database_restore.py`.
+- **Infrastructure:** `infra/provision_database.py`, `configure_runtime.py`, `deploy_runtime.py` and `verify_database_restore.py`.
 
 ## Verification
 
@@ -383,7 +380,7 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 | 10. Review surface | Done | One review for every workflow's run (`RunReview.tsx`, `review.ts`), driven by what the handler reports and the decisions the server offers: each record's status in words, its holds and reasons, one button per decision with the detail it carries (such as a settlement choice), Save ready entries, and the proposed entry, items, settled bills, e-invoice, evidence, rules and Tally's voucher. It reads through the shared query cache, whose reads cancel when nothing watches them, and follows the run's activity. A run starts from its workflow's page with the client, the files and only the settings the workflow declares (`LaunchRun.tsx`). Attention groups by client, and an item or task of a client the member cannot reach is not found by its ID. Run summaries now count as the review does, and every amount meant for people is grouped as Indian accounts write it (`test_work.py`, `test_lanes.py`, `test_attention_api.py`, `test_workspace.py`, `review.test.ts`, `review.spec.js`). Live, a run of 15 bills was reviewed in the console, and a new bill was launched, approved and saved from it ([evidence](evidence.md#review-surface-rehearsed-live-22-october-2026)). 460 Python tests pass. |
 | 11. Hosted Tally | Done | On a server several Windows users share, Minkops reads only each user's own Tally. One read-only observation names the Windows session serving the PC's Tally port beside the companion's own. The connection check, every save's preflight and the sync refuse a Tally in another session (`other_session`); on a remote session that cannot tell, they refuse rather than assume (`ownership_unknown`) (`tally-session.test.js`, `sync.test.js`). A PC's Tally port reached its syncs and saves, but Check Tally connection and diagnostics read 9000; now every job and heartbeat carries it, and Connected PCs sets it (`test_desktop.py`, `jobs.test.js`, `devices.spec.js`). The server sends Tally work to a remote session only from companion 0.11.0. A release is signed: `npm run package:win` refuses to build without the certificate and its publisher, electron-builder pins the signer for updates, and Windows must trust the installer. Publication refuses an installer its publisher did not sign (`package.test.js`, `test_hosting_release.py`). The provider checklist is [Hosted Tally](../hosted-tally.md). Neither a certificate nor a shared server is available here, so both are on the manual testing list. 465 Python tests pass. |
 | 12. Performance | Done | Both targets met on the local stack with 12 lanes, now the default and the deployed setting: 50 labelled bills read in 5 min 30 s (target 10), and a synthetic month of 1,232 statement rows in 4 min 31 s (target 15), though with payees no rehearsal company holds, so that run measures the pipeline rather than routing ([evidence](evidence.md#performance-benchmarked-live-22-october-2026)). Lookups average 3 ms; the model is the limit. Sessions now cite companies and masters only by short references their lookups issued (migration 0031, `test_bill_entry.py`), so a guessed or mistyped GUID can no longer name another real master, and reasons a person reads name them. Every attempt's session counts toward a run's usage (migration 0030, `work.usage`, `test_lanes.py`). Round trips the benchmark exposed are gone: a bill printing no tax, an empty GSTIN check, and lookups of more than 20 subjects. 466 Python tests pass. |
-| 13. Cut-over | Not started | |
+| 13. Cut-over | Done | The old build's schema is retired. Migration 0032 drops the tables, view, triggers and functions of the staged pipeline, Source Discovery and the hosted-environment runtime, and refuses a database that still holds the old build's work, so that history is never dropped. `migrate.py` refuses a database from before the baseline, and the archived upgrade path is gone (`test_migrations.py`). A client's workspace is created for its verified administrator together with its composition (`install_workflows --create-tenant`, `test_installation.py`). The deployment mounted the new instance while the runtime's secret still named the shared one; the runtime's secrets now open the new instance and sit beside the parked build's, which stay untouched for a rollback (`test_runtime_deployment.py`). Retention keeps a parked build's images. Support diagnostics describe the run model ([workflow diagnostics](../workflow-diagnostics.md)). The [runbook](cutover.md) parks the old build, provisions and deploys, creates workspaces, says where PR Infra's statements resume, and rolls back. Rolling back includes reinstalling the parked companion, because the rebuilt one cannot run the parked build's jobs. Nothing is deployed. 466 Python tests pass. |
 
 **Carried into later slices:**
 
