@@ -79,6 +79,11 @@ ledger and voucher type for its payee. A lookup by a payee's name also finds a
 routing learnt under a name that contains it, or that it contains, and an edit made
 in Tally to the saved voucher demotes it (see [Bill entry](bill-entry.md#memory-and-practice)).
 
+As in [Bill entry](bill-entry.md#reading-a-file), the session meets companies and
+masters only as short references its input and lookups gave it (`C1`, `L12`), and a
+row cites only those: the server resolves them to GUIDs before any check, and refuses
+one the session was not given. A row cites a cost centre alone; its category follows.
+
 `propose` checks each row against the pinned company with `validated_plan`:
 
 - the bank ledger is under Bank Accounts;

@@ -57,6 +57,16 @@ books with read-only tools, each logged per call:
 - `memory`, `rules` and `practice`: what Minkops learnt about a supplier, the client's own rules, and how a
   company keeps its books (see [Memory and practice](#memory-and-practice)).
 
+A session meets companies and masters only as short references, never their
+GUIDs: the input names each company (`C1`), and every lookup gives the masters it
+finds theirs (`L12` for a ledger, `T2` for a voucher type, `S4`, `G1` and `K3` for
+stock items, godowns and cost centres). Each stands for one company or master for
+the whole file (`item_refs`), so a resumed session keeps the references it read. A
+proposal may cite only references its own session was given. Tally numbers a
+company's masters in sequence, so a guessed or mistyped GUID could name another
+real ledger; a reference no lookup issued names none, and is refused with the
+lookup that finds the right one. A cost centre's category follows from the centre.
+
 It then calls `propose` with `count`, the number of bills the file holds, and
 the bills numbered in the order they appear. Companion pages such as e-way bills,
 challans and annexures corroborate a bill and are never bills themselves. Each
@@ -74,8 +84,9 @@ number and date.
 `accounts/vouchers.py` `check` binds a proposal to its company's pinned masters
 and proves it:
 
-- every identity is a GUID in the routed company: the voucher type of the right
-  family, the supplier, and a distinct ledger per line;
+- every identity is a master of the routed company, resolved from the references
+  the proposal cites: the voucher type of the right family, the supplier, and a
+  distinct ledger per line;
 - the supplier's line is computed from the printed total, and the other lines
   reach it exactly;
 - each tax line matches its printed rate and taxable value within a rupee, and
@@ -94,9 +105,10 @@ and proves it:
 
 Some holds no later attempt may change, only a person's recheck: a date
 outside the books, a foreign supplier's invoice (whose numbering year is
-unknown), or a missing supplier. Stock items and foreign currency cannot be
-saved yet. The session proposes such a bill as `unsupported_structure`, naming
-the structure. A bill that merely lists goods with HSN codes and quantities is
+unknown), or a missing supplier. Foreign-currency bills cannot be saved yet, nor
+can items Tally keeps in batches (see [Item-wise purchases](#item-wise-purchases)).
+The session proposes such a bill as `unsupported_structure`, naming the
+structure. A bill that merely lists goods with HSN codes and quantities is
 booked to the ledger the client uses, unless the client books such purchases
 item-wise.
 

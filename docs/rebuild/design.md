@@ -143,6 +143,8 @@ or authorises a write.
   `(destination_key, identity)`, which reserves each company bill.
 - `tool_calls` logs every lookup and proposal per session and call ID, with
   bounded results.
+- `item_refs` holds the references an item's lookups issued, each naming one
+  company or master for the whole item.
 - `item_sessions` records every provider session an item opened, one per
   attempt, with the usage its turn reported. A run's spend is their sum
   (`work.usage`): a retry or a recheck adds a session rather than replacing one.
@@ -162,6 +164,13 @@ Sessions use `environment: {"type": "none"}`. That removes hosted environment
 preparation, and with it files and result artifacts. Bill pages arrive as
 `input_image` content. Tools are function tools declared from MCP-shaped
 contracts (name, description, input schema) that accept lists of subjects.
+
+Companies and masters reach a session as short references (`C1`, `L12`) its
+input and lookups issue, never as GUIDs (`desk_tools.Desk.issue`, `item_refs`).
+A proposal cites only references its item was given; the server resolves them
+to GUIDs at the tool boundary, so checks, plans and stored proposals read GUIDs
+as before. A guessed GUID could name another real master, since Tally numbers a
+company's masters in sequence; an unissued reference names none, and is refused.
 
 The worker answers `agent.session.requires_action` with
 `agent.session.input.tool_result`, using an idempotency key derived from the
