@@ -11,7 +11,10 @@ reaches the browser, the companion or a session's tools.
 
 1. **Books.** The Windows companion mirrors each authorised company's masters and
    vouchers into the server, read-only and without AI (`accounts/sync.py`, with
-   `connectors/desktop/src/sync.js` on the PC). A newly seen company stays pending
+   `connectors/desktop/src/sync.js` on the PC). An idle PC refreshes every 15
+   minutes, and every refresh first reports the companies open in Tally: a newly
+   connected PC's companies are found on its first poll, and a company opened later
+   within 15 minutes. A newly seen company stays pending
    until one card authorises it for a client business, or continues the client's
    company from a disconnected PC ([Replacing a PC](#replacing-a-pc)). A run asks the client's PCs
    to refresh, then pins one mirror version per company, so every check in the

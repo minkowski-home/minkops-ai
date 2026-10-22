@@ -434,9 +434,10 @@ class DesktopTests(unittest.TestCase):
         job, _ = self.launch()
         first = self.worker
         self.pair()
-        self.assertIsNone(
-            self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
-        )
+        # The second PC is handed only its own work: the first read of its Tally, never the first PC's job.
+        own = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+        self.assertEqual((own["operation"], own["input"]), ("tally.sync", {"reason": "background"}))
+        self.assertNotEqual(own["id"], job["id"])
         route = self.worker_base + f"/jobs/{job['id']}/finish"
         self.assertEqual(
             self.client.post(

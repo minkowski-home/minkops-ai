@@ -467,11 +467,30 @@ def test_a_nightly_sweep_is_due_after_twenty_hours():
     assert sync.sweep_due({"published_at": published, "swept": True}, datetime(2026, 10, 21, 21, tzinfo=UTC))
 
 
+def test_a_newly_connected_pc_reads_its_open_companies_unasked_so_each_is_found(pc):
+    """Connecting Minkops with the companies open in Tally is the whole setup: no one asks for the first read."""
+    import factory
+
+    from minkops_platform import desktop
+    db, device, tally = pc["db"], pc["device"], Tally()
+    claimed = desktop.claim(db, device, desktop.companion_report("0.11.0", "Client PC", "console"))
+    job = db.execute("SELECT * FROM desktop_jobs WHERE id=%s", (claimed["id"],)).fetchone()
+    assert (job["operation"], job["input"]) == ("tally.sync", {"reason": "background"})
+    _, answer, _ = Companion(db, device, job).run(tally)
+    assert [(step["mode"], step["reason"]) for step in answer["instructions"]] == [("skip", "pending")]
+    company = db.execute("SELECT * FROM companies WHERE device_id=%s", (device["id"],)).fetchone()
+    item = db.execute("SELECT * FROM attention_items WHERE event_key=%s", (f"company:{company['id']}",)).fetchone()
+    assert (company["guid"], item["label"], item["status"]) == (tally.identity["guid"], "New company found", "pending")
+    # An outdated companion is handed no Tally work, so it is not asked to read either.
+    outdated = factory.device(db, pc["tenant"], pc["owner"])
+    assert desktop.claim(db, outdated, desktop.companion_report("0.10.0", "Old PC", "console")) is None
+    assert db.execute("SELECT 1 FROM desktop_jobs WHERE device_id=%s", (outdated["id"],)).fetchone() is None
+
+
 def test_an_idle_pc_gets_one_background_refresh_per_interval_on_one_task(pc):
     from datetime import timedelta
     tally = Tally()
     db, device = pc["db"], pc["device"]
-    assert sync.background(db, device) is None  # Nothing authorised, nothing to keep current.
     authorised(pc, tally)
     db.execute("UPDATE desktop_jobs SET state='completed' WHERE device_id=%s", (device["id"],))
     later = datetime.now(UTC) + sync.BACKGROUND_EVERY + timedelta(minutes=1)

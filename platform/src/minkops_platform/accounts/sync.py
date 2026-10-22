@@ -107,15 +107,17 @@ def queue(connection, device, actor_id, *, reason):
 def background(connection, device, *, now=None):
     """Queue an idle PC's periodic refresh, so a run's "Get ready" finds a small delta.
 
-    Only for a PC with authorised companies, nothing queued or running, and no
-    sync finished within BACKGROUND_EVERY. Background refreshes share one task
-    per PC rather than adding one to the dashboard each time. The nightly sweep
-    needs no scheduler of its own: every sync checks whether one is due.
+    Every refresh first reports the companies open in Tally, so this is also how
+    a PC's companies are found: a newly connected PC is read on its first idle
+    poll, and a company opened later within BACKGROUND_EVERY. Companies not yet
+    authorised are only identified, never read (`_companies`).
+
+    Only for a PC with nothing queued or running and no sync finished within
+    BACKGROUND_EVERY. Background refreshes share one task per PC rather than
+    adding one to the dashboard each time. The nightly sweep needs no scheduler
+    of its own: every sync checks whether one is due.
     """
     now = now or datetime.now(UTC)
-    if not connection.execute("SELECT 1 FROM companies WHERE device_id=%s AND status='authorised' LIMIT 1",
-                              (device["id"],)).fetchone():
-        return None
     if connection.execute("SELECT 1 FROM desktop_jobs WHERE device_id=%s AND state IN ('queued','executing') LIMIT 1",
                           (device["id"],)).fetchone():
         return None
