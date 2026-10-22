@@ -392,3 +392,22 @@ Slice 9 began as a feasibility check, and each question came out in favour:
 - **Coverage.** Clear's certificate link (IRP 4) refuses downloads. IRPs 3 and 5 list their keys only in the browser. Their codes read as unverified: still the invoice's own data, but no proof of registration. The trust store holds production keys only; a sandbox-signed code proves nothing.
 
 No live run used a real e-invoice: no available bill carries one. The tests cover NIC's real sample code and synthetic codes signed by a test key. A real e-invoice from a PR Infra supplier is on the manual testing list.
+
+## Review surface, rehearsed live (22 October 2026)
+
+Slice 10 ran the console against the dev stack, the companion and Third Tally Company's synthetic QA18 books.
+
+- **A run reviewed.** An earlier rehearsal run of 15 bills read as 5 needing a decision, 8 saved and 2 already in Tally. Each held bill showed its hold, its own reason and only the decisions its hold allows, such as Retry save or Recheck. Details showed each proposal's lines, items with their godowns, and the evidence it quoted. Attention grouped its items by client.
+- **A run started, approved and saved in the console.** A synthetic item-wise invoice from QA18 Inventory Depot was uploaded on the workflow's page and routed by its addressee. It was read, proposed and approved with one click, then saved and verified in Tally 2 s later.
+
+**Usage.** One session: 106,273 input tokens (80% cached) and 2,612 output tokens.
+
+**Found and fixed along the way:**
+
+- **The launch was refused.** The mock tenant's saved settings locked bill entry to a company without naming one. "The company each bill is addressed to" sent no company mode, so that default won and the server refused the run. The form now always sends the mode it shows, and starts on a tenant's locked company when it belongs to the client.
+- **A title pushed the status off a phone's screen.** A run's title listed every file, cut at 200 characters, and one long name pushed the task's status out of view. A title now names the first file and counts the rest, and a long one wraps.
+- **One run, three wordings.** The task's summary said "need attention" where the review says "need a decision", with no singular, and kept its launch wording until the first session ended. One summary now counts as the review does, in each workflow's words, from launch on, and moves on as soon as a lane starts reading.
+- **Amounts without grouping.** Holds, refusals and settlement choices printed 188800.00 beside a console showing 1,88,800.00. One formatter now words every amount meant for people.
+- **A worker on mixed code.** A worker started before an edit loaded the new bill handler beside the old run module, and its lane failed. The lane left the item for a successor, which resumed it after the restart. Only a checkout edited under a running worker mixes code like this.
+
+**Found, carried to slice 12:** the session read the supplier's confirmed booking (QA18 Plant Repairs, by name) and proposed a ledger GUID it was never given, which named QA18 Equipment Hire. Tally numbers a company's masters in sequence, so a guessed GUID can name another real master. The booking differed from the confirmed one, so it went to review as designed. The rehearsal approved it to exercise the button, so Third Tally Company holds QA18/INV/STK/002 with its spares under QA18 Equipment Hire; the booking memory learnt from it is disabled.
