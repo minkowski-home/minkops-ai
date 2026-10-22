@@ -103,8 +103,8 @@ limit or purchase more capacity when it would breach this envelope. See
 [Google spend-cap limitations](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
 and [Cloud SQL pricing](https://cloud.google.com/sql/pricing).
 `artifact-cleanup.json` deletes builds older than 30 days and keeps
-the three newest versions; Hosting retains two releases per site and logs are
-kept for 30 days.
+the three newest versions, and every image tagged `parked-…`: a parked build's
+rollback. Hosting retains two releases per site and logs are kept for 30 days.
 
 ### Operator deployment
 

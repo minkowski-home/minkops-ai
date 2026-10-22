@@ -1,4 +1,5 @@
 [
   {"name": "remove-old-builds", "action": {"type": "Delete"}, "condition": {"tagState": "any", "olderThan": "30d"}},
-  {"name": "retain-rollback-builds", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 3}}
+  {"name": "retain-rollback-builds", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 3}},
+  {"name": "retain-parked-builds", "action": {"type": "Keep"}, "condition": {"tagState": "tagged", "tagPrefixes": ["parked-"]}}
 ]
