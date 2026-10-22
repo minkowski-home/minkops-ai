@@ -42,11 +42,12 @@ def digest(content):
 
 
 def launch(connection, *, tenant_id, client_id, workflow, handler, definition_version, bundle, actor_id,
-           request_key, request_hash, config, title, items):
+           request_key, request_hash, config, title, items, describe=None):
     """Create the task, pinned bundle, run and items together; items start queued or waiting.
 
     `handler` is the installed binding's handler key, which the caller read
-    from trusted installation state.
+    from trusted installation state. `describe` words the task's first summary,
+    as it words every later one (see `refresh`).
     """
     if not items:
         raise ServiceError("invalid", "Select at least one input.")
@@ -66,8 +67,11 @@ def launch(connection, *, tenant_id, client_id, workflow, handler, definition_ve
          definition_version, bundle_digest, actor_id, request_key, request_hash, Jsonb(config),
          "preparing" if waiting else "running")).fetchone()
     add_items(connection, run, items)
+    counts = dict.fromkeys(ITEM_STATES, 0) | {"waiting": sum(1 for spec in items if spec.waiting_on),
+                                              "queued": sum(1 for spec in items if not spec.waiting_on)}
+    summary, progress = (describe or describe_run)(run["state"], counts, dict.fromkeys(RECORD_STATUSES, 0))
     observe_task(connection, tenant_id=tenant_id, task_id=task["id"], run_id=run["id"], state="queued",
-                 summary="Getting ready." if waiting else "Queued.", progress=0, event_prefix="run")
+                 summary=summary, progress=progress, event_prefix="run")
     return run
 
 

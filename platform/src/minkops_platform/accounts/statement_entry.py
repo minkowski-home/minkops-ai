@@ -115,7 +115,8 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
                       handler="desk.statement", definition_version=definition.metadata["version"],
                       bundle=definition.session_bundle, actor_id=user["id"], request_key=body["request_key"],
                       request_hash=fingerprint, config=config,
-                      title=work.title("Statement entry", [Path(f["path"]).name for f in statements]), items=specs)
+                      title=work.title("Statement entry", [Path(f["path"]).name for f in statements]), items=specs,
+                      describe=describe)
     items = connection.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
     for item, chunk in zip(items, rows, strict=True):
         if chunk:

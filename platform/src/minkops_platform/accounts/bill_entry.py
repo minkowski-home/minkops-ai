@@ -104,7 +104,7 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
                       request_hash=fingerprint, config=config,
                       title=work.title("Bill entry", [Path(paths[file_id]).name for file_id in file_ids]),
                       items=[work.ItemSpec(KIND, {"file_id": file_id}, waiting_on=sync.blocker(devices[0]["id"]))
-                             for file_id in file_ids])
+                             for file_id in file_ids], describe=describe)
     items = connection.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
     for item in items:
         work.add_records(connection, item, [_blank(item, paths[item["source"]["file_id"]], 1)])

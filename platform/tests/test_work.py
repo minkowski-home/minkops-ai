@@ -47,6 +47,8 @@ def test_launch_pins_a_small_run_with_its_task_bundle_and_items(scope):
         run = launch(db, scope, [work.ItemSpec("bill", {"file_id": "a"}), work.ItemSpec("bill", {"file_id": "b"})])
         task = db.execute("SELECT * FROM tasks WHERE id=%s", (run["task_id"],)).fetchone()
         assert (task["client_id"], task["status"]) == (scope["client"]["id"], "running")
+        # The first summary is the run's own description, as every later one is.
+        assert task["summary"] == "0 of 2 inputs read."
         items = db.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
         assert [(i["ordinal"], i["state"], i["source"]["file_id"]) for i in items] == [(0, "queued", "a"), (1, "queued", "b")]
         bundle = db.execute("SELECT content FROM run_bundles WHERE tenant_id=%s AND digest=%s",
