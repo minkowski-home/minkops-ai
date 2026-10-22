@@ -30,9 +30,9 @@ statement's own balances (`accounts/statement_layouts.py`, reader in
 - **A known format** is matched by its header row, after any preamble, and read with
   no AI session.
 - **An unseen format** gets a `layout` item. Its session sees a bounded preview of the
-  sheet (the first 60 and last 15 rows plus candidate summary rows) and declares the
-  reading with `propose_layout`. Minkops applies the reading to the whole sheet and
-  answers at once:
+  sheet (the first 60 and last 15 rows plus candidate summary rows) and answers with
+  the reading, constrained to the layout's schema (`READING`). Minkops applies the
+  reading to the whole sheet and proves it:
   - every running balance must equal the previous one plus the transaction;
   - declared summary controls (opening, closing, total withdrawals and deposits) must
     match, wherever they sit in the sheet, and so must every copy of one printed twice,
@@ -41,9 +41,9 @@ statement's own balances (`accounts/statement_layouts.py`, reader in
     reads as its paise amount; a real third decimal is refused;
   - the dates must settle their own day-month order.
 
-  A refuted reading is explained to the session, naming the cell and what differs, and
-  the session has two more attempts. A refuted reading is never stored; a sheet held
-  after the last attempt shows the person that refusal.
+  A refuted reading goes back to the session, naming the cell and what differs, at
+  most twice. A refuted reading is never stored; a sheet held after the last one
+  shows the person that refusal.
 - **When only a person can decide** (the date order, or rows with no running balance),
   one Attention card asks once, answered with
   `POST /api/tenants/{tenant}/attention/{item}/decision` and its chosen `action`. The
@@ -74,7 +74,6 @@ own session with the lookup tools:
 | `memory` | How rows with a payee were booked when a person approved them, by the payee's name |
 | `rules` | Every active rule people wrote for the client's statement work, with its ID and version |
 | `practice` | How a company keeps its books, such as how it books bank payments |
-| `propose` | One proposal per row, checked as it arrives |
 
 A row names its payee as the narration prints it, and cites the IDs of the rules it
 follows; the server checks each citation and keeps the text the row followed. A
@@ -88,7 +87,9 @@ masters only as short references its input and lookups gave it (`C1`, `L12`), an
 row cites only those: the server resolves them to GUIDs before any check, and refuses
 one the session was not given. A row cites a cost centre alone; its category follows.
 
-`propose` checks each row against the pinned company with `validated_plan`:
+The session's final answer gives every row of the chunk either a selection or an
+exception, constrained to the rows' schema (`ROWS`), so its shape cannot be wrong.
+Each row is then checked against the pinned company with `validated_plan`:
 
 - the bank ledger is under Bank Accounts;
 - the voucher type is an active type of the right family;
@@ -98,7 +99,8 @@ one the session was not given. A row cites a cost centre alone; its category fol
 - the date is on or after the books' beginning;
 - a counter ledger that keeps bill-by-bill balances settles open bills, as below.
 
-A rejected row is told why and can be resubmitted twice. The model may instead hold
+A rejected row goes back to the same session with why, which answers again with
+the rows it rejected or did not receive, at most twice. The model may instead hold
 a row with a coded exception:
 
 - `company_unresolved`;
@@ -113,7 +115,7 @@ mismatch, uncached formula) cannot be cleared by a proposal. A routing hint such
 Branch column is a client label, not a bank branch; its meaning comes from the
 client's mapping or the evidence.
 
-When a chunk ends, any row it did not propose holds as `statement_interpretation`.
+When a chunk ends, any row it did not answer holds as `statement_interpretation`.
 When the last item settles:
 
 - **Transfers.** Legs that name each other become one Contra, written by the leg

@@ -94,16 +94,25 @@ def resolves(schema, path):
 class InstructionContractTests(unittest.TestCase):
     """Instructions name only what exists: a field renamed in the answer's schema cannot leave them behind."""
 
-    def test_the_bill_instructions_name_only_fields_tools_and_codes_that_exist(self):
-        from minkops_platform.accounts import bill_entry, desk_tools
-        schema = bill_entry.PROPOSAL.tool.input_schema
-        # Fields of the session's input and of lookup answers, which no answer schema declares.
-        given = {"decided_bills", "gst_duty", "description"}
-        known = answer_names(schema) | set(desk_tools.TOOLS) | set(bill_entry.BILL_TOOLS) | given
-        names = re.findall(r"`([a-z][a-z_.]*)`", load_definition(WORKFLOWS / "bill-entry").instructions)
-        for name in names:
+    def check(self, instructions, schema, known):
+        for name in re.findall(r"`([a-z][a-z_.]*)`", instructions):
             with self.subTest(name=name):
                 if "." in name:
                     self.assertTrue(resolves(schema, name.split(".")), f"{name} is no path of the answer")
                 else:
-                    self.assertIn(name, known)
+                    self.assertIn(name, answer_names(schema) | known)
+
+    def test_the_bill_instructions_name_only_fields_tools_and_codes_that_exist(self):
+        from minkops_platform.accounts import bill_entry, desk_tools
+        # Fields of the session's input and of lookup answers, which no answer schema declares.
+        given = {"decided_bills", "gst_duty", "description"}
+        self.check(load_definition(WORKFLOWS / "bill-entry").instructions, bill_entry.PROPOSAL.tool.input_schema,
+                   set(desk_tools.TOOLS) | set(bill_entry.BILL_TOOLS) | given)
+
+    def test_the_statement_instructions_name_only_fields_tools_and_codes_that_exist(self):
+        from minkops_platform.accounts import desk_tools, statement_entry
+        definition = load_definition(WORKFLOWS / "statement-entry")
+        # A lookup answer's field: a ledger that keeps bill-by-bill balances.
+        self.check(definition.instructions, statement_entry.ROWS.tool.input_schema,
+                   set(desk_tools.TOOLS) | set(statement_entry.CHUNK_TOOLS) | {"bill_by_bill"})
+        self.check(definition.session_bundle["stages"]["layout"], statement_entry.READING.tool.input_schema, set())

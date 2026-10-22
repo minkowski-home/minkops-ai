@@ -39,7 +39,8 @@ HDFC = b"""Date,Description,Debit,Credit,Balance
 ICICI_LAYOUT = {"header_row": 3, "columns": {
     "date": {"column": 1, "order": "dmy"}, "amount": {"mode": "debit_credit", "debit": 4, "credit": 5},
     "balance": {"column": 6}, "reference": {"column": 3}, "narration": {"columns": [2]}, "account": None,
-    "routing_hint": None}, "row_order": "oldest_first", "rows": {},
+    "routing_hint": None}, "row_order": "oldest_first",
+    "rows": {"opening": [], "closing": [], "ignore": [], "ends_at": [], "summary": []},
     "details": [{"kind": "account_number", "row": 1, "column": 2}], "evidence": "Headings on row 3; balances chain."}
 HDFC_LAYOUT = {**ICICI_LAYOUT, "header_row": 1, "details": [], "columns": {
     **ICICI_LAYOUT["columns"], "amount": {"mode": "debit_credit", "debit": 3, "credit": 4}, "balance": {"column": 5},
@@ -75,11 +76,48 @@ def masters(company):
         vtype("g-payment", "Payment"), vtype("g-receipt", "Receipt"), vtype("g-contra", "Contra")]
 
 
+def reading(layout):
+    """A layout session's answer: this reading of the sheet."""
+    return ("propose_layout", {"layout": layout, "exception": None})
+
+
+def answered(entry):
+    """A row as a chunk's answer gives it: a selection with every field, null where the row has none, or an
+    exception. Scenarios write rows as flat entries naming only what matters to them."""
+    if "exception" in entry:
+        return {"ref": entry["ref"], "selection": None, "exception": entry["exception"]}
+    selection = {"family": None, "cost_centre": None, "lines": None, "pair": None, "bills": None, "rules": [],
+                 "payee": None, **{key: value for key, value in entry.items() if key != "ref"}}
+    if selection["lines"]:
+        selection["lines"] = [{"cost_centre": None, **line} for line in selection["lines"]]
+    if selection["bills"]:
+        selection["bills"] = [{"name": None, **bill} for bill in selection["bills"]]
+    return {"ref": entry["ref"], "selection": selection, "exception": None}
+
+
+def answering(round_):
+    """A scripted round whose rows are written as flat entries, given in the answer's shape."""
+    def made(answers, session):
+        calls = round_(answers, session) if callable(round_) else round_
+        return [(tool, {"rows": [answered(entry) for entry in arguments["rows"]]} if tool == "propose" else arguments)
+                for tool, arguments in calls]
+    return made
+
+
+def verdicts(session):
+    """What the worker said of each of a session's answers, parsed where it was not refused."""
+    import factory
+    with factory.connect() as db:
+        return [json.loads(row["answer"]) if row["success"] else row["answer"] for row in db.execute(
+            "SELECT success, answer FROM tool_calls WHERE session_id=%s AND call_id LIKE 'answer:%%' ORDER BY created_at",
+            (session.id,))]
+
+
 def chunk_session(desk, *rounds):
     """A chunk session's script: the model looks up the company's masters, then makes each round, written here
-    by GUID, by the references it was given."""
+    by GUID, by the references it was given; its answer is the round proposing the rows."""
     names = named(masters(desk["company"]))
-    return Script(everything(names), *(referring(round_, names) for round_ in rounds))
+    return Script(everything(names), *(answering(referring(round_, names)) for round_ in rounds))
 
 
 @pytest.fixture(autouse=True)
@@ -158,7 +196,7 @@ def rows_of(session):
 def layouts(answers, session):
     """A layout session declares the reading that fits the sheet it was shown."""
     preview = json.loads(session.content[0]["text"])
-    return [("propose_layout", {"layout": HDFC_LAYOUT if preview["file"].startswith("hdfc") else ICICI_LAYOUT})]
+    return [reading(HDFC_LAYOUT if preview["file"].startswith("hdfc") else ICICI_LAYOUT)]
 
 
 def booked(row, company):
@@ -248,7 +286,7 @@ def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
     # Without a company, every company in scope is searched and each match names its company by reference.
     assert [(ledger["name"], ledger["ref"], ledger["company_ref"]) for ledger in lookups[1][0]["ledgers"]] == [
         ("ICICI Current A/c", "L1", "C1")]
-    proposed = [json.loads(a["text"]) for a in chunk.answers if a["name"] == "propose"]
+    proposed = verdicts(chunk)
     assert proposed[0]["rejected"][0]["reason"] == "The bank ledger must belong to the Bank Accounts group."
     assert proposed[0]["held"] == [rows_of(chunk)[1]["ref"]] and proposed[1]["accepted"] == [rows_of(chunk)[0]["ref"]]
     rows = records(desk, run)
@@ -494,18 +532,17 @@ def test_an_unsettled_date_order_waits_for_one_answer_then_reads_the_rows(desk):
 def test_balances_that_refute_a_reading_are_explained_and_never_kept(desk):
     swapped = {**ICICI_LAYOUT, "columns": {**ICICI_LAYOUT["columns"], "amount": {
         "mode": "debit_credit", "debit": 5, "credit": 4}}}
-    fake = FakeAgents(Script([("propose_layout", {"layout": swapped})], [("propose_layout", {"layout": swapped})],
-                             [("propose_layout", {"layout": swapped})], [("propose_layout", {"layout": swapped})]))
+    fake = FakeAgents(Script([reading(swapped)], [reading(swapped)], [reading(swapped)], [reading(swapped)]))
     run = launch(desk, {"icici-sep.csv": ICICI})
     with host(desk, fake):
         until(lambda: items(desk, run)[0]["state"] == "done")
     [session] = fake.sessions or fake.created
-    texts = [a["text"] for a in session.answers]
+    texts = verdicts(session)
     # The first row chains from its own implied opening; the second shows the swapped columns.
     refusal = ("The statement does not confirm this reading. Row 5: The running balance cannot be verified against "
                "the preceding balance and transaction.")
-    assert texts[0] == refusal
-    assert texts[3] == "No more attempts: this sheet will be held for review."
+    # Each refusal goes back to the session; after two corrections the sheet holds.
+    assert texts == [refusal] * 3 and len(session.messages) == 2
     [sheet] = records(desk, run)
     assert (sheet["kind"], sheet["status"], sheet["hold_codes"]) == ("statement_sheet", "held",
                                                                      ["statement_layout_unknown"])
@@ -641,11 +678,12 @@ def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_
         # The last row asks for SM/101, which the row before it settles in full.
         return [("open_bills", {"company": company, "ledgers": ["g-steel", "Acme Steel"]}),
                 ("propose", {"rows": [to_steel_mart(row, company) for row in rows[:3]] + [to_steel_mart(
-                    rows[3], company, bills=[{"type": "Agst Ref", "name": "SM/101", "amount": 500}])]}),
-                ("open_bills", {"company": company, "ledgers": ["g-steel"]})]
+                    rows[3], company, bills=[{"type": "Agst Ref", "name": "SM/101", "amount": 500}])]})]
 
     def corrected(answers, session):
-        return [("propose", {"rows": [to_steel_mart(rows_of(session)[3], company)]})]
+        # Told SM/101 is not open, the model looks again before answering.
+        return [("open_bills", {"company": company, "ledgers": ["g-steel"]}),
+                ("propose", {"rows": [to_steel_mart(rows_of(session)[3], company)]})]
 
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, settle, corrected) if is_chunk(content) else Script(layouts))
     run = launch(desk, {"icici-steel.csv": STEEL})
@@ -660,7 +698,7 @@ def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_
             {"name": "SM/102", "date": "2026-08-15", "open": "5000.00", "balance": "credit"}]}]
     # What this run's rows settle is no longer open to the next.
     assert after["ledgers"] == [{"ledger": "Steel Mart", "bill_by_bill": True, "bills": []}]
-    proposed = [json.loads(a["text"]) for a in chunk.answers if a["name"] == "propose"]
+    proposed = verdicts(chunk)
     assert proposed[0]["rejected"][0]["reason"] == ("SM/101 is not an open bill this payment can settle; open_bills "
                                                     "lists the bills that are.")
     rows = records(desk, run)
@@ -792,7 +830,7 @@ def test_a_mapping_file_is_consulted_through_its_tool_and_never_read_as_transact
         return [("mapping", {"labels": [row["hint"] for row in rows_of(session)]})]
 
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, consult) if is_chunk(content)
-                      else Script([("propose_layout", {"layout": layout})]))
+                      else Script([reading(layout)]))
     run = launch(desk, {"icici-branches.csv": branched}, branch_mapping_file_id=str(mapping["id"]))
     assert [i["kind"] for i in items(desk, run)] == ["layout"]  # the mapping is not a statement
     learned(desk, run, fake)

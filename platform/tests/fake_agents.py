@@ -67,8 +67,9 @@ class _Session:
         self.log, self.pending, self.answers, self.answered_ids = [], {}, [], set()
         # Correction messages sent to the session, and the idempotency keys already applied.
         self.messages, self.keys, self.items = [], set(), []
-        # The final answers given, and how many came from scripted rounds rather than `answers`.
-        self.finals, self.from_rounds = [], 0
+        # The final answers given, how many came from scripted rounds rather than `answers`, and a round's answer
+        # held until its calls are answered.
+        self.finals, self.from_rounds, self.answer_after_calls = [], 0, None
         self.usage, self.reads = None, 0
         self.round = 0
         self.turns = []
@@ -101,16 +102,25 @@ class _Session:
         return (self.agent.get("text") or {}).get("format", {}).get("type") == "json_schema"
 
     def advance(self):
+        if self.answer_after_calls is not None:
+            # The round's calls are answered: its final answer ends the turn.
+            final, self.answer_after_calls = self.answer_after_calls, None
+            self.conclude(final)
+            return
         if self.round < len(self.script.rounds):
             calls = self.script.rounds[self.round]
             calls = calls(list(self.answers), self) if callable(calls) else calls
             given = {tool["name"] for tool in self.agent.get("tools") or []}
             final = [arguments for name, arguments in calls or [] if self.answering and name not in given]
             if final:
-                assert len(calls) == 1, "a final answer ends the turn on its own"
-                self.round += 1
-                self.conclude(final[0])
-                return
+                assert len(final) == 1, "a turn has one final answer"
+                calls = [(name, arguments) for name, arguments in calls if name in given]
+                if not calls:
+                    self.round += 1
+                    self.conclude(final[0])
+                    return
+                # A round that looks things up and answers: the answer comes once its calls are answered.
+                self.answer_after_calls = final[0]
             if calls:
                 for name, arguments in calls:
                     call = Obj(type="function_call", call_id=f"call_{next(self.fake.ids)}", turn_id=self.turn.id,
@@ -121,8 +131,12 @@ class _Session:
                 self.emit("agent.session.requires_action", session=self.snapshot())
                 return
         if self.answering:
-            value = self.script.answers[len(self.finals) - self.from_rounds]
-            self.conclude(value(self) if callable(value) else value, listed=True)
+            listed = len(self.finals) - self.from_rounds
+            if listed < len(self.script.answers):
+                value = self.script.answers[listed]
+                self.conclude(value(self) if callable(value) else value, listed=True)
+            else:
+                self.conclude(None, listed=True)  # a model that ends its turn without answering
             return
         message = Obj(type="message", role="assistant", phase=None, turn_id=self.turn.id,
                       content=[Obj(type="output_text", text="DONE")])
@@ -135,7 +149,7 @@ class _Session:
         self.finals.append(value)
         self.from_rounds += 0 if listed else 1
         message = Obj(type="message", role="assistant", phase="final_answer", turn_id=self.turn.id,
-                      content=[Obj(type="output_text", text=json.dumps(value))])
+                      content=[Obj(type="output_text", text="" if value is None else json.dumps(value))])
         self.items.append(message)
         self.turn_event("agent.session.turn.item.added", item=message)
         self.end(self.script.ending)

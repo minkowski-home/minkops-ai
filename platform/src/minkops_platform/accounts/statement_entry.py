@@ -34,7 +34,7 @@ from minkops_platform.errors import ServiceError
 from minkops_platform.files import files_for
 from minkops_platform.lanes import Session, Wait
 from minkops_platform.run_controls import control_state, require_active, resolve_request
-from minkops_platform.runtime.tools import Tool, ToolError
+from minkops_platform.runtime.tools import Answer, Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
 from . import desk_tools, memory, mirror, settlement, statement_layouts, sync, writes
@@ -193,8 +193,8 @@ def _layout_session(connection, run, item):
     bundle = desk_tools.bundle(connection, run)
     preview = json.dumps(statement_layouts.preview_sheet(entry), ensure_ascii=False)
     return Session(model=bundle["model"], instructions=bundle["stages"]["layout"], reasoning=desk_tools.reasoning(bundle),
-                   content=[{"type": "input_text", "text": preview}], tools=LAYOUT_TOOLS,
-                   state=Layout(run, item, entry))
+                   content=[{"type": "input_text", "text": preview}], tools={}, state=Layout(run, item, entry),
+                   answer=READING)
 
 
 def _chunk_session(connection, run, item):
@@ -217,12 +217,12 @@ def _chunk_session(connection, run, item):
               "routing_hint_column": source.get("hint"), "companies": companies,
               "mapping": bool(run["config"].get("branch_mapping_file_id"))}
     text = (json.dumps(header, ensure_ascii=False) + f"\n{len(rows)} rows follow, one per line; `ref` identifies each "
-            "row in propose.\n" + "\n".join(lines))
+            "row in your answer.\n" + "\n".join(lines))
     tools = {**desk_tools.TOOLS, **CHUNK_TOOLS}
     if not run["config"].get("branch_mapping_file_id"):
         tools.pop("mapping")
     return Session(model=bundle["model"], instructions=bundle["instructions"], reasoning=desk_tools.reasoning(bundle),
-                   content=[{"type": "input_text", "text": text}], tools=tools, state=state)
+                   content=[{"type": "input_text", "text": text}], tools=tools, state=state, answer=ROWS)
 
 
 def _rupees(cents):
@@ -272,8 +272,12 @@ def propose(call, arguments):
     refs = sorted({ref for entry in arguments["rows"] if (ref := _uuid(entry["ref"]))})
     connection.execute("SELECT 1 FROM run_records WHERE run_id=%s AND item_id=%s AND id = ANY(%s) ORDER BY id FOR UPDATE",
                        (run["id"], state.item["id"], refs))
-    for entry in arguments["rows"]:
-        ref = entry["ref"]
+    for answered in arguments["rows"]:
+        ref = answered["ref"]
+        if (answered["selection"] is None) == (answered["exception"] is None):
+            rejected.append({"ref": ref, "reason": "Give the row either a selection or an exception."})
+            continue
+        entry = {"ref": ref, **(answered["selection"] or {"exception": answered["exception"]})}
         try:
             record = _row_of(connection, run, ref, item=state.item, lock=True)
         except ToolError as refusal:
@@ -297,7 +301,7 @@ def propose(call, arguments):
             continue
         try:
             company, selection = _selection(connection, state, entry)
-            cited = state.cite(connection, entry.get("rules", []))
+            cited = state.cite(connection, entry.get("rules") or [])
             resolved = validated_plan(record["facts"], [state.view(connection, company)], selection)
             proposal = {"selection": selection, "resolved": resolved, **({"rules": cited} if cited else {})}
             try:
@@ -354,7 +358,7 @@ def _selection(connection, state, entry):
         "counter_ledger_guid": guid("ledger", entry["counter_ledger"]),
         "voucher_type_guid": guid("voucher_type", entry["voucher_type"]), **centre(entry),
         **({"lines": [{"role": line["role"], "ledger_guid": guid("ledger", line["ledger"]), "amount": line["amount"],
-                       **centre(line)} for line in entry["lines"]]} if "lines" in entry else {})}
+                       **centre(line)} for line in entry["lines"]]} if entry.get("lines") else {})}
 
 
 def _uuid(ref):
@@ -384,7 +388,7 @@ def _settled(connection, state, company, record, resolved, proposed):
         cents = Decimal(str(bill["amount"])) * 100
         if cents != int(cents):
             raise ValueError("Each bill amount must be exact to the paisa.")
-        bills.append({"type": bill["type"], **({"name": bill["name"]} if "name" in bill else {}),
+        bills.append({"type": bill["type"], **({"name": bill["name"]} if bill.get("name") else {}),
                       "amount_cents": int(cents)})
     settlement.lock(connection, state.run)
     allocated = settlement.allocate(settlement.open_bills(connection, state.run, company, counter, record=record),
@@ -451,14 +455,14 @@ def mapping(call, arguments):
 
 def propose_layout(call, arguments):
     state, connection, run = call.state, call.connection, call.run
-    if ("layout" in arguments) == ("exception" in arguments):
+    if (arguments["layout"] is None) == (arguments["exception"] is None):
         raise ToolError("Give either a layout or an exception.")
     earlier = connection.execute("SELECT count(*) AS n FROM tool_calls WHERE item_id=%s AND name='propose_layout'",
                                  (state.item["id"],)).fetchone()["n"]
     if earlier >= ATTEMPTS:
         raise ToolError("No more attempts: this sheet will be held for review.")
     entry, path = state.entry, state.entry["file"]["path"]
-    if "exception" in arguments:
+    if arguments["exception"]:
         code = arguments["exception"]["code"]
         _hold_sheet(connection, state.item, path, "deferred" if code == "not_a_statement" else "held",
                     "statement_layout_unknown", arguments["exception"]["detail"])
@@ -492,72 +496,97 @@ REF = {"type": "string", "minLength": 36, "maxLength": 36}
 LEDGER = reference("A ledger's reference, as find_ledger gives it.")
 CENTRE = {"anyOf": [{"type": "null"}, reference("A cost centre's reference, as cost_centres gives it; its category "
                                                  "follows from it.")]}
+MONEY = {"type": "number", "exclusiveMinimum": 0}
+
+
+def choice(*values, null=False):
+    """One of these strings, or null when `null`: typed, as a constrained answer needs every enum to be."""
+    return {"type": ["string", "null"] if null else "string", "enum": [*values, *([None] if null else [])]}
+
+
+def nullable(definition, description):
+    return {"anyOf": [{"type": "null"}, definition], "description": description}
+
+
 SELECTION = schema({
-    "ref": REF, "company": COMPANY, "bank_ledger": LEDGER, "counter_ledger": LEDGER,
+    "company": COMPANY, "bank_ledger": LEDGER, "counter_ledger": LEDGER,
     "voucher_type": reference("The voucher type's reference, as voucher_types gives it."),
-    "family": {"enum": ["payment", "receipt", "contra"]}, "cost_centre": CENTRE,
-    "lines": {"type": "array", "minItems": 1, "maxItems": 10, "items": schema({
-        "role": {"enum": ["counter", "tax", "tds", "charge"]}, "ledger": LEDGER,
-        "amount": {"type": "number", "exclusiveMinimum": 0}, "cost_centre": CENTRE},
-        ["role", "ledger", "amount"])},
-    "pair": {**REF, "description": "The other leg's ref, for a transfer between own accounts."},
-    "bills": {"type": "array", "minItems": 1, "maxItems": 20, "description": (
+    "family": {**choice("payment", "receipt", "contra", null=True),
+               "description": "Null to follow the amount's sign: money out is a payment, money in a receipt."},
+    "cost_centre": CENTRE,
+    "lines": nullable({"type": "array", "minItems": 1, "maxItems": 10, "items": schema({
+        "role": choice("counter", "tax", "tds", "charge"), "ledger": LEDGER, "amount": MONEY, "cost_centre": CENTRE},
+        ["role", "ledger", "amount", "cost_centre"])},
+        "For one bank line booked to several ledgers: the counter ledger's line first, adding up to the bank amount. "
+        "Null for one counter ledger."),
+    "pair": nullable(REF, "The other leg's ref, for a transfer between own accounts; null otherwise."),
+    "bills": nullable({"type": "array", "minItems": 1, "maxItems": 20, "items": schema({
+        "type": choice(*settlement.TYPES),
+        "name": {"type": ["string", "null"], "minLength": 1, "maxLength": 100,
+                 "description": "The open bill's name; an Advance names a new one. On Account names none."},
+        "amount": MONEY}, ["type", "name", "amount"])},
         "For a counter ledger that keeps bill-by-bill balances: the bills its line settles, adding up to its amount. "
-        "Leave out to let the open bills decide."), "items": schema({
-            "type": {"enum": list(settlement.TYPES)},
-            "name": {"type": "string", "minLength": 1, "maxLength": 100,
-                     "description": "The open bill's name; an Advance names a new one. On Account names none."},
-            "amount": {"type": "number", "exclusiveMinimum": 0}}, ["type", "amount"])},
+        "Null to let the open bills decide."),
     "rules": {"type": "array", "maxItems": 10, "items": REF, "description": "The client's rules this row follows."},
-    "payee": {"type": "string", "minLength": 1, "maxLength": 200,
+    "payee": {"type": ["string", "null"], "minLength": 1, "maxLength": 200,
               "description": "The counterparty the narration names, as printed, without references or amounts."},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
-}, ["ref", "company", "bank_ledger", "counter_ledger", "voucher_type", "evidence"])
-EXCEPTION = schema({"ref": REF, "exception": schema({"code": {"enum": list(EXCEPTIONS)},
-                                                     "detail": {"type": "string", "minLength": 1, "maxLength": 1000}},
-                                                    ["code", "detail"])}, ["ref", "exception"])
+}, ["company", "bank_ledger", "counter_ledger", "voucher_type", "family", "cost_centre", "lines", "pair", "bills",
+    "rules", "payee", "evidence"])
+EXCEPTION = schema({"code": choice(*EXCEPTIONS), "detail": {"type": "string", "minLength": 1, "maxLength": 1000}},
+                   ["code", "detail"])
+ROW_ANSWER = schema({"ref": REF, "selection": nullable(SELECTION, "Where the row is entered; null with an exception."),
+                     "exception": nullable(EXCEPTION, "What remains uncertain; null with a selection.")},
+                    ["ref", "selection", "exception"])
 COLUMN = {"type": "integer", "minimum": 1, "maximum": 100}
 RULES = {"type": "array", "maxItems": 10, "items": schema({
-    "column": COLUMN, "starts_with": {"type": "string", "minLength": 1, "maxLength": 100},
-    "repeat_header": {"type": "boolean"}}, [])}
+    "column": {"type": ["integer", "null"], "minimum": 1, "maximum": 100,
+               "description": "The column the text starts; null to match the row's whole text."},
+    "starts_with": {"type": "string", "minLength": 1, "maxLength": 100},
+    "repeat_header": {"type": "boolean", "description": "True for headings repeated on every page."}},
+    ["column", "starts_with", "repeat_header"])}
 OPTIONAL_COLUMN = {"anyOf": [{"type": "null"}, schema({"column": COLUMN}, ["column"])]}
+VALUES = {"type": "array", "minItems": 1, "maxItems": 5, "items": {"type": "string", "minLength": 1, "maxLength": 20}}
 LAYOUT = schema({
     "header_row": {"type": "integer", "minimum": 1, "maximum": 200},
     "columns": schema({
-        "date": schema({"column": COLUMN, "order": {"enum": ["dmy", "mdy", "ymd", "native"]}}, ["column", "order"]),
-        "amount": {"oneOf": [
-            schema({"mode": {"const": "debit_credit"}, "debit": COLUMN, "credit": COLUMN}, ["mode", "debit", "credit"]),
-            schema({"mode": {"const": "signed"}, "column": COLUMN, "negative": {"enum": ["debit", "credit"]}},
+        "date": schema({"column": COLUMN, "order": choice("dmy", "mdy", "ymd", "native")}, ["column", "order"]),
+        "amount": {"anyOf": [
+            schema({"mode": choice("debit_credit"), "debit": COLUMN, "credit": COLUMN}, ["mode", "debit", "credit"]),
+            schema({"mode": choice("signed"), "column": COLUMN, "negative": choice("debit", "credit")},
                    ["mode", "column", "negative"]),
-            schema({"mode": {"const": "indicator"}, "column": COLUMN, "indicator": COLUMN,
-                    **{key: {"type": "array", "minItems": 1, "maxItems": 5,
-                             "items": {"type": "string", "minLength": 1, "maxLength": 20}}
-                       for key in ("debit_values", "credit_values")}},
-                   ["mode", "column", "indicator", "debit_values", "credit_values"])]},
+            schema({"mode": choice("indicator"), "column": COLUMN, "indicator": COLUMN, "debit_values": VALUES,
+                    "credit_values": VALUES}, ["mode", "column", "indicator", "debit_values", "credit_values"])]},
         "balance": OPTIONAL_COLUMN, "reference": OPTIONAL_COLUMN, "account": OPTIONAL_COLUMN,
         "narration": schema({"columns": {"type": "array", "maxItems": 5, "items": COLUMN}}, ["columns"]),
         "routing_hint": {"anyOf": [{"type": "null"}, schema(
             {"column": COLUMN, "label": {"type": "string", "minLength": 1, "maxLength": 100}}, ["column", "label"])]},
     }, ["date", "amount", "balance", "reference", "narration", "account", "routing_hint"]),
-    "row_order": {"enum": ["oldest_first", "newest_first"]},
+    "row_order": choice("oldest_first", "newest_first"),
     "rows": schema({
         "opening": RULES, "closing": RULES, "ignore": RULES, "ends_at": RULES,
         "summary": {"type": "array", "maxItems": 10, "items": schema({
-            "kind": {"enum": ["opening", "closing", "debit", "credit"]}, "column": COLUMN,
+            "kind": choice("opening", "closing", "debit", "credit"), "column": COLUMN,
             "starts_with": {"type": "string", "minLength": 1, "maxLength": 100}, "value_column": COLUMN,
-            "account_column": COLUMN}, ["kind", "column", "starts_with", "value_column"])}}, []),
+            "account_column": {"type": ["integer", "null"], "minimum": 1, "maximum": 100,
+                               "description": "For a mixed-account summary, the column naming the account."}},
+            ["kind", "column", "starts_with", "value_column", "account_column"])}},
+        ["opening", "closing", "ignore", "ends_at", "summary"]),
     "details": {"type": "array", "maxItems": 10, "items": schema({
-        "kind": {"enum": list(statement_layouts.DETAIL_KINDS)}, "row": {"type": "integer", "minimum": 1,
-                                                                        "maximum": 200}, "column": COLUMN},
-        ["kind", "row", "column"])},
+        "kind": choice(*statement_layouts.DETAIL_KINDS), "row": {"type": "integer", "minimum": 1, "maximum": 200},
+        "column": COLUMN}, ["kind", "row", "column"])},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
-}, ["header_row", "columns", "row_order", "rows", "evidence"])
+}, ["header_row", "columns", "row_order", "rows", "details", "evidence"])
 
+# A chunk session's final answer: an entry or an exception for its rows. A row rejected, or not yet answered, goes
+# back to the session; one accepted or held stays as it is.
+ROWS = Answer(
+    Tool("propose", "Every row of this chunk: where it is entered, or what remains uncertain.",
+         schema({"rows": {"type": "array", "minItems": 1, "maxItems": CHUNK, "items": ROW_ANSWER}}, ["rows"]), propose),
+    settled=lambda result: not result["rejected"] and not result["remaining"],
+    again="Answer again with the rows it rejected or did not receive, each corrected; the rows it accepted or held "
+          "stay as they are.")
 CHUNK_TOOLS = {tool.name: tool for tool in (
-    Tool("propose", "Propose entries for rows of this chunk, up to 50 at a time: a destination for each row, or an "
-         "exception explaining what remains uncertain. Each is checked at once; a rejected row says why.",
-         schema({"rows": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"oneOf": [SELECTION, EXCEPTION]}}},
-                ["rows"]), propose),
     Tool("find_transfer", "Rows anywhere in this run that could be the other leg of a transfer: equal and opposite "
          "amounts within three days.", schema({"refs": {"type": "array", "minItems": 1, "maxItems": 20, "items": REF}},
                                              ["refs"]), find_transfer),
@@ -566,13 +595,15 @@ CHUNK_TOOLS = {tool.name: tool for tool in (
     Tool("mapping", "Rows of the client's mapping file mentioning each label, with each sheet's header row.",
          schema({"labels": SUBJECTS}, ["labels"]), mapping),
 )}
-LAYOUT_TOOLS = {"propose_layout": Tool(
-    "propose_layout", "Declare how to read this sheet (layout), or that it is not a statement (exception). Minkops "
-    "proves the reading against the running balances and answers at once.",
-    schema({"layout": LAYOUT, "exception": schema({"code": {"enum": ["not_a_statement", "unreadable"]},
-                                                   "detail": {"type": "string", "minLength": 1, "maxLength": 500}},
-                                                  ["code", "detail"])}, []),
-    propose_layout)}
+# A layout session's final answer: how to read the sheet, which Minkops proves against its own balances and totals.
+READING = Answer(
+    Tool("propose_layout", "How to read this sheet, or that it is not a statement.",
+         schema({"layout": nullable(LAYOUT, "How to read the sheet; null with an exception."),
+                 "exception": nullable(schema({"code": choice("not_a_statement", "unreadable"),
+                                               "detail": {"type": "string", "minLength": 1, "maxLength": 500}},
+                                              ["code", "detail"]), "Why the sheet cannot be read; null with a layout.")},
+                ["layout", "exception"]), propose_layout),
+    again="Answer again with the reading corrected.")
 
 
 # --- settling ---------------------------------------------------------------------------
