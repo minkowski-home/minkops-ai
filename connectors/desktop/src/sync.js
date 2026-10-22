@@ -8,7 +8,7 @@
  * native fields dropped) before upload; nothing is interpreted here.
  */
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { boundedText, openCompanyScope, tallyCompanyNumber } from "./tally-session.js";
+import { boundedText, openCompanyScope, requireOwnTally, tallyCompanyNumber } from "./tally-session.js";
 
 export const PROTOCOL = 1;
 /** Native master types mirrored for lookups, checks and the writer's references. */
@@ -203,9 +203,11 @@ export function pages(records, limit, bytes = PAGE_BYTES) {
  * reported incomplete so its version is never published; a closed Tally or a
  * stopped task ends the whole sync with its own message.
  */
-export async function runSync(plan, { request = fetch, upload, onProgress = async () => {}, pc = "this PC" }) {
+export async function runSync(plan, { request = fetch, upload, onProgress = async () => {}, pc = "this PC", observe, shared }) {
   if (plan?.protocol !== PROTOCOL) throw new Error("Update Minkops on this PC to sync with this server.");
   const { port } = plan;
+  // Books are read only from this Windows user's own Tally.
+  await requireOwnTally({ port, pc, ...(observe ? { observe } : {}), ...(shared === undefined ? {} : { shared }) });
   const companies = await readCompanies({ port, request, pc });
   await onProgress({ activity: "Read open companies", companies: companies.length });
   const { instructions } = await upload("companies", { companies });

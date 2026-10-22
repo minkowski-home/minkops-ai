@@ -36,6 +36,7 @@ import {
   tallyCrashEvents,
   saveVoucher,
   runSync,
+  sharedSession,
 } from "@minkops/desktop-connectors";
 import { CompanionWorker } from "@minkops/desktop-runtime";
 import { createExecutor, PLAN_VERSION } from "@minkops/desktop-runtime/jobs";
@@ -76,7 +77,6 @@ let updates = null;
 const jobDiagnostics = new Map();
 const recentJobs = [];
 const pcName = () => hostname().slice(0, 80);
-const remoteSession = () => /^RDP-/i.test(process.env.SESSIONNAME ?? "");
 let persistence = Promise.resolve();
 const uuid = (value) =>
   typeof value === "string" &&
@@ -159,7 +159,7 @@ function startWorker() {
         // Each poll tells the console which PC and companion run the work.
         "X-Minkops-Companion-Version": app.getVersion(),
         "X-Minkops-Host": pcName().replace(/[^\x20-\x7e]/g, "?"),
-        "X-Minkops-Session": remoteSession() ? "remote" : "console",
+        "X-Minkops-Session": sharedSession() ? "remote" : "console",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -282,7 +282,7 @@ async function collectDiagnostics() {
   return {
     collected_at: new Date().toISOString(),
     companion: { version: app.getVersion(), plan_version: PLAN_VERSION, connected: Boolean(state.device) },
-    windows: { hostname: pc, release: release(), remote_session: remoteSession() },
+    windows: { hostname: pc, release: release(), remote_session: sharedSession() },
     tally: {
       session,
       processes: processes?.map(({ product, version, session: windowsSession }) => ({ product, version, session: windowsSession })) ?? null,

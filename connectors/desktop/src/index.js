@@ -5,7 +5,7 @@ import { join, sep } from "node:path";
 // The Windows companion's native surface. Tests import implementation modules
 // directly; only what the companion and its operator scripts call is exported.
 export { readTallyReferences } from './tally-references.js';
-export { checkTally, requireOpenCompany, readOpenCompanies, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
+export { checkTally, requireOpenCompany, readOpenCompanies, sharedSession, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
 
 const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;
 const EXCLUDED = new Set([

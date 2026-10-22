@@ -151,6 +151,15 @@ test("a company whose identity changed mid-sync is reported incomplete", async (
   assert.equal(result.companies[0].complete, false);
 });
 
+test("another Windows user's Tally on this port is never read or uploaded", async () => {
+  let asked = 0, sent = 0;
+  await assert.rejects(runSync(PLAN, {
+    request: async () => { asked++; throw new Error("read"); }, upload: async () => { sent++; return {}; },
+    observe: async () => ({ own: 2, listener: { pid: 7, session: 5 }, processes: [{ pid: 7 }] }),
+  }), { tallyState: "other_session" });
+  assert.deepEqual([asked, sent], [0, 0]);
+});
+
 test("an unsupported protocol asks for an update before reading Tally", async () => {
   const tally = new FakeTally();
   await assert.rejects(runSync({ ...PLAN, protocol: 2 }, { request: tally.request, upload: async () => ({}) }),

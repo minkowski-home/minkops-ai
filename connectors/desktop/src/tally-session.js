@@ -64,6 +64,10 @@ const MESSAGES = {
     `More than ${MAX_OPEN_COMPANIES} companies are open in Tally on ${pc}. Close the ones you don't need, then try again.`,
   invalid_response: (pc) =>
     `Tally on ${pc} returned an unexpected response. Use Send diagnostics in the Minkops tray menu.`,
+  other_session: (pc, port) =>
+    `Tally on port ${port} belongs to another Windows user on ${pc}. Give your own Tally a port of its own in Help (F1) > Settings > Connectivity, and set the same port for this PC in Minkops.`,
+  ownership_unknown: (pc, port) =>
+    `Minkops could not confirm that Tally on port ${port} is your own on ${pc}, a shared server. Ask your provider to allow PowerShell for Minkops, or use Send diagnostics in the Minkops tray menu.`,
 };
 const unavailable = (state, pc, ...args) =>
   new TallyUnavailable(state === "unreachable" ? "not_running" : state, MESSAGES[state](pc, ...args));
@@ -181,19 +185,39 @@ export async function classifyTallyFailure(error, { processes = tallyProcesses, 
   return result;
 }
 
+/** On a server several Windows users share, a TCP port is the machine's, not the
+ * user's: Tally on this port may be another user's, with another firm's books.
+ * Its session must be this companion's own before anything is read from it. */
+export async function requireOwnTally({ port = 9000, observe = observeTally, shared = sharedSession(), pc = "this PC" } = {}) {
+  const seen = await Promise.resolve().then(() => observe(port)).catch(() => null);
+  const known = Number.isInteger(seen?.own);
+  if (known && seen.listener && seen.listener.session !== seen.own) throw unavailable("other_session", pc, port);
+  // Unobservable on a shared server, the Tally is not assumed to be this user's; on a PC of their own it is.
+  if (!known && shared) throw unavailable("ownership_unknown", pc, port);
+  return known ? seen : null;
+}
+
+/** Whether this companion runs in a remote session, as on a server several users share. */
+export function sharedSession(name = process.env.SESSIONNAME) {
+  return process.platform === "win32" && Boolean(name) && !/^console$/i.test(name);
+}
+
 /** Check connection, discovery preflight and pre-save checks share this. */
 export async function checkTally({
   port = 9000,
   request = fetch,
   processes = tallyProcesses,
+  observe = observeTally,
+  shared = sharedSession(),
   pc = "this PC",
   retries = 2,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
+  const seen = await requireOwnTally({ port, observe, shared, pc });
   for (let attempt = 0; ; attempt++) {
     try {
       const companies = openCompanyScope(await readOpenCompanies({ port, request, pc }), { pc });
-      const instances = await Promise.resolve().then(processes).catch(() => null);
+      const instances = seen?.processes;
       return {
         state: "ready",
         port,
@@ -335,6 +359,26 @@ $p=@(Get-CimInstance Win32_Process -Filter "Name='tally.exe' OR Name='tallyprime
 ConvertTo-Json -InputObject $p -Compress -Depth 3`;
 const EVENTS = String.raw`$events=@(Get-WinEvent -FilterHashtable @{LogName='Application';Id=1000,1001;StartTime=(Get-Date).AddMinutes(-3)} -MaxEvents 20 -ErrorAction SilentlyContinue | Where-Object {$_.Message -match '(?i)tally(?:prime)?\.exe'} | Select-Object TimeCreated,Id,ProviderName,Message)
 ConvertTo-Json -InputObject $events -Depth 3 -Compress`;
+
+// Read-only: which process listens on the port, in which Windows session, beside
+// this companion's own session and the running Tally processes. Never a handle.
+const OBSERVE = String.raw`$ErrorActionPreference='Stop';[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
+$port=[int](([Console]::In.ReadToEnd() | ConvertFrom-Json).port)
+$own=(Get-CimInstance Win32_Process -Filter "ProcessId=$PID").SessionId
+$owner=$null
+try { $owner=@(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop)[0].OwningProcess } catch {}
+$listener=$null
+if ($owner) { $l=Get-CimInstance Win32_Process -Filter "ProcessId=$owner"; if ($l) { $listener=@{pid=$l.ProcessId; name=$l.Name; session=$l.SessionId} } }
+$p=@(Get-CimInstance Win32_Process -Filter "Name='tally.exe' OR Name='tallyprime.exe'" | ForEach-Object { @{pid=$_.ProcessId; session=$_.SessionId} })
+ConvertTo-Json -InputObject @{own=$own; listener=$listener; processes=$p} -Compress -Depth 4`;
+
+/** Who serves Tally's port and this companion's session, or null when they cannot be observed. */
+export async function observeTally(port) {
+  const seen = await powershell(OBSERVE, { port });
+  if (!seen) return null;
+  const processes = Array.isArray(seen.processes) ? seen.processes : seen.processes ? [seen.processes] : [];
+  return { own: seen.own, listener: seen.listener ?? null, processes };
+}
 
 /** Running Tally processes, or null when they cannot be observed. */
 export async function tallyProcesses() {
