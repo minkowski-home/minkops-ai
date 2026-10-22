@@ -17,7 +17,7 @@ export const TALLY_COLLECTIONS = Object.freeze({
 });
 const EXTRA_FIELDS = {
   company: ',IsCostCentresOn', ledgers: ',IsCostCentresOn',
-  voucher_types: ',IsActive', cost_centres: ',Category',
+  voucher_types: ',IsActive', cost_centres: ',Category', stock_items: ',BaseUnits,IsBatchWiseOn',
 };
 const escapeXml = (s) =>
   s.replace(
@@ -112,7 +112,8 @@ export async function readTallyReferences(
           Object.entries(r)
             .filter(([key]) =>
               // RESERVEDNAME and ISACTIVE classify voucher types (see tally.js).
-              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE", "ISCOSTCENTRESON", "CATEGORY"].includes(key),
+              ["@_NAME", "NAME", "GUID", "PARENT", "ALTERID", "@_RESERVEDNAME", "ISACTIVE", "ISCOSTCENTRESON", "CATEGORY",
+                "BASEUNITS", "ISBATCHWISEON"].includes(key),
             )
             .map(([key, value]) => [key, tallyReferenceScalar(value)]),
         ),

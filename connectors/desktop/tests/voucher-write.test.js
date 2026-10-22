@@ -43,12 +43,17 @@ const types = [
   {NAME: 'Journal', '@_RESERVEDNAME': 'Journal', GUID: 'j'}, {NAME: 'Debit Note', '@_RESERVEDNAME': 'Debit Note', GUID: 'vt-dn'},
   {NAME: 'Payment', '@_RESERVEDNAME': 'Payment', GUID: 'vt-payment'}, {NAME: 'Contra', '@_RESERVEDNAME': 'Contra', GUID: 'vt-contra'},
 ];
-const snapshot = ({ledgerRecords, typeRecords = types, centres = [{NAME: 'Site 4', GUID: 'cc'}]} = {}) => ({collections: [
+const stockRecords = [{NAME: 'Cement', GUID: 'item-cement', BASEUNITS: 'Bag', ISBATCHWISEON: 'No'}];
+const godownRecords = [{NAME: 'Main Location', GUID: 'gd-main'}, {NAME: 'Site Store', GUID: 'gd-site'}];
+const snapshot = ({ledgerRecords, typeRecords = types, centres = [{NAME: 'Site 4', GUID: 'cc'}], items = stockRecords,
+  godowns = godownRecords} = {}) => ({collections: [
   {category: 'company', status: 'ready', records: [{GUID: 'company', ISCOSTCENTRESON: 'Yes'}]},
   {category: 'ledgers', status: 'ready', records: ledgerRecords ?? ledgers.map(NAME => ({NAME, GUID: `${NAME}-guid`, PARENT: 'Group', ALTERID: ' 12 ', ISCOSTCENTRESON: 'Yes'}))},
   {category: 'voucher_types', status: 'ready', records: typeRecords},
   {category: 'cost_centres', status: 'ready', records: centres.map(c => ({CATEGORY: 'Sites', ...c}))},
   {category: 'cost_categories', status: 'ready', records: [{NAME: 'Sites', GUID: 'cat'}]},
+  {category: 'stock_items', status: 'ready', records: items},
+  {category: 'godowns', status: 'ready', records: godowns},
 ]});
 const signed = line => line.side === 'credit' ? line.amount_cents : -line.amount_cents;
 /** The voucher Tally would return for exactly this plan. */
@@ -61,6 +66,9 @@ const observed = (plan, overrides = {}) => ({
   allocations: plan.lines.filter(l => l.allocation).map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})),
   bills: plan.lines.flatMap(l => (l.bills ?? []).map(b => ({ledger: l.ledger, name: b.name ?? null, type: b.type,
     amount_cents: l.side === 'credit' ? b.amount_cents : -b.amount_cents}))),
+  inventory: (plan.inventory ?? []).map(e => ({item: e.item, unit: e.unit, quantity: e.quantity, rate: e.rate,
+    amount_cents: -e.amount_cents, ledger: e.ledger,
+    godowns: e.godowns.map(g => ({godown: g.godown, quantity: g.quantity, amount_cents: -g.amount_cents}))})),
   ...overrides,
 });
 const accepted = '<RESPONSE><CREATED>1</CREATED><ALTERED>0</ALTERED><ERRORS>0</ERRORS></RESPONSE>';
@@ -183,6 +191,59 @@ test('bill references are written with their ledger line, in native signs, and r
   for (const plan of bad) await assert.rejects(saveVoucher(plan, harness([[]]).options), /Unsupported voucher plan/);
 });
 
+// Protocol 6: a purchase booked item-wise; its purchase ledger line carries the items' value.
+const stocked = {...purchase, format_version: 6,
+  lines: [{ledger: 'Supplier A', side: 'credit', amount_cents: 118000, allocation: null},
+    {ledger: 'Purchase 18%', side: 'debit', amount_cents: 100000, allocation: null},
+    {ledger: 'Input CGST', side: 'debit', amount_cents: 9000, allocation: null},
+    {ledger: 'Input SGST', side: 'debit', amount_cents: 9000, allocation: null}],
+  inventory: [{item: 'Cement', unit: 'Bag', quantity: '2.5', rate: '400', side: 'debit', amount_cents: 100000, ledger: 'Purchase 18%',
+    godowns: [{godown: 'Main Location', quantity: '1.5', amount_cents: 60000}, {godown: 'Site Store', quantity: '1', amount_cents: 40000}]}],
+  references: {...references, stock_items: {Cement: {GUID: 'item-cement', BASEUNITS: 'Bag'}},
+    godowns: {'Main Location': {GUID: 'gd-main'}, 'Site Store': {GUID: 'gd-site'}}}};
+
+test('an item-wise purchase is written in the invoice view with its godowns, and read back item by item', async () => {
+  const io = harness([[], [observed(stocked)]]);
+  const result = await saveVoucher(stocked, io.options);
+  assert.equal(result.outcome, 'saved');
+  assert.deepEqual(result.current.inventory[0].godowns[1], {godown: 'Site Store', quantity: '1', amount_cents: -40000});
+  const body = io.imports[0];
+  for (const fragment of [
+    'VCHTYPE="Purchase GST" OBJVIEW="Invoice Voucher View"', '<PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW><ISINVOICE>Yes</ISINVOICE>',
+    '<LEDGERENTRIES.LIST><LEDGERNAME>Supplier A</LEDGERNAME><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE><AMOUNT>1180.00</AMOUNT></LEDGERENTRIES.LIST>',
+    '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><RATE>400/Bag</RATE>'
+      + '<ACTUALQTY>2.5 Bag</ACTUALQTY><BILLEDQTY>2.5 Bag</BILLEDQTY><AMOUNT>-1000.00</AMOUNT>',
+    '<BATCHALLOCATIONS.LIST><GODOWNNAME>Main Location</GODOWNNAME><BATCHNAME>Primary Batch</BATCHNAME><AMOUNT>-600.00</AMOUNT>'
+      + '<ACTUALQTY>1.5 Bag</ACTUALQTY><BILLEDQTY>1.5 Bag</BILLEDQTY></BATCHALLOCATIONS.LIST>',
+    '<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>Purchase 18%</LEDGERNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><AMOUNT>-1000.00</AMOUNT>',
+  ]) assert.ok(body.includes(fragment), fragment);
+  // The purchase ledger is written only inside its item, never as a ledger entry of its own.
+  assert.ok(!body.includes('<LEDGERNAME>Purchase 18%</LEDGERNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><AMOUNT>-1000.00</AMOUNT></LEDGERENTRIES.LIST>'));
+  // A readback whose stock went to another godown, or without the item, is not the approved voucher.
+  const moved = observed(stocked);
+  moved.inventory[0].godowns = [{godown: 'Main Location', quantity: '2.5', amount_cents: -100000}];
+  for (const current of [moved, observed(stocked, {inventory: []})])
+    assert.equal((await saveVoucher(stocked, harness([[], [current]]).options)).hold, 'uncertain_import');
+  const bad = [
+    {...stocked, format_version: 5},
+    {...stocked, inventory: [{...stocked.inventory[0], side: 'credit'}]},
+    {...stocked, inventory: [{...stocked.inventory[0], quantity: '2.50.1'}]},
+    {...stocked, inventory: [{...stocked.inventory[0], ledger: 'Input CGST'}]},
+    {...stocked, inventory: [{...stocked.inventory[0], godowns: [stocked.inventory[0].godowns[0]]}]},
+    {...stocked, inventory: [{...stocked.inventory[0], godowns: stocked.inventory[0].godowns.map(g => ({...g, quantity: '1.2'}))}]},
+    {...stocked, references: {...stocked.references, godowns: {'Main Location': {GUID: 'gd-main'}}}},
+    {...stocked, family: 'journal', duplicate: {...stocked.duplicate, families: ['journal']}},
+  ];
+  for (const plan of bad) await assert.rejects(saveVoucher(plan, harness([[]]).options), /Unsupported voucher plan/);
+  // A stock item recounted in another unit or now kept in batches, or a godown replaced, is not what the run read.
+  for (const refs of [snapshot({items: [{...stockRecords[0], BASEUNITS: 'Kg'}]}), snapshot({items: [{...stockRecords[0], ISBATCHWISEON: 'Yes'}]}),
+    snapshot({godowns: [godownRecords[0], {NAME: 'Site Store', GUID: 'other'}]})]) {
+    const changed = harness([[]], {references: refs});
+    assert.equal((await saveVoucher(stocked, changed.options)).hold, 'destination_changed');
+    assert.equal(changed.imports.length, 0);
+  }
+});
+
 test('a supplier credit note is a Debit Note with the party debited', async () => {
   const note = {...purchase, family: 'debit_note', voucher_type: {NAME: 'Debit Note', GUID: 'vt-dn'},
     lines: purchase.lines.map(l => ({...l, side: l.side === 'credit' ? 'debit' : 'credit'})),
@@ -211,7 +272,7 @@ test('voucher reads are bounded to the calendar window and parsed into comparabl
     guid: 'g', master_id: '7', date: '20261001', voucher_type: 'Purchase GST', reference: 'INV-17', number: '12',
     narration: `[Minkops statement:${id}] UPI`, party_ledger: 'Supplier A', tag: id, unsupported: false, fingerprint: undefined,
     entries: [{ledger: 'Purchase 18%', amount_cents: -118040}, {ledger: 'Supplier A', amount_cents: 118040}],
-    allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}], bills: [],
+    allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}], bills: [], inventory: [],
   });
   assert.match(record.fingerprint, /^v5:[a-f0-9]{64}$/);
   // Bill references are read with their ledger; they no longer make a voucher unsupported.
@@ -221,8 +282,22 @@ test('voucher reads are bounded to the calendar window and parsed into comparabl
   const [withBills] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(referenced)});
   assert.deepEqual([withBills.unsupported, withBills.bills],
     [false, [{ledger: 'Supplier A', name: 'INV-17', type: 'New Ref', amount_cents: 118040}]]);
-  const inventory = voucher('20261001').replace('</VOUCHER>', '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME></ALLINVENTORYENTRIES.LIST></VOUCHER>');
-  assert.equal((await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(inventory)}))[0].unsupported, true);
+  // Tally's own export of an item-wise purchase: each item with its godowns and the ledger that carries its value.
+  const batch = (godown, qty, amount, order = ' Not Applicable') => `<BATCHALLOCATIONS.LIST><GODOWNNAME>${godown}</GODOWNNAME>`
+    + `<BATCHNAME>Primary Batch</BATCHNAME><AMOUNT>${amount}</AMOUNT><ACTUALQTY>${qty} Bag</ACTUALQTY><BILLEDQTY>${qty} Bag</BILLEDQTY>`
+    + `<ORDERNO>${order}</ORDERNO><TRACKINGNUMBER> Not Applicable</TRACKINGNUMBER></BATCHALLOCATIONS.LIST>`;
+  const item = (order) => '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME><RATE>472.16/Bag</RATE>'
+    + '<ACTUALQTY>2.500 Bag</ACTUALQTY><BILLEDQTY>2.500 Bag</BILLEDQTY><AMOUNT>-1180.40</AMOUNT>'
+    + batch('Main Location', '1.500', '-708.24', order) + batch('Site Store', '1.000', '-472.16')
+    + '<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>Purchase 18%</LEDGERNAME><AMOUNT>-1180.40</AMOUNT></ACCOUNTINGALLOCATIONS.LIST>'
+    + '</ALLINVENTORYENTRIES.LIST></VOUCHER>';
+  const [stock] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20261001').replace('</VOUCHER>', item()))});
+  assert.deepEqual([stock.unsupported, stock.inventory], [false, [{item: 'Cement', unit: 'Bag', quantity: '2.5', rate: '472.16',
+    amount_cents: -118040, ledger: 'Purchase 18%', godowns: [{godown: 'Main Location', quantity: '1.5', amount_cents: -70824},
+      {godown: 'Site Store', quantity: '1', amount_cents: -47216}]}]]);
+  // Stock tracked against an order is more than a plan states.
+  const [ordered] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20261001').replace('</VOUCHER>', item('PO-7')))});
+  assert.equal(ordered.unsupported, true);
   await assert.rejects(readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20270401'))}), /outside the requested window/);
 });
 
