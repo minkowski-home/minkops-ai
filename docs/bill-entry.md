@@ -193,7 +193,10 @@ whatever the review mode, when:
 - it books the supplier the way someone changed in Tally since Minkops saved it,
   or the way a best guess first did;
 - its reading changed after a refusal;
-- it is a copy of a bill in another file, or a best guess.
+- it is a copy of a bill in another file, or a best guess;
+- the same bill (buyer, supplier, number, date and total as printed) is held in
+  another file. Each copy names the other, so the proposed one is not written while
+  its copy waits for a reason no one has seen.
 
 The session never learns of these notes, so it cannot rebook a sound bill to
 avoid review.

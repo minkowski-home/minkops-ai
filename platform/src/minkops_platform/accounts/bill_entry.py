@@ -718,11 +718,48 @@ def _finalize(connection, run, *, settling):
         for record in rest:
             work.update_record(connection, record, proposal={**record["proposal"], "repeat_of": str(first["id"])},
                                review_reasons=[f"This bill is also in {first['facts']['file']}; it is entered once."])
+    _link_held_copies(connection, run, ready)
     if (run["config"].get("review_mode") == "only_exceptions"
             and control_state(connection, run["tenant_id"], run["task_id"]) == "active"):
         for record in ready:
             if record["status"] == "proposed" and not record["review_reasons"]:
                 _approve(connection, run, record, actor=run["actor_id"])
+
+
+def _copy_key(record):
+    """One bill as its printed copies show it: buyer, supplier, number, date and total; None for one not read."""
+    facts = record["facts"] or {}
+    key = [facts.get(field) for field in ("company", "supplier", "number", "date", "total")]
+    if None in key:
+        return None
+    return key[0], mirror.normalized(key[1]), mirror.normalized(key[2]), key[3], key[4]
+
+
+def _link_held_copies(connection, run, ready):
+    """A bill proposed in one file and held in another: each names the other, so the proposed copy waits for a person.
+
+    Only proposed copies are grouped to be written once; a held copy has no reading to group by. Standing approval
+    writes only a bill with no review note, so the note keeps the proposed copy from being written while its copy
+    is held for a reason a person has not seen.
+    """
+    proposed = {}
+    for record in ready:
+        if record["status"] == "proposed" and (key := _copy_key(record)):
+            proposed.setdefault(key, record)
+    if not proposed:
+        return
+    for held in connection.execute("SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND status='held' "
+                                   "ORDER BY id FOR UPDATE", (run["id"], KIND)).fetchall():
+        copy = proposed.get(_copy_key(held))
+        if copy is None or copy["item_id"] == held["item_id"]:
+            continue
+        why = (held["review_reasons"] or [hold(held["hold_codes"][0]).reason])[0]
+        there = f"This bill is also in {held['facts']['file']}, held there: {why}"[:300]
+        here = f"This bill is also in {copy['facts']['file']}, where it is proposed; it is entered once."
+        if there not in copy["review_reasons"]:
+            work.update_record(connection, copy, review_reasons=[*copy["review_reasons"], there])
+        if here not in held["review_reasons"]:
+            work.update_record(connection, held, review_reasons=[*held["review_reasons"], here])
 
 
 # --- review and decisions ---------------------------------------------------------------

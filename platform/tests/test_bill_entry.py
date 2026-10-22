@@ -532,6 +532,23 @@ def scan(text_colour=(0, 0, 0)):
     return buffer.getvalue()
 
 
+def test_a_bill_held_in_one_file_and_proposed_in_another_names_its_copy_and_waits_for_a_person(desk):
+    """Read twice, one copy held and one proposed: each says where the other is, and neither is approved unasked."""
+    names = names_of(desk["company"])
+    company = desk["company"]["guid"]
+    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
+    fake = by_file(**{"a-sunrise.pdf": proposing(names, proposal(company)),
+                      "b-sunrise-copy.pdf": proposing(names, unsure)})
+    run = launch(desk, {"a-sunrise.pdf": B01, "b-sunrise-copy.pdf": B01}, review_mode="only_exceptions")
+    read(desk, fake, run)
+    proposed, held = records(desk, run)
+    assert (proposed["status"], held["status"]) == ("proposed", "held")
+    assert proposed["review_reasons"][-1] == ("This bill is also in b-sunrise-copy.pdf, held there: Asset or "
+                                              "repairs?")
+    assert held["review_reasons"] == ["Asset or repairs?",
+                                      "This bill is also in a-sunrise.pdf, where it is proposed; it is entered once."]
+
+
 def test_a_bill_in_several_files_is_written_once_and_different_printed_versions_all_hold(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
