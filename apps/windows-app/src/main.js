@@ -297,6 +297,7 @@ async function collectDiagnostics() {
     companion: { version: app.getVersion(), plan_version: PLAN_VERSION, connected: Boolean(state.device) },
     windows: { hostname: pc, release: release(), remote_session: sharedSession() },
     tally: {
+      port: tallyPort,
       session,
       processes: processes?.map(({ product, version, session: windowsSession }) => ({ product, version, session: windowsSession })) ?? null,
       settings: await readTallyIni(processes?.[0]?.exe),

@@ -137,9 +137,11 @@ Customer manifests in `solutions/` describe composition.
 tray execution, native folder grants, the read-only Tally sync and native saves.
 Bill and statement runs read the synced books, with one-click review decisions,
 independent parallel sessions and verified, idempotent destination saves.
-See [Windows app setup and recovery](docs/windows-app.md). Scheduled runs are
-not implemented yet; installer signing and broader Windows/device coverage
-remain distribution work.
+See [Windows app setup and recovery](docs/windows-app.md), and [Hosted Tally](docs/hosted-tally.md)
+for Tally on a server several Windows users share. Scheduled runs are not
+implemented yet; the first signed release (it needs the organization's
+code-signing certificate) and broader Windows/device coverage remain
+distribution work.
 
 For a local manual test, follow [Accounts desk local setup](docs/accounts-desk.md#local-setup):
 start the OLTP database, run migrations and the demo seed, then start the API

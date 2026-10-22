@@ -5,11 +5,12 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.10.0 (plan protocol 6; see its contracts below);
+This revision builds companion 0.11.0 (plan protocol 6; see its contracts below);
 the last release recorded in `windows-release.json` is 0.9.1. The server refuses
-Tally work from companions older than 0.10.0. The companion works only with the
-companies open in the user's Tally, reports typed session states, sends
-diagnostics and updates itself. Its Tally sync uses HTTP/XML exports and needs no
+Tally work from companions older than 0.10.0, and older than 0.11.0 on a remote
+session such as a shared server. The companion works only with the companies open
+in the user's own Tally, reports typed session states, sends diagnostics and
+updates itself. For Tally on a hosted server, see [Hosted Tally](hosted-tally.md). Its Tally sync uses HTTP/XML exports and needs no
 ODBC driver. Windows 10 device testing was deferred by the owner; compatibility
 is retained.
 
@@ -17,7 +18,7 @@ is retained.
 
 | Operation | Desktop | Web with a connected PC | Authority |
 | --- | --- | --- | --- |
-| Check Tally | Yes | Yes | Fixed, read-only company export to `127.0.0.1:9000` |
+| Check Tally | Yes | Yes | Fixed, read-only company export from this PC's Tally port on `127.0.0.1` (9000 unless set under Connected PCs) |
 | Sync Tally books | Yes | Yes | Read-only: each authorised company's masters and vouchers into the server's mirror, in bounded pages |
 | Connect a folder | Native picker | Open desktop to grant it | Explicit local selection; snapshots must match the uploaded source |
 | Refresh a connected folder | Yes | Yes | Owned device/source binding; limited supported files |
@@ -91,6 +92,16 @@ check, and returns one typed state whose message names the PC:
 | `no_company` / `duplicate_company` / `too_many` | Open-company scope is empty, ambiguous by name, or over 50 |
 | `company_not_open` | A save's company is not open, or a same-named copy is open instead |
 | `invalid_response` | Unparseable or failed reply |
+| `other_session` | The Tally on this PC's port runs in another Windows user's session, as on a shared server |
+| `ownership_unknown` | On a remote session, the session serving the port could not be observed |
+
+Before the check reads anything, one read-only PowerShell observation names the
+process listening on the port, its Windows session, the companion's own session
+and the running Tally processes. A Tally in another session is never read or
+written. Where nothing can be observed, a console session proceeds as before and a
+remote session refuses. Each PC's port is set under Connected PCs; every job and
+heartbeat carries it, so the check and diagnostics read the same Tally as syncs
+and saves.
 
 Typed messages pass through job receipts verbatim; untyped errors keep a generic
 fallback. Before each save the company must be open and match the synced GUID;
@@ -123,9 +134,10 @@ summary instead. The server keeps diagnostics for 30 days in `desktop_diagnostic
 Bill data, request XML, file contents and credentials never leave the PC.
 
 Every poll reports the companion version, hostname and whether the session is a
-Remote Desktop session. The console shows them, warns about Remote Desktop, and the
-server refuses Tally work for companions older than 0.9.0 with "Update Minkops on
-*PC*". A PC that has not polled yet may queue work.
+remote one (any session but the console). The console shows them with the PC's
+Tally port, and the server refuses Tally work from companions older than 0.10.0,
+or 0.11.0 on a remote session, with "Update Minkops on *PC*". A PC that has not
+polled yet may queue work.
 
 `node scripts/verify_tally_session_live.mjs [port] [company] [guid]` prints the
 typed state on a Windows PC without changing Tally, for rehearsals.
@@ -144,7 +156,8 @@ cd connectors/desktop && npm ci
 cd ../../apps/windows-app && npm ci
 npm test
 npm run build
-npm run package:win
+npm run package:win            # a release, signed by its publisher
+npm run package:win:candidate  # an unsigned release candidate
 ```
 
 Build on Windows with a Windows-local checkout and Node/npm. WSL symlinks are
@@ -172,9 +185,21 @@ across install/restart; keep the local API/UI/worker services running for testin
 Configure an edge request limit of at most 42 MB on the base64 folder receipt
 route, with smaller limits elsewhere. Services/native adapters enforce 100
 supported files, 5 MB per file, 30 MB per snapshot and folder containment.
-Production distribution needs the organization's Windows signing certificate;
-without one, builds are unsigned release candidates. The packaged profile uses
-`https://app.minkops.com`; release notes must disclose the unsigned status.
+A release is signed. `npm run package:win` needs the organization's code-signing
+certificate (`WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`) and
+`MINKOPS_WINDOWS_PUBLISHER`, the certificate's common name, and refuses to build
+without them (`scripts/package.js`). electron-builder signs the installer and pins
+the signer in the update settings (`app-update.yml`), so an installed companion
+accepts only updates signed by the same publisher. After the build, Windows must
+trust the installer's signature, and both the signer and the pinned name must be
+that publisher. `npm run package:win:candidate` builds an unsigned release
+candidate on purpose, ignoring any certificate at hand; its updates do not check
+their publisher. The packaged profile uses `https://app.minkops.com`.
+
+The release manifest (`windows-release.json`) names the publisher of a signed
+release, or says `"unsigned": true` for a candidate, whose release notes must
+disclose it. Publication refuses a release whose installer's Authenticode
+signature names anyone else, or no one (`infra/deploy_hosting.py`).
 
 From 0.7.0, packaged companions update themselves from the generic feed at
 `https://minkops.com/downloads/` (electron-updater). `npm run package:win` writes
@@ -188,8 +213,8 @@ companion is idle: no claimed job, no unsent receipt and no focused window.
 From 0.8.1 the console also shows update status and **Restart when safe**, which
 waits for local work and receipts even while the window is focused. Frontend
 releases have a separate explicit refresh banner. See [run limits and updates](run-limits-and-updates.md).
-Downloads are SHA-512 verified; until the installer is code-signed, first installs
-still show SmartScreen.
+Downloads are SHA-512 verified; an unsigned release candidate still shows
+SmartScreen on first install.
 
 Run `npm ci` in this app before building a release. Its `.npmrc` packages the two
 local modules rather than depending on Windows junction traversal, and this
@@ -236,8 +261,9 @@ sync or save finishes there, and reopening shows its result.
 
 Native suites pass on Linux and Windows; Windows skips only a file-symlink test
 that requires creation privileges (the same guard runs on Linux). A fresh
-Windows 10/11 device matrix, screen-reader audit and signed distribution have
-not been verified.
+Windows 10/11 device matrix, a screen-reader audit, a release signed with the
+organization's certificate and a shared server with two users have not been
+verified.
 
 ### Companion 0.10.0 contracts
 
