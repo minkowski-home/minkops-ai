@@ -88,6 +88,8 @@ _CATALOG = [
         ("voucher_type_unresolved", EXCEPTION, "Voucher type needed",
          "A supported voucher type must be selected for this company."),
         ("extraction_failed", EXCEPTION, "Recheck bill", "The bill could not be processed and needs an explicit recheck."),
+        ("already_in_tally", EXCEPTION, "Already in Tally",
+         "Tally already has this bill, booked otherwise. Check it there; Minkops will not add another."),
     ]),
     *_holds((BILL, STATEMENT), _INTERPRETATION, [
         ("classification_uncertain", EXCEPTION, "Ledger unclear",

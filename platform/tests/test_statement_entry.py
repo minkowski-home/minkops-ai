@@ -1064,3 +1064,82 @@ def test_a_refutation_names_the_broken_balance_before_the_summary_it_upsets(desk
     # Row 5's balance is one rupee off, which also upsets the next row and the closing balance.
     assert outcome == {"status": "refuted", "reason": "Row 5: The running balance cannot be verified against the "
                                                       "preceding balance and transaction."}
+
+
+def by_hand(guid, day, counter, rupees, reference, *, kind="Payment", alter="3"):
+    """A bank voucher someone entered in Tally themselves, carrying the bank's reference."""
+    out = kind == "Payment"
+    return {"GUID": guid, "MASTERID": "90", "ALTERID": alter, "DATE": day, "VOUCHERTYPENAME": kind,
+            "REFERENCE": reference, "PARTYLEDGERNAME": counter, "NARRATION": f"Entered by hand {reference}",
+            "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": counter, "AMOUNT": f"-{rupees}" if out else rupees},
+                                      {"LEDGERNAME": "ICICI Current A/c", "AMOUNT": rupees if out else f"-{rupees}"}]}
+
+
+def routings(desk):
+    desk["db"].commit()
+    return desk["db"].execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='routing'",
+                              (desk["company"]["id"],)).fetchall()
+
+
+def test_a_row_the_books_already_record_is_a_duplicate_when_proposed_and_teaches_its_routing(desk):
+    """Acme's payment, carrying its UTR, is already in Tally: proposed, it is not entered again, and teaches how
+    Acme's rows are booked. A return of the same amount under another reference is entered as usual."""
+    import factory
+    company = desk["company"]["guid"]
+    factory.books(desk["db"], desk["company"], masters(desk["company"]),
+                  [purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00"),
+                   by_hand("v-acme", "20260901", "Acme Steel", "1180.00", "UTR111222")])
+    desk["db"].commit()
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, routed(company)) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    acme, back = rows["NEFT ACME STEEL UTR111222"], rows["NEFT RETURN UTR111222"]
+    assert (acme["status"], acme["review_reasons"], acme["current"]["guid"]) == (
+        "duplicate", [statement_entry.ALREADY], "v-acme")
+    assert back["status"] == "proposed"
+    [learnt] = routings(desk)
+    assert (learnt["value"], learnt["evidence"][-1]["kind"]) == (
+        {"payee": "ACME STEEL", "counter_ledger": "Acme Steel", "voucher_type": "Payment"}, "tally_entry")
+
+
+def test_held_and_deferred_rows_a_person_entered_in_tally_by_hand_are_reconciled_after_the_next_sync(desk):
+    """Acme's payment holds for its other side, and the return is left as is; the accountant enters both in Tally.
+    After the next sync each is a duplicate of its voucher, found by its reference, amount and bank; the payment
+    teaches how Acme's rows are booked."""
+    import factory
+    company = desk["company"]["guid"]
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {
+                "code": "ledger_unresolved", "detail": "Acme Steel or Steel Mart?", "company_guid": company,
+                "bank_ledger_guid": "g-icici", "payee": "ACME STEEL", "candidate_guids": ["g-acme", "g-steel"]}}
+            if "ACME" in row["narration"] else booked(row, company)
+            for row in rows_of(session) if "TRANSFER" not in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    acme, back = rows["NEFT ACME STEEL UTR111222"], rows["NEFT RETURN UTR111222"]
+    assert (acme["status"], back["status"]) == ("held", "proposed")
+    decide(desk, back, "nothing")
+    version = factory.books(desk["db"], desk["company"], masters(desk["company"]), [
+        purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00"),
+        by_hand("v-acme", "20260901", "Acme Steel", "1180.00", "UTR111222"),
+        by_hand("v-back", "20260915", "Acme Steel", "1180.00", "UTR111222R", kind="Receipt")])
+    statement_entry.entered_by_hand(desk["db"], desk["company"], version["version"])
+    desk["db"].commit()
+    after = {r["facts"]["narration"]: r for r in records(desk, run)}
+    assert [(after[n]["status"], after[n]["review_reasons"], after[n]["current"]["guid"])
+            for n in ("NEFT ACME STEEL UTR111222", "NEFT RETURN UTR111222")] == [
+        ("duplicate", [statement_entry.BY_HAND], "v-acme"), ("duplicate", [statement_entry.BY_HAND], "v-back")]
+    [learnt] = routings(desk)
+    assert learnt["value"]["counter_ledger"] == "Acme Steel"

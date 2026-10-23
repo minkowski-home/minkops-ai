@@ -61,9 +61,8 @@ def sync(books, records, vouchers):
     import factory
     version = factory.books(books["db"], books["company"], records, vouchers)
     memory.revalidate(books["db"], books["company"], version)
-    return memory.live(books["db"], books["company"]["tenant_id"], books["company"]["client_id"],
-                       company_id=books["company"]["id"], kind="booking", subject="g-sunrise:cabins") or books["db"].execute(
-        "SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking'", (books["company"]["id"],)).fetchone()
+    return books["db"].execute("SELECT * FROM memory_entries WHERE company_id=%s AND subject='g-sunrise:cabins'",
+                               (books["company"]["id"],)).fetchone()
 
 
 def test_an_edit_made_in_tally_demotes_what_was_learnt_and_lost_masters_retire_it(books):
@@ -82,6 +81,33 @@ def test_an_edit_made_in_tally_demotes_what_was_learnt_and_lost_masters_retire_i
     for _ in range(3):
         last = sync(books, masters("g-cabins"), [saved("Repairs", alter="4")])
     assert last["status"] == "retired"
+
+
+def test_a_correction_made_in_tally_is_learnt_once_and_an_amount_change_or_cancellation_teaches_nothing(books):
+    """Someone rebooks Minkops's save to Repairs in Tally: what was learnt is demoted, and the booking the voucher shows
+    now is learnt from it, once per alteration. Changing only the amounts is no other treatment; cancelling the
+    voucher demotes what it taught and teaches nothing."""
+    db, company = books["db"], books["company"]
+    booking(books)
+
+    def entries():
+        return {(row["value"]["ledgers"][0], row["status"], row["uses"]) for row in db.execute(
+            "SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking'", (company["id"],))}
+
+    larger = saved(alter="4")
+    larger["ALLLEDGERENTRIES.LIST"] = [{"LEDGERNAME": "Sunrise Office Systems", "AMOUNT": "12980.00"},
+                                       {"LEDGERNAME": "Office Cabins", "AMOUNT": "-11000.00"},
+                                       {"LEDGERNAME": "Input CGST 9%", "AMOUNT": "-1980.00"}]
+    sync(books, masters(), [larger])
+    assert entries() == {("Office Cabins", "confirmed", 0)}
+    for _ in range(2):
+        sync(books, masters(), [saved("Repairs", alter="5")])
+    assert entries() == {("Office Cabins", "demoted", 0), ("Repairs", "confirmed", 1)}
+    [corrected] = db.execute("SELECT evidence FROM memory_entries WHERE company_id=%s AND status='confirmed'",
+                             (company["id"],)).fetchall()
+    assert corrected["evidence"] == [{"kind": "tally_edit", "voucher": "v-1", "alter_id": 5}]
+    sync(books, masters(), [{**saved("Repairs", alter="6"), "ISCANCELLED": "Yes"}])
+    assert entries() == {("Office Cabins", "demoted", 0), ("Repairs", "demoted", 1)}
 
 
 def test_rules_are_versioned_and_scoped_and_a_seed_is_applied_once(books):

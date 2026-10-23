@@ -282,6 +282,25 @@ desk employee (`accounts/memory.py`):
   an entry was learnt from, or its deletion, demotes the entry, and the next bill
   booked that way goes to review. An entry whose ledgers are missing from three
   syncs in a row retires. A renamed ledger is still the same booking.
+- **Learning from Tally.** A person who corrects a saved voucher in Tally has shown
+  its treatment: the edit that demotes the old entry also teaches, once per
+  alteration, how the voucher is booked now (evidence `tally_edit`); an amount-only
+  edit changes nothing, and a deleted or cancelled voucher only demotes. A voucher
+  moved to another supplier teaches recognition instead (below). After each sync,
+  the client's bills held for a question, or left as is, that a person has since
+  entered in Tally by hand are found there by their document identity, as the
+  write-time check finds them (the supplier by the printed GSTIN when none was
+  matched): each becomes `duplicate`, noted "Entered in Tally by hand", and teaches
+  its booking (evidence `tally_entry`). A bill already in the run's books when it
+  is proposed is `duplicate` at once if entered as proposed, or held as
+  `already_in_tally` (final) naming what differs; the write-time check still guards
+  every save.
+- **Supplier recognition.** A printed supplier name a person matched to a ledger,
+  by choosing it in review or moving a saved voucher to it in Tally, is kept as a
+  `supplier_name` entry, only when the session quoted that name and no printed
+  GSTIN conflicts with the ledger's. `find_ledger` lists that ledger first, marked
+  learnt; a later different choice demotes it. Recognition finds a supplier; it
+  never decides how a bill is booked.
 - **Rules.** Plain-text instructions only people write, scoped to a workflow or
   company, versioned and cited by ID. Sessions read every active rule in scope,
   so a client keeps at most 30 active rules per employee.

@@ -1519,3 +1519,109 @@ def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the
     assert companion(desk) is None
     assert db.execute("SELECT outcome FROM native_writes WHERE run_id=%s", (run["id"],)).fetchone()["outcome"] == (
         "cancelled")
+
+
+def entered(number="SOS/26/0412", day="20260901", expense="Office Cabins", party="Sunrise Office Systems", guid="v-hand",
+            alter="12", taxable="160000.00", tax="14400.00"):
+    """A bill as someone entered it in Tally themselves: Sunrise's purchase, its number in the reference."""
+    total = f"{float(taxable) + 2 * float(tax):.2f}"
+    return {"GUID": guid, "MASTERID": "88", "ALTERID": alter, "DATE": day, "VOUCHERTYPENAME": "Purchase",
+            "REFERENCE": number, "PARTYLEDGERNAME": party, "NARRATION": "Entered by the accountant",
+            "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": party, "AMOUNT": total},
+                                      {"LEDGERNAME": expense, "AMOUNT": f"-{taxable}"},
+                                      {"LEDGERNAME": "Input CGST 9%", "AMOUNT": f"-{tax}"},
+                                      {"LEDGERNAME": "Input SGST 9%", "AMOUNT": f"-{tax}"}]}
+
+
+def bookings(desk):
+    desk["db"].commit()
+    return desk["db"].execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='booking' ORDER BY created_at",
+                              (desk["company"]["id"],)).fetchall()
+
+
+def test_a_bill_already_in_tally_when_proposed_is_a_duplicate_or_held_naming_what_differs(desk):
+    """The books already hold B01, entered by hand: proposed exactly as entered, it is a duplicate at once and
+    teaches how Sunrise's bills are booked; booked otherwise there, it holds and says how, and is never written."""
+    db, names, guid = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
+    factory.books(db, desk["company"], masters(desk["company"]), [PRIOR, entered()])
+    db.commit()
+    run = launch(desk, {"sunrise.pdf": B01})
+    read(desk, by_file(**{"sunrise.pdf": proposing(names, proposal(guid))}), run)
+    [bill] = records(desk, run)
+    assert (bill["status"], bill["review_reasons"], bill["current"]["guid"]) == (
+        "duplicate", [bill_entry.ALREADY], "v-hand")
+    [learnt] = bookings(desk)
+    assert (learnt["value"]["ledgers"], learnt["evidence"][-1]) == (
+        ["Office Cabins"], {"kind": "tally_entry", "voucher": "v-hand", "alter_id": 12})
+    # Booked to Repairs there, the proposal to Office Cabins holds for a person, saying how Tally has it.
+    factory.books(db, desk["company"], masters(desk["company"]), [PRIOR, entered(expense="Repairs and Maintenance")])
+    db.commit()
+    again = launch(desk, {"sunrise-again.pdf": B01})
+    read(desk, by_file(**{"sunrise-again.pdf": proposing(names, proposal(guid))}), again)
+    [held] = records(desk, again)
+    assert (held["status"], held["hold_codes"], held["checks"]["final"], actions(held)) == (
+        "held", ["already_in_tally"], True, ["nothing", "retry"])
+    assert held["review_reasons"][0] == ("Tally's voucher for SOS/26/0412 posts to Repairs and Maintenance instead "
+                                         "of Office Cabins. Review it there; Minkops did not add a second voucher.")
+    assert db.execute("SELECT count(*) AS n FROM native_writes WHERE run_id=%s", (again["id"],)).fetchone()["n"] == 0
+
+
+def test_held_and_deferred_bills_a_person_entered_in_tally_by_hand_are_reconciled_after_the_next_sync(desk):
+    """B01 holds for its ledger and the repairs bill is left as is; the accountant enters both in Tally. After the
+    next sync both are duplicates of the vouchers they entered, noted, and teach the bookings they used."""
+    db, names, guid = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
+    unsure = proposal(guid, exception=exception("Office Cabins or Repairs?", "g-cabins", "g-repairs"))
+    fake = by_file(**{"a.pdf": proposing(names, unsure), "b.pdf": proposing(names, repairs(guid, "SOS/26/0420"))})
+    run = launch(desk, {"a.pdf": B01, "b.pdf": repairs_pdf("SOS/26/0420")})
+    read(desk, fake, run)
+    held, left = records(desk, run)
+    decide(desk, left, "nothing")
+    version = factory.books(db, desk["company"], masters(desk["company"]), [
+        PRIOR, entered(expense="Repairs and Maintenance"),
+        entered(number="SOS/26/0420", day="20260902", expense="Repairs and Maintenance", guid="v-hand-2",
+                taxable="10000.00", tax="900.00")])
+    bill_entry.entered_by_hand(db, desk["company"], version["version"])
+    held, left = record(desk, held), record(desk, left)
+    assert [(r["status"], r["review_reasons"], r["current"]["guid"]) for r in (held, left)] == [
+        ("duplicate", [bill_entry.BY_HAND], "v-hand"), ("duplicate", [bill_entry.BY_HAND], "v-hand-2")]
+    assert work.get_run(db, desk["tenant"]["id"], run["id"])["state"] == "completed"
+    [learnt] = bookings(desk)
+    assert (learnt["value"]["ledgers"], learnt["uses"]) == (["Repairs and Maintenance"], 2)
+    # The next sync finds the same vouchers unchanged: nothing is learnt twice.
+    bill_entry.entered_by_hand(db, desk["company"], version["version"])
+    assert [row["uses"] for row in bookings(desk)] == [2]
+
+
+def test_a_supplier_moved_in_tally_teaches_what_the_printed_name_stands_for_only_when_its_gstin_agrees(desk):
+    """Minkops saved B01 to Sunrise Office Systems; the accountant moves it to Sunrise Systems in Tally. Where that
+    ledger holds another GSTIN than the bill prints, nothing is learnt about the name; where it holds the bill's,
+    the printed name stands for it, and find_ledger lists it first, marked learnt."""
+    from minkops_platform.accounts import memory
+    db, names, guid = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
+    run = launch(desk, {"sunrise.pdf": B01})
+    read(desk, by_file(**{"sunrise.pdf": proposing(names, proposal(guid))}), run)
+    [bill] = records(desk, run)
+    decide(desk, bill, "approve")
+    companion(desk)
+
+    def moved(gstin, alter):
+        systems = ledger("g-sunsys", "Sunrise Systems", "Sundry Creditors", PARTYGSTIN=gstin)
+        version = factory.books(db, desk["company"], [*masters(desk["company"]), systems], [
+            PRIOR, entered(party="Sunrise Systems", guid="tally-1", alter=alter)])
+        memory.revalidate(db, desk["company"], version)
+        db.commit()
+        return db.execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='supplier_name'",
+                          (desk["company"]["id"],)).fetchall()
+
+    assert moved(gstin("37OTHER1234X1Z"), "20") == []
+    [name] = moved(SUNRISE, "21")
+    assert (name["subject"], name["value"], name["guids"], name["evidence"][-1]["kind"]) == (
+        "sunrise office systems", {"name": "Sunrise Office Systems", "ledger": "Sunrise Systems"}, ["g-sunsys"],
+        "tally_edit")
+    lookup = FakeAgents(script_for=lambda metadata, content: Script(
+        [("find_ledger", {"subjects": ["Sunrise Office Systems"]})], answers=[{"count": 1, "bills": []}]))
+    later = launch(desk, {"later.pdf": B01})
+    read(desk, lookup, later)
+    [found] = answers(lookup.created[0], "find_ledger")
+    assert [(found_["name"], found_.get("learnt")) for found_ in found["results"][0]["ledgers"]] == [
+        ("Sunrise Systems", True), ("Sunrise Office Systems", None)]

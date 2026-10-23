@@ -13,7 +13,7 @@ GOLDEN = {
     ("nothing", "retry"): (BILL, [
         "not_a_bill", "multiple_bills_unclear", "required_value_missing", "source_values_conflict",
         "source_unreadable", "date_before_books", "identity_rule_unknown", "date_outside_company_period",
-        "voucher_type_unresolved", "extraction_failed"]),
+        "voucher_type_unresolved", "extraction_failed", "already_in_tally"]),
     # Only the treatment is in question: a person may choose it and approve.
     ("choose", "nothing", "retry"): (BILL, ["supplier_unresolved"]),
     ("supplier", "choose", "nothing", "retry"): (BILL, ["supplier_missing"]),

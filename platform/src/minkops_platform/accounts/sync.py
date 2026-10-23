@@ -439,11 +439,17 @@ def finish(connection, device, job, result):
         else:
             mirror.abandon(connection, version, "incomplete")
             abandoned.append(key)
+    from .bill_entry import entered_by_hand as bills_entered
     from .practice import probe, unprobed
+    from .statement_entry import entered_by_hand as rows_entered
     for version in published:
         company = connection.execute("SELECT * FROM companies WHERE id=%s", (version["company_id"],)).fetchone()
         _compare_copies(connection, job, company, version)
         memory.revalidate(connection, company, version)
+        if company["status"] == "authorised":
+            # Work its client's runs hold that a person has since entered in Tally by hand is found there.
+            bills_entered(connection, company, version["version"])
+            rows_entered(connection, company, version["version"])
         probe(connection, company, version, job)
         mirror.collect(connection, company["id"])
     # Books unchanged since a probe was added have not met it yet.

@@ -47,10 +47,12 @@ from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
 from .voucher_types import base_types
 from .vouchers import (
+    BASE_FAMILY,
     KIND_FAMILIES,
     HoldReason,
     check,
     correction_reason,
+    invoice_window,
     narration_token,
     observed_bill,
     rupees,
@@ -82,6 +84,8 @@ UNPRECEDENTED = ("This supplier's bills have not been booked this way before. Re
 DEMOTED = ("Someone changed a bill booked this way in Tally after Minkops saved it. Review the voucher type and "
            "ledgers before approving.")
 BOOKING_REVIEWS = (UNPRECEDENTED, DEMOTED)
+ALREADY = "Already in Tally, booked as proposed."
+BY_HAND = "Entered in Tally by hand."
 # A line's role, as the ledgers a person may choose for it are listed (desk_tools.ROLE_GROUPS).
 PICKERS = {"expense": "expense", "freight": "expense", "other_charge": "expense", "discount": "expense",
            "tax": "tax", "tds": "tax"}
@@ -555,6 +559,10 @@ def _propose_one(connection, desk, record, bill, count):
     if registered:
         # The reviewer sees which IRP registered the bill, and whether its signature verified.
         facts = {**facts, "einvoice": {key: registered[key] for key in ("status", "signer", "irn", "page")}}
+    entered = _in_tally(connection, company, bound)
+    if entered:
+        return _found_in_tally(connection, desk, record, bill, company, bound, entered, facts=facts,
+                               checks=checks, review=review, rules=cited, count=count)
     note, precedents = _precedent(connection, desk, company, bound)
     review += [*bound.notes, *([note] if note else [])]
     checks = {**checks, "precedents": precedents}
@@ -623,14 +631,67 @@ def _besides(connection, desk, bill, company):
     return []
 
 
-def _hold(connection, desk, record, bill, company, code, reason, *, facts, checks, review, count, rules=()):
+def _hold(connection, desk, record, bill, company, code, reason, *, facts, checks, review, count, rules=(),
+          current=None):
     offers = _offers(connection, desk, bill, company, [code], count) if company else []
     said = desk.spelled(connection, reason)
     work.update_record(connection, record, status="held", hold_codes=[code], review_reasons=[said[:300], *review],
                        facts=facts, company_id=company["id"] if company else None,
                        proposal={"bill": bill, **({"rules": list(rules)} if rules else {})},
-                       checks={**checks, "offers": offers})
+                       checks={**checks, "offers": offers}, current=current)
     return {"status": "held", "code": code, "reason": reason}
+
+
+def _in_tally(connection, company, bound):
+    """The vouchers in the run's books that already record this bill."""
+    return _recorded(connection, company, party=bound.party, number=bound.number, kind=bound.kind,
+                     issued=date.fromisoformat(bound.date))
+
+
+def _recorded(connection, company, *, party, number, kind, issued):
+    """The vouchers in a company's copy of the books (its `version`) that record a document, as the write-time check
+    finds them: the party's, carrying the number where the company records invoice numbers, in its invoice year,
+    of the families the document is booked as."""
+    window = invoice_window(issued)
+    types = mirror.masters(connection, company["id"], company["version"], types=["VOUCHERTYPE"])
+    families = {name: BASE_FAMILY.get(mirror.normalized(base)) for name, base in base_types(
+        [row["data"] for row in types]).items()}
+    return [row for row in mirror.documents(connection, company["id"], company["version"], party=party, number=number,
+                                            fields=_number_fields(connection, company), date_from=window["from"],
+                                            date_to=window["to"])
+            if families.get(row["voucher_type"].casefold()) in KIND_FAMILIES[kind]]
+
+
+def _found_in_tally(connection, desk, record, bill, company, bound, entered, *, facts, checks, review, rules, count):
+    """A bill the books already hold when it is proposed: entered exactly as proposed, it is `duplicate` at once and
+    teaches how it is booked; booked otherwise, it holds for a person, naming what differs. The write-time check
+    still guards every save."""
+    current = mirror.observed(entered[0])
+    plan = bound.native_plan("", number_fields=_number_fields(connection, company))
+    ours = sorted((line["ledger"], line["amount_cents"] if line["side"] == "credit" else -line["amount_cents"])
+                  for line in plan["lines"])
+    if len(entered) == 1 and current["date"] == bound.date.replace("-", "") \
+            and mirror.normalized(current["voucher_type"]) == mirror.normalized(bound.voucher_type["NAME"]) \
+            and sorted((line["ledger"], line["amount_cents"]) for line in current["lines"]) == ours:
+        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[ALREADY],
+                           facts=facts, company_id=company["id"], checks=checks, current=current,
+                           proposal=_proposal(bill, bound, **({"rules": list(rules)} if rules else {})))
+        _learn_entered(connection, company, entered[0])
+        return {"status": "duplicate", "reason": "Tally already has this bill, booked this way."}
+    reason = (correction_reason(plan, current) if len(entered) == 1 else
+              f"Tally has {len(entered)} vouchers for this bill. Review them there; Minkops did not add another.")
+    return _hold(connection, desk, record, bill, company, "already_in_tally", reason, facts=facts,
+                 checks={**checks, "final": True}, review=review, count=count, rules=rules, current=current)
+
+
+def _learn_entered(connection, company, voucher):
+    """A bill a person entered in Tally teaches how it is booked, once per alteration of its voucher."""
+    if memory.taught(connection, company, "tally_entry", voucher):
+        return
+    found = memory.treatment(connection, company, company["version"], voucher)
+    if found:
+        memory.learn_treatment(connection, company, found, {"kind": "tally_entry", "voucher": voucher["guid"],
+                                                            "alter_id": voucher["alter_id"]})
 
 
 def _offers(connection, desk, bill, company, codes, count):
@@ -1114,8 +1175,11 @@ def _choose(connection, run, record, detail, *, actor):
         raise ServiceError("conflict", waits[1])
     kept = {key: record["proposal"][key] for key in ("rules", "created") if record["proposal"].get(key)}
     held = record["hold_codes"][0] if record["status"] == "held" else None
+    # The supplier the session matched, if any: one the person chose instead teaches what the printed name stands for.
+    matched = ((record["proposal"]["bill"].get("voucher") or {}).get("party") or {}).get("ledger_guid")
     work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=list(bound.notes),
-                       proposal=_proposal(bill, bound, **kept, chosen={"by": str(actor), "held": held}))
+                       proposal=_proposal(bill, bound, **kept, chosen={"by": str(actor), "held": held,
+                                                                       "matched": matched}))
     return _approve(connection, run, record, actor=actor)
 
 
@@ -1198,10 +1262,8 @@ def _approve(connection, run, record, *, actor):
         work.update_record(connection, record, status="held", hold_codes=[refusal.code],
                            review_reasons=[str(refusal)[:300]])
         return {"status": "held"}
-    # Duplicates are sought where the company types invoice numbers; until that is settled, in both places.
-    fields = (practice.settled(connection, company, "invoice_number_field") or {}).get("fields")
     plan = {**bound.native_plan(narration_token(run["tenant_id"], bound.destination_key, bound.identity),
-                                number_fields=tuple(fields or ("REFERENCE", "NARRATION")),
+                                number_fields=_number_fields(connection, company),
                                 note=_register_note(connection, company, record["proposal"]["bill"])),
             "destination_key": bound.destination_key}
     row = connection.execute("SELECT * FROM companies WHERE id=%s", (record["company_id"],)).fetchone()
@@ -1216,6 +1278,13 @@ def _approve(connection, run, record, *, actor):
             (run["id"], str(record["id"]))).fetchall():
         work.update_record(connection, follower, status="approved")
     return {"status": "writing"}
+
+
+def _number_fields(connection, company):
+    """Where the company types a supplier's invoice number, so a duplicate is sought there; until its practice is
+    settled, in both places."""
+    fields = (practice.settled(connection, company, "invoice_number_field") or {}).get("fields")
+    return tuple(fields or ("REFERENCE", "NARRATION"))
 
 
 def _register_note(connection, company, bill):
@@ -1398,6 +1467,7 @@ def written(connection, run, record, write, receipt):
         memory.learn_booking(connection, run, record, write["plan"], current["guid"],
                              actor_id=memory.approver(connection, run, record))
         if record["proposal"].get("chosen") and not record["proposal"].get("alike"):
+            _recognised(connection, run, record)
             _alike(connection, run, record)
         follow = {"status": "duplicate", "current": current, "hold_codes": [], "review_reasons": []}
     else:
@@ -1415,6 +1485,21 @@ def written(connection, run, record, write, receipt):
         work.update_record(connection, follower, **follow)
     return {"verified": outcome in ("saved", "duplicate"),
             "outcome": outcome if outcome in ("saved", "duplicate") else "held"}
+
+
+def _recognised(connection, run, chosen):
+    """A supplier a person chose instead of the session's match teaches what the bill's printed name stands for,
+    when the session quoted that name and no printed GSTIN conflicts (memory.recognise)."""
+    bill = chosen["proposal"]["bill"]
+    party = bill["voucher"]["party"]["ledger_guid"]
+    printed = memory.printed_supplier(bill)
+    if not printed or party == chosen["proposal"]["chosen"].get("matched"):
+        return
+    desk, company = _destination(connection, run, chosen)
+    [ledger] = mirror.masters(connection, company["id"], company["version"], guids=[party])
+    memory.recognise(connection, company, name=printed["name"], gstin=printed["gstin"], ledger=ledger,
+                     evidence={"kind": "choice", "run": str(run["id"]), "record": str(chosen["id"])},
+                     actor_id=chosen["proposal"]["chosen"]["by"])
 
 
 def _alike(connection, run, chosen):
@@ -1487,6 +1572,51 @@ def _booked_as(theirs, bill):
     return {**theirs, "exception": None, "voucher": {
         **voucher, "family": mine["family"], "voucher_type_guid": mine["voucher_type_guid"], "party": mine["party"],
         "lines": lines, **({"items": items} if items else {})}}
+
+
+def entered_by_hand(connection, company, version):
+    """After a sync, the client's bills of this company held for a question, or left as is, that a person has since
+    entered in Tally by hand are found there by their document identity, as the write-time check would find them.
+    Each becomes `duplicate` with Tally's voucher, noted, and teaches how it is booked. A bill whose supplier no
+    ledger was matched to is found through the GSTIN it prints; one Tally holds twice is left for a person.
+    """
+    company, runs = {**company, "version": version}, set()
+    for record in connection.execute(
+            """SELECT r.* FROM run_records r JOIN runs n ON n.tenant_id=r.tenant_id AND n.id=r.run_id
+               WHERE r.tenant_id=%s AND r.company_id=%s AND r.kind=%s AND r.status IN ('held','deferred')
+                   AND r.proposal ? 'bill' AND n.created_at > now() - interval '60 days'
+               ORDER BY r.id FOR UPDATE OF r""", (company["tenant_id"], company["id"], KIND)).fetchall():
+        if record["status"] == "held" and any(hold(code).kind != EXCEPTION or code == "already_in_tally"
+                                              for code in record["hold_codes"]):
+            continue  # a save in flight, or a voucher already named
+        bill = record["proposal"]["bill"]
+        document = bill.get("document") or {}
+        party = _party_in(connection, company, bill)
+        if not party or not document.get("number") or _iso(document.get("date")) is None \
+                or document.get("kind") not in KIND_FAMILIES:
+            continue
+        found = _recorded(connection, company, party=party, number=document["number"], kind=document["kind"],
+                          issued=date.fromisoformat(document["date"]))
+        if len(found) != 1:
+            continue
+        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[BY_HAND],
+                           current=mirror.observed(found[0]))
+        _learn_entered(connection, company, found[0])
+        runs.add(record["run_id"])
+    for run_id in sorted(runs):
+        work.refresh(connection, company["tenant_id"], run_id, describe=describe)
+
+
+def _party_in(connection, company, bill):
+    """The supplier ledger's name a bill's session matched, or the one ledger holding the GSTIN it prints."""
+    matched = ((bill.get("voucher") or {}).get("party") or {}).get("ledger_guid")
+    if matched:
+        rows = mirror.masters(connection, company["id"], company["version"], guids=[matched])
+    else:
+        printed = ((bill.get("document") or {}).get("supplier_gstin") or "").strip().upper()
+        rows = [row for row in mirror.search_masters(connection, company["id"], company["version"], ["LEDGER"],
+                                                     printed) if printed and row["gstin"] == printed]
+    return rows[0]["name"] if len(rows) == 1 else None
 
 
 # How a saved bill stands in Tally's GST returns, when it is not counted, for the person who completes it there.

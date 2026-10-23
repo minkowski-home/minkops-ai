@@ -80,7 +80,12 @@ follows; the server checks each citation and keeps the text the row followed. A
 verified row a person approved becomes a routing in the client's memory: the counter
 ledger and voucher type for its payee. A lookup by a payee's name also finds a
 routing learnt under a name that contains it, or that it contains, and an edit made
-in Tally to the saved voucher demotes it (see [Bill entry](bill-entry.md#memory-and-practice)).
+in Tally to the saved voucher demotes it and teaches the routing it shows now (see
+[Bill entry](bill-entry.md#memory-and-practice)). A row the run's books already
+record, posting its amount to its bank within three days under its reference or
+UTR, is `duplicate` when proposed. After each sync, held or left-as-is rows a person
+has since entered in Tally by hand are found the same way, become `duplicate` noted
+"Entered in Tally by hand", and teach their payee's routing.
 
 As in [Bill entry](bill-entry.md#reading-a-file), the session meets companies and
 masters only as short references its input and lookups gave it (`C1`, `L12`), and a

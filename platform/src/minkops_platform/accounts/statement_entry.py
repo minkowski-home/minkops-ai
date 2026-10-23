@@ -62,6 +62,10 @@ SAVE_HOLDS = {"possible_existing", "uncertain_import", "destination_changed", "c
 OFFERED = ("nothing", "retry", "choose", "retry_save", "settle")
 # Buttons beside the holds' own: approving a proposal, and every row booked as a person chose for another.
 LABELS = {**ACTIONS, "approve": "Approve", "alike": "Approve all booked this way"}
+ALREADY = "Already in Tally."
+BY_HAND = "Entered in Tally by hand."
+# A UTR or bank reference a narration prints: one token of 10 to 22 letters and digits, at least six of them digits.
+UTR = re.compile(r"(?<![A-Z0-9])(?=[A-Z0-9]*(?:\d[A-Z0-9]*){6})[A-Z0-9]{10,22}(?![A-Z0-9])")
 
 
 # --- launch ---------------------------------------------------------------------------
@@ -353,6 +357,15 @@ def propose(call, arguments):
             work.update_record(connection, record, **changes)
             rejected.append({"ref": ref, "reason": str(refusal)})
             continue
+        entered = _entered(connection, company, record, resolved["data"]["bank_ledger"])
+        if entered is not None:
+            # The books already record this transaction: it is not entered again, and teaches how it was booked.
+            work.update_record(connection, record, status="duplicate", company_id=company["id"], hold_codes=[],
+                               review_reasons=[ALREADY], proposal=proposal, current=mirror.observed(entered),
+                               checks={"submissions": submissions + 1})
+            _learn_entered(connection, company, entered, entry.get("payee"))
+            accepted.append(ref)
+            continue
         work.update_record(connection, record, status="proposed", company_id=company["id"], hold_codes=[],
                            review_reasons=[], proposal=proposal,
                            checks={"submissions": submissions + 1,
@@ -361,6 +374,62 @@ def propose(call, arguments):
     remaining = connection.execute("SELECT count(*) AS n FROM run_records WHERE item_id=%s AND status='pending'",
                                    (state.item["id"],)).fetchone()["n"]
     return {"accepted": accepted, "held": held, "rejected": rejected, "remaining": remaining}
+
+
+def _reference(facts):
+    """The row's own reference, or a UTR its narration prints: what a voucher entered for it carries."""
+    reference = re.sub(r"\s", "", facts.get("reference") or "")
+    if len(reference) >= 6:
+        return reference
+    found = UTR.search((facts.get("narration") or "").upper())
+    return found.group(0) if found else None
+
+
+def _entered(connection, company, record, bank):
+    """The one voucher in a company's copy of the books (its `version`) that records this bank row: posting its amount
+    to its bank ledger within three days, and carrying its reference or UTR. None when none does, or several do."""
+    reference, facts = _reference(record["facts"]), record["facts"]
+    if not reference or facts.get("amount_cents") is None:
+        return None
+    day = date.fromisoformat(facts["date"])
+    found = mirror.bank_entries(connection, company["id"], company["version"], bank=bank, cents=-facts["amount_cents"],
+                                reference=reference, date_from=day - timedelta(days=3), date_to=day + timedelta(days=3))
+    return found[0] if len(found) == 1 else None
+
+
+def _learn_entered(connection, company, voucher, payee):
+    """A row a person entered in Tally teaches how its payee's rows are booked, once per alteration of its voucher."""
+    if not payee or memory.taught(connection, company, "tally_entry", voucher):
+        return
+    found = memory.treatment(connection, company, company["version"], voucher, payee=payee)
+    if found:
+        memory.learn_treatment(connection, company, found, {"kind": "tally_entry", "voucher": voucher["guid"],
+                                                            "alter_id": voucher["alter_id"]})
+
+
+def entered_by_hand(connection, company, version):
+    """After a sync, the client's bank rows of this company held for a question, or left as is, that a person has
+    since entered in Tally by hand are found there by their reference or UTR, amount and bank ledger. Each becomes
+    `duplicate` with Tally's voucher, noted, and teaches how its payee's rows are booked."""
+    company, runs = {**company, "version": version}, set()
+    for record in connection.execute(
+            """SELECT r.* FROM run_records r JOIN runs n ON n.tenant_id=r.tenant_id AND n.id=r.run_id
+               WHERE r.tenant_id=%s AND r.company_id=%s AND r.kind=%s AND r.status IN ('held','deferred')
+                   AND n.created_at > now() - interval '60 days' ORDER BY r.id FOR UPDATE OF r""",
+            (company["tenant_id"], company["id"], ROW)).fetchall():
+        if record["status"] == "held" and any(hold(code).kind != "exception" for code in record["hold_codes"]):
+            continue  # a save in flight, or a source the reader could not prove
+        now = _established(connection, record)
+        bank = now["bank"] and mirror.masters(connection, company["id"], version, guids=[now["bank"]])
+        voucher = _entered(connection, company, record, bank[0]["name"]) if bank else None
+        if voucher is None:
+            continue
+        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[BY_HAND],
+                           current=mirror.observed(voucher))
+        _learn_entered(connection, company, voucher, now["payee"])
+        runs.add(record["run_id"])
+    for run_id in sorted(runs):
+        work.refresh(connection, company["tenant_id"], run_id, describe=describe)
 
 
 def _weighed(connection, state, exception):

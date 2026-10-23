@@ -104,7 +104,9 @@ The supplier is identified by what the bill prints about it: its name, GSTIN,
 address, or an alias the printed text actually matches.
 
 - **Searching.** Use `find_ledger`, by GSTIN first and then by the name and its
-  variants.
+  variants. A ledger marked `learnt` is the one a person matched this printed
+  name to before: prefer it, unless the GSTIN the bill prints is another
+  ledger's.
 - **Ambiguity.** When that identity fits two or more supplier ledgers equally,
   the bill is `supplier_unresolved`. The purchase, the expense ledger or history
   never choose between suppliers, because a wrong creditor misstates payables.

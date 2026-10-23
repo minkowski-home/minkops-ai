@@ -436,7 +436,7 @@ class Desk:
 # Where each role's ledgers sit in Tally's group tree, by its reserved group names; `any` is every ledger.
 ROLE_GROUPS = {
     "supplier": ("Sundry Creditors", "Sundry Debtors"),
-    "expense": ("Purchase Accounts", "Direct Expenses", "Indirect Expenses", "Fixed Assets", "Misc. Expenses (ASSET)"),
+    "expense": mirror.EXPENSE_GROUPS,
     "tax": ("Duties & Taxes",),
     "bank": ("Bank Accounts",),
 }
@@ -529,18 +529,33 @@ def _ledgers(call, company, subjects):
 
 
 def find_ledger(call, arguments):
-    """Without a company, every company in scope is searched: which one owns this bank account or supplier."""
+    """Without a company, every company in scope is searched: which one owns this bank account or supplier.
+
+    A supplier name a person matched to a ledger before (memory.recognise) lists that ledger first, marked learnt.
+    """
     desk, connection = call.state, call.connection
     scope = [desk.company_of(connection, arguments["company"])] if arguments.get("company") else list(desk.companies.values())
-    found = [(subject, company, row) for subject in arguments["subjects"] for company in scope
-             for row in mirror.search_masters(connection, company["id"], company["version"], ["LEDGER"], subject)]
+    learnt = {}
+    for entry in memory.entries(connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=desk.part_ids(),
+                                kinds=["supplier_name"], subjects=arguments["subjects"], statuses=("confirmed",)):
+        learnt.setdefault((entry["subject"], entry["company_id"]), entry["guids"][0])
+    found = []
+    for subject in arguments["subjects"]:
+        for company in scope:
+            known = {learnt.get((memory.payee_key(subject), part)) for part in desk.part_ids(company)} - {None}
+            first = mirror.masters(connection, company["id"], company["version"], types=["LEDGER"],
+                                   guids=sorted(known)) if known else []
+            rows = mirror.search_masters(connection, company["id"], company["version"], ["LEDGER"], subject)
+            found += [(subject, company, {**row, "learnt": True}) for row in first]
+            found += [(subject, company, row) for row in rows if row["guid"] not in known]
     refs = {company["guid"]: desk.issue(connection, "ledger", company["guid"],
                                         [row["guid"] for _, owner, row in found if owner["guid"] == company["guid"]])
             for company in scope}
     named = {} if arguments.get("company") else desk.issue(connection, "company", None, [c["guid"] for c in scope])
     return {"results": [{"subject": subject, "ledgers": [
         {**desk.ledger(connection, company, row, refs[company["guid"]][row["guid"]]),
-         **({"company": company["name"], "company_ref": named[company["guid"]]} if named else {})}
+         **({"company": company["name"], "company_ref": named[company["guid"]]} if named else {}),
+         **({"learnt": True} if row.get("learnt") else {})}
         for asked, company, row in found if asked == subject]} for subject in arguments["subjects"]]}
 
 
@@ -664,7 +679,8 @@ TOOLS = {tool.name: tool for tool in (
     Tool("find_ledger", "Ledgers matching each subject: a name or alias (every word must appear, whatever punctuation "
          "separates them; a number as a whole word), a GSTIN, or a bank "
          "account number; a masked number matches by its last digits. Give a company to search only it; without one, "
-         "every company is searched and each ledger names its company.",
+         "every company is searched and each ledger names its company. A ledger marked `learnt` is the one a person "
+         "matched this supplier name to before.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["subjects"]), find_ledger),
     Tool("voucher_types", "A company's active voucher types of the given families.",
          schema({"company": COMPANY, "families": {"type": "array", "minItems": 1, "uniqueItems": True,
