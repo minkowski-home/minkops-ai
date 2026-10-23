@@ -202,6 +202,14 @@ production build remains HTTPS-only. Its profile keeps encrypted registration
 credentials and folder grants across restarts; keep the local API, worker and
 console running while testing. From WSL, Windows reaches them on `127.0.0.1`.
 
+Start Minkops Dev from the Start menu, or from a script with `explorer.exe
+"<install folder>\Minkops Dev.exe"`, never directly from a shell that a packaged
+(MSIX) desktop app started, such as a coding agent's WSL or PowerShell. Windows
+runs such a child inside that package's container and redirects its profile to
+`%LOCALAPPDATA%\Packages\<package>\LocalCache\Roaming\Minkops Dev`: it then
+pairs as one PC there, and the same app started from the Start menu finds the
+real, unpaired profile and appears to have forgotten it.
+
 Configure an edge request limit of at most 42 MB on the base64 folder receipt
 route, with smaller limits elsewhere. Services/native adapters enforce 100
 supported files, 5 MB per file, 30 MB per snapshot and folder containment.
