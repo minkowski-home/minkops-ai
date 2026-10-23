@@ -93,6 +93,34 @@ def register(connection, tenant, user, name, installation_id):
     return {**public_device(row), "credential": credential}
 
 
+def adopt_installation(connection, device, installation_id):
+    """Move a connected PC's record to the installation ID its companion derives from the machine (0.11.2+).
+
+    Registration finds a record by owner and installation ID. A companion paired under an ID kept in its app profile
+    moves the record to the ID every profile of the same Windows user on that PC derives, so a lost or second profile
+    reconnects this record, with its companies, rather than adding a PC whose books must be continued by hand.
+    An ID another of the owner's records holds stays with it.
+
+    Machine identities are name-based (version 5) UUIDs, profile IDs random (version 4). A record moves to a machine
+    identity once and never between machines: a profile copied or roamed to a second PC would otherwise take this
+    PC's record, with its companies and writes, to another Tally copy.
+    """
+    current, wanted = UUID(str(device["installation_id"])), UUID(str(installation_id))
+    if current == wanted:
+        return {"installation_id": str(wanted)}
+    if wanted.version != 5:
+        raise ServiceError("invalid", "Only a machine identity can be adopted.")
+    if current.version == 5:
+        raise ServiceError("conflict", "This PC record belongs to another PC.")
+    try:
+        with connection.transaction():
+            connection.execute("UPDATE desktop_devices SET installation_id=%s WHERE id=%s",
+                               (installation_id, device["id"]))
+    except UniqueViolation:
+        raise ServiceError("conflict", "Another PC record of yours already has this installation.") from None
+    return {"installation_id": str(installation_id)}
+
+
 def authenticate(connection, credential):
     # Share the authorization fence across concurrent operations. Revocation
     # and credential rotation still take an exclusive lock and wait for them.

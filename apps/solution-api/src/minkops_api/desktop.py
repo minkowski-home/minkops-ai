@@ -152,6 +152,17 @@ def heartbeat(device: Device):
     return {"tally_port": device["tally_port"]}
 
 
+class Installation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    installation_id: UUID
+
+
+@router.post("/api/desktop/worker/installation")
+def installation(body: Installation, device: Device, connection: Db):
+    """Companion 0.11.2+: this PC's record takes the installation ID derived from its machine and Windows user."""
+    return call(desktop.adopt_installation, connection, device, body.installation_id)
+
+
 @router.post("/api/desktop/worker/claim")
 def claim(
     device: Device,

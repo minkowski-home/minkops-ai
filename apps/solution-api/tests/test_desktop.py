@@ -280,6 +280,40 @@ class DesktopTests(unittest.TestCase):
             404,
         )
 
+    def test_a_connected_pc_adopts_its_machine_identity_and_keeps_its_record(self):
+        """Any profile of the same Windows user on the same PC then reconnects as this record, companies and all."""
+        self.pair()
+        # Companions derive machine identities as name-based (version 5) UUIDs; profile IDs are random (version 4).
+        machine = str(uuid.uuid5(uuid.NAMESPACE_URL, "machine-a"))
+        route = self.worker_base + "/installation"
+        self.assertEqual(self.client.post(route, json={"installation_id": machine}).status_code, 401)
+        adopted = self.client.post(route, headers=self.worker, json={"installation_id": machine})
+        self.assertEqual(adopted.status_code, 200, adopted.text)
+        self.assertEqual(adopted.json(), {"installation_id": machine})
+        # Idempotent: a companion that lost the answer asks again.
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": machine}).status_code, 200)
+        # Another profile on the same PC registers with the machine identity and finds the same record.
+        again = self.client.post(self.base + "/devices", headers=self.csrf,
+                                 json={"name": "Office PC", "installation_id": machine})
+        self.assertEqual(again.json()["id"], self.device["id"])
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": machine}).status_code,
+                         401, "the rotated-out credential no longer speaks for the record")
+        self.worker["Authorization"] = "Bearer " + again.json()["credential"]
+        # An identity another of the owner's records holds is never taken from it.
+        other = self.client.post(self.base + "/devices", headers=self.csrf,
+                                 json={"name": "Laptop", "installation_id": str(uuid.uuid4())}).json()
+        taken = self.client.post(route, headers={"Authorization": "Bearer " + other["credential"]},
+                                 json={"installation_id": machine})
+        self.assertEqual(taken.status_code, 409, taken.text)
+        # A record bound to one machine never moves to another's: a profile copied or roamed to a second PC must not
+        # take this PC's record, its companies and its writes with it.
+        moved = self.client.post(route, headers=self.worker,
+                                 json={"installation_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "machine-b"))})
+        self.assertEqual(moved.status_code, 409, moved.text)
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": "not-a-uuid"}).status_code, 422)
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": str(uuid.uuid4())}).status_code,
+                         422, "a random ID names no machine")
+
     def setUp(self):
         os.environ["DATABASE_URL"] = URL
         os.environ["AUTH_DEV_MODE"] = "1"
