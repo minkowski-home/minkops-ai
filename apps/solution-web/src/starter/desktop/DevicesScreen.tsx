@@ -84,12 +84,14 @@ export function DevicesScreen({
             <p>
               {connected
                 ? "This PC is connected to your workspace."
-                : "Connect this PC to run local work from Minkops on the web or desktop."}
+                : native.reconnecting
+                  ? "Reconnecting this PC to your workspace…"
+                  : "Connect this PC to run local work from Minkops on the web or desktop."}
             </p>
           </div>
           <button
             className="button button-primary"
-            disabled={busy}
+            disabled={busy || (!connected && native.reconnecting)}
             onClick={() =>
               void action(async () => {
                 if (connected) await desktopBridge()?.disconnect();

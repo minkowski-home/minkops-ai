@@ -12,6 +12,8 @@ export interface DesktopStatus {
   update?: { state: 'downloading' | 'ready' | 'waiting' | 'error'; version?: string } | null;
   name: string;
   device: { id: string; tenant: string; owner_id: string } | null;
+  /** Companion 0.11.1+: reconnecting this PC by itself after its saved credential could not be read. */
+  reconnecting?: boolean;
 }
 export interface DesktopBridge {
   version: number;

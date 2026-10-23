@@ -38,3 +38,28 @@ test('a PC keeps its own Tally port, as each user on a shared server must', asyn
   await page.setViewportSize({width:390, height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test('a PC reconnecting itself after a restart is not offered as a new connection', async ({page, context}) => {
+  await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/, route => route.fulfill({body:'', contentType:'text/css'}));
+  await context.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/auth/session')
+      return route.fulfill({json:{id:'qa', name:'QA', memberships:[{slug:'mock-tenant', role:'member'}], csrf_token:'csrf'}});
+    if (path.endsWith('/workspace'))
+      return route.fulfill({json:{tenant:{slug:'mock-tenant', name:'QA'}, can_edit:false, employees:[], workflows:[], tasks:[]}});
+    if (path === '/api/tenants/mock-tenant/desktop/devices') return route.fulfill({json:[pc]});
+    throw Error(`${route.request().method()} ${path}`);
+  });
+  // The desktop app's bridge, as companion 0.11.1 reports a PC whose saved credential could not be read.
+  await page.addInitScript(() => {
+    const connects = [];
+    window.connects = connects;
+    window.minkopsDesktop = {version:1, status: async () => ({version:'0.11.1', name:'GAUSS-PC', device:null, reconnecting:true}),
+      connect: async (tenant) => { connects.push(tenant); return {id:'pc-1'}; }, disconnect: async () => {}};
+  });
+  await page.goto('http://127.0.0.1:3000/mock-tenant/connections');
+  const card = page.getByRole('article').filter({hasText:'GAUSS-PC'});
+  await expect(card.getByText('Reconnecting this PC to your workspace…')).toBeVisible();
+  await expect(card.getByRole('button', {name:'Connect this PC'})).toBeDisabled();
+  expect(await page.evaluate(() => window.connects)).toEqual([]);
+});
