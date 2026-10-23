@@ -593,8 +593,8 @@ def bank_precedents(connection, company_id, version, *, bank, counter, voucher_t
 
 
 def observed(row):
-    """A stored voucher as a person reads it on a record (`current`): its identity, and its ledger lines signed as
-    Tally signs them, as a Tally readback reports them."""
+    """A stored voucher as a person reads it on a record (`current`): its identity, and its ledger lines, cost
+    allocations and bill references signed as Tally signs them, as a Tally readback reports them."""
     return {"guid": row["guid"], "master_id": str(row["master_id"] or ""), "date": row["date"].strftime("%Y%m%d"),
             "voucher_type": row["voucher_type"], "number": row["number"], "reference": row["reference"],
             "party_ledger": row["party_ledger"], "alter_id": row["alter_id"],
@@ -603,7 +603,11 @@ def observed(row):
                              "centre": text(centre.get("NAME")), "amount_cents": _cents(centre.get("AMOUNT"))}
                             for entry in _entries(row["data"])
                             for category in _list(entry.get("CATEGORYALLOCATIONS.LIST")) if isinstance(category, dict)
-                            for centre in _list(category.get("COSTCENTREALLOCATIONS.LIST")) if isinstance(centre, dict)]}
+                            for centre in _list(category.get("COSTCENTREALLOCATIONS.LIST")) if isinstance(centre, dict)],
+            "bills": [{"ledger": text(entry.get("LEDGERNAME")), "name": text(bill.get("NAME")) or None,
+                       "type": text(bill.get("BILLTYPE")), "amount_cents": _cents(bill.get("AMOUNT"))}
+                      for entry in _entries(row["data"])
+                      for bill in _list(entry.get("BILLALLOCATIONS.LIST")) if isinstance(bill, dict)]}
 
 
 def vouchers_mentioning(connection, company_id, version, needle, date_from, date_to, *, limit=10):

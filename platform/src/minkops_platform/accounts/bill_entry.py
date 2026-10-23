@@ -53,6 +53,7 @@ from .vouchers import (
     HoldReason,
     check,
     correction_reason,
+    differences,
     invoice_window,
     narration_token,
     observed_bill,
@@ -672,11 +673,7 @@ def _found_in_tally(connection, desk, record, bill, company, bound, entered, *, 
     still guards every save."""
     current = mirror.observed(entered[0])
     plan = bound.native_plan("", number_fields=_number_fields(connection, company))
-    ours = sorted((line["ledger"], line["amount_cents"] if line["side"] == "credit" else -line["amount_cents"])
-                  for line in plan["lines"])
-    if len(entered) == 1 and current["date"] == bound.date.replace("-", "") \
-            and mirror.normalized(current["voucher_type"]) == mirror.normalized(bound.voucher_type["NAME"]) \
-            and sorted((line["ledger"], line["amount_cents"]) for line in current["lines"]) == ours:
+    if len(entered) == 1 and not differences(plan, current):
         work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[ALREADY],
                            facts=facts, company_id=company["id"], checks=checks, current=current,
                            proposal=_proposal(bill, bound, **({"rules": list(rules)} if rules else {})))

@@ -299,10 +299,11 @@ desk employee (`accounts/memory.py`):
   noted "Saved in Tally by Minkops from another run" when a run saved and verified
   that voucher, or else "Entered in Tally by hand". Only an entry made by hand
   teaches its booking (evidence `tally_entry`), and no voucher teaches the client's
-  memory twice. A bill already in the run's books when it
-  is proposed is `duplicate` at once if entered as proposed, or held as
-  `already_in_tally` (final) naming what differs; the write-time check still guards
-  every save.
+  memory twice. A bill already in the run's books when it is proposed is
+  `duplicate` at once if entered as proposed (its date, voucher type, ledgers and
+  amounts, cost allocations and bill references), or held as `already_in_tally`
+  (final) naming what differs, such as a bill-by-bill supplier's bill kept on
+  account; the write-time check still guards every save.
 - **Mature memory steers.** A booking memory confirmed at least `memory.STANDING`
   (2) times binds the supplier's next bills: a proposal booked otherwise, with no
   rule cited, is refused naming that booking unless the session states in

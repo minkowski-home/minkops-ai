@@ -301,10 +301,12 @@ def _stated(plan, current):
         raise ValueError("Tally's readback does not show the GST details Minkops wrote for this bill.")
 
 
-def correction_reason(plan, current):
-    """How the voucher Tally already has for this bill differs from the approved plan, for the person reviewing it.
+def differences(plan, current):
+    """How a voucher Tally holds for this bill differs from the approved plan, as clauses a person reads; none when it
+    records the bill as planned: its date and voucher type, every ledger and amount, and, those being equal, its cost
+    allocations and bill references.
 
-    `current` is a receipt's observed voucher that observed_bill has accepted.
+    `current` is an observed voucher: a receipt's that observed_bill has accepted, or a stored one (mirror.observed).
     """
     theirs = Counter((line["ledger"], line["amount_cents"]) for line in current["lines"])
     ours = Counter((line["ledger"], _signed(line)) for line in plan["lines"])
@@ -318,6 +320,8 @@ def correction_reason(plan, current):
     clauses = []
     if current["date"] != plan["header"]["date"].replace("-", ""):
         clauses.append(f"is dated {current['date'][:4]}-{current['date'][4:6]}-{current['date'][6:]}")
+    if normalized(current["voucher_type"]) != normalized(plan["voucher_type"]["NAME"]):
+        clauses.append(f"is a {current['voucher_type']}, not a {plan['voucher_type']['NAME']}")
     if there and here:
         clauses.append(f"posts to {', '.join(there)} instead of {', '.join(here)}")
     elif there or here:
@@ -331,9 +335,22 @@ def correction_reason(plan, current):
                        + (f", with other amounts for {', '.join(changed)}" if changed else ""))
     elif changed:
         clauses.append(f"has other amounts for {', '.join(changed)}")
-    if not clauses and sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != (
-            _allocations(plan)):
+    if clauses:
+        return clauses
+    if sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != _allocations(plan):
         clauses.append("has other cost allocations")
+    kept, planned = _bills(current.get("bills") or []), _planned_bills(plan)
+    if kept != planned:
+        named = lambda bills: ", ".join(f"{b['type']} {b['name']}" if b["name"] else b["type"] for b in bills)  # noqa: E731
+        clauses.append(f"carries the bill reference {named(kept)} instead of {named(planned)}" if kept and planned
+                       else f"carries the bill reference {named(kept)}" if kept
+                       else f"carries no bill reference instead of {named(planned)}")
+    return clauses
+
+
+def correction_reason(plan, current):
+    """How the voucher Tally already has for this bill differs from the approved plan, for the person reviewing it."""
+    clauses = differences(plan, current)
     found = (f"Tally's voucher for {plan['duplicate']['number']} {'; '.join(clauses)}." if clauses
              else "Tally already has this bill with other amounts or ledgers.")
     return f"{found} Review it there; Minkops did not add a second voucher."

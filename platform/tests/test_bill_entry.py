@@ -1625,6 +1625,19 @@ def test_a_bill_already_in_tally_when_proposed_is_a_duplicate_or_held_naming_wha
     assert held["review_reasons"][0] == ("Tally's voucher for SOS/26/0412 posts to Repairs and Maintenance instead "
                                          "of Office Cabins. Review it there; Minkops did not add a second voucher.")
     assert db.execute("SELECT count(*) AS n FROM native_writes WHERE run_id=%s", (again["id"],)).fetchone()["n"] == 0
+    # Sunrise keeps its bills bill by bill, and the bill was entered on account: the reference is not the bill's.
+    billwise = [{**m, "data": {**m["data"], "ISBILLWISEON": "Yes"}} if m["data"]["GUID"] == "g-sunrise" else m
+                for m in masters(desk["company"])]
+    on_account = entered()
+    on_account["ALLLEDGERENTRIES.LIST"][0]["BILLALLOCATIONS.LIST"] = [{"BILLTYPE": "On Account", "AMOUNT": "188800.00"}]
+    factory.books(db, desk["company"], billwise, [PRIOR, on_account])
+    db.commit()
+    third = launch(desk, {"sunrise-third.pdf": B01})
+    read(desk, by_file(**{"sunrise-third.pdf": proposing(names, proposal(guid))}), third)
+    [kept] = records(desk, third)
+    assert (kept["status"], kept["review_reasons"][0]) == ("held", (
+        "Tally's voucher for SOS/26/0412 carries the bill reference On Account instead of New Ref SOS/26/0412. "
+        "Review it there; Minkops did not add a second voucher."))
 
 
 def test_held_and_deferred_bills_a_person_entered_in_tally_by_hand_are_reconciled_after_the_next_sync(desk):

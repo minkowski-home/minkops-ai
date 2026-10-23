@@ -204,6 +204,18 @@ class ReceiptTest(unittest.TestCase):
         self.assertEqual(reason(lines=extra), "Tally's voucher for MOCK-1 also posts to Round Off.")
         allocated = [{"ledger": "Purchases", "category": "Sites", "centre": "Site 4", "amount_cents": -10000}]
         self.assertEqual(reason(allocations=allocated), "Tally's voucher for MOCK-1 has other cost allocations.")
+        self.assertEqual(reason(voucher_type="Journal"), "Tally's voucher for MOCK-1 is a Journal, not a Purchase GST.")
+        # A bill by bill supplier's line names the bill it opens: one Tally keeps on account is not the bill planned.
+        billed = {**self.bill, "format_version": 6, "lines": [
+            {**self.bill["lines"][0], "bills": [{"name": "MOCK-1", "type": "New Ref", "amount_cents": 11800}]},
+            *self.bill["lines"][1:]]}
+        on_account = [{"ledger": "Supplier", "name": None, "type": "On Account", "amount_cents": 11800}]
+        self.assertEqual(vouchers.differences(billed, observed(billed)), [])
+        self.assertEqual(vouchers.correction_reason(billed, observed(billed, bills=on_account)),
+                         "Tally's voucher for MOCK-1 carries the bill reference On Account instead of New Ref MOCK-1. "
+                         "Review it there; Minkops did not add a second voucher.")
+        self.assertEqual(vouchers.differences(billed, observed(billed, bills=[])),
+                         ["carries no bill reference instead of New Ref MOCK-1"])
 
     def test_a_bill_by_bill_receipt_must_carry_the_approved_references(self):
         billed = {**BILL, "format_version": 6, "lines": [
