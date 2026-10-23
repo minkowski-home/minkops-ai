@@ -50,6 +50,21 @@ after successful server acceptance; interrupted/unverified backups remain
 encrypted for recovery. State is under Electron's per-user Minkops app-data
 directory. Original business files remain in the selected folder.
 
+The encrypted state (`companion.bin`) is not the PC's only memory of its pairing.
+A plain `installation.json` beside it keeps the non-secret identity: the
+installation ID and the PC record (ID, workspace, owner) it is connected as,
+never the credential. Every write is flushed to disk before it replaces the
+previous file, so a power cut leaves the old or the new version. When
+`companion.bin` cannot be read at start (damaged, or its Windows key is gone), it
+is renamed `companion.bin.unreadable-<time>` for support and never overwritten.
+As soon as that record's owner is signed in on the PC, the companion reconnects
+it by itself: the same installation ID rotates the credential of the same PC
+record, so its Tally port, company and source links and queued work carry on,
+and no second, offline PC appears. Folders granted on the PC were in the lost
+state and are chosen again. A record disconnected from the web meanwhile stays
+disconnected, and storage that is only unavailable leaves the saved file and
+credential alone. Diagnostics report `restore_problem` and `reconnecting`.
+
 Device credentials are hashed on the server, rotate on reconnect, expire after
 90 days and stop working on revocation or lost membership. Desktop logout stops
 its companion; web users can revoke a PC in Connected PCs. Revoking holds any save
@@ -269,6 +284,12 @@ that requires creation privileges (the same guard runs on Linux). A fresh
 Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
+
+### Companion 0.11.1
+
+`desktop:status` reports `reconnecting` while the companion reconnects a PC whose
+saved credential could not be read; Connected PCs says so rather than offering
+to connect it. Server contracts are unchanged.
 
 ### Companion 0.11.0 contracts
 

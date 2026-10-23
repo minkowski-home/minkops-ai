@@ -14,11 +14,9 @@ import {
 } from "electron";
 import { hostname, release } from "node:os";
 import { join, basename } from "node:path";
-import { existsSync } from "node:fs";
 import {
   readFile,
   writeFile,
-  rename,
   realpath,
   mkdir,
   readdir,
@@ -42,6 +40,7 @@ import { CompanionWorker } from "@minkops/desktop-runtime";
 import { createExecutor, PLAN_VERSION } from "@minkops/desktop-runtime/jobs";
 import electronUpdater from "electron-updater";
 import { startUpdates } from "./updater.js";
+import { openPairing, stillPaired } from "./pairing.js";
 import {
   trustedOrigin,
   validateSender,
@@ -61,13 +60,11 @@ let tray;
 let quitting = false;
 let worker;
 let timer;
-let state = {
-  server_origin: origin,
-  installation_id: randomUUID(),
-  device: null,
-  bindings: {},
-  pending: null,
-};
+let recovery;
+// This PC's pairing (see pairing.js) and its live state, loaded once the app is ready.
+let pairing;
+let state;
+let connecting = Promise.resolve();
 const pendingGrants = new Map();
 let update = null;
 let updates = null;
@@ -84,29 +81,13 @@ const learnPort = (answer) => {
     tallyPort = answer.tally_port;
   return answer;
 };
-let persistence = Promise.resolve();
 const uuid = (value) =>
   typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const slug = (value) =>
   typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,79}$/.test(value);
 
-function statePath() {
-  return join(app.getPath("userData"), "companion.bin");
-}
-async function persist() {
-  persistence = persistence
-    .catch(() => {})
-    .then(async () => {
-      if (!safeStorage.isEncryptionAvailable())
-        throw new Error("Windows credential storage is unavailable.");
-      const encrypted = safeStorage.encryptString(JSON.stringify(state));
-      const temporary = statePath() + ".tmp";
-      await writeFile(temporary, encrypted, { mode: 0o600 });
-      await rename(temporary, statePath());
-    });
-  return persistence;
-}
+const persist = () => pairing.save();
 
 async function cloud(path, options = {}) {
   if (!path.startsWith("/api/")) throw new Error("Invalid cloud operation.");
@@ -253,15 +234,85 @@ function startWorker() {
       .tick()
       .catch((error) => {
         // No tokens, documents, paths or raw protocol responses in console logs.
+        // The server refused this credential: the PC was disconnected or expired, so it is not reconnected by itself.
         if (error.status === 401 && state.device === identity) {
           state.device = null;
           state.pending = null;
+          pairing.previous = null;
           clearInterval(timer);
           void persist();
         }
       });
   timer = setInterval(tick, 4000);
   tick();
+}
+
+/** Register this PC for `tenant` as `user`, then start its worker. The same installation ID always maps to the
+ * same PC record, whose credential this rotates. Serialized: of two registrations at once, one would be left
+ * holding a rotated-out credential. */
+function connect(tenant, user) {
+  connecting = connecting
+    .catch(() => {})
+    .then(async () => {
+      const device = await (
+        await cloud(`/api/tenants/${tenant}/desktop/devices`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-csrf-token": user.csrf_token,
+          },
+          body: JSON.stringify({
+            name: hostname().slice(0, 80),
+            installation_id: state.installation_id,
+          }),
+        })
+      ).json();
+      clearInterval(timer);
+      clearInterval(recovery);
+      state.device = {
+        id: device.id,
+        tenant,
+        owner_id: user.id,
+        credential: device.credential,
+      };
+      state.pending = null;
+      pairing.previous = null;
+      await persist();
+      startWorker();
+      return { id: device.id };
+    });
+  return connecting;
+}
+
+/** When this PC's saved credential could not be read, reconnect it as the same PC record once its owner is signed
+ * in here, unless that record was disconnected meanwhile. Signed out, or signed in as someone else, it waits. */
+function startRecovery() {
+  clearInterval(recovery);
+  if (state.device || !pairing.previous) return;
+  let trying = false;
+  const attempt = async () => {
+    const previous = pairing.previous;
+    if (state.device || !previous) return clearInterval(recovery);
+    if (trying) return;
+    trying = true;
+    try {
+      const user = await profile(previous.tenant);
+      if (user.id !== previous.owner_id) return;
+      const devices = await (await cloud(`/api/tenants/${previous.tenant}/desktop/devices`)).json();
+      if (state.device || pairing.previous !== previous) return;
+      if (stillPaired({ previous, user, installationId: state.installation_id, devices }))
+        await connect(previous.tenant, user);
+      else {
+        pairing.previous = null;
+        await persist();
+      }
+      clearInterval(recovery);
+    } finally {
+      trying = false;
+    }
+  };
+  recovery = setInterval(() => void attempt().catch(() => {}), 10000);
+  void attempt().catch(() => {});
 }
 
 /** A technical summary for support: versions, this PC, the Tally session and
@@ -293,7 +344,13 @@ async function collectDiagnostics() {
   }
   return {
     collected_at: new Date().toISOString(),
-    companion: { version: app.getVersion(), plan_version: PLAN_VERSION, connected: Boolean(state.device) },
+    companion: {
+      version: app.getVersion(),
+      plan_version: PLAN_VERSION,
+      connected: Boolean(state.device),
+      reconnecting: Boolean(pairing.previous),
+      restore_problem: pairing.problem,
+    },
     windows: { hostname: pc, release: release(), remote_session: sharedSession() },
     tally: {
       port: tallyPort,
@@ -366,39 +423,17 @@ function setupBridge() {
           owner_id: state.device.owner_id,
         }
       : null,
+    // Companion 0.11.1+: reconnecting this PC by itself after its saved credential could not be read.
+    reconnecting: !state.device && Boolean(pairing.previous),
   }));
-  handle("desktop:connect", async (tenant) => {
-    const user = await profile(tenant);
-    const device = await (
-      await cloud(`/api/tenants/${tenant}/desktop/devices`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-csrf-token": user.csrf_token,
-        },
-        body: JSON.stringify({
-          name: hostname().slice(0, 80),
-          installation_id: state.installation_id,
-        }),
-      })
-    ).json();
-    clearInterval(timer);
-    state.device = {
-      id: device.id,
-      tenant,
-      owner_id: user.id,
-      credential: device.credential,
-    };
-    state.pending = null;
-    await persist();
-    startWorker();
-    return { id: device.id };
-  });
+  handle("desktop:connect", async (tenant) => connect(tenant, await profile(tenant)));
   handle("desktop:disconnect", async () => {
     clearInterval(timer);
+    clearInterval(recovery);
     const device = state.device;
     state.device = null;
     state.pending = null;
+    pairing.previous = null;
     pendingGrants.clear();
     await persist();
     if (device) {
@@ -600,22 +635,20 @@ else {
     .whenReady()
     .then(async () => {
       app.setAppUserModelId("com.minkops.desktop");
-      if (existsSync(statePath()) && safeStorage.isEncryptionAvailable()) {
-        try {
-          const restored = JSON.parse(
-            safeStorage.decryptString(await readFile(statePath())),
-          );
-          // Credentials and grants belong to one server. Changing deployments
-          // requires explicit pairing; never send a prior server's token away.
-          if (restored.server_origin === origin) state = restored;
-          // Releases before 0.7.0 remembered how to restart Tally. Minkops no
-          // longer controls Tally, so that local state is discarded.
-          delete state.tally_startup;
-          delete state.tally_company_numbers;
-        } catch {
-          /* Damaged local credentials require explicit reconnection. */
-        }
-      }
+      pairing = await openPairing({
+        directory: app.getPath("userData"),
+        origin,
+        cipher: {
+          available: () => safeStorage.isEncryptionAvailable(),
+          encrypt: (text) => safeStorage.encryptString(text),
+          decrypt: (data) => safeStorage.decryptString(data),
+        },
+      });
+      state = pairing.state;
+      // Releases before 0.7.0 remembered how to restart Tally. Minkops no
+      // longer controls Tally, so that local state is discarded.
+      delete state.tally_startup;
+      delete state.tally_company_numbers;
       session.defaultSession.setPermissionRequestHandler(
         (_contents, _permission, callback) => callback(false),
       );
@@ -643,6 +676,7 @@ else {
       );
       tray.on("double-click", openConsole);
       startWorker();
+      startRecovery();
       updates = startUpdates({
         updater: electronUpdater.autoUpdater,
         isPackaged: app.isPackaged && !dev,
