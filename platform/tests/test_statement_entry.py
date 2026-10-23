@@ -454,6 +454,29 @@ def test_a_transfer_between_own_accounts_is_written_once_for_both_rows(desk):
                                  FROM native_writes WHERE run_id=%s""", (run["id"],)).fetchone() == {"contra": 1, "n": 5}
 
 
+# The money comes back from HDFC two days later: a round trip within one account, never one transfer's two legs.
+ROUND_TRIP = ICICI.replace(b"15/09/2026,NEFT RETURN UTR111222,UTR111222R,,1180.00,94882.00",
+                           b"04/09/2026,TRANSFER FROM HDFC,TRF2,,5000.00,98702.00\n"
+                           b"15/09/2026,NEFT RETURN UTR111222,UTR111222R,,1180.00,99882.00")
+
+
+def test_a_transfers_other_leg_is_sought_only_in_another_account(desk):
+    """A transfer out and the same amount back into one account are two transfers: each leg is in the other account's
+    statement. Offered the account's own inflow, a session paired the two and both were held."""
+    company = desk["company"]["guid"]
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ROUND_TRIP, "hdfc-sep.csv": HDFC})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    icici = next(s for s in fake.created if is_chunk(s.content) and "icici" in s.content[0]["text"].split("\n")[0])
+    offered = {row["ref"]: row["narration"] for row in rows_of(icici)}
+    found = {offered[result["ref"]]: [candidate["narration"] for candidate in result["candidates"]]
+             for result in answer(icici, "find_transfer")["results"]}
+    assert found == {"TRANSFER TO HDFC": ["TRANSFER FROM ICICI"], "TRANSFER FROM HDFC": []}
+
+
 def test_an_approved_row_writes_once_and_an_interrupted_save_is_never_resent(desk):
     company = desk["company"]["guid"]
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, transfers, routed(company)) if is_chunk(content)

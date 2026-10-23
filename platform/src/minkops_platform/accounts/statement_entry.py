@@ -19,6 +19,7 @@ cleared by a proposal.
 
 import hashlib
 import json
+import re
 from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
@@ -429,19 +430,40 @@ def _terms(record, resolved):
             "text": f"{facts.get('narration') or ''} {facts.get('reference') or ''}"}
 
 
+def _account(connection, row):
+    """Which account a row is in: the number its statement's layout read, else its file, sheet and account column."""
+    item = connection.execute("SELECT source FROM run_items WHERE id=%s", (row["item_id"],)).fetchone()
+    digits = re.sub(r"\D", "", ((item["source"] or {}).get("details") or {}).get("account_number") or "")
+    facts = row["facts"]
+    return digits if len(digits) >= 4 else (facts.get("file"), facts.get("sheet"), facts.get("account") or "")
+
+
+def _same_account(mine, theirs):
+    """Two statements may print one account's number in full or masked: the shorter is then the longer's tail."""
+    if isinstance(mine, str) and isinstance(theirs, str):
+        return mine.endswith(theirs) or theirs.endswith(mine)
+    return mine == theirs
+
+
 def find_transfer(call, arguments):
+    """Rows of this run that could be a transfer's other leg: equal and opposite, within three days, in another account.
+
+    A transfer's two legs are in two accounts' statements. The same amount back into the same account is another
+    transfer: offered as the other leg, it was paired with the first and both were held.
+    """
     connection, run, results = call.connection, call.run, []
     for ref in arguments["refs"]:
         record = _row_of(connection, run, ref)
-        facts = record["facts"]
+        facts, account = record["facts"], _account(connection, record)
         day = date.fromisoformat(facts["date"])
         candidates = connection.execute(
             """SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND id<>%s
                    AND (facts->>'amount_cents')::bigint = %s AND (facts->>'date')::date BETWEEN %s AND %s
-               ORDER BY (facts->>'date'), position LIMIT 5""",
+               ORDER BY (facts->>'date'), position LIMIT 50""",
             (run["id"], ROW, record["id"], -facts["amount_cents"], day - timedelta(days=3),
              day + timedelta(days=3))).fetchall()
-        results.append({"ref": ref, "candidates": [_brief(row) for row in candidates]})
+        elsewhere = [row for row in candidates if not _same_account(account, _account(connection, row))][:5]
+        results.append({"ref": ref, "candidates": [_brief(row) for row in elsewhere]})
     return {"results": results}
 
 
@@ -616,8 +638,8 @@ ROWS = Answer(
     again="Answer again with the rows it rejected or did not receive, each corrected; the rows it accepted or held "
           "stay as they are.")
 CHUNK_TOOLS = {tool.name: tool for tool in (
-    Tool("find_transfer", "Rows anywhere in this run that could be the other leg of a transfer: equal and opposite "
-         "amounts within three days.", schema({"refs": {"type": "array", "minItems": 1, "maxItems": 20, "items": REF}},
+    Tool("find_transfer", "Rows of this run in another account that could be the other leg of a transfer: equal and "
+         "opposite amounts within three days.", schema({"refs": {"type": "array", "minItems": 1, "maxItems": 20, "items": REF}},
                                              ["refs"]), find_transfer),
     Tool("pair_return", "For a returned payment's UTR, the original payment: rows in this run, and vouchers in the "
          "client's Tally books, that mention it.", schema({"utrs": SUBJECTS}, ["utrs"]), pair_return),
