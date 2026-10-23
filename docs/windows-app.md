@@ -5,7 +5,7 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.11.0 (plan protocol 6; see its contracts below);
+This revision builds companion 0.11.3 (plan protocol 6; see its contracts below);
 the last release recorded in `windows-release.json` is 0.9.1. The server refuses
 Tally work from companions older than 0.11.0. The companion works only with the companies open
 in the user's own Tally, reports typed session states, sends diagnostics and
@@ -47,8 +47,14 @@ and recovery backups. Native state and backups use Electron `safeStorage`
 (Windows DPAPI, via [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage)); encryption failure prevents persistence. Credentials never
 enter the renderer, and absolute folder paths stay on the PC. Backups are deleted
 after successful server acceptance; interrupted/unverified backups remain
-encrypted for recovery. State is under Electron's per-user Minkops app-data
-directory. Original business files remain in the selected folder.
+encrypted for recovery. Original business files remain in the selected folder.
+
+What belongs to the PC (`companion.bin`, `installation.json`,
+`statement-manifests/` and `tally-diagnostics/`) is kept in
+`%LOCALAPPDATA%\Minkops` (`%LOCALAPPDATA%\Minkops Dev` for the dev channel), which
+stays on the PC. Chromium's session and cache stay in Electron's userData,
+`%APPDATA%\Minkops`, which roaming profiles and AppData folder redirection carry
+to the user's other PCs (see [Companion 0.11.3](#companion-0113)).
 
 The encrypted state (`companion.bin`) is not the PC's only memory of its pairing.
 A plain `installation.json` beside it keeps the non-secret identity: the
@@ -198,16 +204,16 @@ To test the local stack from an installed app, `npm run package:win:dev` builds
 production companion: its own app ID, install folder, shortcuts and `Minkops Dev`
 profile, unsigned, with no update feed. Its server is fixed at build time to the
 local console, `http://127.0.0.1:3000`; no flag or variable repoints it, and the
-production build remains HTTPS-only. Its profile keeps encrypted registration
-credentials and folder grants across restarts; keep the local API, worker and
+production build remains HTTPS-only. Its `Minkops Dev` folders keep encrypted
+registration credentials and folder grants across restarts; keep the local API, worker and
 console running while testing. From WSL, Windows reaches them on `127.0.0.1`.
 
 Start Minkops Dev from the Start menu, or from a script with `explorer.exe
 "<install folder>\Minkops Dev.exe"`, never directly from a shell that a packaged
 (MSIX) desktop app started, such as a coding agent's WSL or PowerShell. Windows
-runs such a child inside that package's container and redirects its profile to
-`%LOCALAPPDATA%\Packages\<package>\LocalCache\Roaming\Minkops Dev`: it then
-pairs as one PC there, and the same app started from the Start menu finds the
+runs such a child inside that package's container and redirects its folders to
+`%LOCALAPPDATA%\Packages\<package>\LocalCache\Roaming\Minkops Dev` and
+`...\LocalCache\Local\Minkops Dev`: it then pairs as one PC there, and the same app started from the Start menu finds the
 real, unpaired profile and appears to have forgotten it.
 
 Configure an edge request limit of at most 42 MB on the base64 folder receipt
@@ -292,6 +298,28 @@ that requires creation privileges (the same guard runs on Linux). A fresh
 Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
+
+### Companion 0.11.3
+
+The PC's own state leaves the roaming profile. Releases up to 0.11.2 kept it in
+`%APPDATA%`, so in a domain with roaming profiles or AppData folder redirection a
+second PC loaded the first PC's credential and claimed its Tally jobs, writing
+them to its own Tally copy. From 0.11.3 it is in `%LOCALAPPDATA%`
+(`apps/windows-app/src/machine-state.js`).
+
+The first start moves an earlier release's state there, once. Each file is
+flushed to its new place before its roaming copy is removed, so a power cut is
+resumed on the next start; a file already present is never overwritten, and its
+roaming copy is left where it is. Half-written saves (`*.tmp`) are deleted from
+the roaming profile. `migrated.json` is written last, and while it exists nothing
+is moved again, so a credential an older companion on another PC later saves in
+the roaming profile is never picked up. A file that cannot be read stops the start
+("Minkops could not start") and is retried on the next one: a save fence left
+behind could let a voucher be imported twice.
+
+Going back to 0.11.2 or earlier finds no state in `%APPDATA%`; the PC is connected
+again and, by its machine identity, rotates its own record's credential. Server
+contracts are unchanged.
 
 ### Companion 0.11.2
 
@@ -380,7 +408,7 @@ plan's date window before deciding:
 - `counterpart` plans (a Contra's lone leg) are covered by one Minkops transfer
   already holding both lines; an untagged one holds.
 
-A `strict` fence encrypts and fsyncs the intent under the app profile
+A `strict` fence encrypts and fsyncs the intent in the PC's state folder
 (`statement-manifests`) before importing;
 `retry_after_read` lets a later explicit Retry save import only after a fresh
 read. Within one attempt an import is never repeated, and only an exact readback

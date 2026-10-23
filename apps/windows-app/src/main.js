@@ -41,6 +41,7 @@ import { createExecutor, PLAN_VERSION } from "@minkops/desktop-runtime/jobs";
 import electronUpdater from "electron-updater";
 import { startUpdates } from "./updater.js";
 import { openPairing, stillPaired, machineInstallationId } from "./pairing.js";
+import { machineStateDirectory } from "./machine-state.js";
 import {
   trustedOrigin,
   validateSender,
@@ -61,6 +62,8 @@ let quitting = false;
 let worker;
 let timer;
 let recovery;
+// This PC's machine-bound state, outside the roaming profile (see machine-state.js), resolved once the app is ready.
+let machineState;
 // This PC's pairing (see pairing.js) and its live state, loaded once the app is ready.
 let pairing;
 let state;
@@ -172,7 +175,7 @@ function startWorker() {
         return tallyTransport({
           pc: pcName(),
           diagnose: async (diagnostic) => {
-            const root = join(app.getPath("userData"), "tally-diagnostics");
+            const root = join(machineState, "tally-diagnostics");
             await mkdir(root, { recursive: true });
             const record = {
               ...diagnostic,
@@ -193,10 +196,11 @@ function startWorker() {
       },
       // An encrypted, fsynced intent per remote ID: once written, no later
       // attempt may import that voucher again. Statement plans keep their
-      // remote ID across retries, so this directory must stay the one they used.
+      // remote ID across retries, so this directory must stay the one they used:
+      // an earlier release's moves with the rest of the machine-bound state.
       durableIntent: (job) => async (intent) => {
         if (state.device !== identity || !safeStorage.isEncryptionAvailable()) throw new Error("PC connection changed.");
-        const directory = join(app.getPath("userData"), "statement-manifests");
+        const directory = join(machineState, "statement-manifests");
         await mkdir(directory, { recursive: true });
         let handle;
         try { handle = await open(join(directory, `${intent.remote_id}.bin`), "wx", 0o600); }
@@ -346,7 +350,7 @@ async function collectDiagnostics() {
   } catch (error) {
     session = { state: error.tallyState ?? "error", message: String(error.message).slice(0, 300), cause: error.detail?.cause };
   }
-  const folder = join(app.getPath("userData"), "tally-diagnostics");
+  const folder = join(machineState, "tally-diagnostics");
   const records = [];
   try {
     const files = await Promise.all(
@@ -427,7 +431,7 @@ function setupBridge() {
   handle("desktop:check-updates", () => updates?.check());
   handle("desktop:install-update", () => updates?.requestInstall() ?? false);
   handle("desktop:tally-diagnostics", async () => {
-    await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
+    await shell.openPath(join(machineState, "tally-diagnostics"));
   });
   handle("desktop:status", async () => ({
     version: app.getVersion(),
@@ -652,8 +656,10 @@ else {
     .whenReady()
     .then(async () => {
       app.setAppUserModelId("com.minkops.desktop");
+      // Before anything reads or writes it: an earlier release's state moves out of the roaming profile here.
+      machineState = await machineStateDirectory({ userData: app.getPath("userData") });
       pairing = await openPairing({
-        directory: app.getPath("userData"),
+        directory: machineState,
         origin,
         machine: await machineInstallationId(),
         cipher: {

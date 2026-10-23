@@ -19,7 +19,8 @@ import { execFile } from "node:child_process";
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { open, readFile, rename } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
+import { durableWrite } from "./machine-state.js";
 
 const machineGuid = async () =>
   (await promisify(execFile)("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"],
@@ -50,18 +51,6 @@ export async function machineInstallationId({ query = machineGuid, host, account
   } catch {
     return null;
   }
-}
-
-async function durableWrite(path, data) {
-  const temporary = path + ".tmp";
-  const handle = await open(temporary, "w", 0o600);
-  try {
-    await handle.writeFile(data);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await rename(temporary, path);
 }
 
 async function readOptional(path) {
