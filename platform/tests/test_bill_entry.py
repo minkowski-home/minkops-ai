@@ -1707,3 +1707,25 @@ def test_a_bill_departing_from_its_suppliers_mature_booking_needs_a_stated_reaso
     later = launch(desk, {"c.pdf": repairs_pdf("SOS/26/0503")})
     read(desk, by_file(**{"c.pdf": proposing(names, repairs(guid, "SOS/26/0503"))}), later)
     assert records(desk, later)[0]["status"] == "proposed"
+
+
+def test_a_held_copy_of_a_bill_minkops_saved_in_another_run_is_reconciled_without_learning_it_twice(desk):
+    """The same bill holds in one run and is approved and saved in another. After the next sync the held copy is a
+    duplicate of that voucher, noted as Minkops's own save rather than one entered by hand, and the voucher, which
+    taught its booking when it was saved, teaches nothing more."""
+    db, names, guid = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
+    unsure = proposal(guid, exception=exception("Office Cabins or Repairs?", "g-cabins", "g-repairs"))
+    first = launch(desk, {"held.pdf": B01})
+    read(desk, by_file(**{"held.pdf": proposing(names, unsure)}), first)
+    second = launch(desk, {"saved.pdf": B01})
+    read(desk, by_file(**{"saved.pdf": proposing(names, proposal(guid))}), second)
+    decide(desk, records(desk, second)[0], "approve")
+    operation, plan = companion(desk)
+    assert record(desk, records(desk, second)[0])["status"] == "saved"
+    saved = {**entered(guid="tally-1"), "NARRATION": plan["header"]["narration"]}
+    version = factory.books(db, desk["company"], masters(desk["company"]), [PRIOR, saved])
+    bill_entry.entered_by_hand(db, desk["company"], version["version"])
+    held = records(desk, first)[0]
+    assert (held["status"], held["review_reasons"], held["current"]["guid"]) == (
+        "duplicate", [bill_entry.SAVED_ELSEWHERE], "tally-1")
+    assert [row["uses"] for row in bookings(desk)] == [1]

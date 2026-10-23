@@ -42,6 +42,13 @@ def request(connection, run, record, plan, company, *, actor):
     return True
 
 
+def saved(connection, tenant_id, voucher_guid):
+    """Whether a run saved this Tally voucher and verified it: work found in Tally is then Minkops's own save."""
+    return connection.execute(
+        "SELECT 1 FROM run_records WHERE tenant_id=%s AND status='saved' AND current->>'guid'=%s LIMIT 1",
+        (tenant_id, voucher_guid)).fetchone() is not None
+
+
 def dispatch(connection, tenant_id, device_id, *, actor=None):
     """Queue the PC's next pending write unless one is already queued or running there.
 

@@ -287,11 +287,13 @@ desk employee (`accounts/memory.py`):
   alteration, how the voucher is booked now (evidence `tally_edit`); an amount-only
   edit changes nothing, and a deleted or cancelled voucher only demotes. A voucher
   moved to another supplier teaches recognition instead (below). After each sync,
-  the client's bills held for a question, or left as is, that a person has since
-  entered in Tally by hand are found there by their document identity, as the
-  write-time check finds them (the supplier by the printed GSTIN when none was
-  matched): each becomes `duplicate`, noted "Entered in Tally by hand", and teaches
-  its booking (evidence `tally_entry`). A bill already in the run's books when it
+  the client's bills held for a question, or left as is, that are now in Tally are
+  found there by their document identity, as the write-time check finds them (the
+  supplier by the printed GSTIN when none was matched). Each becomes `duplicate`,
+  noted "Saved in Tally by Minkops from another run" when a run saved and verified
+  that voucher, or else "Entered in Tally by hand". Only an entry made by hand
+  teaches its booking (evidence `tally_entry`), and no voucher teaches the client's
+  memory twice. A bill already in the run's books when it
   is proposed is `duplicate` at once if entered as proposed, or held as
   `already_in_tally` (final) naming what differs; the write-time check still guards
   every save.

@@ -88,9 +88,11 @@ bills do: the larger of memory's confirmed uses and the bank ledger's vouchers o
 the last 400 days posting to the same counter ledger as the same voucher type,
 whose narration names the payee (at least four characters). A routing confirmed
 at least twice binds the payee's next rows: a row booked otherwise, with no rule
-cited, needs a stated `departure`, and is then proposed with it as a review note. After each sync, held or left-as-is rows a person
-has since entered in Tally by hand are found the same way, become `duplicate` noted
-"Entered in Tally by hand", and teach their payee's routing.
+cited, needs a stated `departure`, and is then proposed with it as a review note. After each sync, held or left-as-is rows now in
+Tally are found the same way and become `duplicate`, noted "Saved in Tally by Minkops
+from another run" when a run saved and verified that voucher, or else "Entered in
+Tally by hand". Only an entry made by hand teaches its payee's routing, and no
+voucher teaches twice.
 
 As in [Bill entry](bill-entry.md#reading-a-file), the session meets companies and
 masters only as short references its input and lookups gave it (`C1`, `L12`), and a

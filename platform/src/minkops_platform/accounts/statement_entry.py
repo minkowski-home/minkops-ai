@@ -74,6 +74,7 @@ OFFERED = ("nothing", "retry", "choose", "supplier", "retry_save", "settle")
 LABELS = {**ACTIONS, "approve": "Approve", "alike": "Approve all booked this way"}
 ALREADY = "Already in Tally."
 BY_HAND = "Entered in Tally by hand."
+SAVED_ELSEWHERE = "Saved in Tally by Minkops from another run."
 # A UTR or bank reference a narration prints: one token of 10 to 22 letters and digits, at least six of them digits.
 UTR = re.compile(r"(?<![A-Z0-9])(?=[A-Z0-9]*(?:\d[A-Z0-9]*){6})[A-Z0-9]{10,22}(?![A-Z0-9])")
 
@@ -409,8 +410,9 @@ def _entered(connection, company, record, bank):
 
 
 def _learn_entered(connection, company, voucher, payee):
-    """A row a person entered in Tally teaches how its payee's rows are booked, once per alteration of its voucher."""
-    if not payee or memory.taught(connection, company, "tally_entry", voucher):
+    """A row a person entered in Tally teaches how its payee's rows are booked, once: a voucher that already taught
+    the client's memory teaches nothing more."""
+    if not payee or memory.taught(connection, company, voucher):
         return
     found = memory.treatment(connection, company, company["version"], voucher, payee=payee)
     if found:
@@ -419,9 +421,10 @@ def _learn_entered(connection, company, voucher, payee):
 
 
 def entered_by_hand(connection, company, version):
-    """After a sync, the client's bank rows of this company held for a question, or left as is, that a person has
-    since entered in Tally by hand are found there by their reference or UTR, amount and bank ledger. Each becomes
-    `duplicate` with Tally's voucher, noted, and teaches how its payee's rows are booked."""
+    """After a sync, the client's bank rows of this company held for a question, or left as is, that are now in
+    Tally, entered by hand or saved by Minkops from another run, are found there by their reference or UTR, amount
+    and bank ledger. Each becomes `duplicate` with Tally's voucher, noted with how it got there, and a voucher entered
+    by hand teaches how its payee's rows are booked."""
     company, runs = {**company, "version": version}, set()
     for record in connection.execute(
             """SELECT r.* FROM run_records r JOIN runs n ON n.tenant_id=r.tenant_id AND n.id=r.run_id
@@ -435,9 +438,12 @@ def entered_by_hand(connection, company, version):
         voucher = _entered(connection, company, record, bank[0]["name"]) if bank else None
         if voucher is None:
             continue
-        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[BY_HAND],
-                           current=mirror.observed(voucher))
-        _learn_entered(connection, company, voucher, now["payee"])
+        # A voucher Minkops saved from another run taught its routing, if any, when it was verified.
+        ours = writes.saved(connection, company["tenant_id"], voucher["guid"])
+        work.update_record(connection, record, status="duplicate", hold_codes=[],
+                           review_reasons=[SAVED_ELSEWHERE if ours else BY_HAND], current=mirror.observed(voucher))
+        if not ours:
+            _learn_entered(connection, company, voucher, now["payee"])
         runs.add(record["run_id"])
     for run_id in sorted(runs):
         work.refresh(connection, company["tenant_id"], run_id, describe=describe)

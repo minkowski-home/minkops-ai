@@ -86,6 +86,7 @@ DEMOTED = ("Someone changed a bill booked this way in Tally after Minkops saved 
 BOOKING_REVIEWS = (UNPRECEDENTED, DEMOTED)
 ALREADY = "Already in Tally, booked as proposed."
 BY_HAND = "Entered in Tally by hand."
+SAVED_ELSEWHERE = "Saved in Tally by Minkops from another run."
 # A line's role, as the ledgers a person may choose for it are listed (desk_tools.ROLE_GROUPS).
 PICKERS = {"expense": "expense", "freight": "expense", "other_charge": "expense", "discount": "expense",
            "tax": "tax", "tds": "tax"}
@@ -688,8 +689,9 @@ def _found_in_tally(connection, desk, record, bill, company, bound, entered, *, 
 
 
 def _learn_entered(connection, company, voucher):
-    """A bill a person entered in Tally teaches how it is booked, once per alteration of its voucher."""
-    if memory.taught(connection, company, "tally_entry", voucher):
+    """A bill a person entered in Tally teaches how it is booked, once: a voucher that already taught the client's
+    memory teaches nothing more."""
+    if memory.taught(connection, company, voucher):
         return
     found = memory.treatment(connection, company, company["version"], voucher)
     if found:
@@ -1625,10 +1627,11 @@ def _booked_as(theirs, bill):
 
 
 def entered_by_hand(connection, company, version):
-    """After a sync, the client's bills of this company held for a question, or left as is, that a person has since
-    entered in Tally by hand are found there by their document identity, as the write-time check would find them.
-    Each becomes `duplicate` with Tally's voucher, noted, and teaches how it is booked. A bill whose supplier no
-    ledger was matched to is found through the GSTIN it prints; one Tally holds twice is left for a person.
+    """After a sync, the client's bills of this company held for a question, or left as is, that are now in Tally,
+    entered by hand or saved by Minkops from another run, are found there by their document identity, as the
+    write-time check would find them. Each becomes `duplicate` with Tally's voucher, noted with how it got there, and
+    a voucher entered by hand teaches how it is booked. A bill whose supplier no ledger was matched to is found
+    through the GSTIN it prints; one Tally holds twice is left for a person.
     """
     company, runs = {**company, "version": version}, set()
     for record in connection.execute(
@@ -1649,9 +1652,12 @@ def entered_by_hand(connection, company, version):
                           issued=date.fromisoformat(document["date"]))
         if len(found) != 1:
             continue
-        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[BY_HAND],
-                           current=mirror.observed(found[0]))
-        _learn_entered(connection, company, found[0])
+        # A voucher Minkops saved from another run taught its booking, if any, when it was verified.
+        ours = writes.saved(connection, company["tenant_id"], found[0]["guid"])
+        work.update_record(connection, record, status="duplicate", hold_codes=[],
+                           review_reasons=[SAVED_ELSEWHERE if ours else BY_HAND], current=mirror.observed(found[0]))
+        if not ours:
+            _learn_entered(connection, company, found[0])
         runs.add(record["run_id"])
     for run_id in sorted(runs):
         work.refresh(connection, company["tenant_id"], run_id, describe=describe)

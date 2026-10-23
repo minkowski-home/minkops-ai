@@ -1146,6 +1146,49 @@ def test_held_and_deferred_rows_a_person_entered_in_tally_by_hand_are_reconciled
     assert learnt["value"]["counter_ledger"] == "Acme Steel"
 
 
+def test_a_held_row_minkops_saved_from_another_run_is_reconciled_without_learning_it_twice(desk):
+    """Acme's payment holds in one run and is approved and saved from another. After the next sync the held copy
+    is a duplicate of that voucher, noted as Minkops's save, and the voucher teaches Acme's routing once."""
+    import factory
+    company = desk["company"]["guid"]
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {
+                "code": "ledger_unresolved", "detail": "Acme Steel or Steel Mart?", "company_guid": company,
+                "bank_ledger_guid": "g-icici", "payee": "ACME STEEL", "candidate_guids": ["g-acme", "g-steel"]}}
+            if "ACME" in row["narration"] else booked(row, company)
+            for row in rows_of(session) if "TRANSFER" not in row["narration"]]})]
+
+    unsure = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                        else Script(layouts))
+    first = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, first, unsure)
+    with host(desk, unsure):
+        until(lambda: all(i["state"] == "done" for i in items(desk, first)))
+    sure = FakeAgents(script_for=lambda m, content: chunk_session(desk, routed(company)) if is_chunk(content)
+                      else Script(layouts))
+    second = launch(desk, {"icici-copy.csv": ICICI})
+    with host(desk, sure):
+        until(lambda: any(i["kind"] == "chunk" for i in items(desk, second)))
+    refreshed(desk)
+    with host(desk, sure):
+        until(lambda: all(i["state"] == "done" for i in items(desk, second)))
+    acme = next(r for r in records(desk, second) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    decide(desk, acme, "approve")
+    companion(desk)
+    assert work.get_record(desk["db"], desk["tenant"]["id"], acme["id"])["status"] == "saved"
+    version = factory.books(desk["db"], desk["company"], masters(desk["company"]), [
+        purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00"),
+        by_hand("tally-1", "20260901", "Acme Steel", "1180.00", "UTR111222")])
+    statement_entry.entered_by_hand(desk["db"], desk["company"], version["version"])
+    desk["db"].commit()
+    held = next(r for r in records(desk, first) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    assert (held["status"], held["review_reasons"], held["current"]["guid"]) == (
+        "duplicate", [statement_entry.SAVED_ELSEWHERE], "tally-1")
+    assert [(r["uses"], [e["kind"] for e in r["evidence"]]) for r in routings(desk)] == [(1, ["outcome"])]
+
+
 def test_a_payees_own_ledger_is_created_in_tallys_terms_only_where_the_company_gives_payees_ledgers(desk):
     """No ledger is Acme Steel's. Where the books cannot say how payees are booked, the row offers Create this
     ledger, under a group a party may go under: refused under any other group or as the wrong voucher type, then

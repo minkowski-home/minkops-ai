@@ -324,12 +324,14 @@ def learn_treatment(connection, company, found, evidence, *, actor_id=None):
                   guids=found["guids"], evidence=evidence, status="confirmed", actor_id=actor_id, use=True)
 
 
-def taught(connection, company, kind, voucher):
-    """Whether this alteration of a voucher already taught the client's memory, as `kind` evidence."""
+def taught(connection, company, voucher, *, edit=False):
+    """Whether a voucher already taught the client's memory: any evidence naming it, so one voucher never counts twice;
+    for an `edit`, this alteration of it."""
+    named = {"kind": "tally_edit", "voucher": voucher["guid"], "alter_id": voucher["alter_id"]} if edit else {
+        "voucher": voucher["guid"]}
     return connection.execute(
         "SELECT 1 FROM memory_entries WHERE tenant_id=%s AND client_id=%s AND evidence @> %s LIMIT 1",
-        (company["tenant_id"], company["client_id"],
-         Jsonb([{"kind": kind, "voucher": voucher["guid"], "alter_id": voucher["alter_id"]}]))).fetchone() is not None
+        (company["tenant_id"], company["client_id"], Jsonb([named]))).fetchone() is not None
 
 
 def _corrected(connection, company, version, entry, voucher):
@@ -338,7 +340,7 @@ def _corrected(connection, company, version, entry, voucher):
     A bill whose supplier changed teaches what its printed supplier name stands for instead (`recognise`), from
     the bill the entry was learnt from; its booking under the other supplier is not this supplier's.
     """
-    if taught(connection, company, "tally_edit", voucher):
+    if taught(connection, company, voucher, edit=True):
         return
     evidence = {"kind": "tally_edit", "voucher": voucher["guid"], "alter_id": voucher["alter_id"]}
     if entry["kind"] == "routing":
