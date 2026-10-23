@@ -75,7 +75,7 @@ def proposal(**changes):
         "bill": 1, "company_guid": "company", "company_evidence": "Buyer GSTIN matches Test.",
         "document": {"kind": "invoice", "number": "INV/26/0412", "date": "2026-10-14", "total": 6355.00,
                      "supplier_name": "ACME CEMENT", "supplier_gstin": "27AAACA1234A1Z5", "origin": "domestic",
-                     "taxable": None, "tax": None},
+                     "buyer_gstin": "27ABCDE1234F1Z5", "taxable": None, "tax": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "vt-purchase-gst",
                     "party": {"ledger_guid": guid("Acme Cement"), "new_supplier": False,
                               "evidence": "GSTIN matches ledger."},
@@ -450,9 +450,34 @@ class GstReturnsTest(unittest.TestCase):
         next(r for r in typed["masters"]["records"] if r["data"].get("NAME") == "Purchase 18%")["data"]["GSTTYPEOFSUPPLY"] = "Goods"
         self.assertTrue(gst_check(gst_proposal(**{"voucher.lines.0.supply": None}), in_view=typed))
 
+    def test_input_tax_is_claimed_only_on_a_bill_that_names_the_companys_gstin(self):
+        # Registered, the company claims tax only where the bill prints it as the buyer: read again if it does.
+        code, reason = gst_held(gst_proposal(**{"document.buyer_gstin": None}))
+        self.assertEqual(code, "classification_uncertain")
+        self.assertEqual(reason, (
+            "Test can claim input tax only on a bill that prints its GSTIN as the buyer's. Give buyer_gstin as the "
+            "bill prints it. If it prints none, propose classification_uncertain: whether the tax is claimed or is "
+            "part of the cost is a person's call."))
+        # An untaxed bill needs no buyer GSTIN: the company's only registration is assumed.
+        untaxed = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 5000.00)],
+                              "document.total": 5000.00, "document.buyer_gstin": None})
+        self.assertTrue(gst_check(untaxed))
+        # GST on in Tally with no GSTIN there: nothing can be claimed, and no reading changes that.
+        try:
+            gst_check(gst_proposal(), in_view=gst_view(registrations=()))
+        except HoldReason as refusal:
+            self.assertEqual((refusal.code, refusal.final), ("classification_uncertain", True))
+            self.assertEqual(str(refusal), (
+                "Test has GST switched on in Tally but no GSTIN there, so it cannot claim this bill's input tax. "
+                "Add the company's GSTIN in Tally, or decide whether the tax is part of the cost."))
+        else:
+            raise AssertionError("A company without a GSTIN claimed input tax.")
+        # GST off in Tally: tax ledgers are the company's own bookkeeping, and its bills are not held for them.
+        self.assertTrue(check(proposal()))
+
     def test_of_several_registrations_the_bill_names_the_one_it_is_addressed_to(self):
         several = gst_view(registrations=(("Test Maharashtra", BUYER), ("Test Karnataka", "29ABCDE1234F1Z1")))
-        self.assertIn("give the buyer GSTIN", gst_held(gst_proposal(), in_view=several)[1])
+        self.assertIn("give the buyer GSTIN", gst_held(gst_proposal(**{"document.buyer_gstin": None}), in_view=several)[1])
         self.assertEqual(gst_held(gst_proposal(**{"document.buyer_gstin": "07ABCDE1234F1Z9"}), in_view=several)[0],
                          "company_unresolved")
         plan = gst_check(gst_proposal(**{"document.buyer_gstin": "29abcde1234f1z1"}), in_view=several).native_plan(REMOTE)

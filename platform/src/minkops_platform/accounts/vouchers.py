@@ -812,12 +812,23 @@ def _gst(view, masters, company, document, family, raw, lines, taxes, ledger, pa
     registrations = gst.registrations(view)
     buyer = (document.get("buyer_gstin") or "").strip().upper()
     registration = None
+    # Input tax is claimed only by a registered buyer, on a bill that names its GSTIN. A company with GST off in Tally
+    # keeps its tax ledgers as plain bookkeeping, so only one with GST on is held to that.
+    if taxes and not registrations and masters.scalar(view["identity"], "ISGSTON").casefold() == "yes":
+        raise HoldReason("classification_uncertain", (
+            f"{company['name']} has GST switched on in Tally but no GSTIN there, so it cannot claim this bill's input "
+            "tax. Add the company's GSTIN in Tally, or decide whether the tax is part of the cost."), final=True)
     if registrations:
         if buyer:
             registration = next((r for r in registrations if r["gstin"] == buyer), None)
             if registration is None:
                 raise HoldReason("company_unresolved", f"The bill is addressed to GSTIN {buyer}, which is not one of "
                                                        f"{company['name']}'s GST registrations in Tally.")
+        elif len(registrations) == 1 and taxes:
+            raise HoldReason("classification_uncertain", (
+                f"{company['name']} can claim input tax only on a bill that prints its GSTIN as the buyer's. Give "
+                "buyer_gstin as the bill prints it. If it prints none, propose classification_uncertain: whether the "
+                "tax is claimed or is part of the cost is a person's call."))
         elif len(registrations) == 1:
             registration = registrations[0]
         else:
