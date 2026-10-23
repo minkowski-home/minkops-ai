@@ -788,6 +788,25 @@ def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_
     saved = work.get_record(desk["db"], desk["tenant"]["id"], rows[0]["id"])
     assert (saved["status"], saved["current"]["bills"]) == (
         "saved", [{"ledger": "Steel Mart", "name": "SM/102", "type": "Agst Ref", "amount_cents": -200000}])
+    # A recheck pins a newer copy of the books, which holds the saved payment: it settles SM/102 there, and its claim
+    # no longer counts, so no balance is settled twice.
+    import factory
+    from minkops_platform.accounts import desk_tools, settlement
+    db, steel = desk["db"], desk["company"]
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    desk_tools.recheck(db, current, desk["operator"]["id"], [steel["id"]])
+    payment = {"GUID": "tally-1", "MASTERID": "71", "ALTERID": "9", "DATE": "20260915", "VOUCHERTYPENAME": "Payment",
+               "PARTYLEDGERNAME": "Steel Mart", "ALLLEDGERENTRIES.LIST": [
+                   {"LEDGERNAME": "Steel Mart", "AMOUNT": "-2000.00", "BILLALLOCATIONS.LIST": {
+                       "NAME": "SM/102", "BILLTYPE": "Agst Ref", "AMOUNT": "-2000.00"}},
+                   {"LEDGERNAME": "ICICI Current A/c", "AMOUNT": "2000.00"}]}
+    factory.books(db, steel, masters(steel), [purchase("v-sm1", "20260801", "SM/101", "1180.00"),
+                                             purchase("v-sm2", "20260815", "SM/102", "5000.00"), payment])
+    refreshed(desk)
+    pinned = desk_tools.ready(db, current)
+    db.commit()
+    # SM/102's 5,000.00: 2,000.00 paid in the books, 3,000.00 claimed by the run's second row; SM/101 by its third.
+    assert settlement.open_bills(db, pinned, {**steel, "version": pinned["pins"][str(steel["id"])]}, "Steel Mart") == []
 
 
 def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk):
@@ -874,19 +893,28 @@ def test_stopping_holds_unsaved_rows_and_withdraws_writes_no_pc_has_started(desk
     assert companion(desk) is None
 
 
-def test_a_rechecked_row_gets_a_fresh_proposal_in_a_new_attempt_of_its_chunk(desk):
-    company = desk["company"]["guid"]
+def test_a_rechecked_row_is_proposed_afresh_once_its_pc_has_read_the_books_again(desk):
+    """No ledger is Acme Steel's when the run reads the books, so its row holds. The person creates the ledger in
+    Tally and rechecks: the row waits until its PC has refreshed, the run pins the new copy, and only that row goes
+    to a new attempt of its chunk, which finds the ledger."""
+    import factory
+    db, company, device = desk["db"], desk["company"], desk["device"]
+    factory.books(db, company, [r for r in masters(company) if r["data"]["GUID"] != "g-acme"])
+    db.commit()
     attempts = []
 
-    def once_unsure(answers, session):
-        rows, first = rows_of(session), not attempts
+    def unsure_until_found(answers, session):
+        rows = rows_of(session)
         attempts.append(len(rows))
+        found = any(ledger["name"] == "Acme Steel" for a in session.answers if a["name"] == "find_ledger"
+                    for result in json.loads(a["text"])["results"] for ledger in result["ledgers"])
         return [("propose", {"rows": [
-            {"ref": row["ref"], "exception": {"code": "ledger_unresolved", "detail": "Which supplier?"}}
-            if first and "ACME" in row["narration"] else booked(row, company)
+            {"ref": row["ref"], "exception": {"code": "ledger_unresolved", "detail": "No ledger is Acme Steel's."}}
+            if not found and ("ACME" in row["narration"] or "RETURN" in row["narration"]) else booked(row, company["guid"])
             for row in rows if "TRANSFER" not in row["narration"]]})]
 
-    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, once_unsure) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_until_found) if is_chunk(content)
+                      else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, run, fake)
     with host(desk, fake):
@@ -894,8 +922,17 @@ def test_a_rechecked_row_gets_a_fresh_proposal_in_a_new_attempt_of_its_chunk(des
     acme = next(r for r in records(desk, run) if "ACME" in r["facts"]["narration"])
     assert acme["hold_codes"] == ["ledger_unresolved"]
     decide(desk, acme, "retry")
+    chunk = next(i for i in items(desk, run) if i["kind"] == "chunk")
+    assert (chunk["state"], chunk["waiting_on"]) == ("waiting", sync.blocker(device["id"]))
+    assert work.get_record(db, desk["tenant"]["id"], acme["id"])["review_reasons"] == [
+        f"Reading this entry again once {device['name']} has refreshed its Tally copy."]
+    fresh = factory.books(db, company, masters(company))
     with host(desk, fake):
-        until(lambda: work.get_record(desk["db"], desk["tenant"]["id"], acme["id"])["status"] == "proposed")
+        refreshed(desk)
+        until(lambda: work.get_record(db, desk["tenant"]["id"], acme["id"])["status"] == "proposed")
+    assert work.get_record(db, desk["tenant"]["id"], acme["id"])["proposal"]["resolved"]["data"]["counter_ledger"] \
+        == "Acme Steel"
+    assert work.get_run(db, desk["tenant"]["id"], run["id"])["pins"][str(company["id"])] == fresh["version"]
     # Only the rechecked row went to the new session; the others kept their proposals.
     assert attempts == [4, 1]
 

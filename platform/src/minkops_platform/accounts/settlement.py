@@ -52,7 +52,9 @@ def open_bills(connection, run, company, ledger, *, record=None):
 
     `company` carries its pinned `version`. `record` is the row being settled:
     neither it nor its repeats in overlapping statements, the same bank
-    transaction, count against it. Each repeated transaction counts once.
+    transaction, count against it. Each repeated transaction counts once. A
+    saved row whose voucher the pinned books already hold, as they do once a
+    recheck pins a later copy, settles its bills there and claims nothing more.
     """
     identity = (record["facts"] or {}).get("identity") if record else None
     claims = {row["name"]: row["cents"] for row in connection.execute(
@@ -66,11 +68,15 @@ def open_bills(connection, run, company, ledger, *, record=None):
                      AND r.proposal->'resolved'->'data'->>'counter_ledger' = %(ledger)s
                      AND jsonb_typeof(r.proposal->'resolved'->'bills') = 'array'
                      AND r.id IS DISTINCT FROM %(self)s::uuid AND (r.facts->>'identity') IS DISTINCT FROM %(identity)s
+                     AND NOT (r.status = 'saved' AND EXISTS (
+                         SELECT 1 FROM mirror_vouchers v WHERE v.company_id=%(company)s AND v.guid=r.current->>'guid'
+                             AND v.synced_in <= %(version)s
+                             AND (v.superseded_in IS NULL OR v.superseded_in > %(version)s)))
                  ORDER BY coalesce(r.facts->>'identity', r.id::text), r.id) AS claim,
                 jsonb_array_elements(claim.proposal->'resolved'->'bills') AS bill
            WHERE bill->>'type' = 'Agst Ref' GROUP BY bill->>'name'""",
-        {"run": run["id"], "company": company["id"], "ledger": ledger, "self": record["id"] if record else None,
-         "identity": identity}).fetchall()}
+        {"run": run["id"], "company": company["id"], "version": company["version"], "ledger": ledger,
+         "self": record["id"] if record else None, "identity": identity}).fetchall()}
     bills = []
     for bill in mirror.open_bills(connection, company["id"], company["version"], [ledger]):
         balance = bill["balance_cents"] + claims.get(bill["name"], 0)

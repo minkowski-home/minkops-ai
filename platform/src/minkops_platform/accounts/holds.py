@@ -59,12 +59,15 @@ _CATALOG = [
         ("unsupported_structure", EXCEPTION, "Manual entry needed",
          "This bill requires accounting entries outside the supported save format."),
     ]),
-    # Neither recheck nor retry can clear these: Stop is final, and a run's books stay as it read them.
+    # Stop is final: neither recheck nor retry clears it.
     *_holds((BILL, STATEMENT), ("nothing",), [
         ("run_stopped", LIFECYCLE, "Run stopped", "The run was stopped before this bill was saved."),
+    ]),
+    # A recheck reads the books again as they are now (desk_tools.recheck).
+    *_holds((BILL, STATEMENT), NON_WRITING, [
         ("destination_changed", NATIVE, "Tally changed",
-         "A ledger, voucher type or cost allocation changed in Tally after this run read the books. Start a new run "
-         "to enter this bill."),
+         "A ledger, voucher type or cost allocation changed in Tally after this run read the books. Recheck to read "
+         "this bill again against the books as they are now."),
     ]),
     *_holds((BILL,), NON_WRITING, [
         ("not_a_bill", EXCEPTION, "Not a bill", "This source does not contain a bill that can be entered."),

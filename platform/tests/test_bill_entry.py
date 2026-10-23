@@ -821,8 +821,9 @@ def test_a_file_of_several_bills_keeps_its_decided_bills_through_a_recheck(desk)
     decide(desk, second, "approve")
     companion(desk)
     assert record(desk, second)["status"] == "saved"
-    # Recheck reads the whole file again; the saved bill keeps its number and stays as it is.
+    # Recheck reads the whole file again once the PC has refreshed; the saved bill keeps its number and stays as it is.
     assert decide(desk, first, "retry")["status"] == "pending"
+    refreshed(desk)
     with lanes.Host(os.environ["TEST_DATABASE_URL"], client=fake, tenant_id=desk["tenant"]["id"], lanes=2,
                     heartbeat_seconds=0.2, poll_seconds=0.3, close_seconds=0.1):
         until(lambda: items(desk, run)[0]["state"] == "done" and record(desk, first)["status"] != "pending")
@@ -834,6 +835,100 @@ def test_a_file_of_several_bills_keeps_its_decided_bills_through_a_recheck(desk)
     assert answered["bills"] == [{"bill": 1, "status": "accepted"},
                                  {"bill": 2, "status": "saved", "reason": "Already decided."}]
     assert [(r["facts"]["bill"], r["status"]) for r in records(desk, run)] == [(1, "proposed"), (2, "saved")]
+
+
+def offered(desk, row):
+    """The decisions a bill offers as its review shows them, its run's control state included."""
+    current = record(desk, row)
+    run = work.get_run(desk["db"], desk["tenant"]["id"], current["run_id"])
+    return [a["action"] for a in bill_entry.HANDLER.summarize(run, current).get("actions", [])]
+
+
+def test_a_recheck_reads_the_books_again_so_a_ledger_created_in_tally_since_is_found(desk):
+    """The books have no ledger for the cabin, so its bill holds. The person creates one in Tally and rechecks: the
+    bill waits until its PC has read the books again, then is proposed with that ledger. A refresh already reading
+    Tally may have missed the change, so the bill waits for one that starts after the recheck. The run's other bill
+    keeps its proposal."""
+    db, company, device = desk["db"], desk["company"], desk["device"]
+    factory.books(db, company, [r for r in masters(company) if r["data"]["GUID"] != "g-cabins"], [PRIOR])
+    db.commit()
+    names, guid = names_of(company), company["guid"]
+    unsure = proposal(guid, voucher=None, exception={"code": "classification_uncertain",
+                                                      "detail": "No ledger records office cabins."})
+    readings = {"a-cabin.pdf": iter([proposing(names, unsure), proposing(names, proposal(guid))]),
+                "b-repairs.pdf": iter([proposing(names, repairs(guid, "SOS/26/0420"))])}
+    fake = FakeAgents(script_for=lambda metadata, content: Script(*next(readings[header_of(content)["file"]])))
+    run = launch(desk, {"a-cabin.pdf": B01, "b-repairs.pdf": repairs_pdf("SOS/26/0420")})
+    read(desk, fake, run)
+    held, other = records(desk, run)
+    assert (held["hold_codes"], offered(desk, held), other["status"]) == (
+        ["classification_uncertain"], ["nothing", "retry"], "proposed")
+    pinned = work.get_run(db, desk["tenant"]["id"], run["id"])["pins"]
+    reading = sync.queue(db, device, desk["operator"]["id"], reason="background")
+    db.execute("UPDATE desktop_jobs SET state='executing', lease_until=now()+interval '2 minutes' WHERE id=%s",
+               (reading["id"],))
+    db.commit()
+    assert decide(desk, held, "retry")["status"] == "pending"
+    [item, _] = items(desk, run)
+    assert (item["state"], item["waiting_on"]) == ("waiting", sync.blocker(device["id"]))
+    syncs = db.execute("SELECT state, input->>'reason' AS reason FROM desktop_jobs WHERE device_id=%s AND "
+                       "operation='tally.sync' AND state IN ('queued','executing') ORDER BY created_at",
+                       (device["id"],)).fetchall()
+    assert [(s["state"], s["reason"]) for s in syncs] == [("executing", "background"), ("queued", "recheck")]
+    # Until its PC has read the books, the bill says which PC it waits for: an offline one keeps it waiting.
+    assert record(desk, held)["review_reasons"] == [
+        f"Reading this bill again once {device['name']} has refreshed its Tally copy."]
+    # The refresh that was already reading finishes first: the bill waits on for the one queued after the recheck.
+    db.execute("UPDATE desktop_jobs SET state='completed' WHERE id=%s", (reading["id"],))
+    work.release(db, desk["tenant"]["id"], sync.blocker(device["id"]))
+    db.commit()
+    with lanes.Host(os.environ["TEST_DATABASE_URL"], client=fake, tenant_id=desk["tenant"]["id"], lanes=2,
+                    heartbeat_seconds=0.2, poll_seconds=0.3, close_seconds=0.1):
+        until(lambda: items(desk, run)[0]["state"] == "waiting" and items(desk, run)[0]["attempt"] == 2)
+    assert work.get_run(db, desk["tenant"]["id"], run["id"])["pins"] == pinned
+    # The recheck's refresh publishes the books with the ledger created in Tally; the bill is proposed with it.
+    fresh = factory.books(db, company, masters(company), [PRIOR])
+    with lanes.Host(os.environ["TEST_DATABASE_URL"], client=fake, tenant_id=desk["tenant"]["id"], lanes=2,
+                    heartbeat_seconds=0.2, poll_seconds=0.3, close_seconds=0.1):
+        refreshed(desk)
+        until(lambda: record(desk, held)["status"] != "pending")
+    held = record(desk, held)
+    assert (held["status"], held["proposal"]["preview"]["lines"][1]["ledger"]) == ("proposed", "Office Cabins")
+    after = work.get_run(db, desk["tenant"]["id"], run["id"])
+    assert (after["pins"][str(company["id"])], after["repin"]) == (fresh["version"], [])
+    # The run's other bill kept its proposal, as decided against the books it was read from.
+    assert {key: record(desk, other)[key] for key in ("version", "status", "proposal")} == {
+        key: other[key] for key in ("version", "status", "proposal")}
+
+
+def header_of(content):
+    return json.loads(content[0]["text"])
+
+
+def test_a_bill_left_as_is_or_refused_as_tally_changed_can_be_rechecked_unless_its_run_was_stopped(desk):
+    """Do nothing, fix it in Tally, recheck: a bill left as is, or one Tally refused because its masters changed after
+    the run read them, is read again. A stopped run offers only Do nothing."""
+    db, names, guid = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
+    fake = by_file(**{"a-sunrise.pdf": proposing(names, proposal(guid)),
+                      "b-repairs.pdf": proposing(names, repairs(guid, "SOS/26/0420"))})
+    run = launch(desk, {"a-sunrise.pdf": B01, "b-repairs.pdf": repairs_pdf("SOS/26/0420")})
+    read(desk, fake, run)
+    changed, left = records(desk, run)
+    decide(desk, changed, "approve")
+    companion(desk, lambda operation, plan: {"outcome": "attention", "hold": "destination_changed",
+                                             "message": "Office Cabins changed in Tally after this run read it."})
+    assert (record(desk, changed)["hold_codes"], offered(desk, changed)) == (["destination_changed"], ["nothing", "retry"])
+    decide(desk, left, "nothing")
+    assert offered(desk, left) == ["retry"]
+    assert decide(desk, changed, "retry")["status"] == "pending"
+    rechecked = record(desk, changed)
+    assert (rechecked["status"], rechecked["hold_codes"], rechecked["current"]) == ("pending", [], None)
+    assert record(desk, left)["status"] == "deferred"
+    run_controls.task_control(db, desk["tenant"]["id"], desk["operator"], run["task_id"], "stop")
+    db.commit()
+    assert (offered(desk, left), offered(desk, changed)) == ([], ["nothing"])
+    with pytest.raises(ServiceError, match="not available"):
+        decide(desk, left, "retry")
 
 
 def test_a_locked_run_enters_bills_into_its_company_and_a_year_split_routes_by_date(desk):

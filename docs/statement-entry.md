@@ -169,7 +169,9 @@ each settlement choice as its own button. The runs API serves:
 - pages of record summaries;
 - each record's detail;
 - idempotent decisions per record version: `approve`, `nothing` (Do nothing),
-  `retry` (Recheck the row in a new attempt of its chunk), `retry_save`, and
+  `retry` (Recheck: the row's PC reads the books afresh, then the row is proposed
+  again in a new attempt of its chunk against that copy; a row left as is offers it
+  too), `retry_save`, and
   `settle` with the chosen allocation;
 - `POST .../runs/{run}/approve`, which approves every ready row that needs no review.
 
@@ -189,7 +191,8 @@ An approved row becomes a durable `native_writes` intent before anything is sent
   open, possible existing voucher, uncertain import) holds the row. Retry save sends
   the same plan, which the companion either finds already in Tally or refuses to
   import twice. A ledger, voucher type or cost allocation that changed in Tally after
-  the run read the books holds as `destination_changed`: start a new run for it.
+  the run read the books holds as `destination_changed`: Recheck reads the books
+  again and proposes the row afresh.
 - **Interrupted saves.** A write whose PC stopped before confirming it holds as
   `save_interrupted` once that PC polls again; it is never re-sent automatically.
 

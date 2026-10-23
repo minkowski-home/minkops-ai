@@ -925,14 +925,21 @@ def _link_copies(connection, run, ready):
 
 # --- review and decisions ---------------------------------------------------------------
 
-def _offered(record):
+def _offered(record, run=None):
+    """The decisions a bill offers now. One left as is can be read again once Tally is fixed; a stopped run offers
+    only Do nothing, since every other decision needs it active."""
+    offered = []
     if record["status"] == "proposed":
-        return ["approve", "nothing"]
-    if record["status"] != "held":
-        return []
-    offers = (record["checks"] or {}).get("offers") or []
-    return [action for action in hold_actions(record["hold_codes"])
-            if action in OFFERED and (action not in ("guess", "supplier") or action in offers)]
+        offered = ["approve", "nothing"]
+    elif record["status"] == "deferred":
+        offered = ["retry"]
+    elif record["status"] == "held":
+        offers = (record["checks"] or {}).get("offers") or []
+        offered = [action for action in hold_actions(record["hold_codes"])
+                   if action in OFFERED and (action not in ("guess", "supplier") or action in offers)]
+    if (run or {}).get("control_state") == "stopped":
+        return [action for action in offered if action == "nothing"]
+    return offered
 
 
 def summarize(run, record):
@@ -944,7 +951,7 @@ def summarize(run, record):
         "company": facts.get("company"), "voucher_type": preview.get("voucher_type"),
         "holds": [{"code": code, "label": hold(code).label, "reason": hold(code).reason_for(BILL)}
                   for code in record["hold_codes"]], "review": record["review_reasons"],
-        "actions": [{"action": a, "label": ACTIONS.get(a, "Approve")} for a in _offered(record)],
+        "actions": [{"action": a, "label": ACTIONS.get(a, "Approve")} for a in _offered(record, run)],
     }.items() if value not in (None, [])}
 
 
@@ -957,11 +964,11 @@ def detail(connection, run, record):
             "exception": bill.get("exception"), "repeat_of": proposal.get("repeat_of"), "rules": proposal.get("rules"),
             "guess": proposal.get("guess", False), "current": record["current"],
             **({"new_supplier": {"name": (bill.get("document") or {}).get("supplier_name"), **supplier}}
-               if "supplier" in _offered(record) else {})}
+               if "supplier" in _offered(record, run) else {})}
 
 
 def decide(connection, run, record, action, detail, context):
-    if action not in _offered(record):
+    if action not in _offered(record, run):
         raise ServiceError("conflict", "That action is not available for this bill now.")
     if action == "nothing":
         work.update_record(connection, record, status="deferred")
@@ -969,7 +976,7 @@ def decide(connection, run, record, action, detail, context):
     require_active(connection, run["tenant_id"], run["task_id"])
     actor = context["user"]["id"]
     if action == "retry":
-        return _recheck(connection, run, record)
+        return _recheck(connection, run, record, actor)
     if action == "supplier":
         return _create_supplier(connection, run, record, actor=actor)
     if action == "guess":
@@ -980,16 +987,22 @@ def decide(connection, run, record, action, detail, context):
     return _approve(connection, run, record, actor=actor)
 
 
-def _recheck(connection, run, record):
-    """A new attempt of the file's session: its bills not yet decided are read again, against the run's books."""
+def _recheck(connection, run, record, actor):
+    """A new attempt of the file's session once its PC has read the books afresh (desk_tools.recheck): this bill and
+    the file's bills not yet decided are read again, so a ledger created in Tally since is found."""
     item = connection.execute("SELECT * FROM run_items WHERE id=%s FOR UPDATE", (record["item_id"],)).fetchone()
-    if item["state"] not in ("done", "failed"):
-        raise ServiceError("conflict", "This file is still being read.")
-    work.requeue_item(connection, run["tenant_id"], item["id"])
+    if item["state"] == "running":
+        raise ServiceError("conflict", "This file is being read now. Recheck it once it finishes.")
+    blocker, pcs = desk_tools.recheck(connection, run, actor,
+                                      [record["company_id"]] if record["company_id"] else list(run["pins"]))
+    if item["state"] in ("done", "failed"):
+        work.requeue_item(connection, run["tenant_id"], item["id"], waiting_on=blocker)
     connection.execute(
-        """UPDATE run_records SET status='pending', hold_codes='{}', review_reasons='{}', proposal=NULL, checks=NULL,
-           company_id=NULL, version=version+1, updated_at=now() WHERE id = ANY(%s)""",
-        ([r["id"] for r in _records(connection, item, lock=True) if _open(r)],))
+        """UPDATE run_records SET status='pending', hold_codes='{}',
+               review_reasons=CASE WHEN id=%s THEN %s ELSE '{}'::text[] END, proposal=NULL, checks=NULL,
+               company_id=NULL, current=NULL, version=version+1, updated_at=now() WHERE id = ANY(%s)""",
+        (record["id"], [desk_tools.waiting_note("bill", pcs)],
+         [r["id"] for r in _records(connection, item, lock=True) if _open(r) or r["id"] == record["id"]]))
     return {"status": "pending"}
 
 

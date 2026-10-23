@@ -77,8 +77,12 @@ def request(connection, tenant, user, member, device_id, *, reason="requested"):
     return desktop.public_job(queue(connection, device, user["id"], reason=reason))
 
 
-def queue(connection, device, actor_id, *, reason):
-    """The PC's queued or running sync, or a new one; callers have authorised the request."""
+def queue(connection, device, actor_id, *, reason, fresh=False):
+    """The PC's queued or running sync, or a new one; callers have authorised the request.
+
+    `fresh` asks for a read that starts after this request, as a recheck does: a sync already reading Tally may have
+    read the books before a person changed them, so another is queued behind it.
+    """
     desktop.require_companion(device)
     existing = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND operation='tally.sync' AND state IN ('queued','executing')
@@ -88,7 +92,7 @@ def queue(connection, device, actor_id, *, reason):
         fail(connection, device, existing, "The previous refresh stopped before it finished.")
         connection.execute("""UPDATE desktop_jobs SET state='failed',error='The refresh stopped before it finished.',
                               lease_until=NULL,updated_at=now() WHERE id=%s""", (existing["id"],))
-    elif existing:
+    elif existing and not (fresh and existing["state"] == "executing"):
         return existing
     task = connection.execute("INSERT INTO tasks(tenant_id,title,summary) VALUES (%s,%s,%s) RETURNING id",
                               (device["tenant_id"], f"Refresh Tally copy on {device['name']}",

@@ -113,7 +113,10 @@ def find_by_request(connection, tenant_id, request_key):
 
 
 def get_run(connection, tenant_id, run_id):
-    row = connection.execute("SELECT * FROM runs WHERE tenant_id=%s AND id=%s", (tenant_id, run_id)).fetchone()
+    """The run, with its task's control state: a stopped run offers no decision that needs it active."""
+    row = connection.execute(
+        """SELECT r.*, t.control_state FROM runs r JOIN tasks t ON t.tenant_id=r.tenant_id AND t.id=r.task_id
+           WHERE r.tenant_id=%s AND r.id=%s""", (tenant_id, run_id)).fetchone()
     if not row:
         raise ServiceError("not_found", "Run not found.")
     return row
@@ -311,13 +314,18 @@ def rewait(connection, tenant_id, blocker, to, *, client_id):
         (Jsonb(to), client_id, tenant_id, Jsonb(blocker))).rowcount
 
 
-def requeue_item(connection, tenant_id, item_id):
-    """An explicit Recheck: a new attempt for a finished item, never a replay of a live one."""
+def requeue_item(connection, tenant_id, item_id, *, waiting_on=None):
+    """An explicit Recheck: a new attempt for a finished item, never a replay of a live one.
+
+    With `waiting_on`, the attempt waits on that blocker first, such as its PC's refresh of the books.
+    """
     row = connection.execute(
-        """UPDATE run_items SET state='queued', queued_at=now(), session_id=NULL, turn_id=NULL,
-           session_requested_at=NULL, error_code=NULL, error=NULL, started_at=NULL, finished_at=NULL, updated_at=now()
-           WHERE tenant_id=%s AND id=%s AND state IN ('done','failed') RETURNING *""",
-        (tenant_id, item_id)).fetchone()
+        """UPDATE run_items SET state=CASE WHEN %(waiting)s::jsonb IS NULL THEN 'queued' ELSE 'waiting' END,
+           waiting_on=%(waiting)s, queued_at=CASE WHEN %(waiting)s::jsonb IS NULL THEN now() END, session_id=NULL,
+           turn_id=NULL, session_requested_at=NULL, error_code=NULL, error=NULL, started_at=NULL, finished_at=NULL,
+           updated_at=now()
+           WHERE tenant_id=%(tenant)s AND id=%(item)s AND state IN ('done','failed') RETURNING *""",
+        {"waiting": Jsonb(waiting_on) if waiting_on else None, "tenant": tenant_id, "item": item_id}).fetchone()
     if not row:
         raise ServiceError("conflict", "This input is still being processed.")
     return row

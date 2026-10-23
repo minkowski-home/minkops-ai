@@ -28,8 +28,10 @@ GOLDEN = {
 SHARED = {
     "company_unresolved": ("nothing", "retry"), "unsupported_structure": ("nothing", "retry"),
     "classification_uncertain": ("guess", "nothing", "retry"),
-    # Stop is final, and a run's books stay as it read them: neither can be rechecked or retried.
-    "run_stopped": ("nothing",), "destination_changed": ("nothing",),
+    # Stop is final: it can be neither rechecked nor retried.
+    "run_stopped": ("nothing",),
+    # Tally changed since the run read the books: a recheck reads them again as they are now.
+    "destination_changed": ("nothing", "retry"),
 }
 # A bill waiting on its company's practice is released by the answer, not by a recheck.
 BILL_ONLY = {"practice_question": ("nothing",)}

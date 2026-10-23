@@ -18,7 +18,7 @@ master; a reference no lookup issued names none.
 
 import json
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from minkops_platform import attention, clients
 from minkops_platform.errors import ServiceError
@@ -86,19 +86,25 @@ def note_unavailable(connection, run):
                             actor=run["actor_id"])
 
 
-def refreshing(connection, client_id, *, since=None):
-    """The blocker of a refresh still running for one of the client's PCs, or None."""
+def refreshing(connection, client_id, *, since=None, companies=None):
+    """The blocker of a refresh still running for one of the client's PCs, or for the PCs holding these companies,
+    or None."""
     pending = connection.execute(
         """SELECT j.device_id FROM desktop_jobs j JOIN companies c ON c.device_id=j.device_id
            JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NULL
            WHERE c.client_id=%s AND c.status='authorised' AND j.operation='tally.sync'
                AND j.state IN ('queued','executing') AND (%s::timestamptz IS NULL OR j.created_at <= %s)
-           ORDER BY j.device_id LIMIT 1""", (client_id, since, since)).fetchone()
+               AND (%s::uuid[] IS NULL OR c.id = ANY(%s::uuid[]))
+           ORDER BY j.device_id LIMIT 1""", (client_id, since, since, companies, companies)).fetchone()
     return sync.blocker(pending["device_id"]) if pending else None
 
 
 def ready(connection, run):
-    """Pin the client's mirrors once every PC it uses has refreshed; until then, wait on the next one."""
+    """Pin the client's mirrors once every PC it uses has refreshed; until then, wait on the next one.
+
+    A company a recheck asked to read again (`runs.repin`) is pinned to its newly published copy once its PC has no
+    refresh left to finish, and leaves the list; until then the item waits on that PC.
+    """
     blocker = refreshing(connection, run["client_id"], since=run["created_at"])
     if blocker:
         raise Wait(blocker)
@@ -116,7 +122,50 @@ def ready(connection, run):
             raise Wait(sync.blocker(device["device_id"]))
         run = connection.execute("UPDATE runs SET pins=%s,updated_at=now() WHERE id=%s RETURNING *",
                                  (json.dumps(pins), run["id"])).fetchone()
+    if run["repin"]:
+        blocker = refreshing(connection, run["client_id"], companies=run["repin"])
+        if blocker:
+            raise Wait(blocker)
+        # A company with no newer copy on the PC it is on now keeps its pin.
+        fresh = mirror.pins(connection, run["repin"])
+        run = connection.execute("UPDATE runs SET pins=pins || %s::jsonb, repin='{}', updated_at=now() WHERE id=%s "
+                                 "RETURNING *", (json.dumps(fresh), run["id"])).fetchone()
     return run
+
+
+def recheck(connection, run, actor_id, company_ids):
+    """A person's Recheck: the PCs holding these companies read their books afresh, and the run's next session pins
+    the copies they publish (`ready`), so a ledger created in Tally after the run read the books is found.
+
+    Proposals already made keep their plans, and the pins they were checked against stay until then; every save is
+    verified against Tally as it is. Returns the blocker the rechecked item waits on and the names of the PCs it
+    waits for.
+    """
+    rows = connection.execute(
+        """SELECT c.id AS company_id, d.* FROM companies c JOIN desktop_devices d ON d.tenant_id=c.tenant_id
+               AND d.id=c.device_id
+           WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised' AND c.id = ANY(%s::uuid[])
+           ORDER BY d.id, c.id""", (run["tenant_id"], run["client_id"], list(company_ids))).fetchall()
+    if not rows:
+        raise ServiceError("conflict", "These books are no longer authorised for this client, so they cannot be read "
+                                       "again. Start a new run.")
+    devices = list({row["id"]: row for row in rows}.values())
+    gone = [d["name"] for d in devices if d["revoked_at"] or d["expires_at"] <= datetime.now(UTC)]
+    if gone:
+        raise ServiceError("conflict", f"{gone[0]} holds these books and is no longer connected. Continue them on the "
+                                       "PC that holds them now, then start a new run.")
+    for device in devices:
+        sync.queue(connection, device, actor_id, reason="recheck", fresh=True)
+    connection.execute("UPDATE runs SET repin=ARRAY(SELECT DISTINCT unnest(repin || %s::uuid[])), updated_at=now() "
+                       "WHERE id=%s", ([row["company_id"] for row in rows], run["id"]))
+    return sync.blocker(devices[0]["id"]), [device["name"] for device in devices]
+
+
+def waiting_note(noun, pcs):
+    """What a rechecked record says while its PCs refresh: an offline PC keeps it waiting, and is named."""
+    one = len(pcs) == 1
+    return (f"Reading this {noun} again once {' and '.join(pcs)} {'has' if one else 'have'} refreshed "
+            f"{'its' if one else 'their'} Tally copy.")
 
 
 def bundle(connection, run):

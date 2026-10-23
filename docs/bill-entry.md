@@ -231,17 +231,26 @@ offers only Do nothing and Recheck.
 | `classification_uncertain`, `source_unreadable` | Best guess write, Do nothing, Recheck |
 | `supplier_missing` | Create this ledger, Do nothing, Recheck |
 | `company_not_open`, `no_company`, `duplicate_company`, `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response`, `rejected`, `save_waiting`, `save_interrupted`, `save_held` | Retry save, Do nothing |
-| `run_stopped`, `destination_changed` | Do nothing |
+| `destination_changed` | Do nothing, Recheck |
+| `run_stopped` | Do nothing |
 | `practice_question` | Do nothing; the answer in Attention releases it |
 
 Best guess write is offered only when the held bill's complete candidate passes
 the gate, and Create this ledger only when the supplier can be created safely
-(below). Recheck reads the file again in a new attempt of its session, against
-the run's pinned books. Decisions are idempotent per record version: the same
-decision sent twice returns one receipt. Stop is final: unsaved bills hold as
-`run_stopped`, and writes no PC has started are withdrawn. A ledger, voucher type
-or cost allocation that changed in Tally after the run read the books holds as
-`destination_changed`; start a new run for that bill.
+(below). Recheck reads the books afresh first: it asks the PC holding the bill's
+company (every company in the run's scope, for a bill with none) to refresh, and
+the file's next session waits for that refresh, which must start after the
+recheck, then pins the copy it published (`runs.repin`, `desk_tools.ready`). A
+ledger created in Tally after the run started is then found. Until then the bill
+names the PC it waits for, so an offline PC keeps it waiting visibly. The run's
+other bills keep their proposals and the books they were checked against; every
+save is verified against Tally as it is. A bill left as is (Do nothing) offers
+Recheck, so "do nothing, fix it in Tally, recheck" works, and so does a save Tally
+refused because a ledger, voucher type or cost allocation changed after the run
+read the books (`destination_changed`). Decisions are idempotent per record
+version: the same decision sent twice returns one receipt. Stop is final: unsaved
+bills hold as `run_stopped`, writes no PC has started are withdrawn, and a
+stopped run offers only Do nothing.
 
 ## Memory and practice
 

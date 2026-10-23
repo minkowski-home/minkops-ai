@@ -852,20 +852,27 @@ def _holds(record):
             for code in record["hold_codes"]]
 
 
-def _offered(record):
+def _offered(record, run=None):
+    """The decisions a row offers now. A row left as is can be read again once Tally is fixed; a stopped run offers
+    only Do nothing, since every other decision needs it active."""
+    offered = []
     if record["status"] == "proposed":
-        return ["approve", "nothing"]
-    if record["status"] == "held":
-        return [action for action in hold_actions(record["hold_codes"]) if action in OFFERED
-                and (action != "retry" or record["kind"] == ROW)]
-    return []
+        offered = ["approve", "nothing"]
+    elif record["status"] == "held":
+        offered = [action for action in hold_actions(record["hold_codes"]) if action in OFFERED
+                   and (action != "retry" or record["kind"] == ROW)]
+    elif record["status"] == "deferred" and record["kind"] == ROW:
+        offered = ["retry"]
+    if (run or {}).get("control_state") == "stopped":
+        return [action for action in offered if action == "nothing"]
+    return offered
 
 
-def _actions(record):
+def _actions(record, run=None):
     """The row's one-click actions; Settle is one button per allocation the open bills leave."""
     choices = ((record["proposal"] or {}).get("settlement") or {}).get("choices") or []
     actions = []
-    for action in _offered(record):
+    for action in _offered(record, run):
         if action == "settle":
             actions.extend({"action": action, "label": choice["label"], "detail": {"choice": index}}
                            for index, choice in enumerate(choices))
@@ -883,7 +890,7 @@ def summarize(run, record):
         "company": resolved.get("company"), "bank_ledger": (resolved.get("data") or {}).get("bank_ledger"),
         "counter_ledger": " + ".join(line["ledger"] for line in resolved["lines"]) if resolved.get("lines")
         else (resolved.get("data") or {}).get("counter_ledger"), "bills": resolved.get("bills"),
-        "holds": _holds(record), "review": record["review_reasons"], "actions": _actions(record),
+        "holds": _holds(record), "review": record["review_reasons"], "actions": _actions(record, run),
     }.items() if value not in (None, [])}
 
 
@@ -897,7 +904,7 @@ def detail(connection, run, record):
 
 
 def decide(connection, run, record, action, detail, context):
-    if action not in _offered(record):
+    if action not in _offered(record, run):
         raise ServiceError("conflict", "That action is not available for this row now.")
     if action == "approve":
         return _approve(connection, run, record, actor=context["user"]["id"])
@@ -910,12 +917,22 @@ def decide(connection, run, record, action, detail, context):
         require_active(connection, run["tenant_id"], run["task_id"])
         work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=[])
         return _approve(connection, run, record, actor=context["user"]["id"])
-    # Recheck: the row gets a fresh proposal in a new attempt of its chunk.
-    item = connection.execute("SELECT * FROM run_items WHERE id=%s", (record["item_id"],)).fetchone()
-    work.update_record(connection, record, status="pending", hold_codes=[], review_reasons=[], proposal=None,
-                       checks=None, company_id=None)
+    return _recheck(connection, run, record, actor=context["user"]["id"])
+
+
+def _recheck(connection, run, record, *, actor):
+    """The row gets a fresh proposal in a new attempt of its chunk, once its PC has read the books afresh
+    (desk_tools.recheck), so a ledger created in Tally since is found."""
+    require_active(connection, run["tenant_id"], run["task_id"])
+    item = connection.execute("SELECT * FROM run_items WHERE id=%s FOR UPDATE", (record["item_id"],)).fetchone()
+    if item["state"] == "running":
+        raise ServiceError("conflict", "This part of the statement is being read now. Recheck it once it finishes.")
+    blocker, pcs = desk_tools.recheck(connection, run, actor,
+                                      [record["company_id"]] if record["company_id"] else list(run["pins"]))
+    work.update_record(connection, record, status="pending", hold_codes=[], proposal=None, checks=None,
+                       company_id=None, current=None, review_reasons=[desk_tools.waiting_note("entry", pcs)])
     if item["state"] in ("done", "failed"):
-        work.requeue_item(connection, run["tenant_id"], item["id"])
+        work.requeue_item(connection, run["tenant_id"], item["id"], waiting_on=blocker)
     return {"status": "pending"}
 
 
