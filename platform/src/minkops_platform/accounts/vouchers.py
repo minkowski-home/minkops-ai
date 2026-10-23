@@ -302,9 +302,9 @@ def _stated(plan, current):
 
 
 def differences(plan, current):
-    """How a voucher Tally holds for this bill differs from the approved plan, as clauses a person reads; none when it
-    records the bill as planned: its date and voucher type, every ledger and amount, and, those being equal, its cost
-    allocations and bill references.
+    """How a voucher Tally holds for this bill books it otherwise than the approved plan, as clauses a person reads:
+    its date, voucher type, or a ledger or amount. None when it books the bill as planned; `particulars` then says
+    where it still keeps the bill otherwise.
 
     `current` is an observed voucher: a receipt's that observed_bill has accepted, or a stored one (mirror.observed).
     """
@@ -335,8 +335,13 @@ def differences(plan, current):
                        + (f", with other amounts for {', '.join(changed)}" if changed else ""))
     elif changed:
         clauses.append(f"has other amounts for {', '.join(changed)}")
-    if clauses:
-        return clauses
+    return clauses
+
+
+def particulars(plan, current):
+    """Where a voucher that books the bill as planned keeps it otherwise: its cost allocations or bill references, as
+    clauses a person reads. Accountants name bills and split costs their own way, so these are told, not held."""
+    clauses = []
     if sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != _allocations(plan):
         clauses.append("has other cost allocations")
     kept, planned = _bills(current.get("bills") or []), _planned_bills(plan)
@@ -350,7 +355,7 @@ def differences(plan, current):
 
 def correction_reason(plan, current):
     """How the voucher Tally already has for this bill differs from the approved plan, for the person reviewing it."""
-    clauses = differences(plan, current)
+    clauses = differences(plan, current) or particulars(plan, current)
     found = (f"Tally's voucher for {plan['duplicate']['number']} {'; '.join(clauses)}." if clauses
              else "Tally already has this bill with other amounts or ledgers.")
     return f"{found} Review it there; Minkops did not add a second voucher."

@@ -57,6 +57,7 @@ from .vouchers import (
     invoice_window,
     narration_token,
     observed_bill,
+    particulars,
     rupees,
 )
 
@@ -668,13 +669,16 @@ def _recorded(connection, company, *, party, number, kind, issued):
 
 
 def _found_in_tally(connection, desk, record, bill, company, bound, entered, *, facts, checks, review, rules, count):
-    """A bill the books already hold when it is proposed: entered exactly as proposed, it is `duplicate` at once and
-    teaches how it is booked; booked otherwise, it holds for a person, naming what differs. The write-time check
-    still guards every save."""
+    """A bill the books already hold when it is proposed: booked as proposed (its date, voucher type, ledgers and
+    amounts), it is `duplicate` at once and teaches how it is booked, its note naming any cost allocation or bill
+    reference Tally keeps otherwise; booked otherwise, it holds for a person, naming what differs. The write-time
+    check still guards every save."""
     current = mirror.observed(entered[0])
     plan = bound.native_plan("", number_fields=_number_fields(connection, company))
     if len(entered) == 1 and not differences(plan, current):
-        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[ALREADY],
+        kept = particulars(plan, current)
+        note = f"{ALREADY.removesuffix('.')}, except that Tally's voucher {'; '.join(kept)}." if kept else ALREADY
+        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[note],
                            facts=facts, company_id=company["id"], checks=checks, current=current,
                            proposal=_proposal(bill, bound, **({"rules": list(rules)} if rules else {})))
         _learn_entered(connection, company, entered[0])

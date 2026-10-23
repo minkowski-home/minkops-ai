@@ -210,11 +210,14 @@ class ReceiptTest(unittest.TestCase):
             {**self.bill["lines"][0], "bills": [{"name": "MOCK-1", "type": "New Ref", "amount_cents": 11800}]},
             *self.bill["lines"][1:]]}
         on_account = [{"ledger": "Supplier", "name": None, "type": "On Account", "amount_cents": 11800}]
-        self.assertEqual(vouchers.differences(billed, observed(billed)), [])
         self.assertEqual(vouchers.correction_reason(billed, observed(billed, bills=on_account)),
                          "Tally's voucher for MOCK-1 carries the bill reference On Account instead of New Ref MOCK-1. "
                          "Review it there; Minkops did not add a second voucher.")
-        self.assertEqual(vouchers.differences(billed, observed(billed, bills=[])),
+        # Booked as planned, a voucher may still keep its bill or cost centres otherwise: those are its particulars.
+        for current in (observed(billed), observed(billed, bills=on_account), observed(billed, bills=[])):
+            self.assertEqual(vouchers.differences(billed, current), [])
+        self.assertEqual(vouchers.particulars(billed, observed(billed)), [])
+        self.assertEqual(vouchers.particulars(billed, observed(billed, bills=[])),
                          ["carries no bill reference instead of New Ref MOCK-1"])
 
     def test_a_bill_by_bill_receipt_must_carry_the_approved_references(self):
