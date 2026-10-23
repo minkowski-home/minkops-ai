@@ -121,10 +121,6 @@ and proves it:
   reduces what it is owed as TDS does, and a refundable deposit as its own line,
   never expense. An advance already paid is matched in Tally; the bill is booked
   at its full value with a note, so standing approval leaves it to a person;
-- a service, rent, maintenance or subscription period the bill prints is read as
-  `service_period`. One running past the financial year's end (31 March of the
-  bill's year) is booked at its full value with a note, and a person decides what
-  part of it is prepaid;
 - a supplier that keeps bill-by-bill balances gets the bill recorded under its
   invoice number (a New Ref on the supplier's line). Its credit note holds as
   `unsupported_structure`, because it must name the bill it adjusts: enter it in
@@ -221,9 +217,7 @@ whatever the review mode, when:
   another file. Each copy names the other, so the proposed one is not written while
   its copy waits for a reason no one has seen. Two held copies name each other
   too, so the one settled first is never entered again from the other;
-- it adjusts an advance already paid, which a person matches in Tally;
-- it covers a service past the financial year's end, whose prepaid part a person
-  decides.
+- it adjusts an advance already paid, which a person matches in Tally.
 
 The session never learns of these notes, so it cannot rebook a sound bill to
 avoid review.

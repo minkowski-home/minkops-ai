@@ -130,7 +130,7 @@ def proposal(company, n=1, **changes):
                      "supplier_name": "Sunrise Office Systems", "supplier_gstin": SUNRISE, "origin": "domestic",
                      "buyer_gstin": BUYER, "place_of_supply": None, "taxable": 160000.0, "tax": None,
                      "receipt_register": None, "adjustments": None,
-                     "cost_split": None, "service_period": None},
+                     "cost_split": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "g-purchase",
                     "party": {"ledger_guid": "g-sunrise", "new_supplier": False, "evidence": "GSTIN matches."},
                     "lines": [line("expense", "g-cabins", 160000.0, supply="goods"),
@@ -1561,25 +1561,6 @@ def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the
     assert companion(desk) is None
     assert db.execute("SELECT outcome FROM native_writes WHERE run_id=%s", (run["id"],)).fetchone()["outcome"] == (
         "cancelled")
-
-
-def test_standing_approval_leaves_a_service_past_the_years_end_for_a_person(desk):
-    """Booked as the supplier's bills always are, a bill whose service runs past 31 March still waits for a person,
-    who decides what part of it is prepaid."""
-    names = names_of(desk["company"])
-    again = {**PRIOR, "GUID": "v-prior-2", "MASTERID": "6", "ALTERID": "4", "DATE": "20260801", "REFERENCE": "SOS/26/0008"}
-    factory.books(desk["db"], desk["company"], masters(desk["company"]), [PRIOR, again])
-    desk["db"].commit()
-    annual = proposal(desk["company"]["guid"])
-    annual["document"]["service_period"] = {"from": "2026-09-01", "to": "2027-08-31",
-                                            "evidence": "Maintenance period 01-09-2026 to 31-08-2027"}
-    run = launch(desk, {"annual.pdf": B01}, review_mode="only_exceptions")
-    read(desk, by_file(**{"annual.pdf": proposing(names, annual)}), run)
-    [bill] = records(desk, run)
-    assert (bill["status"], bill["checks"]["precedents"], bill["review_reasons"]) == ("proposed", 2, [
-        "The bill covers service from 2026-09-01 to 2027-08-31, past the financial year's end on 2027-03-31. "
-        "Minkops books it at its full value; decide in Tally what part of it is prepaid."])
-    assert companion(desk) is None
 
 
 def entered(number="SOS/26/0412", day="20260901", expense="Office Cabins", party="Sunrise Office Systems", guid="v-hand",
