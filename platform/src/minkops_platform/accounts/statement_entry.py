@@ -252,6 +252,13 @@ def _rupees(cents):
 
 # --- tools ------------------------------------------------------------------------------
 
+def _prints(facts, payee):
+    """Whether a row prints this payee: every word of it is among the words of the row's narration, reference or
+    routing hint, whatever the case, punctuation or order."""
+    words = lambda text: set(re.findall(r"[0-9a-z]+", (text or "").casefold()))  # noqa: E731
+    return words(payee) <= words(" ".join(facts.get(key) or "" for key in ("narration", "reference", "branch")))
+
+
 def _row_of(connection, run, ref, *, item=None, lock=False):
     parsed = _uuid(ref)
     if parsed is None:
@@ -310,6 +317,13 @@ def propose(call, arguments):
             rejected.append({"ref": ref, "reason": (
                 f"This answer restates the amount {answered['amount']}, but this row's is {shown}: it is meant for "
                 "another row. Answer each row under its own ref.")})
+            continue
+        # A payee is named as its row prints it: one the row never prints belongs to another row, or to none.
+        payee = (answered["selection"] or answered["exception"]).get("payee")
+        if payee and not _prints(record["facts"], payee):
+            rejected.append({"ref": ref, "reason": (
+                f"This row does not print the payee {payee}: name the counterparty as the row prints it, or answer "
+                "the row it belongs to.")})
             continue
         submissions = (record["checks"] or {}).get("submissions", 0)
         if not _proposable(record):

@@ -303,6 +303,34 @@ def test_an_answer_that_lands_on_another_row_is_refused_by_the_amount_it_restate
     assert [r["proposal"]["resolved"]["data"]["counter_ledger"] for r in rows[:2]] == ["Acme Steel", "Bank Charges"]
 
 
+def test_an_answer_naming_a_payee_its_row_does_not_print_is_refused(desk):
+    """Found live: a session booked a payment to one supplier as another's, naming as payee a supplier the narration
+    never prints. A payee is named as the row prints it, so the answer is refused and the row asked again."""
+    company = desk["company"]["guid"]
+
+    def misnamed(answers, session):
+        payment = rows_of(session)[0]
+        return [("propose", {"rows": [{**booked(payment, company), "payee": "STEEL MART"}]})]
+
+    def corrected(answers, session):
+        return [("propose", {"rows": [booked(rows_of(session)[0], company)]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, misnamed, corrected) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    chunk = next(s for s in fake.created if is_chunk(s.content))
+    payment = rows_of(chunk)[0]
+    first, second = verdicts(chunk)[:2]
+    assert first["rejected"] == [{"ref": payment["ref"], "reason": (
+        "This row does not print the payee STEEL MART: name the counterparty as the row prints it, or answer the row "
+        "it belongs to.")}]
+    assert second["accepted"] == [payment["ref"]]
+    assert records(desk, run)[0]["proposal"]["selection"]["payee"] == "ACME STEEL"
+
+
 def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
     company = desk["company"]["guid"]
 
@@ -1281,12 +1309,14 @@ def test_the_banks_own_vouchers_naming_the_payee_are_precedent_for_standing_appr
                                       for row in rows_of(session) if "ACME" in row["narration"] or "CHARGES" in row["narration"]]})]
 
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, payees) if is_chunk(content) else Script(layouts))
-    run = launch(desk, {"icici-sep.csv": ICICI}, review_mode="only_exceptions")
+    # The charges row prints its payee as BNK, as the bank's earlier vouchers do.
+    statement = ICICI.replace(b"01/09/2026,BANK CHARGES,", b"01/09/2026,BNK SVC CHARGES,")
+    run = launch(desk, {"icici-sep.csv": statement}, review_mode="only_exceptions")
     learned(desk, run, fake)
     with host(desk, fake):
         until(lambda: all(i["state"] == "done" for i in items(desk, run)))
     rows = {r["facts"]["narration"]: r for r in records(desk, run)}
-    acme, charges = rows["NEFT ACME STEEL UTR111222"], rows["BANK CHARGES"]
+    acme, charges = rows["NEFT ACME STEEL UTR111222"], rows["BNK SVC CHARGES"]
     assert (acme["checks"]["precedents"], acme["status"]) == (2, "writing")
     assert (charges["checks"]["precedents"], charges["status"]) == (0, "proposed")
 

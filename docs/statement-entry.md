@@ -76,7 +76,10 @@ own session with the lookup tools:
 | `practice` | How a company keeps its books, such as how it books bank payments |
 
 A row names its payee as the narration prints it, and cites the IDs of the rules it
-follows; the server checks each citation and keeps the text the row followed. A
+follows; the server checks each citation and keeps the text the row followed. An
+answer naming a payee its row does not print (every word of it among the words of
+the row's narration, reference or routing hint) is refused, as is one restating
+another row's amount: it was meant for another row, and the row is asked again. A
 verified row a person approved becomes a routing in the client's memory: the counter
 ledger and voucher type for its payee. A lookup by a payee's name also finds a
 routing learnt under a name that contains it, or that it contains, and an edit made
