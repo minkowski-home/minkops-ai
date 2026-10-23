@@ -451,6 +451,19 @@ def words(value):
     return re.findall(r"[^\W_]+", str(value or "").casefold())
 
 
+def _initialled(names):
+    """Words with each run of initials joined as one: "R K Supplies", "R.K. Supplies" and "RK Supplies" read alike."""
+    joined, initial = [], False
+    for word in names:
+        single = len(word) == 1 and word.isalpha()
+        if single and initial:
+            joined[-1] += word
+        else:
+            joined.append(word)
+        initial = single
+    return joined
+
+
 def search_masters(connection, company_id, version, types, subject, *, limit=8):
     """Masters of these types matching one subject: by GSTIN, bank account number, HSN, or every word of a name.
 
@@ -459,11 +472,13 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
     codes under it. Names match on all words, in the name or any alias,
     whatever punctuation separates them: a word may be part of one ("cabin"
     finds Cabins), but a number is a whole word, so Section 1 is never
-    Section 2 nor QA18. An exact name sorts first.
+    Section 2 nor QA18. Initials are words too, each run joined as one on
+    both sides (R K, R.K. and RK alike), and a lone one starts a word: dropped,
+    "R K Supplies" found every supplier of supplies. An exact name sorts first.
     """
     digits = re.sub(r"\D", "", subject)
     found = GSTIN.search(subject.upper())
-    wanted = [word for word in words(subject) if len(word) > 1 or word.isdigit()][:8]
+    wanted = _initialled(words(subject))[:8]
     if not (found or len(digits) >= 4 or wanted):
         return []
     return connection.execute(
@@ -473,9 +488,12 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
                 OR (%(digits)s::text IS NOT NULL AND hsn LIKE %(digits)s || '%%')
                 OR (cardinality(%(words)s::text[]) > 0 AND NOT EXISTS (
                     SELECT 1 FROM unnest(%(words)s::text[]) AS word,
-                         LATERAL (SELECT ' ' || btrim(regexp_replace(lower(name_key || ' ' ||
-                                 array_to_string(aliases, ' ')), '[^[:alnum:]]+', ' ', 'g')) || ' ' AS text) AS spoken
+                         -- Words split at any punctuation, with each run of single-letter initials joined as one.
+                         LATERAL (SELECT regexp_replace(' ' || btrim(regexp_replace(lower(name_key || ' ' ||
+                                 array_to_string(aliases, ' ')), '[^[:alnum:]]+', ' ', 'g')) || ' ',
+                                 '(?<= [[:alpha:]]) (?=[[:alpha:]] )', '', 'g') AS text) AS spoken
                     WHERE CASE WHEN word ~ '^[0-9]+$' THEN position(' ' || word || ' ' IN spoken.text) = 0
+                               WHEN length(word) = 1 THEN position(' ' || word IN spoken.text) = 0
                                ELSE position(word IN spoken.text) = 0 END)))
             ORDER BY (name_key = %(key)s) DESC, length(name), guid LIMIT %(limit)s""",
         {"c": company_id, "v": version, "types": list(types), "gstin": found.group(0) if found else None,

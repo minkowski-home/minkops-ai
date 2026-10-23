@@ -229,3 +229,24 @@ def test_a_name_is_found_whatever_punctuation_separates_its_words_and_a_number_m
     # A word may still be part of one, as before: a cabin is among the cabins.
     assert found("site cabin") == ["Portable Site Cabins - UAT"]
     assert found("Section 3") == []
+
+
+@DB
+def test_initials_are_part_of_a_name_and_never_dropped(company):
+    """A statement's "R K SUPPLIES" is not MKQA GST Supplies: dropping its initials left only "supplies", which found
+    another creditor, and five payments were proposed to it. Initials run together as one word on both sides, however
+    printed: R K, R.K. and RK are one. Whether R K is Ram Kumar is a person's call, so it is not offered."""
+    db, row = company
+    version = build(db, row, kind="full", masters=[
+        ledger("g-mkqa", "MKQA GST Supplies"), ledger("g-rk", "R K Supplies"), ledger("g-rkt", "RK Traders"),
+        ledger("g-sse", "S.S. Enterprises"), ledger("g-ram", "Ram Kumar Supplies")])["version"]
+
+    def found(subject):
+        return sorted(m["name"] for m in mirror.search_masters(db, row["id"], version, ["LEDGER"], subject))
+
+    assert found("R K SUPPLIES") == found("R.K. Supplies") == ["R K Supplies"]
+    assert found("RK TRADERS") == found("R K TRADERS") == ["RK Traders"]
+    assert found("S S ENTERPRISES") == found("SS Enterprises") == ["S.S. Enterprises"]
+    assert found("M K SUPPLIES") == ["MKQA GST Supplies"]
+    assert found("P Q SUPPLIES") == []
+    assert found("Supplies") == ["MKQA GST Supplies", "R K Supplies", "Ram Kumar Supplies"]
