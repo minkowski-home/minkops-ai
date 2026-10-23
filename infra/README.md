@@ -69,13 +69,12 @@ with point-in-time recovery, deletion protection) isolates client books,
 including the Tally mirror, from other products and gives the worker lanes
 connection headroom; it is not a speed fix. Create it once with
 `provision_database.py --create-instance --tier <tier>`: the tier is the
-operator's recorded cost decision, and this instance replaces Minkops' half of
-the shared SQL allocation below, so revise the envelope before creating it.
-Until the cut-over, production runs the pre-rebuild build on Myndral's shared
-instance `myndral-prod:us-central1:myndral-db`, through the `minkops-database-url`
-secret. The cut-over retires it for good: one final logical backup is kept
-off-site, and its database, roles and secrets leave that instance, whose other
-contents stay Myndral's.
+operator's recorded cost decision. The cut-over on 23 October 2026 created it at
+`db-f1-micro`, the tier of Myndral's instance, as the owner chose. Until then,
+production ran the pre-rebuild build on Myndral's shared instance
+`myndral-prod:us-central1:myndral-db`. The cut-over retired that build for good:
+one final logical backup is kept off-site, and its database, roles and secrets
+left that instance, whose other contents stay Myndral's.
 
 Database roles: runtime `minkops_app` (16 connections, no DDL), `minkops_owner`
 (NOLOGIN, owns the schema) and `minkops_migrate` (migrations only). Test a restore
@@ -83,15 +82,16 @@ by loading a logical backup into a new disposable database with
 `verify_database_restore.py`, using PostgreSQL 16 client tools to match
 production; never restore over a live database as a test.
 
-Cost envelope: **CAD 20/month including Minkops' share of shared SQL**. Reserve
-CAD 8 for half the fixed SQL footprint (two products share it), target CAD 10 for
-Minkops-exclusive resources, and retain CAD 2 of contingency. The current
-31-day base SQL allocation is about CAD 6.74 before allocated backups/network:
-half of 744 hours at CAD 0.014874825/hour plus 10 GiB at CAD 0.2408305/GiB-month.
-These are the Google catalog's CAD rates on 21 October 2026; review allocation,
-FX, backups, storage growth and actual billing monthly. Myndral's other charges
-are outside the Minkops envelope. A second SQL instance is not provisioned merely
-to bypass inefficient queries; benchmark the corrected paths first.
+Cost envelope: **CAD 20/month**, set while Minkops shared Myndral's instance:
+CAD 8 for half that fixed SQL footprint, a CAD 10 target for Minkops-exclusive
+resources, and CAD 2 of contingency. Since the cut-over, `minkops-books` is
+Minkops' alone and bills to `minkops-ai-prod`: a 31-day month costs about
+CAD 13.48 before backups and network, 744 hours at CAD 0.014874825/hour plus
+10 GiB at CAD 0.2408305/GiB-month (the Google catalog's CAD rates on 21 October
+2026). The envelope, and the CAD 10 project alert below, which now counts the
+instance, wait on the owner's revision. Review FX, backups, storage growth and
+actual billing monthly. A second SQL instance is not provisioned merely to bypass
+inefficient queries; benchmark the corrected paths first.
 
 `bootstrap_hosting.py` updates the existing project alert to CAD 10 and the
 Cloud Run-only gross spend cap to CAD 6, leaving room for Hosting, artifacts,

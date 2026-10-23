@@ -10,13 +10,13 @@ The baseline's one formatting-only cleanup moved dump-style ALTER statements int
 dependency-ordered CREATE definitions. The runner accepts the exact original/new
 checksum pair; any other baseline edit still fails.
 
-The rebuilt accounts desk starts on a fresh database (see
-[cut-over](../docs/rebuild/cutover.md)); the parked build keeps its own. A database
-whose history predates the baseline holds that build's work and is refused, and
-migration `0032`, which drops the old runtime's tables, refuses a database that
-still holds its rows. The archived pre-baseline history and its convergence path
-left with the old build. Its source stays in git history, under the tags
-`archive/2026-10-07/*-before-convergence`, and in the parked build's own tag.
+The rebuilt accounts desk started on a fresh database at the
+[cut-over](../docs/rebuild/cutover.md), which retired the old build's database after
+one final backup. A database whose history predates the baseline holds that build's
+work and is refused, and migration `0032`, which drops the old runtime's tables,
+refuses a database that still holds its rows. The archived pre-baseline history and
+its convergence path left with the old build. Its source stays in git history, under
+the tags `archive/2026-10-07/*-before-convergence`.
 
 ## Isolated integration tests
 
