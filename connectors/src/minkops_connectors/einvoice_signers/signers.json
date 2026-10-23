@@ -1,0 +1,153 @@
+[
+  {
+    "irp": "NIC IRP 1",
+    "irns": [
+      "2020-08-05",
+      "2020-09-11"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/prodpubkey1.zip",
+    "file": "nic1-20200805.pem",
+    "sha1": "115F4426617A7938BE1BA06DBEE91A427584EDAB",
+    "valid": [
+      "2018-09-12",
+      "2020-09-12"
+    ]
+  },
+  {
+    "irp": "NIC IRP 1",
+    "irns": [
+      "2020-09-11",
+      "2020-09-28"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/prodpubkey2.zip",
+    "file": "nic1-20200911.pem",
+    "sha1": "247EBBCBE931277CD0BCCEB00CB021D98E886DAC",
+    "valid": [
+      "2020-09-09",
+      "2022-09-09"
+    ]
+  },
+  {
+    "irp": "NIC IRP 1",
+    "irns": [
+      "2020-09-28",
+      "2022-09-16"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/ProdPubKey3.zip",
+    "file": "nic1-20200928.pem",
+    "sha1": null,
+    "valid": null
+  },
+  {
+    "irp": "NIC IRP 1",
+    "irns": [
+      "2022-09-16",
+      "2024-09-06"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/einvpublickey4.zip",
+    "file": "nic1-20220916.pem",
+    "sha1": "B8D63ECB58EA5E6F4AAC3D524543B2246669B0F8",
+    "valid": [
+      "2022-09-09",
+      "2024-09-09"
+    ]
+  },
+  {
+    "irp": "NIC IRP 1",
+    "irns": [
+      "2024-09-06",
+      "2026-06-03"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/einvpublickey5.zip",
+    "file": "nic1-20240906.pem",
+    "sha1": "4DE1544AE695BDC84EC7BC12F2F57F813F44E301",
+    "valid": [
+      "2024-06-03",
+      "2026-06-03"
+    ]
+  },
+  {
+    "irp": "NIC IRP 1",
+    "irns": [
+      "2026-06-03",
+      "2027-05-01"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/einv1publickeyApr2027.zip",
+    "file": "nic1-20260603.pem",
+    "sha1": "CD01AC2B6E720CF0B9E048F1CCBC7509C766AF78",
+    "valid": [
+      "2025-05-01",
+      "2027-05-01"
+    ]
+  },
+  {
+    "irp": "NIC IRP 2",
+    "irns": [
+      "2023-04-01",
+      "2024-09-04"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/einv2publickey1.zip",
+    "file": "nic2-20230401.pem",
+    "sha1": "6C9E76A15241484CBBFC0CB81A5F3F0E5D489918",
+    "valid": [
+      "2022-09-09",
+      "2024-09-09"
+    ]
+  },
+  {
+    "irp": "NIC IRP 2",
+    "irns": [
+      "2024-09-05",
+      "2026-06-03"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/einv2publickey2024.zip",
+    "file": "nic2-20240905.pem",
+    "sha1": "DEB2031A279F203BBDDF3538E77D4122ACB4D07D",
+    "valid": [
+      "2024-06-20",
+      "2026-06-20"
+    ]
+  },
+  {
+    "irp": "NIC IRP 2",
+    "irns": [
+      "2026-06-03",
+      "2027-05-01"
+    ],
+    "source": "https://einvoice1.gst.gov.in/Documents/einv2publickeyApr2027.zip",
+    "file": "nic2-20260603.pem",
+    "sha1": "644956C46E4E947AAD72FD15DFDB01EB9A96A66B",
+    "valid": [
+      "2025-05-01",
+      "2027-05-01"
+    ]
+  },
+  {
+    "irp": "IRIS IRP 6",
+    "irns": [
+      "2022-11-25",
+      "2024-11-20"
+    ],
+    "source": "https://einvoice6.gst.gov.in/content/wp-content/uploads/2023/06/IRIS_IRP_Prod_sign_certificate.zip",
+    "file": "iris6-20221125.pem",
+    "sha1": "81E666AD0BE9D258D34BEF16CA49E1094DBAEE43",
+    "valid": [
+      "2022-11-25",
+      "2024-11-25"
+    ]
+  },
+  {
+    "irp": "IRIS IRP 6",
+    "irns": [
+      "2024-11-21",
+      "2026-06-20"
+    ],
+    "source": "https://einvoice6.gst.gov.in/content/wp-content/uploads/2024/11/IRIS_IRP_Prod_sign_certificate_21112024.zip",
+    "file": "iris6-20241121.pem",
+    "sha1": "E4ED5B77A8E0FEFEF5FB0E0E64344138CCC3E1E8",
+    "valid": [
+      "2024-06-20",
+      "2026-06-20"
+    ]
+  }
+]

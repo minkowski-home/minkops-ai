@@ -1,1 +1,10 @@
-{"workflows":[{"key":"source-discovery","status":"active"},{"key":"statement-entry","status":"active"}]}
+{
+  "workflows": [
+    {"key": "statement-entry", "status": "active", "variant": "variant.json"},
+    {"key": "bill-entry", "status": "active", "variant": "variant.json", "defaults": {"review_mode": "all_outputs", "company_mode": "infer"}}
+  ],
+  "rules": [
+    {"key": "neft-returns", "workflow": "statement-entry",
+     "text": "NEFT returns: book both legs. Enter the original payment and its return as two vouchers, the return as a Receipt from the same party; never net them off or leave the original out."}
+  ]
+}

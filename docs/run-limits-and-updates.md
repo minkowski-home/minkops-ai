@@ -22,8 +22,8 @@ a hard termination at an exact second during a network or database outage.
 
 Completed proposals, outcomes, verified saves and recovery receipts remain
 durable. A financial save already underway can finish and report its actual
-outcome; new saves cannot start. Discovery checks control between collection
-steps. A stopped task cannot resume; start a new run, whose existing readback
+outcome; new saves cannot start. A PC job whose task was stopped before it began
+never starts. A stopped task cannot resume; start a new run, whose existing readback
 and idempotency rules reconcile previous saves. Unfinished model reasoning is
 not a resumable checkpoint. Future workflows must use these shared contracts
 rather than adding their own timers or bypassing dispatch/approval fences.

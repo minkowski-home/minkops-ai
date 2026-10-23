@@ -1,49 +1,21 @@
-"""Workflow-agnostic attention and auditable decisions. Destinations own manual edits.
+"""Workflow-agnostic attention items, their audit trail, and the questions a person answers there.
 
-Only server-owned targets become desktop plans. A refresh never writes and an
-unchanged destination never establishes human review. Domain adapters attach
-exact identifiers and resolution evidence, not free-form automation commands.
+A workflow opens an item for an event that needs a person, such as a gap
+between statements, and restates it idempotently by its event key. A question
+card is answered once per member: its kind names the module that applies the
+answer (QUESTIONS), and a receipt makes a replayed answer return what it did.
 """
-from uuid import uuid4
+import importlib
 
 from psycopg.types.json import Jsonb
 
 from .errors import ServiceError
 
-
-def label(reason):
-    value = str(reason).lower()
-    for words, title in [
-        (("locked company",), "Company mismatch"),
-        (("company", "buyer"), "Unknown company"),
-        (("changed", "stale"), "Source changed"),
-        (("supplier", "vendor", "ledger"), "Missing supplier"),
-        (("handwrit", "unclear", "confidence"), "Needs review"),
-        (("inventory", "allocation"), "Manual entry needed"),
-    ]:
-        if any(word in value for word in words):
-            return title
-    return "Needs attention"
-
-
-def resolved(item, observation):
-    if observation.get("valid") is not True:
-        return False
-    target, current = item["target"], observation.get("current") or {}
-    if item["kind"] == "supplier":
-        return target.get("vendor") in observation.get("ledgers", [])
-    if item["kind"] == "bill" and not target.get("baseline"):
-        return bool(current)
-    baseline = target.get("baseline") or {}
-    # Fingerprints from different native readers are not comparable: never
-    # treat a reader change as an edit made in Tally.
-    if str(baseline.get("fingerprint", "")).startswith("v5:") != str(current.get("fingerprint", "")).startswith("v5:"):
-        return False
-    return item["kind"] in ("bill", "review") and bool(baseline.get("fingerprint")) and (
-        current.get("guid") == baseline.get("guid")
-        and bool(current.get("fingerprint"))
-        and current["fingerprint"] != baseline["fingerprint"]
-    )
+# Question kinds and the module that shows each card (`question(target)`) and applies its answer
+# (`decide(connection, tenant, user, item, action)`).
+QUESTIONS = {"layout": "minkops_platform.accounts.statement_layouts",
+             "practice": "minkops_platform.accounts.practice"}
+PROMPTS = {"layout": "Confirm how to read this statement.", "practice": "Answer how this company keeps its books."}
 
 
 def audit(connection, item, actor, action, summary, *, detail=None):
@@ -85,46 +57,48 @@ def record(connection, run, event_key, identifier, title, *, kind="manual", targ
     return row
 
 
-def get(connection, tenant_id, item_id):
-    row = connection.execute("SELECT * FROM attention_items WHERE tenant_id=%s AND id=%s FOR UPDATE",
-                             (tenant_id, item_id)).fetchone()
+def get(connection, tenant_id, item_id, visible=None):
+    """One item; an item of a client outside `visible` is indistinguishable from none."""
+    row = connection.execute(
+        """SELECT a.* FROM attention_items a JOIN tasks t ON t.tenant_id=a.tenant_id AND t.id=a.task_id
+           WHERE a.tenant_id=%s AND a.id=%s AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
+           FOR UPDATE OF a""", (tenant_id, item_id, *(2 * [None if visible is None else list(visible)]))).fetchone()
     if not row:
         raise ServiceError("not_found", "Attention item not found.")
     return row
 
 
-def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest"):
-    grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status"}[group]
+def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest", visible=None):
+    """Items by group and order; `visible` limits client work to reachable clients."""
+    grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status", "client": "client"}[group]
     ordering = "a.identifier" if sort == "name" else "a.updated_at DESC"
     rows = connection.execute(
         f"""SELECT a.id,a.task_id,a.identifier,a.label,a.kind,a.status,a.created_at,a.updated_at,a.done_at,a.target,
-        a.done_by,a.authorized_by,w.name AS workflow,
+        a.done_by,a.authorized_by,w.name AS workflow,c.name AS client,
         coalesce((SELECT string_agg(e.name,', ' ORDER BY e.name) FROM employees e
           JOIN workflow_employees we ON we.employee_id=e.id AND we.tenant_id=e.tenant_id
           WHERE we.workflow_id=t.workflow_id AND we.tenant_id=a.tenant_id),'') AS employee
         FROM attention_items a JOIN tasks t ON t.id=a.task_id AND t.tenant_id=a.tenant_id
         LEFT JOIN workflows w ON w.id=t.workflow_id AND w.tenant_id=a.tenant_id
+        LEFT JOIN client_businesses c ON c.id=t.client_id AND c.tenant_id=a.tenant_id
         WHERE a.tenant_id=%s AND (%s='all' OR a.status=%s)
-        ORDER BY {grouping},{ordering},a.id LIMIT 200 OFFSET %s""", (tenant_id, status, status, offset)
+          AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
+        ORDER BY {grouping},{ordering},a.id LIMIT 200 OFFSET %s""",
+        (tenant_id, status, status, *(2 * [None if visible is None else list(visible)]), offset)
     ).fetchall()
-    from .accounts.bill_review import reason_sentence
     for row in rows:
         target = row.pop("target")
-        confirmation = {"profile": "Confirm this company's posting pattern to continue.",
-                        "layout": "Confirm how to read this statement."}
-        row["reason"] = target.get("reason") or confirmation.get(row["kind"]) or reason_sentence({}, title=row["label"])
-        if row["kind"] == "layout":
-            row["layout"] = {"prompt": target.get("prompt"), "actions": target.get("actions", []),
-                             "samples": target.get("samples", [])[:3]}
-        if row["kind"] == "profile":
-            # Only what the member confirms: never identities or internal targets.
-            row["profile"] = {"company": target.get("company"), "summary": target.get("summary", [])[:8],
-                              "waiting": target.get("waiting", 0)}
+        row["reason"] = target.get("reason") or PROMPTS.get(row["kind"]) or row["label"]
+        if row["kind"] in QUESTIONS:
+            row["question"] = importlib.import_module(QUESTIONS[row["kind"]]).question(target)
+        # A card's own details, such as the client a found company continues, are for those who reach every client.
+        if visible is None and target.get("card"):
+            row["card"] = target["card"]
     return rows
 
 
-def done(connection, tenant_id, user, item_id):
-    item = get(connection, tenant_id, item_id)
+def done(connection, tenant_id, user, item_id, visible=None):
+    item = get(connection, tenant_id, item_id, visible)
     if item["status"] != "done":
         connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
                            (user["id"], item["id"]))
@@ -132,76 +106,28 @@ def done(connection, tenant_id, user, item_id):
     return {"status": "done"}
 
 
-def enqueue(connection, item, user, operation="attention.refresh"):
-    if item["status"] == "done" or not item["target"].get("device_id"):
-        return False
-    # A tenant member may request a read on an already granted PC; this does
-    # not extend that PC's resource grants or impersonate its original owner.
-    device = connection.execute("SELECT * FROM desktop_devices WHERE tenant_id=%s AND id=%s AND revoked_at IS NULL AND expires_at>now()",
-                                (item["tenant_id"], item["target"]["device_id"])).fetchone()
-    if not device:
-        return False
-    if connection.execute("SELECT id FROM desktop_jobs WHERE tenant_id=%s AND operation=%s AND input->>'item_id'=%s AND state IN ('queued','executing')",
-                          (item["tenant_id"], operation, str(item["id"]))).fetchone():
-        return False
-    payload = {"item_id": str(item["id"])}
-    connection.execute("""INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,request_key,request_hash)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-        (item["tenant_id"], device["id"], user["id"], item["task_id"], operation, Jsonb(payload), uuid4(), str(item["id"])))
-    audit(connection, item, user["id"], operation, "External check requested." if operation.endswith("refresh") else "Supplier creation authorized.")
-    connection.execute("UPDATE attention_items SET updated_at=now() WHERE id=%s", (item["id"],))
-    return True
+def decide(connection, tenant, user, item_id, action, visible=None):
+    """Answer a question card once per member; the same answer again returns its receipt."""
+    # Serialize exact replays before examining the mutable item.
+    connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                       (f"attention-decision:{tenant['id']}:{item_id}",))
+    receipt = decision_receipt(connection, tenant["id"], user["id"], item_id, visible)
+    if receipt:
+        if receipt["action"] != action:
+            raise ServiceError("conflict", "This item already has a different decision from you.")
+        return receipt
+    item = get(connection, tenant["id"], item_id, visible)
+    if item["kind"] not in QUESTIONS or item["status"] != "pending":
+        raise ServiceError("conflict", "This item is no longer awaiting a decision.")
+    outcome = importlib.import_module(QUESTIONS[item["kind"]]).decide(connection, tenant, user, item, action)
+    return connection.execute(
+        """INSERT INTO attention_decision_receipts(tenant_id,item_id,actor_id,action,status)
+           VALUES(%s,%s,%s,%s,%s) RETURNING item_id,actor_id,action,status,applied_at""",
+        (tenant["id"], item_id, user["id"], action, outcome["status"])).fetchone()
 
 
-def refresh(connection, tenant_id, user, item_id=None):
-    rows = [get(connection, tenant_id, item_id)] if item_id else connection.execute(
-        """SELECT a.* FROM attention_items a WHERE tenant_id=%s AND status='pending' AND target ? 'device_id'
-        AND NOT EXISTS (SELECT 1 FROM desktop_jobs j WHERE j.tenant_id=a.tenant_id AND j.input->>'item_id'=a.id::text
-            AND (j.state='queued' OR (j.state='executing' AND j.lease_until>now())))
-        ORDER BY updated_at,id LIMIT 200 FOR UPDATE""",
-        (tenant_id,)).fetchall()
-    return {"queued": sum(enqueue(connection, item, user) for item in rows)}
-
-
-def plan(connection, device, job, *, plan_version=1):
-    item = get(connection, device["tenant_id"], job["input"]["item_id"])
-    if str(item["target"].get("device_id")) != str(device["id"]) or item["status"] != "pending":
-        raise ServiceError("conflict", "Attention item no longer pending on this PC.")
-    if item["target"].get("gst_supplier") and plan_version < 4:
-        raise ServiceError("conflict", "Update Minkops on this PC to 0.8.0 or later before creating or verifying this GST supplier.")
-    return native_target(item["target"], plan_version)
-
-
-def native_target(target, plan_version):
-    """A protocol-5 companion observes bills with the voucher writer's reader,
-    so a refresh fingerprint is comparable with the one saved at write time.
-    A baseline saved by the older reader keeps being observed by that reader."""
-    baseline = (target.get("baseline") or {}).get("fingerprint")
-    if (plan_version < 5 or target.get("tool") != "tally" or not target.get("date")
-            or (baseline is not None and not str(baseline).startswith("v5:"))):
-        return target
-    from datetime import date
-
-    from .accounts.vouchers import BILL_FAMILIES, invoice_window
-    return {**target, "document": {"window": invoice_window(date.fromisoformat(target["date"])),
-                                   "number_fields": ["REFERENCE"], "families": BILL_FAMILIES}}
-
-
-def accept(connection, device, job, observation, error=None):
-    item = get(connection, device["tenant_id"], job["input"]["item_id"])
-    if str(item["target"].get("device_id")) != str(device["id"]):
-        raise ServiceError("forbidden", "Wrong attention PC.")
-    from .accounts.attention import check_observation, supplier_created
-    if error:
-        audit(connection, item, job["actor_id"], "failed", error)
-        return {"resolved": False}
-    verified = check_observation(item, observation)
-    if item["kind"] == "supplier" and item["authorized_by"]:
-        supplier_created(connection, item, job, verified)
-    completed = resolved(item, verified)
-    if completed and item["status"] != "done":
-        connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
-                           (job["actor_id"], item["id"]))
-    audit(connection, item, job["actor_id"], "verified_done" if completed else "still_pending",
-          "External resolution verified." if completed else "No verified resolution found.")
-    return {"resolved": completed}
+def decision_receipt(connection, tenant_id, actor_id, item_id, visible=None):
+    get(connection, tenant_id, item_id, visible)  # Scope even an absent receipt.
+    return connection.execute("""SELECT item_id,actor_id,action,status,applied_at
+        FROM attention_decision_receipts WHERE tenant_id=%s AND actor_id=%s AND item_id=%s""",
+        (tenant_id, actor_id, item_id)).fetchone()

@@ -1,4 +1,10 @@
-"""Apply the final baseline or adopt verified legacy history without rebuilding data."""
+"""Apply the baseline to a fresh database, then every later migration in order.
+
+A database whose history predates the baseline holds the parked build's work:
+the rebuilt app starts on a fresh database instead (docs/rebuild/cutover.md).
+Unknown or changed history fails the whole transaction, and an advisory lock
+serializes runners.
+"""
 
 import hashlib
 import os
@@ -7,7 +13,6 @@ from pathlib import Path
 import psycopg
 
 MIGRATIONS = Path(__file__).resolve().with_name("migrations")
-ARCHIVE = Path(__file__).resolve().parent / "archive/pre-baseline"
 BASELINE = "0001_baseline"
 # One verified formatting-only rewrite. Match BOTH digests so future edits to
 # this migration still fail closed, including on installations of the old form.
@@ -44,31 +49,22 @@ def migrate(url: str) -> None:
         applied = dict(connection.execute(
             "SELECT version, checksum FROM schema_migrations"
         ).fetchall())
-        current, legacy = sources(MIGRATIONS), sources(ARCHIVE)
-        known = {**legacy, **current}
+        if applied and BASELINE not in applied:
+            raise RuntimeError("This database predates the baseline: it holds the parked build's work, and the "
+                               "rebuilt app starts on a fresh database.")
+        current = sources(MIGRATIONS)
         for version, checksum in applied.items():
-            if version not in known:
+            if version not in current:
                 raise RuntimeError(f"Unknown migration history: {version}")
             equivalent_baseline = (
                 version == BASELINE
-                and (checksum, known[version][1]) == BASELINE_FORMAT_CHECKSUMS
+                and (checksum, current[version][1]) == BASELINE_FORMAT_CHECKSUMS
             )
-            if checksum != known[version][1] and not equivalent_baseline:
+            if checksum != current[version][1] and not equivalent_baseline:
                 raise RuntimeError(f"Applied migration changed: {version}.sql")
-        if BASELINE not in applied and applied:
-            # Converge either released branch with its original SQL/checksums.
-            # Preserve runs, sessions, reservations and receipts, then adopt
-            # the equivalent baseline. No baseline CREATE executes here.
-            for version, (source, checksum) in legacy.items():
-                if version not in applied:
-                    apply(connection, version, source, checksum)
-            connection.execute("INSERT INTO schema_migrations (version, checksum) VALUES (%s, %s)",
-                               (BASELINE, current[BASELINE][1]))
-            applied[BASELINE] = current[BASELINE][1]
         for version, (source, checksum) in current.items():
-            if version in applied:
-                continue
-            apply(connection, version, source, checksum)
+            if version not in applied:
+                apply(connection, version, source, checksum)
 
 
 if __name__ == "__main__":

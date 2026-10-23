@@ -1,23 +1,4 @@
-This client uses Tally Purchase vouchers under the run's selected review mode.
-Only unresolved exceptions require decisions in only_exceptions mode. Use the
-selected company and the current references supplied by
-the platform; never substitute a company from an example or another client.
-Keep distinct evidenced tax components in their separate discovered tax ledgers.
-Use the run's versioned allocation capability; unsupported or ambiguous allocations
-need clarification. The platform's monetary checks and native readback remain
-mandatory regardless of these client instructions.
-
-This mock client uses synthetic release documents solely in its isolated demo
-company. Their synthetic/non-commercial label describes the test fixture, not a
-missing field. For these fixtures the printed billing Ref is the invoice_number;
-a separately labelled weighbridge or delivery identifier must not replace it.
-Keep missing or conflicting references unresolved, and never apply this demo
-convention to another client's documents or relax approval/write safeguards.
-
-For the reviewed RC fixtures from RC Deccan Cement Traders, RC Sahyadri Steel
-Supply and RC Kaveri Aggregates, the demo's approved mapping is RC Civil Materials
-Purchase for purchases and RC Input GST Mock for their stated GST. These are
-exact names in Test Company, not fallback ledgers. If either is absent or changed,
-request clarification. Do not apply this fixture mapping to another supplier,
-company or client; evidence, arithmetic, approval and fresh native identity
-checks still apply.
+This mock client's documents are synthetic fixtures for its rehearsal companies.
+A label such as "SYNTHETIC TEST DOCUMENT - NOT FOR PAYMENT / NOT A VALID TAX
+DOCUMENT" marks the fixture: it is not a missing field, a cancelled bill or a
+reason to hold one. Never apply this convention to another client's documents.

@@ -1,4 +1,6 @@
 import io
+import re
+import zipfile
 from collections import Counter
 from datetime import date
 
@@ -103,8 +105,8 @@ def test_without_a_balance_column_nothing_can_be_proven():
 
 def test_a_closing_row_must_equal_the_last_running_balance():
     closing = table('Date,Ref,Debit,Credit,Balance\nOpening balance,,,,1000\n01/10/26,A,100,,900\nClosing balance,,,,950\n')
-    rows, _ = apply_layout(closing, layout(rows={**OPENING, 'closing': [{'column': 1, 'starts_with': 'Closing balance'}]}), 0)
-    assert rows[-1]['code'] == 'statement_closing'
+    rows, proof = apply_layout(closing, layout(rows={**OPENING, 'closing': [{'column': 1, 'starts_with': 'Closing balance'}]}), 0)
+    assert not proof['amounts'] and all(row['code'] == 'statement_closing' for row in rows)
 
 
 def test_date_order_is_proven_only_by_the_dates_themselves():
@@ -149,3 +151,144 @@ def test_uncached_formulas_and_legacy_files_fail_closed():
         read_tables(b'legacy', '.xls')
     cp = 'Date,Reference,Amount,Balance\n01/10/26,Café,-10,90\n'.encode('cp1252')
     assert read_tables(cp, '.csv')[0][1][1][1] == 'Café'
+
+
+def summary_layout():
+    return layout(rows={'ends_at': [{'column': 1, 'starts_with': 'Page Total'}], 'summary': [
+        {'kind': kind, 'column': 1, 'starts_with': label, 'value_column': 2}
+        for kind, label in [('opening', 'Opening Bal:'), ('debit', 'Withdrawls:'),
+                            ('credit', 'Deposits:'), ('closing', 'Closing Bal:')]]})
+
+
+SUMMARY = ('Date,Ref,Debit,Credit,Balance\n01/Sep/2026,A,100,,900\n02/Sep/2026,B,,50,950\n'
+           'Page Total\nOpening Bal:,1000\nWithdrawls:,100\nDeposits:,50\nClosing Bal:,950\n')
+
+
+def test_independent_footer_controls_use_their_declared_value_columns_after_table_end():
+    rows, proof = apply_layout(table(SUMMARY), summary_layout(), 0)
+    assert len(rows) == 2 and not any(r.get('code') for r in rows)
+    assert proof['amounts'] and proof['summary'] is True
+
+
+@pytest.mark.parametrize('change', [
+    ('Opening Bal:,1000', 'Opening Bal:,1001'), ('Closing Bal:,950', 'Closing Bal:,949'),
+    ('Withdrawls:,100', 'Withdrawls:,101'), ('Deposits:,50', 'Deposits:,49'),
+    ('Closing Bal:,950', 'Closing Bal:,unreadable'), ('Closing Bal:,950', ''),
+    ('Closing Bal:,950', 'Closing Bal:,950\nClosing Bal:,940')])
+def test_declared_missing_invalid_duplicate_or_conflicting_controls_hold_the_whole_sheet(change):
+    rows, proof = apply_layout(table(SUMMARY.replace(*change)), summary_layout(), 0)
+    assert not proof['amounts'] and proof['summary'] is False
+    assert all(r.get('code') == 'statement_summary' for r in rows)
+
+
+@pytest.mark.parametrize('removed', ['01/Sep/2026,A,100,,900\n', '02/Sep/2026,B,,50,950\n'])
+def test_footer_controls_detect_an_omitted_boundary_transaction(removed):
+    rows, proof = apply_layout(table(SUMMARY.replace(removed, '')), summary_layout(), 0)
+    assert not proof['amounts'] and all(r.get('code') == 'statement_summary' for r in rows)
+
+
+def test_summary_controls_follow_accumulation_order_in_newest_first_statements():
+    text = SUMMARY.replace('01/Sep/2026,A,100,,900\n02/Sep/2026,B,,50,950',
+                           '02/Sep/2026,B,,50,950\n01/Sep/2026,A,100,,900')
+    spec = summary_layout()
+    spec['row_order'] = 'newest_first'
+    assert apply_layout(table(text), spec, 0)[1]['summary'] is True
+
+
+def xlsx(rows, saved=None):
+    """A workbook as Excel saves it: `saved` puts a numeric cell's value in the file exactly as Excel writes it.
+
+    Excel writes 17 significant digits, so a SUM's cached value keeps its float error (14985856.630000005);
+    openpyxl would round it to 15 and hide the case.
+    """
+    book = Workbook()
+    for row in rows:
+        book.active.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    content = buffer.getvalue()
+    if saved:
+        source, target = zipfile.ZipFile(io.BytesIO(content)), io.BytesIO()
+        with zipfile.ZipFile(target, 'w') as rewritten:
+            for info in source.infolist():
+                data = source.read(info)
+                if info.filename == 'xl/worksheets/sheet1.xml':
+                    for cell, value in saved.items():
+                        data = re.sub(rf'(<c r="{cell}"[^>]*><v>)[^<]*'.encode(), rf'\g<1>{value}'.encode(), data)
+                rewritten.writestr(info, data)
+        content = target.getvalue()
+    return read_tables(content, '.xlsx')[0][1]
+
+
+FLOAT_SUMMARY = [['Date', 'Ref', 'Debit', 'Credit', 'Balance'], ['01/Sep/2026', 'A', 0.1, None, 999.9],
+                 ['02/Sep/2026', 'B', 0.2, None, 999.7], ['Page Total'], ['Opening Bal:', 1000],
+                 ['Withdrawls:', 0.3], ['Deposits:', 0], ['Closing Bal:', 999.7]]
+
+
+def test_a_spreadsheet_total_carrying_float_error_reads_as_its_paise_amount():
+    """Excel keeps numbers as binary doubles: a SUM of 0.10 and 0.20 is saved as 0.30000000000000004."""
+    sheet = xlsx(FLOAT_SUMMARY, saved={'B6': repr(0.1 + 0.2)})
+    assert sheet[5][1] == 0.1 + 0.2 != 0.3
+    rows, proof = apply_layout(sheet, summary_layout(), 0)
+    assert proof['amounts'] and proof['summary'] is True
+    assert [r['amount_cents'] for r in rows] == [-10, -20]
+
+
+@pytest.mark.parametrize('printed', [0.305, '0.30000000000000004'])
+def test_a_real_third_decimal_or_text_past_paise_is_still_refused(printed):
+    sheet = xlsx([*FLOAT_SUMMARY[:5], ['Withdrawls:', printed], *FLOAT_SUMMARY[6:]])
+    rows, proof = apply_layout(sheet, summary_layout(), 0)
+    assert proof['summary'] is False
+    assert any(r.get('reason', '').startswith(f'Row 6, column 2: the printed debit total {printed} is not an amount')
+               for r in rows)
+
+
+def test_a_refused_control_names_its_cell_and_what_differs():
+    rows, _ = apply_layout(table(SUMMARY.replace('Withdrawls:,100', 'Withdrawls:,101')), summary_layout(), 0)
+    assert ('Row 6, column 2: the printed debit total 101.00 differs from the transactions, which come to 100.00.'
+            in [r.get('reason') for r in rows])
+    rows, _ = apply_layout(table(SUMMARY.replace('Closing Bal:,950', 'Closing Bal:,950\nClosing Bal:,940')),
+                           summary_layout(), 0)
+    assert ('Row 9, column 2: the printed closing balance 940.00 differs from the transactions, which come to 950.00.'
+            in [r.get('reason') for r in rows])
+
+
+def test_a_control_printed_twice_proves_the_reading_only_when_every_copy_agrees():
+    """Banks often print the closing balance in a header summary and again in the footer: both are checked."""
+    twice = SUMMARY.replace('Date,Ref', 'Closing Bal:,950\nDate,Ref')
+    rows, proof = apply_layout(table(twice), summary_layout(), 1)
+    assert proof['amounts'] and proof['summary'] is True and not any(r.get('code') for r in rows)
+    rows, proof = apply_layout(table(twice.replace('Closing Bal:,950\nDate', 'Closing Bal:,905\nDate')),
+                               summary_layout(), 1)
+    assert not proof['amounts'] and 'Row 1, column 2: the printed closing balance 905.00 differs from the ' \
+        'transactions, which come to 950.00.' in [r.get('reason') for r in rows]
+
+
+def test_uncached_summary_formula_does_not_prove_a_sheet():
+    rows, proof = apply_layout(table(SUMMARY), summary_layout(), 0, formulas={(8, 2)})
+    assert not proof['amounts'] and all(r.get('code') == 'statement_summary' for r in rows)
+
+
+def test_mixed_account_summary_controls_cannot_validate_the_wrong_bank():
+    source = table('Date,Account,Reference,Debit,Credit,Balance\n'
+                   '01/Sep/2026,ICICI,A,10,,90\n02/Sep/2026,ICICI,B,,5,95\n'
+                   '01/Sep/2026,HDFC,C,20,,180\n02/Sep/2026,HDFC,D,,10,190\n'
+                   'End table\nOpening,ICICI,100\nClosing,ICICI,95\nOpening,HDFC,200\nClosing,HDFC,190\n')
+    spec = layout({'mode': 'debit_credit', 'debit': 4, 'credit': 5}, balance=6, reference=3, account=2,
+                  rows={'ends_at': [{'column': 1, 'starts_with': 'End table'}], 'summary': [
+                      {'kind': kind, 'column': 1, 'starts_with': label, 'value_column': 3, 'account_column': 2}
+                      for kind, label in [('opening', 'Opening'), ('closing', 'Closing')]]})
+    assert apply_layout(source, spec, 0)[1]['summary'] is True
+    source[-1][2] = '95'
+    rows, proof = apply_layout(source, spec, 0)
+    assert not proof['amounts'] and all(r.get('code') == 'statement_summary' for r in rows)
+
+
+def test_layout_preview_keeps_bounded_summary_rows_hidden_by_trailing_legends():
+    source = table(SUMMARY)
+    source[1:1] = [['01/Sep/2026', str(i), '1', '', str(1000-i)] for i in range(100)]
+    source.extend([[f'Legend {i}'] for i in range(50)])
+    shown = preview(source)
+    assert any(row['cells'][0] == 'Opening Bal:' for row in shown)
+    assert any(row['cells'][0] == 'Closing Bal:' for row in shown)
+    assert len(shown) <= 105

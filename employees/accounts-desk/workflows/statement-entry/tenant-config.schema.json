@@ -11,8 +11,7 @@
         "all_outputs",
         "only_exceptions"
       ],
-      "title": "Review before saving",
-      "x-step": "Review and save"
+      "title": "Review before saving"
     }
   }
 }

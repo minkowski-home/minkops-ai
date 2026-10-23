@@ -24,10 +24,10 @@ export function TaskProgress({ view, stale = false }: { view: TaskProgressView; 
         <span>{stage}<small>{stale && index === view.current ? "Last known state" : state === "failed" && view.label === "Stopped" ? "Stopped" : stateLabels[state]}</small></span>
       </li>;
     })}</ol>
-    <div className="workflow-meter-label"><span>{view.meterLabel}</span><span>{view.countLabel ?? (view.percent != null ? `${view.percent}%` : active ? "In progress" : "")}</span></div>
+    <div className="workflow-meter-label"><span>{view.meterLabel}</span><span>{view.percent != null ? `${view.percent}%` : active ? "In progress" : ""}</span></div>
     <div className={`workflow-meter${view.percent == null && active ? " is-indeterminate" : ""}`} role="progressbar"
       aria-label={view.meterLabel} aria-valuemin={0} aria-valuemax={100}
-      aria-valuenow={view.percent ?? undefined} aria-valuetext={stale ? "Updates interrupted" : view.countLabel ?? (view.percent == null ? view.label : `${view.percent}%`)}>
+      aria-valuenow={view.percent ?? undefined} aria-valuetext={stale ? "Updates interrupted" : view.percent == null ? view.label : `${view.percent}%`}>
       <span style={{ width: view.percent == null ? "0%" : `${view.percent}%` }} />
     </div>
     <p className="workflow-activity" title={view.activity} role="status" aria-live="polite" aria-atomic="true">

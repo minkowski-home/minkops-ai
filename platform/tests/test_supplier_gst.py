@@ -1,7 +1,7 @@
 """GST identity must be deterministic before a permanent master is offered."""
 import pytest
 
-from minkops_platform.accounts.supplier_gst import gstin, state_name, validate_details
+from minkops_platform.accounts.supplier_gst import gstin, jurisdiction, state_name, validate_details
 
 
 @pytest.mark.parametrize("value", ["27AAPFU0939F1ZV"])
@@ -33,6 +33,30 @@ def test_valid_printed_details_are_canonical_and_do_not_invent_address_or_regist
     assert value["address"] == ["Synthetic industrial road", "Pune"]
 
 
+@pytest.mark.parametrize("printed", ["Maharashtra (27)", "27 - Maharashtra", "Maharashtra - 27", "  Maharashtra  "])
+def test_printed_jurisdiction_name_and_code_resolve_without_losing_evidence(printed):
+    source = details()
+    source["place_of_supply"] = printed
+    source["evidence"][3]["quote"] = f"Place of supply: {printed}"
+    assert validate_details(source, company_state="Maharashtra", tax=18)["place_of_supply"] == "Maharashtra"
+    assert source["place_of_supply"] == printed
+
+
+@pytest.mark.parametrize("printed", ["Maharashtra (08)", "27 - Rajasthan", "Maharashtra / Rajasthan", "28", "unknown"])
+def test_conflicting_unknown_or_obsolete_jurisdictions_do_not_authorize_creation(printed):
+    source = details()
+    source["place_of_supply"] = printed
+    source["evidence"][3]["quote"] = f"Place of supply: {printed}"
+    with pytest.raises(ValueError):
+        validate_details(source, company_state="Maharashtra", tax=18)
+
+
+@pytest.mark.parametrize("printed,canonical", [("Orissa (21)", "Odisha"), ("Pondicherry", "Puducherry"),
+                                               ("Jammu & Kashmir (01)", "Jammu and Kashmir")])
+def test_recognized_aliases_resolve_to_one_current_jurisdiction(printed, canonical):
+    assert jurisdiction(printed) == canonical
+
+
 @pytest.mark.parametrize("change", [
     {"state_code": "08"}, {"state": "Rajasthan"}, {"address": []}, {"evidence": []},
     {"registration_type": "Unregistered"}, {"registration_type": "Composition"}, {"pincode": "abc"},
@@ -47,33 +71,34 @@ def test_cross_state_and_unconfirmed_company_state_require_manual_review_in_v1()
 
 
 def creation_fixture():
-    from minkops_platform.accounts.supplier_gst import creation_plan
-    candidate = {"data": {"tax": 18, "date": "2026-10-02"}, "supplier_details": details()}
-    candidate["supplier_details"]["gstin"] = "27AABCM1256F1ZR"
-    candidate["supplier_details"]["evidence"][0]["quote"] = "Supplier GSTIN 27AABCM1256F1ZR"
+    printed = details()
+    printed["gstin"] = "27AABCM1256F1ZR"
+    printed["evidence"][0]["quote"] = "Supplier GSTIN 27AABCM1256F1ZR"
     template = {"type": "LEDGER", "data": {"@_NAME": "Existing registered supplier", "GUID": "template-guid", "ALTERID": "12",
                 "PARENT": "Sundry Creditors", "PARTYGSTIN": "27AAPFU0939F1ZV", "GSTREGISTRATIONTYPE": "Regular"}}
-    selected = {"references": {"company_guid": "company"}}
-    run = {"config": {"tally_target": {"supplier_creation_version": 1}, "source_catalog_snapshot": {"sources": [
-        {"tool": "tally", "snapshot": {"companies": [{"company_guid": "company", "identity": {"STATENAME": "Maharashtra"},
-          "masters": {"records": [template]}}]}}]}}}
-    return creation_plan, run, candidate, selected
+    view = {"identity": {"STATENAME": "Maharashtra"}, "masters": {"records": [template]}}
+    return printed, view
 
 
-def test_creation_requires_same_company_registered_template_and_matching_full_discovery():
-    create, run, record, selected = creation_fixture()
-    plan = create(run, record, selected)
-    assert plan["gstin"] == "27AABCM1256F1ZR" and plan["template"]["guid"] == "template-guid"
-    run["config"]["source_catalog_snapshot"]["sources"][0]["snapshot"]["companies"][0]["masters"]["records"] = []
-    with pytest.raises(ValueError, match="template"): create(run, record, selected)
+def test_creation_models_the_ledger_on_a_same_company_registered_creditor():
+    from minkops_platform.accounts.supplier_gst import creation_plan
+    printed, view = creation_fixture()
+    plan = creation_plan(printed, view, tax=18, issued="2026-10-02")
+    assert (plan["gstin"], plan["template"]["guid"], plan["applicable_from"]) == ("27AABCM1256F1ZR", "template-guid",
+                                                                                  "2026-10-02")
+    view["masters"]["records"] = []
+    with pytest.raises(ValueError, match="model the new ledger on"):
+        creation_plan(printed, view, tax=18, issued="2026-10-02")
+    assert creation_plan(None, view, tax=0, issued="2026-10-02") is None
+    with pytest.raises(ValueError, match="details are missing"):
+        creation_plan(None, view, tax=18, issued="2026-10-02")
 
 
-def test_existing_gstin_under_another_name_blocks_creation_and_legacy_pins_stay_off():
-    create, run, record, selected = creation_fixture()
-    record["supplier_details"] = details()
-    with pytest.raises(ValueError, match="already carries"): create(run, record, selected)
-    run["config"]["tally_target"].pop("supplier_creation_version")
-    with pytest.raises(ValueError, match="pinned"): create(run, record, selected)
+def test_existing_gstin_under_another_name_blocks_creation():
+    from minkops_platform.accounts.supplier_gst import creation_plan
+    _, view = creation_fixture()
+    with pytest.raises(ValueError, match="already carries"):
+        creation_plan(details(), view, tax=18, issued="2026-10-02")
 
 
 def test_gst_readback_rejects_lost_registration_state_address_or_pin():

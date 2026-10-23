@@ -1,11 +1,16 @@
-/** Native accounting-voucher adapter, plan protocol 5. One writer for every
- * supported family: a plan states a header and balanced ledger lines; this
+/** Native accounting-voucher adapter, plan protocols 5 and 6. One writer for
+ * every supported family: a plan states a header and balanced ledger lines; this
  * module rechecks the pinned Tally identities, reads before writing, imports at
  * most once per attempt and accepts only an exact readback. XML/TDL, endpoints
  * and amounts are fixed here; the renderer and the server supply only data.
  *
- * Inventory, bill-wise and multi-centre allocations are outside this contract:
- * the server holds them as named connector limitations before a plan exists. */
+ * Protocol 6 adds a line's bill references (New Ref, Agst Ref, Advance, On
+ * Account) and a purchase's inventory: each item's quantity, rate and amount,
+ * its godowns, and the purchase ledger line that carries its value. Such a
+ * purchase is written in Tally's invoice view. Protocol 7 adds a line split
+ * across cost centres, each with its share, and a ledger repeated on lines at
+ * different GST rates. Batches and order or receipt-note tracking are outside
+ * this contract: the server holds them as named limitations before a plan exists. */
 import {createHash} from 'node:crypto';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
 import {readTallyReferences} from './tally-references.js';
@@ -20,6 +25,10 @@ const BASE_FAMILY = new Map(Object.entries(FAMILIES).map(([family, base]) => [ba
 /** Families whose party ledger has a fixed side; others carry no party rule here. */
 const PARTY_SIDE = {purchase: 'credit', debit_note: 'debit'};
 const NUMBER_FIELDS = new Set(['REFERENCE', 'VOUCHERNUMBER', 'NARRATION']);
+const BILL_TYPES = new Set(['New Ref', 'Agst Ref', 'Advance', 'On Account']);
+/** Inward stock without batches, as one primary batch per godown. */
+const PRIMARY_BATCH = 'Primary Batch';
+const NOT_APPLICABLE = 'Not Applicable';
 const MAX_WINDOW_DAYS = 366;
 
 const list = v => v == null ? [] : Array.isArray(v) ? v : [v];
@@ -28,19 +37,57 @@ const scalar = v => raw(v).trim();
 const norm = v => scalar(v).toLowerCase();
 const nameOf = r => scalar(r?.['@_NAME'] ?? r?.NAME);
 const hash = v => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+// What a voucher states for Tally's GST returns, and Tally's own verdict on it. Read back to verify a save,
+// never part of a voucher's fingerprint: Tally restates its verdict when masters change.
+const GST_FIELDS = ['PARTYGSTIN', 'GSTREGISTRATIONTYPE', 'STATENAME', 'COUNTRYOFRESIDENCE', 'PLACEOFSUPPLY', 'CMPGSTIN',
+  'VCHGSTSTATUSISINCLUDED', 'VCHGSTSTATUSISUNCERTAIN', 'VCHGSTSTATUSISEXCLUDED', 'VCHGSTSTATUSISAPPLICABLE'];
+const GSTIN = /^[0-9]{2}[0-9A-Z]{13}$/, GST_RATE = /^\d{1,3}(\.\d{1,4})?$/;
+const GST_HEADS = [['cgst', 'CGST'], ['sgst', 'SGST/UTGST'], ['igst', 'IGST'], ['cess', 'Cess']];
 const xml = v => String(v).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'}[c]));
 const compact = date => date.replaceAll('-', '');
 const isoDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
 const safeText = (v, max = 200) => typeof v === 'string' && v.trim() !== '' && v.length <= max && !/[\x00-\x1f]/.test(v);
 /** Tally's native sign: credits are positive, debits negative. */
 const signed = line => line.side === 'credit' ? line.amount_cents : -line.amount_cents;
+/** A line's cost allocations, each with its share: protocol 7 states several; earlier ones give the whole line one. */
+const lineAllocations = line => line.allocations ?? (line.allocation ? [{...line.allocation, amount_cents: line.amount_cents}] : []);
 const byLedger = (a, b) => a.ledger.localeCompare(b.ledger) || a.amount_cents - b.amount_cents;
+const byBill = (a, b) => byLedger(a, b) || a.type.localeCompare(b.type) || String(a.name ?? '').localeCompare(String(b.name ?? ''));
+/** A line's bill references as Tally signs them, comparable with a readback. */
+const lineBills = line => (line.bills ?? []).map(bill => ({ledger: line.ledger, name: bill.name ?? null, type: bill.type,
+  amount_cents: line.side === 'credit' ? bill.amount_cents : -bill.amount_cents}));
 const nativeCents = v => {
   const n = Number(scalar(v)) * 100;
   if (!Number.isSafeInteger(Math.round(n)) || Math.abs(n - Math.round(n)) > 0.00001) throw new Error('Invalid native money.');
   return Math.round(n);
 };
 const populated = v => typeof v === 'object' && v !== null ? Object.values(v).some(populated) : v != null && String(v).trim() !== '';
+/** A quantity or rate in millionths: plans state "1.25"; Tally reads back "1.250 MT" or "56000.00/MT". */
+const DECIMAL = /^(0|[1-9]\d{0,11})(?:\.(\d{1,6}))?$/;
+const micro = text => {
+  const match = DECIMAL.exec(String(text ?? ''));
+  return match ? BigInt(match[1]) * 1000000n + BigInt((match[2] ?? '').padEnd(6, '0')) : null;
+};
+const positive = text => (micro(text) ?? 0n) > 0n;
+/** Canonical decimal text, as the server states it: no trailing zeros. */
+const figure = text => {
+  const value = micro(text);
+  if (value == null) return null;
+  const fraction = String(value % 1000000n).padStart(6, '0').replace(/0+$/, '');
+  return `${value / 1000000n}${fraction ? `.${fraction}` : ''}`;
+};
+/** A native quantity ("10.000 MKQANos") or rate ("250.00/MKQANos") as [figure, unit]. */
+const measured = (v, separator) => {
+  const [amount, ...unit] = scalar(v).split(separator);
+  return [figure(amount.trim()), unit.join(separator).trim()];
+};
+const byItem = (a, b) => a.item.localeCompare(b.item) || a.amount_cents - b.amount_cents
+  || a.quantity.localeCompare(b.quantity) || a.ledger.localeCompare(b.ledger);
+const byGodown = (a, b) => a.godown.localeCompare(b.godown) || a.amount_cents - b.amount_cents;
+/** The approved items as Tally signs them: an inward item is a debit, like the line that carries it. */
+const planItems = plan => (plan.inventory ?? []).map(e => ({item: e.item, unit: e.unit, quantity: e.quantity, rate: e.rate,
+  amount_cents: -e.amount_cents, ledger: e.ledger,
+  godowns: e.godowns.map(g => ({godown: g.godown, quantity: g.quantity, amount_cents: -g.amount_cents})).sort(byGodown)})).sort(byItem);
 
 /** One bounded XML exchange with the local Tally HTTP server. */
 export async function tallyExchange(company, port, body, request) {
@@ -84,7 +131,7 @@ const REJECTIONS = [
   ["permission", /not (?:authori[sz]ed|allowed|permitted)|access denied|no (?:access|rights)|security/i,
     "The Tally user who is logged in cannot create this voucher. Log in as a user allowed to enter purchases, then use Retry save."],
   ["voucher_type", /voucher ?type/i,
-    "Tally rejected the purchase voucher type. Check it in Tally, refresh Source Discovery, then start a new run."],
+    "Tally rejected the voucher type. Check it in Tally, then start a new run."],
   ["voucher_number", /voucher (?:no\b|number)/i,
     "Tally needs a voucher number for this voucher type. Check its numbering in Tally, then use Retry save."],
   ["ledger", /ledger|does not exist|not found/i,
@@ -124,7 +171,7 @@ export function voucherFamilies(records) {
 /** Structural checks only; business rules are the server's. Throws before any native call. */
 export function validatePlan(plan) {
   const fail = reason => { throw new Error(`Unsupported voucher plan: ${reason}.`); };
-  if (plan?.format_version !== 5) fail('format');
+  if (![5, 6, 7].includes(plan?.format_version)) fail('format');
   if (!Object.hasOwn(FAMILIES, plan.family)) fail('family');
   if (!['append', 'update'].includes(plan.operation)) fail('operation');
   if (!safeText(plan.company) || !safeText(plan.company_guid) || !Number.isInteger(plan.port) || plan.port < 1 || plan.port > 65535) fail('company');
@@ -137,6 +184,13 @@ export function validatePlan(plan) {
   if (header.party_ledger != null && !safeText(header.party_ledger)) fail('party');
   if (header.narration != null && (typeof header.narration !== 'string' || header.narration.length > 500)) fail('narration');
   if (header.tag != null && !/^[a-z]{1,20}$/.test(header.tag)) fail('tag');
+  if (plan.gst != null) {
+    // Protocol 6 only: the supplier's registration and the place of supply, for a purchase or debit note.
+    const {party = {}, company_gstin: company, registration} = plan.gst;
+    if (plan.format_version < 6 || !['purchase', 'debit_note'].includes(plan.family) || !GSTIN.test(party.gstin ?? '')
+        || !GSTIN.test(company ?? '') || ['registration_type', 'state', 'country', 'place_of_supply'].some(k => !safeText(party[k], 60))) fail('gst');
+    if (registration != null && (!safeText(registration.name) || registration.gstin !== company)) fail('gst registration');
+  }
 
   const lines = plan.lines;
   if (!Array.isArray(lines) || lines.length < 2 || lines.length > 40) fail('line count');
@@ -144,11 +198,63 @@ export function validatePlan(plan) {
   for (const line of lines) {
     if (!safeText(line?.ledger) || !['debit', 'credit'].includes(line.side) || !Number.isSafeInteger(line.amount_cents) || line.amount_cents <= 0) fail('line');
     if (line.allocation != null && !['category', 'category_guid', 'centre', 'centre_guid'].every(k => safeText(line.allocation[k]))) fail('allocation');
+    if (line.allocations != null) {
+      // Protocol 7 only: one line's value split across distinct cost centres, whose shares add up to the line.
+      if (plan.format_version < 7 || line.allocation != null || !Array.isArray(line.allocations)
+          || line.allocations.length < 2 || line.allocations.length > 20) fail('allocations');
+      let shared = 0;
+      for (const a of line.allocations) {
+        if (!['category', 'category_guid', 'centre', 'centre_guid'].every(k => safeText(a?.[k]))
+            || !Number.isSafeInteger(a.amount_cents) || a.amount_cents <= 0) fail('allocations');
+        shared += a.amount_cents;
+      }
+      if (shared !== line.amount_cents || new Set(line.allocations.map(a => a.centre)).size !== line.allocations.length) fail('allocations');
+    }
+    // A taxed purchase line states its rates in the voucher: Tally reads none from masters for an import.
+    if (line.gst != null && (plan.gst == null || plan.family !== 'purchase' || line.gst.taxability !== 'Taxable'
+        || !['Goods', 'Services'].includes(line.gst.supply) || GST_HEADS.some(([k]) => !GST_RATE.test(line.gst.rates?.[k] ?? '')))) fail('line gst');
+    if (line.bills != null) {
+      // Protocol 6 only: references that name their bill (On Account names none) and add up to the line.
+      if (plan.format_version < 6 || !Array.isArray(line.bills) || !line.bills.length || line.bills.length > 20) fail('bills');
+      let referenced = 0;
+      for (const bill of line.bills) {
+        if (!BILL_TYPES.has(bill?.type) || !Number.isSafeInteger(bill.amount_cents) || bill.amount_cents <= 0) fail('bill');
+        if (bill.type === 'On Account' ? bill.name != null : !safeText(bill.name, 100)) fail('bill name');
+        referenced += bill.amount_cents;
+      }
+      if (referenced !== line.amount_cents) fail('bill total');
+    }
     if (line.side === 'debit') debit += line.amount_cents; else credit += line.amount_cents;
   }
   if (!Number.isSafeInteger(debit) || debit !== credit) fail('unbalanced');
-  if (new Set(lines.map(l => l.ledger)).size !== lines.length) fail('repeated ledger');
+  // Protocol 7 repeats a ledger on lines at different GST rates; the supplier's line is never repeated.
+  const names = lines.map(l => l.ledger);
+  if (new Set(names).size !== names.length
+      && (plan.format_version < 7 || names.filter(name => name === header.party_ledger).length > 1)) fail('repeated ledger');
   if (plan.references?.company_guid !== plan.company_guid || lines.some(l => !safeText(plan.references.ledgers?.[l.ledger]?.GUID))) fail('references');
+  if (plan.inventory != null) {
+    // Protocol 6 only: inward stock on a new Purchase; each item ledger line carries exactly its items' value.
+    const inventory = plan.inventory, carried = new Map();
+    if (plan.format_version < 6 || plan.family !== 'purchase' || plan.operation !== 'append' || !Array.isArray(inventory)
+        || !inventory.length || inventory.length > 100) fail('inventory');
+    for (const entry of inventory) {
+      if (!safeText(entry?.item) || !safeText(entry.unit, 50) || !positive(entry.quantity) || !positive(entry.rate) || entry.side !== 'debit'
+          || !Number.isSafeInteger(entry.amount_cents) || entry.amount_cents <= 0 || !safeText(plan.references.stock_items?.[entry.item]?.GUID)) fail('item');
+      const line = lines.find(l => l.ledger === entry.ledger);
+      if (!line || line.side !== 'debit' || lineAllocations(line).length || line.bills || line.ledger === header.party_ledger) fail('item ledger');
+      if (!Array.isArray(entry.godowns) || !entry.godowns.length || entry.godowns.length > 10) fail('godowns');
+      let cents = 0, quantity = 0n;
+      for (const godown of entry.godowns) {
+        if (!safeText(godown?.godown) || !positive(godown.quantity) || !Number.isSafeInteger(godown.amount_cents) || godown.amount_cents <= 0
+            || !safeText(plan.references.godowns?.[godown.godown]?.GUID)) fail('godown');
+        cents += godown.amount_cents;
+        quantity += micro(godown.quantity);
+      }
+      if (cents !== entry.amount_cents || quantity !== micro(entry.quantity) || new Set(entry.godowns.map(g => g.godown)).size !== entry.godowns.length) fail('godown total');
+      carried.set(entry.ledger, (carried.get(entry.ledger) ?? 0) + entry.amount_cents);
+    }
+    for (const [ledger, cents] of carried) if (lines.find(l => l.ledger === ledger).amount_cents !== cents) fail('item ledger total');
+  }
   const party = header.party_ledger == null ? null : lines.find(l => l.ledger === header.party_ledger);
   if (header.party_ledger != null && !party) fail('party line');
   if (PARTY_SIDE[plan.family] && party?.side !== PARTY_SIDE[plan.family]) fail('party side');
@@ -178,7 +284,7 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
   if (!isoDate(window?.from) || !isoDate(window?.to)) throw new Error('Invalid voucher window.');
   const from = compact(window.from), to = compact(window.to);
   const day = '($$YearOfDate:$Date * 10000 + $$MonthOfDate:$Date * 100 + $$DayOfDate:$Date)';
-  const body = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsVouchers</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${xml(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">${from}</SVFROMDATE><SVTODATE TYPE="Date">${to}</SVTODATE><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsVouchers"><TYPE>Voucher</TYPE><FETCH>MasterID,GUID,AlterID,Date,VoucherNumber,Reference,Narration,PartyLedgerName,VoucherTypeName,IsInvoice,AllLedgerEntries.*,LedgerEntries.*,AllInventoryEntries.*,InventoryEntries.*</FETCH><FILTER>MinkopsVoucherWindow</FILTER></COLLECTION><SYSTEM TYPE="Formulae" NAME="MinkopsVoucherWindow">(${day} >= ${from}) AND (${day} &lt;= ${to})</SYSTEM></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+  const body = `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>MinkopsVouchers</ID></HEADER><BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${xml(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">${from}</SVFROMDATE><SVTODATE TYPE="Date">${to}</SVTODATE><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="MinkopsVouchers"><TYPE>Voucher</TYPE><FETCH>MasterID,GUID,AlterID,Date,VoucherNumber,Reference,Narration,PartyLedgerName,VoucherTypeName,IsInvoice,${GST_FIELDS.join(',')},AllLedgerEntries.*,LedgerEntries.*,AllInventoryEntries.*,InventoryEntries.*</FETCH><FILTER>MinkopsVoucherWindow</FILTER></COLLECTION><SYSTEM TYPE="Formulae" NAME="MinkopsVoucherWindow">(${day} >= ${from}) AND (${day} &lt;= ${to})</SYSTEM></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
   const envelope = (await tallyExchange(company, port, body, request)).ENVELOPE;
   if (scalar(envelope?.HEADER?.STATUS) !== '1' || !Object.hasOwn(envelope?.BODY?.DATA ?? {}, 'COLLECTION'))
     throw new Error('Tally did not confirm the voucher collection.');
@@ -188,25 +294,39 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
     const date = scalar(v.DATE);
     if (date < from || date > to) throw new Error('Tally returned a voucher outside the requested window.');
     const entries = list(v['ALLLEDGERENTRIES.LIST'] ?? v['LEDGERENTRIES.LIST']);
-    const allocations = [];
-    let unsupported = scalar(v.ISINVOICE).toLowerCase() === 'yes'
-      || ['ALLINVENTORYENTRIES.LIST', 'INVENTORYENTRIES.LIST'].some(key => populated(v[key]));
+    const allocations = [], bills = [], inventory = [];
+    let unsupported = false;
+    for (const item of list(v['ALLINVENTORYENTRIES.LIST'] ?? v['INVENTORYENTRIES.LIST']).filter(populated)) {
+      const accounting = list(item['ACCOUNTINGALLOCATIONS.LIST']).filter(populated);
+      const batches = list(item['BATCHALLOCATIONS.LIST']).filter(populated);
+      const [quantity, unit] = measured(item.BILLEDQTY, ' '), [actual] = measured(item.ACTUALQTY, ' '), [rate] = measured(item.RATE, '/');
+      const tracked = b => [b.ORDERNO, b.TRACKINGNUMBER].some(n => scalar(n) && scalar(n) !== NOT_APPLICABLE);
+      // One purchase ledger, primary batches untracked and billed as received is all a plan can state.
+      if (accounting.length !== 1 || quantity == null || rate == null || actual !== quantity
+          || batches.some(b => scalar(b.BATCHNAME) !== PRIMARY_BATCH || tracked(b) || measured(b.BILLEDQTY, ' ')[0] == null)) unsupported = true;
+      inventory.push({item: scalar(item.STOCKITEMNAME), unit, quantity: quantity ?? '', rate: rate ?? '', amount_cents: nativeCents(item.AMOUNT),
+        ledger: scalar(accounting[0]?.LEDGERNAME),
+        godowns: batches.map(b => ({godown: scalar(b.GODOWNNAME), quantity: measured(b.BILLEDQTY, ' ')[0] ?? '', amount_cents: nativeCents(b.AMOUNT)})).sort(byGodown)});
+    }
     for (const entry of entries) {
-      if (['BILLALLOCATIONS.LIST', 'INVENTORYALLOCATIONS.LIST'].some(key => populated(entry[key]))) unsupported = true;
+      for (const bill of list(entry['BILLALLOCATIONS.LIST']).filter(populated))
+        bills.push({ledger: scalar(entry.LEDGERNAME), name: scalar(bill.NAME) || null, type: scalar(bill.BILLTYPE),
+          amount_cents: nativeCents(bill.AMOUNT)});
       const centres = list(entry['CATEGORYALLOCATIONS.LIST']).flatMap(category =>
         list(category['COSTCENTREALLOCATIONS.LIST']).filter(populated).map(centre => ({
           ledger: scalar(entry.LEDGERNAME), category: scalar(category.CATEGORY), centre: scalar(centre.NAME), amount_cents: nativeCents(centre.AMOUNT)})));
-      // One centre per line is the contract; anything richer cannot be preserved or compared.
-      if (centres.length > 1) unsupported = true;
       allocations.push(...centres);
     }
     return {
       guid: scalar(v.GUID), master_id: scalar(v.MASTERID), date, voucher_type: scalar(v.VOUCHERTYPENAME),
       reference: scalar(v.REFERENCE), number: scalar(v.VOUCHERNUMBER), narration: scalar(v.NARRATION),
       party_ledger: scalar(v.PARTYLEDGERNAME), tag: scalar(v.NARRATION).match(/\[Minkops [a-z]+:([a-f0-9-]{36})\]/)?.[1] ?? null,
-      unsupported, fingerprint: `v5:${hash(v)}`,
+      unsupported, fingerprint: `v5:${hash(Object.fromEntries(Object.entries(v).filter(([k]) => !GST_FIELDS.includes(k))))}`,
+      gst: {party_gstin: scalar(v.PARTYGSTIN), registration_type: scalar(v.GSTREGISTRATIONTYPE), state: scalar(v.STATENAME),
+        country: scalar(v.COUNTRYOFRESIDENCE), place_of_supply: scalar(v.PLACEOFSUPPLY), company_gstin: scalar(v.CMPGSTIN),
+        status: gstStatus(v)},
       entries: entries.map(e => ({ledger: scalar(e.LEDGERNAME), amount_cents: nativeCents(e.AMOUNT)})).sort(byLedger),
-      allocations: allocations.sort(byLedger),
+      allocations: allocations.sort(byLedger), bills: bills.sort(byBill), inventory: inventory.sort(byItem),
     };
   });
 }
@@ -214,8 +334,9 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
 /** Pinned company, ledgers, voucher type and allocation masters must still be
  * exactly the discovered ones. Returns null when anything moved. */
 async function recheck(plan, {request, readReferences}) {
-  const allocations = plan.lines.filter(l => l.allocation).map(l => l.allocation);
-  const categories = ['company', 'ledgers', 'voucher_types', ...(allocations.length ? ['cost_centres', 'cost_categories'] : [])];
+  const allocations = plan.lines.flatMap(lineAllocations), stock = plan.inventory ?? [];
+  const categories = ['company', 'ledgers', 'voucher_types', ...(allocations.length ? ['cost_centres', 'cost_categories'] : []),
+    ...(stock.length ? ['stock_items', 'godowns'] : [])];
   const snapshot = await readReferences({company: plan.company, port: plan.port, categories}, {request});
   if (snapshot.collections.some(c => c.status !== 'ready')) return null;
   const records = category => snapshot.collections.find(c => c.category === category)?.records ?? [];
@@ -227,7 +348,7 @@ async function recheck(plan, {request, readReferences}) {
   for (const line of plan.lines) {
     const found = records('ledgers').filter(r => nameOf(r) === line.ledger), pinned = plan.references.ledgers[line.ledger];
     if (found.length !== 1 || ['GUID', 'PARENT', 'ALTERID'].some(k => pinned[k] != null && !same(k, found[0][k], pinned[k]))) return null;
-    if (line.allocation && norm(found[0].ISCOSTCENTRESON) !== 'yes') return null;
+    if (lineAllocations(line).length && norm(found[0].ISCOSTCENTRESON) !== 'yes') return null;
   }
   for (const allocation of allocations)
     for (const [category, name, guid] of [['cost_centres', 'centre', 'centre_guid'], ['cost_categories', 'category', 'category_guid']]) {
@@ -235,18 +356,30 @@ async function recheck(plan, {request, readReferences}) {
       if (found.length !== 1 || scalar(found[0].GUID) !== allocation[guid]) return null;
       if (category === 'cost_centres' && scalar(found[0].CATEGORY) !== allocation.category) return null;
     }
+  // An item must still be the same stock item, counted in the same unit and kept without batches.
+  for (const entry of stock) {
+    const found = records('stock_items').filter(r => nameOf(r) === entry.item);
+    if (found.length !== 1 || scalar(found[0].GUID) !== plan.references.stock_items[entry.item].GUID
+        || scalar(found[0].BASEUNITS) !== entry.unit || norm(found[0].ISBATCHWISEON) === 'yes') return null;
+    for (const godown of entry.godowns) {
+      const place = records('godowns').filter(r => nameOf(r) === godown.godown);
+      if (place.length !== 1 || scalar(place[0].GUID) !== plan.references.godowns[godown.godown].GUID) return null;
+    }
+  }
   const typeRecords = records('voucher_types'), types = voucherFamilies(typeRecords);
   const key = plan.voucher_type.NAME.toLowerCase(), live = typeRecords.filter(r => nameOf(r).toLowerCase() === key);
   if (live.length !== 1 || scalar(live[0].GUID) !== plan.voucher_type.GUID || !types.active.has(key) || types.family.get(key) !== plan.family) return null;
   return {types, typeName: nameOf(live[0])};
 }
 
-/** The approved lines, allocations and date; the voucher type only when given. */
+/** The approved lines, allocations, bill references, items and date; the voucher type only when given. */
 function equal(current, plan, typeName) {
   const lines = plan.lines.map(l => ({ledger: l.ledger, amount_cents: signed(l)})).sort(byLedger);
-  const allocations = plan.lines.filter(l => l.allocation)
-    .map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})).sort(byLedger);
+  const allocations = plan.lines.flatMap(l => lineAllocations(l).map(a => ({ledger: l.ledger, category: a.category, centre: a.centre,
+    amount_cents: l.side === 'credit' ? a.amount_cents : -a.amount_cents}))).sort(byLedger);
   return current.date === compact(plan.header.date) && hash(current.entries) === hash(lines) && hash(current.allocations) === hash(allocations)
+    && hash(current.bills ?? []) === hash(plan.lines.flatMap(lineBills).sort(byBill))
+    && hash(current.inventory ?? []) === hash(planItems(plan))
     && (typeName == null || current.voucher_type.toLowerCase() === typeName.toLowerCase());
 }
 
@@ -259,16 +392,26 @@ function containsToken(haystack, needle) {
 }
 const FIELD_VALUE = {REFERENCE: v => v.reference, VOUCHERNUMBER: v => v.number};
 /** Party plus document number in the client's configured number fields. */
-export function documentMatches(voucher, duplicate) {
+function documentMatches(voucher, duplicate) {
   return norm(voucher.party_ledger) === norm(duplicate.party_ledger) && duplicate.number_fields.some(field =>
     field === 'NARRATION' ? containsToken(voucher.narration, duplicate.number) : norm(FIELD_VALUE[field](voucher)) === norm(duplicate.number));
 }
 
 /** The observed voucher as receipts and attention observations report it. */
-export function observedVoucher(v, family) {
+function observedVoucher(v, family) {
   return {guid: v.guid, master_id: v.master_id, date: v.date, voucher_type: v.voucher_type, family,
     reference: v.reference, number: v.number, narration: v.narration, party_ledger: v.party_ledger, tag: v.tag,
-    lines: v.entries, allocations: v.allocations, fingerprint: v.fingerprint};
+    lines: v.entries, allocations: v.allocations, bills: v.bills ?? [], inventory: v.inventory ?? [], fingerprint: v.fingerprint,
+    ...(v.gst ? {gst: v.gst} : {})};
+}
+
+/** Tally's own verdict on a voucher for its GST returns, as it stores it. */
+function gstStatus(v) {
+  const yes = key => norm(v[key]) === 'yes';
+  if (yes('VCHGSTSTATUSISINCLUDED')) return 'included';
+  if (yes('VCHGSTSTATUSISUNCERTAIN')) return 'uncertain';
+  if (yes('VCHGSTSTATUSISEXCLUDED')) return 'excluded';
+  return norm(v.VCHGSTSTATUSISAPPLICABLE) === 'no' ? 'not_applicable' : 'unknown';
 }
 
 const hold = (code, message) => ({outcome: 'attention', hold: code, ...(message ? {message} : {})});
@@ -315,12 +458,29 @@ function importBody(plan, typeName, current) {
     ? `DATE="${xml(current.date)}" TAGNAME="MASTER ID" TAGVALUE="${xml(current.master_id)}" Action="Alter"`
     : `REMOTEID="${xml(guid)}" Action="Create"`;
   const narration = (header.tag ? `[Minkops ${header.tag}:${plan.remote_id}] ` : '') + (header.narration ?? '');
-  const lines = plan.lines.map(line => {
-    const amount = signed(line), deemed = amount < 0 ? 'Yes' : 'No', money = (amount / 100).toFixed(2), a = line.allocation;
-    const allocation = a ? `<CATEGORYALLOCATIONS.LIST><CATEGORY>${xml(a.category)}</CATEGORY><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><COSTCENTREALLOCATIONS.LIST><NAME>${xml(a.centre)}</NAME><AMOUNT>${money}</AMOUNT></COSTCENTREALLOCATIONS.LIST></CATEGORYALLOCATIONS.LIST>` : '';
-    return `<ALLLEDGERENTRIES.LIST><LEDGERNAME>${xml(line.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><AMOUNT>${money}</AMOUNT>${allocation}</ALLLEDGERENTRIES.LIST>`;
+  // In the invoice view the items carry their purchase ledgers; the other lines are its ledger entries.
+  const stock = plan.inventory ?? [], invoice = stock.length > 0, carriers = new Set(stock.map(e => e.ledger));
+  const entryTag = invoice ? 'LEDGERENTRIES.LIST' : 'ALLLEDGERENTRIES.LIST', view = invoice ? 'Invoice Voucher View' : 'Accounting Voucher View';
+  const money = cents => (cents / 100).toFixed(2);
+  const lines = plan.lines.filter(line => !carriers.has(line.ledger)).map(line => {
+    const amount = signed(line), deemed = amount < 0 ? 'Yes' : 'No', shares = lineAllocations(line), sign = Math.sign(amount);
+    // Each category once, with every centre's share of the line in Tally's sign.
+    const allocation = [...new Set(shares.map(a => a.category))].map(category => `<CATEGORYALLOCATIONS.LIST><CATEGORY>${xml(category)}</CATEGORY><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE>${
+      shares.filter(a => a.category === category).map(a => `<COSTCENTREALLOCATIONS.LIST><NAME>${xml(a.centre)}</NAME><AMOUNT>${money(sign * a.amount_cents)}</AMOUNT></COSTCENTREALLOCATIONS.LIST>`).join('')}</CATEGORYALLOCATIONS.LIST>`).join('');
+    const bills = lineBills(line).map(b => `<BILLALLOCATIONS.LIST>${b.name != null ? `<NAME>${xml(b.name)}</NAME>` : ''}<BILLTYPE>${xml(b.type)}</BILLTYPE><AMOUNT>${money(b.amount_cents)}</AMOUNT></BILLALLOCATIONS.LIST>`).join('');
+    const rates = line.gst ? [...GST_HEADS.map(([k, head]) => [head, line.gst.rates[k]]), ['State Cess', '0']] : [];
+    const gst = line.gst ? `<GSTOVRDNTAXABILITY>${xml(line.gst.taxability)}</GSTOVRDNTAXABILITY><GSTOVRDNTYPEOFSUPPLY>${xml(line.gst.supply)}</GSTOVRDNTYPEOFSUPPLY><GSTRATEINFERAPPLICABILITY>Specify in Voucher</GSTRATEINFERAPPLICABILITY>${rates.map(([head, rate]) => `<RATEDETAILS.LIST><GSTRATEDUTYHEAD>${head}</GSTRATEDUTYHEAD><GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE><GSTRATE>${xml(rate)}</GSTRATE></RATEDETAILS.LIST>`).join('')}` : '';
+    return `<${entryTag}><LEDGERNAME>${xml(line.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><AMOUNT>${money(amount)}</AMOUNT>${gst}${allocation}${bills}</${entryTag}>`;
   }).join('');
-  return `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="${xml(type)}" OBJVIEW="Accounting Voucher View"><GUID>${xml(guid)}</GUID><DATE>${compact(header.date)}</DATE><VOUCHERTYPENAME>${xml(type)}</VOUCHERTYPENAME>${header.reference ? `<REFERENCE>${xml(header.reference)}</REFERENCE>` : ''}${header.party_ledger ? `<PARTYLEDGERNAME>${xml(header.party_ledger)}</PARTYLEDGERNAME>` : ''}<PERSISTEDVIEW>Accounting Voucher View</PERSISTEDVIEW><ISINVOICE>No</ISINVOICE><NARRATION>${xml(narration)}</NARRATION>${lines}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
+  const items = stock.map(e => {
+    const quantity = q => `${xml(q)} ${xml(e.unit)}`;
+    const batches = e.godowns.map(g => `<BATCHALLOCATIONS.LIST><GODOWNNAME>${xml(g.godown)}</GODOWNNAME><BATCHNAME>${PRIMARY_BATCH}</BATCHNAME><AMOUNT>${money(-g.amount_cents)}</AMOUNT><ACTUALQTY>${quantity(g.quantity)}</ACTUALQTY><BILLEDQTY>${quantity(g.quantity)}</BILLEDQTY></BATCHALLOCATIONS.LIST>`).join('');
+    return `<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>${xml(e.item)}</STOCKITEMNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><RATE>${xml(e.rate)}/${xml(e.unit)}</RATE><ACTUALQTY>${quantity(e.quantity)}</ACTUALQTY><BILLEDQTY>${quantity(e.quantity)}</BILLEDQTY><AMOUNT>${money(-e.amount_cents)}</AMOUNT>${batches}<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>${xml(e.ledger)}</LEDGERNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><AMOUNT>${money(-e.amount_cents)}</AMOUNT></ACCOUNTINGALLOCATIONS.LIST></ALLINVENTORYENTRIES.LIST>`;
+  }).join('');
+  // The supplier's registration and the place of supply, as Tally's returns read them from the voucher.
+  const g = plan.gst, party = g?.party;
+  const gst = g ? `<STATENAME>${xml(party.state)}</STATENAME><COUNTRYOFRESIDENCE>${xml(party.country)}</COUNTRYOFRESIDENCE><GSTREGISTRATIONTYPE>${xml(party.registration_type)}</GSTREGISTRATIONTYPE><PARTYGSTIN>${xml(party.gstin)}</PARTYGSTIN><PLACEOFSUPPLY>${xml(party.place_of_supply)}</PLACEOFSUPPLY>${g.registration ? `<GSTREGISTRATION>${xml(g.registration.name)}</GSTREGISTRATION><CMPGSTIN>${xml(g.registration.gstin)}</CMPGSTIN>` : ''}` : '';
+  return `<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(plan.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA><TALLYMESSAGE><VOUCHER ${attributes} VCHTYPE="${xml(type)}" OBJVIEW="${view}"><GUID>${xml(guid)}</GUID><DATE>${compact(header.date)}</DATE><VOUCHERTYPENAME>${xml(type)}</VOUCHERTYPENAME>${header.reference ? `<REFERENCE>${xml(header.reference)}</REFERENCE>` : ''}${header.party_ledger ? `<PARTYLEDGERNAME>${xml(header.party_ledger)}</PARTYLEDGERNAME>` : ''}${gst}<PERSISTEDVIEW>${view}</PERSISTEDVIEW><ISINVOICE>${invoice ? 'Yes' : 'No'}</ISINVOICE><NARRATION>${xml(narration)}</NARRATION>${lines}${items}</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>`;
 }
 
 /** One approved voucher. `fence: "strict"` requires a durable local intent
@@ -341,7 +501,7 @@ export async function saveVoucher(plan, {
   try {
     await requireCompany(company, session);
     const live = await recheck(plan, {request, readReferences});
-    if (!live) return hold('destination_changed', 'A ledger, voucher type or cost allocation changed in Tally since discovery. Refresh Source Discovery before saving.');
+    if (!live) return hold('destination_changed', 'A ledger, voucher type or cost allocation changed in Tally after this run read the books. Start a new run to save against the current books.');
     const familyOf = v => live.types.family.get(v.voucher_type.toLowerCase()) ?? null;
     const receipt = (outcome, v) => ({outcome, company_guid: plan.company_guid, current: observedVoucher(v, familyOf(v))});
     const decision = decide(plan, await window(), live, receipt);

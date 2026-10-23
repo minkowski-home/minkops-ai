@@ -1,80 +1,49 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CompanionWorker } from "../../../platform/desktop-runtime/src/worker.js";
-import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 
-test("discovery pauses at a read boundary, renews observations, and resumes once", async () => {
-  const states = ["paused", "paused", "active"];
-  let waits = 0, reads = 0;
-  await reportDiscoveryProgress(async () => ({ control_state: states[reads++] }), {
-    wait: async ms => { assert.equal(ms, 2000); waits++; }
+test("a busy job and its receipt delivery keep presence without claiming another job", async () => {
+  let release, entered, pending = null, claims = 0, beats = 0;
+  const started = () => new Promise(resolve => { entered = resolve; });
+  const block = () => { entered(); return new Promise(resolve => { release = resolve; }); };
+  const worker = new CompanionWorker({
+    request: async path => { if (path.endsWith("/claim")) { claims++; return {id: "job", claim_token: "token"}; } await block(); },
+    execute: block,
+    pending: () => pending,
+    savePending: async value => { pending = value; },
+    heartbeat: async () => { beats++; },
   });
-  assert.equal(waits, 2); assert.equal(reads, 3);
-  await reportDiscoveryProgress(async () => ({})); // An older API remains compatible.
-  await assert.rejects(reportDiscoveryProgress(async () => ({ control_state: "stopped" })), { code: "TASK_STOPPED" });
+  let ready = started();
+  const first = worker.tick();
+  for (let phase = 0; phase < 2; phase++) {
+    await ready;
+    await worker.tick();
+    assert.equal(claims, 1);
+    assert.equal(beats, phase + 1);
+    ready = started();
+    release({files: []});
+  }
+  await first;
+  assert.equal(worker.busy, false);
+  assert.equal(pending, null);
 });
 
-test("a discovery Stop is never mistaken for an unavailable source or followed by more reads", async () => {
-  let reads = 0;
-  await assert.rejects(collectSources({ config: {}, sources: [{key: "excel", tool: "excel"}, {key: "second", tool: "excel"}] }, {
-    folderFor: () => "folder", inventory: async () => [{path: "one.xlsx", content: Buffer.from("x").toString("base64")}],
-    excelSchemaBytes: async b => b, inspectExcel: async () => { reads++; return {}; },
-    onProgress: async (_key, _status, _category, progress) => { if (progress?.completed === 1) throw Object.assign(new Error("Stopped"), {code: "TASK_STOPPED"}); }
-  }), { code: "TASK_STOPPED" });
-  assert.equal(reads, 1);
-});
-
-test("a network failure cannot release an acknowledged pause", async () => {
-  let calls = 0, waits = 0;
-  await reportDiscoveryProgress(async () => {
-    calls++;
-    if (calls === 2) throw new Error("Offline");
-    return {control_state: calls === 1 ? "paused" : "active"};
-  }, {wait: async () => { waits++; }});
-  assert.equal(calls, 3); assert.equal(waits, 2);
-});
-
-test("discovery continues after a missing folder and reports a separate Tally result", async () => {
-  const events = [];
-  const result = await collectSources(
-    {
-      config: { depth: "client_context", tally: {} },
-      sources: [
-        { key: "missing", tool: "excel" },
-        { key: "tally", tool: "tally" },
-      ],
-    },
-    {
-      folderFor: () => {
-        throw new Error("Missing");
-      },
-      inventory: async () => [],
-      inspectExcel: async () => {},
-      discoverClientContext: async () => ({ companies: [] }),
-      onProgress: async (...args) => events.push(args),
-    },
-  );
-  assert.deepEqual(
-    result.sources.map((s) => s.status),
-    ["unavailable", "ready"],
-  );
-  assert.equal(events.at(-1)[0], "tally");
-});
-
-test("discovery forwards native measurements and reports one workbook activity at a time", async () => {
-  const events = [];
-  const measurement = { completed: 2, total: 7, activity: "Collected masters", item: "A" };
-  await collectSources({ config: { tally: {} }, sources: [{ key: "tally", tool: "tally" }, { key: "excel", tool: "excel" }] }, {
-    folderFor: () => "folder", inventory: async () => ["one.xlsx", "two.xlsx"].map(path => ({ path, content: Buffer.from("bytes").toString("base64") })),
-    excelSchemaBytes: async bytes => bytes, inspectExcel: async () => ({ sheets: [] }),
-    discoverClientContext: async (_config, { onProgress }) => { await onProgress("A", "reading", measurement); return { companies: [] }; },
-    onProgress: async (...args) => events.push(args)
+test("overlapping presence requests are bounded and a failed receipt stays durable", async () => {
+  let release, beats = 0, pending = {id: "job", receipt: {claim_token: "token"}};
+  const worker = new CompanionWorker({
+    request: async () => { throw new Error("offline"); },
+    execute: async () => { throw new Error("must not execute again"); },
+    pending: () => pending, savePending: async value => { pending = value; },
+    heartbeat: () => { beats++; return new Promise(resolve => { release = resolve; }); },
   });
-  assert.ok(events.some(event => event[0] === "tally" && event[3] === measurement));
-  const excel = events.filter(event => event[0] === "excel" && event[3]);
-  assert.equal(excel.at(-1)[3].completed, 2);
-  assert.equal(excel.at(-1)[3].total, 2);
-  assert.equal(excel.at(-1)[3].item, "two.xlsx");
+  // A retry reports presence before attempting to deliver its durable receipt.
+  const first = worker.tick();
+  await worker.tick();
+  assert.equal(beats, 1);
+  release();
+  await assert.rejects(first, /offline/);
+  assert.equal(pending.id, "job");
+  assert.equal(worker.busy, false);
 });
 
 test("a rejected receipt becomes an observable failure instead of an endless read retry", async () => {
@@ -86,13 +55,13 @@ test("a rejected receipt becomes an observable failure instead of an endless rea
     savePending: async (p) => {
       pending = p;
     },
-    execute: async () => ({ sources: [] }),
+    execute: async () => ({ files: [] }),
     request: async (path, body) => {
       if (path.endsWith("/claim"))
         return {
           id: "job",
           claim_token: "token",
-          operation: "sources.discover",
+          operation: "files.refresh",
         };
       if (!rejected) {
         rejected = true;
@@ -198,7 +167,7 @@ test("a financial save receipt survives worker recreation and cleanup follows ac
   assert.equal(pending, null);
 });
 
-test("superseded receipts are discarded without deleting a recovery backup", async () => {
+test("superseded receipts are discarded without executing again", async () => {
   let pending = { id: "old", receipt: {} };
   const worker = new CompanionWorker({
     request: async () => {
@@ -211,7 +180,6 @@ test("superseded receipts are discarded without deleting a recovery backup", asy
     savePending: async (value) => {
       pending = value;
     },
-    acknowledge: async () => assert.fail("Unverified backup must remain"),
   });
   await assert.rejects(worker.tick());
   assert.equal(pending, null);
@@ -303,18 +271,18 @@ async function failedReceipt(operation, error) {
   return finished[0];
 }
 
-test("statement failures direct reconciliation to Tally without folder instructions", async () => {
-  const receipt = await failedReceipt("tally.statement", new Error("private error"));
+test("write failures direct reconciliation to Tally without folder instructions", async () => {
+  const receipt = await failedReceipt("tally.write", new Error("private error"));
   assert.match(receipt.error, /Tally/);
   assert.match(receipt.error, /Retry save/);
   assert.doesNotMatch(receipt.error, /folder|private/);
 });
 
 test("a typed Tally state reaches the user verbatim instead of a generic guess", async () => {
-  const typed = Object.assign(new Error("Tally isn't open on PRAHLAD-GADHWAL. Open it and your companies, then try again."), {
+  const typed = Object.assign(new Error("Tally isn't open on OFFICE-PC-07. Open it and your companies, then try again."), {
     userSafe: true, tallyState: "not_running",
   });
-  for (const operation of ["tally.probe", "tally.references", "tally.save", "sources.discover"])
+  for (const operation of ["tally.probe", "tally.sync", "tally.write", "tally.supplier", "files.refresh"])
     assert.equal((await failedReceipt(operation, typed)).error, typed.message);
   const long = Object.assign(new Error("x".repeat(400)), { userSafe: true });
   assert.equal((await failedReceipt("tally.probe", long)).error.length, 300);
@@ -326,14 +294,11 @@ test("untyped failures keep their safe fallback and never leak internal details"
   assert.match(receipt.error, /Send diagnostics/);
 });
 
-test("a typed Tally failure names its action on the Tally source", async () => {
-  const typed = Object.assign(new Error("Two open companies are named Sachin Infra. Close one in Tally on PC1, then try again."), { userSafe: true });
-  const result = await collectSources(
-    { config: { tally: {} }, sources: [{ key: "tally", tool: "tally" }] },
-    { discoverClientContext: async () => { throw typed; }, onProgress: async () => {} },
-  );
-  assert.equal(result.sources[0].status, "unavailable");
-  assert.equal(result.sources[0].error, typed.message);
+test("an unnamed failure tells the member what to do for that kind of job", async () => {
+  const quiet = new Error("ECONNRESET at C:\\Users\\private");
+  assert.match((await failedReceipt("tally.sync", quiet)).error, /Keep Tally open/);
+  assert.match((await failedReceipt("tally.supplier", quiet)).error, /Create this ledger again/);
+  assert.match((await failedReceipt("files.refresh", quiet)).error, /connected folder/);
 });
 
 test("a job's local diagnostic travels with its receipt, success or failure", async () => {

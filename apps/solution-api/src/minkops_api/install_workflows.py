@@ -5,7 +5,8 @@ import os
 
 import psycopg
 
-from minkops_platform.installation import install, load_solution
+from minkops_platform.errors import ServiceError
+from minkops_platform.installation import install, load_solution, provision_tenant
 from minkops_platform.resources import REPOSITORY_ROOT
 
 
@@ -17,6 +18,10 @@ def main():
     )
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument(
+        "--create-tenant", metavar="NAME",
+        help="Create the solution's workspace, named NAME, for --actor-email, who signed up and verified first",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Validate against tenant state and roll back"
     )
     args = parser.parse_args()
@@ -26,11 +31,17 @@ def main():
         return
     if not args.actor_email:
         parser.error("--actor-email is required for tenant installation")
-    with (
-        psycopg.connect(os.environ["DATABASE_URL"]) as connection,
-        connection.transaction(force_rollback=args.dry_run),
-    ):
-        installed = install(connection, composition, actor_email=args.actor_email)
+    try:
+        with (
+            psycopg.connect(os.environ["DATABASE_URL"]) as connection,
+            connection.transaction(force_rollback=args.dry_run),
+        ):
+            if args.create_tenant:
+                provision_tenant(connection, composition, name=args.create_tenant, owner_email=args.actor_email)
+            installed = install(connection, composition, actor_email=args.actor_email)
+    except ServiceError as error:
+        # A refusal is the operator's to act on, such as an owner who has not verified yet.
+        parser.exit(1, f"{error}\n")
     print(
         f"{'Validated' if args.dry_run else 'Installed'}: {', '.join(installed) or '(empty composition)'}."
     )

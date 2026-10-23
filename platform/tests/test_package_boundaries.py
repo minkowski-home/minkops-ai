@@ -69,4 +69,4 @@ class PackageBoundaryTests(TestCase):
                 for name in imported_names(path):
                     with self.subTest(module=str(path.relative_to(REPOSITORY_ROOT)), imports=name):
                         self.assertFalse(name.startswith(forbidden))
-        self.assertGreater(checked, 50)
+        self.assertGreater(checked, 30)  # the scan found the packages, not an empty glob

@@ -1,0 +1,131 @@
+[
+  {
+    "file": "2901 SYNTHETIC OFFICE SUPPLIES SOS-077-25-26 999900001111 15.3.26.pdf",
+    "case": "tax_inclusive_amount_column",
+    "dmr": "2901",
+    "site_note": "Site 3 Store",
+    "supplier": "SYNTHETIC OFFICE SUPPLIES",
+    "supplier_gstin": "37BXSPS7788M1ZW",
+    "buyer_gstin": "37AAXCM4321K1ZX",
+    "bank_registration_gstin": "08AAXCM4321K1ZY",
+    "invoice_number": "SOS/077/25-26",
+    "date": "2026-03-15",
+    "tax_mode": "intra",
+    "qr": {
+      "SellerGstin": "37BXSPS7788M1ZW",
+      "BuyerGstin": "37AAXCM4321K1ZX",
+      "DocNo": "SOS/077/25-26",
+      "DocTyp": "INV",
+      "DocDt": "15/03/2026",
+      "TotInvVal": 30267.0,
+      "ItemCnt": 4,
+      "MainHsnCode": "4802",
+      "Irn": "a4c123b1612dd272d1371c17149d439536b3216fdaeeb975729fae923d5a4fd1",
+      "IrnDt": "2026-03-15 12:00:00"
+    },
+    "lines": [
+      {
+        "description": "A4 Copier Paper 75 GSM (500 sheets)",
+        "hsn": "4802",
+        "quantity": 40,
+        "unit": "Ream",
+        "rate": "245.00",
+        "taxable": "9800.00"
+      },
+      {
+        "description": "Box File Heavy Duty",
+        "hsn": "4820",
+        "quantity": 60,
+        "unit": "Nos",
+        "rate": "118.50",
+        "taxable": "7110.00"
+      },
+      {
+        "description": "Whiteboard Marker (set of 4)",
+        "hsn": "9608",
+        "quantity": 25,
+        "unit": "Set",
+        "rate": "160.00",
+        "taxable": "4000.00"
+      },
+      {
+        "description": "Desk Organiser Tray",
+        "hsn": "3926",
+        "quantity": 12,
+        "unit": "Nos",
+        "rate": "395.00",
+        "taxable": "4740.00"
+      }
+    ],
+    "taxable": "25650.00",
+    "taxes": [
+      {
+        "head": "cgst",
+        "rate": 9.0,
+        "amount": "2308.50"
+      },
+      {
+        "head": "sgst",
+        "rate": 9.0,
+        "amount": "2308.50"
+      }
+    ],
+    "tax": "4617.00",
+    "round_off": "0.00",
+    "total": "30267"
+  },
+  {
+    "file": "2916 SYNTHETIC MOVERS 25SM1153 6.3.26.pdf",
+    "case": "goods_and_services_lines",
+    "dmr": "2916",
+    "site_note": "Batch Plant Direct",
+    "supplier": "SYNTHETIC MOVERS AND HANDLING",
+    "supplier_gstin": "36AAHFS2468P1ZH",
+    "buyer_gstin": "37AAXCM4321K1ZX",
+    "bank_registration_gstin": "08AAXCM4321K1ZY",
+    "invoice_number": "25SM1153",
+    "date": "2026-03-06",
+    "tax_mode": "inter",
+    "qr": {
+      "SellerGstin": "36AAHFS2468P1ZH",
+      "BuyerGstin": "37AAXCM4321K1ZX",
+      "DocNo": "25SM1153",
+      "DocTyp": "INV",
+      "DocDt": "06/03/2026",
+      "TotInvVal": 46610.0,
+      "ItemCnt": 2,
+      "MainHsnCode": "8425",
+      "Irn": "84d8dbc74254770f58904dba41ecccc3fc1626e53a13043b026c48bbf33feff9",
+      "IrnDt": "2026-03-06 12:00:00"
+    },
+    "lines": [
+      {
+        "description": "Hydraulic Bottle Jack 20 T",
+        "hsn": "8425",
+        "quantity": 2,
+        "unit": "Nos",
+        "rate": "18500.00",
+        "taxable": "37000.00"
+      },
+      {
+        "description": "Loading, Unloading and Handling Charges",
+        "hsn": "996719",
+        "quantity": 1,
+        "unit": "Job",
+        "rate": "2500.00",
+        "taxable": "2500.00"
+      }
+    ],
+    "taxable": "39500.00",
+    "taxes": [
+      {
+        "head": "igst",
+        "rate": 18,
+        "amount": "7110.00"
+      }
+    ],
+    "tax": "7110.00",
+    "round_off": "0.00",
+    "total": "46610"
+  }
+]

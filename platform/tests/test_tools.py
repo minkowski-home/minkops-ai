@@ -1,0 +1,155 @@
+"""Function-tool contracts: what the model is told, and what is logged once per call."""
+
+import json
+import logging
+import os
+from types import SimpleNamespace
+
+import pytest
+
+from minkops_platform import work
+from minkops_platform.runtime import tools
+from minkops_platform.runtime.tools import Answer, Tool, ToolError
+
+SUBJECTS = {"type": "object", "properties": {"subjects": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
+            "required": ["subjects"], "additionalProperties": False}
+ran = []
+
+
+def find_ledger(context, arguments):
+    ran.append(arguments)
+    if arguments["subjects"] == ["Unknown"]:
+        raise ToolError("No ledger matches Unknown. Ask for the party's GSTIN instead.")
+    if arguments["subjects"] == ["boom"]:
+        raise RuntimeError("connection to db-host failed: password=hunter2")
+    if arguments["subjects"] == ["everything"]:
+        return {"ledgers": ["x" * 1000] * 100}
+    return {"ledgers": [{"name": subject, "group": "Sundry Creditors"} for subject in arguments["subjects"]]}
+
+
+# A nullable nested object, as a proposal's voucher is: an error inside it must be named, not the whole value.
+ENTRY = {"type": "object", "required": ["entry"], "additionalProperties": False, "properties": {"entry": {"anyOf": [
+    {"type": "null"}, {"type": "object", "required": ["lines"], "additionalProperties": False, "properties": {
+        "lines": {"type": "array", "items": {"type": "object", "required": ["tds", "tax"], "properties": {
+            "tds": {"type": ["object", "null"]}, "tax": {"type": ["object", "null"]}}}}}}]}}}
+TOOLS = {"find_ledger": Tool("find_ledger", "Find ledgers by name.", SUBJECTS, find_ledger),
+         "record": Tool("record", "Record an entry.", ENTRY, lambda context, arguments: ran.append(arguments) or {})}
+
+
+@pytest.mark.parametrize(("name", "arguments", "expected"), [
+    ("find_ledger", {"subjects": ["Acme"]}, (True, '{"ledgers":[{"name":"Acme","group":"Sundry Creditors"}]}')),
+    ("find_ledger", '{"subjects": ["Acme"]}', (True, '{"ledgers":[{"name":"Acme","group":"Sundry Creditors"}]}')),
+    ("find_party", {"subjects": ["Acme"]}, (False, "There is no tool named find_party.")),
+    ("find_ledger", "{not json", (False, "Arguments must be a JSON object.")),
+    ("find_ledger", ["Acme"], (False, "Arguments must be a JSON object.")),
+    ("find_ledger", {"subjects": []}, (False, "Invalid subjects: [] should be non-empty")),
+    ("find_ledger", {"subjects": ["Acme"], "all": True}, (False, "Invalid arguments: Additional properties are not "
+                                                                 "allowed ('all' was unexpected)")),
+    ("find_ledger", {"subjects": ["Unknown"]}, (False, "No ledger matches Unknown. Ask for the party's GSTIN instead.")),
+    ("find_ledger", {"subjects": ["everything"]}, (False, "The answer is too large. Ask about fewer subjects at a time.")),
+    ("record", {"entry": {"lines": [{"tax": None}]}}, (False, "Invalid entry/lines/0: 'tds' is a required property")),
+    # Several errors inside it are each named where they are, never the whole value instead.
+    ("record", {"entry": {"lines": [{"amount": 1}]}}, (False, "Invalid entry/lines/0: 'tds' is a required property; "
+                                                              "'tax' is a required property")),
+    # Faults in different places are all named at once: refused one at a time, a model corrects one per attempt.
+    ("record", {"entry": {"lines": [{"tax": None}, {"tds": None, "tax": 5}]}}, (
+        False, "Invalid entry/lines/0: 'tds' is a required property. Invalid entry/lines/1/tax: 5 is not of type "
+               "'object', 'null'")),
+], ids=["answer", "json-text", "unknown-tool", "bad-json", "not-an-object", "schema", "extra-field", "refusal",
+        "too-large", "nested", "nested-several", "several-places"])
+def test_the_model_is_told_exactly_why_a_call_was_refused(name, arguments, expected):
+    ran.clear()
+    assert tools.compute(TOOLS, None, name, arguments) == expected
+    # A call that breaks its contract never reaches the handler.
+    assert bool(ran) == (expected[0] or "No ledger" in expected[1] or "too large" in expected[1])
+
+
+def test_an_internal_failure_is_logged_but_never_shown_to_the_model(caplog):
+    with caplog.at_level(logging.ERROR, logger="minkops_platform.runtime.tools"):
+        success, text = tools.compute(TOOLS, None, "find_ledger", {"subjects": ["boom"]})
+    assert not success and "hunter2" not in text and "db-host" not in text
+    assert "hunter2" in caplog.text  # the operator still sees the cause
+
+
+@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is required")
+def test_a_repeated_call_gets_its_logged_answer_without_running_again():
+    import factory
+    with factory.connect() as db:
+        tenant = factory.tenant(db)
+        operator = factory.user(db, tenant, role="admin")
+        run = factory.run(db, tenant, factory.client(db, tenant), factory.workflow(db, tenant), operator,
+                          [work.ItemSpec("bill", {"file_id": "a"})])
+        item = db.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
+        call = SimpleNamespace(call_id="call_1", turn_id="turn_1", name="find_ledger",
+                               arguments=json.dumps({"subjects": ["Acme"]}))
+        ran.clear()
+        first = tools.answer(db, item, "sess_1", call, TOOLS, None)
+        again = tools.answer(db, item, "sess_1", call, TOOLS, None)
+        assert first == again and first[0] and len(ran) == 1
+        # A call with arguments the model garbled is still evidence: logged, refused, never run.
+        garbled = SimpleNamespace(call_id="call_2", turn_id="turn_1", name="drop_table", arguments="{oops")
+        assert tools.answer(db, item, "sess_1", garbled, TOOLS, None) == (False, "There is no tool named drop_table.")
+        logged = db.execute("SELECT call_id,name,arguments,success FROM tool_calls WHERE item_id=%s ORDER BY call_id",
+                            (item["id"],)).fetchall()
+        assert [(r["call_id"], r["name"], r["arguments"], r["success"]) for r in logged] == [
+            ("call_1", "find_ledger", {"subjects": ["Acme"]}, True),
+            ("call_2", "unknown", {"unparsed": "{oops"}, False)]
+
+
+@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is required")
+def test_a_call_that_fails_leaves_nothing_behind_but_its_log():
+    import factory
+    with factory.connect() as db:
+        tenant = factory.tenant(db)
+        operator = factory.user(db, tenant, role="admin")
+        run = factory.run(db, tenant, factory.client(db, tenant), factory.workflow(db, tenant), operator,
+                          [work.ItemSpec("bill", {"file_id": "a"})])
+        item = db.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
+
+        def half_done(context, arguments):
+            context.connection.execute("UPDATE run_items SET attempt=attempt+1 WHERE id=%s", (item["id"],))
+            if arguments["subjects"] == ["refused"]:
+                raise ToolError("Refused after a write.")
+            context.connection.execute("SELECT 1/0")
+
+        failing = {"record": Tool("record", "Record an entry.", SUBJECTS, half_done)}
+        for n, subject in enumerate(["refused", "broken"]):
+            call = SimpleNamespace(call_id=f"call_{n}", turn_id="turn_1", name="record", arguments={"subjects": [subject]})
+            assert not tools.answer(db, item, "sess_failing", call, failing, SimpleNamespace(connection=db))[0]
+        # Neither call's write survives, and a statement that broke does not break the transaction logging it.
+        assert db.execute("SELECT attempt FROM run_items WHERE id=%s", (item["id"],)).fetchone()["attempt"] == \
+            item["attempt"]
+        assert [r["call_id"] for r in db.execute(
+            "SELECT call_id FROM tool_calls WHERE item_id=%s AND NOT success ORDER BY call_id", (item["id"],))] == [
+            "call_0", "call_1"]
+
+
+# --- final answers ------------------------------------------------------------------------------
+
+def answer_tool(schema):
+    return Tool("propose", "The proposal.", schema, lambda call, arguments: {})
+
+
+CLOSED = {"type": "object", "properties": {"amount": {"type": "number"}}, "required": ["amount"],
+          "additionalProperties": False}
+
+
+@pytest.mark.parametrize(("schema", "fault"), [
+    ({**CLOSED, "properties": {**CLOSED["properties"], "note": {"type": "string"}}},
+     "answer: every property must be required, null where it may be absent (note is optional)"),
+    ({**CLOSED, "additionalProperties": True}, "answer: an object must not allow other properties"),
+    ({**CLOSED, "properties": {"amount": {"enum": ["a", "b"]}}}, "answer/amount: an enum needs its type"),
+    ({**CLOSED, "properties": {"amount": {"type": "array", "uniqueItems": True}}},
+     "answer/amount: uniqueItems is not a keyword the provider constrains an answer with"),
+])
+def test_an_answer_the_provider_cannot_fully_constrain_is_refused_where_it_is_declared(schema, fault):
+    with pytest.raises(ValueError) as refused:
+        Answer(answer_tool(schema))
+    assert str(refused.value) == fault
+
+
+def test_every_workflow_answer_is_constrainable():
+    """Declared at import: a workflow whose answer the provider could not constrain does not load."""
+    from minkops_platform.accounts import bill_entry
+    assert Answer(answer_tool(CLOSED)).tool.name == "propose"
+    assert bill_entry.PROPOSAL.tool.input_schema["required"] == ["count", "bills"]

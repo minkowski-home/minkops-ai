@@ -3,6 +3,11 @@
 Run explicitly as a cloud operator. The private state directory makes interrupted
 provisioning resumable without rotating credentials of a running deployment.
 The temporary bootstrap account is removed only after migration/grant checks.
+
+The rebuild's fresh start gives Minkops its own Cloud SQL instance, isolating
+client books from other products and giving the worker lanes connection
+headroom. `--create-instance` creates it once, with an operator-chosen tier,
+before the roles and database are provisioned through the proxy.
 """
 
 import argparse
@@ -17,6 +22,48 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
 from db.migrate import MIGRATIONS, migrate, sources
+
+
+def instance_body(instance, region, tier, storage_gb):
+    """A zonal PostgreSQL 16 instance that only accepts encrypted connections.
+
+    Daily backups with point-in-time recovery cover client books; deletion
+    protection stops an accidental teardown. Tier is the operator's cost
+    decision, never defaulted here.
+    """
+    return {
+        "name": instance, "region": region, "databaseVersion": "POSTGRES_16",
+        "settings": {
+            "tier": tier, "edition": "ENTERPRISE", "availabilityType": "ZONAL",
+            "dataDiskType": "PD_SSD", "dataDiskSizeGb": str(storage_gb),
+            "storageAutoResize": True, "storageAutoResizeLimit": str(storage_gb * 5),
+            "deletionProtectionEnabled": True,
+            "backupConfiguration": {
+                "enabled": True, "pointInTimeRecoveryEnabled": True, "startTime": "20:30",
+                "transactionLogRetentionDays": 7,
+                "backupRetentionSettings": {"retainedBackups": 14, "retentionUnit": "COUNT"}},
+            "ipConfiguration": {"ipv4Enabled": True, "sslMode": "ENCRYPTED_ONLY", "authorizedNetworks": []},
+            "maintenanceWindow": {"day": 7, "hour": 21, "updateTrack": "stable"},
+            "userLabels": {"product": "minkops", "data": "client-books"},
+        },
+    }
+
+
+def ensure_instance(api, project, instance, region, tier, storage_gb):
+    """Create the dedicated instance once; an existing one is never altered."""
+    base = f"https://sqladmin.googleapis.com/v1/projects/{project}"
+    try:
+        existing = api.request(f"{base}/instances/{instance}")
+    except RuntimeError as error:
+        if "Google API 404" not in str(error):
+            raise
+    else:
+        if existing.get("databaseVersion") != "POSTGRES_16":
+            raise RuntimeError("The named instance exists but is not PostgreSQL 16.")
+        return False
+    operation = api.request(f"{base}/instances", instance_body(instance, region, tier, storage_gb))
+    api.wait(f"{base}/operations/{operation['name']}", timeout=1800)
+    return True
 
 
 def provision(project, instance, state_dir):
@@ -86,5 +133,18 @@ if __name__ == "__main__":
     parser.add_argument("--sql-project", required=True)
     parser.add_argument("--instance", required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--create-instance", action="store_true",
+                        help="Create the dedicated instance first if it does not exist.")
+    parser.add_argument("--region", default="us-central1")
+    parser.add_argument("--tier", help="Cloud SQL machine tier; required with --create-instance.")
+    parser.add_argument("--storage-gb", type=int, default=10)
     args = parser.parse_args()
-    provision(args.sql_project, args.instance, args.state_dir)
+    if args.create_instance:
+        if not args.tier:
+            parser.error("--create-instance needs an explicit --tier: the tier is a recorded cost decision.")
+        created = ensure_instance(GoogleApi("minkops-ai-prod"), args.sql_project, args.instance, args.region,
+                                  args.tier, args.storage_gb)
+        print("Dedicated instance created." if created else "Dedicated instance already exists; left unchanged.")
+        print("Start the Cloud SQL Auth Proxy on 127.0.0.1:5433 for it, then run again without --create-instance.")
+    else:
+        provision(args.sql_project, args.instance, args.state_dir)

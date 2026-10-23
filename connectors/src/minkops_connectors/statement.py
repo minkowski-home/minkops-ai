@@ -13,6 +13,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import re
 from collections import Counter
 from datetime import date, datetime
@@ -32,6 +33,16 @@ def normalized(value):
 
 
 def money(value):
+    """Paise from a printed amount; anything finer than paise is refused, never rounded away.
+
+    A spreadsheet number is a binary double, and Excel saves a SUM's cached value with its float error:
+    14,985,856.63 is saved as 14985856.630000005. Within a few units of the last place of a paise amount,
+    the cell is that amount; a real third decimal (0.305) is far outside it and is refused like text.
+    """
+    if isinstance(value, float) and math.isfinite(value):
+        paise = round(value, 2)
+        if abs(value - paise) <= min(1024 * math.ulp(value), 1e-4):
+            value = paise
     raw = str(value).strip().replace(',', '').replace('₹', '').strip()
     raw = re.sub(r'^(?:inr|rs\.?)\s*', '', raw, flags=re.I)
     suffix = re.search(r'\s*(Dr|Cr)$', raw, re.I)
@@ -100,9 +111,15 @@ def signatures(table, limit=60):
 
 
 def preview(table, first=60, last=15):
-    """Bounded text view of a sheet for layout inference; 1-based row numbers."""
+    """Bounded evidence including summary controls hidden before long legends.
+
+    This selects evidence only; the model still declares every parsing rule.
+    It does not infer columns or use these labels to interpret transactions.
+    """
     rows = list(enumerate(table, 1))
-    chosen = rows if len(rows) <= first + last else [*rows[:first], *rows[-last:]]
+    summary = [r for r in rows if any(re.match(r"^(?:opening|closing|brought|carried|page total|total|withdrawals?|withdrawls?|deposits?)\b",
+                                                    normalized(c)) for c in r[1])][:30]
+    chosen = rows if len(rows) <= first + last else sorted(dict([*rows[:first], *summary, *rows[-last:]]).items())
     return [{'row': number, 'cells': [cell_text(v) for v in cells]} for number, cells in chosen
             if any(cell_text(v) for v in cells)]
 
@@ -153,6 +170,75 @@ def _matches(cells, rules):
     return False
 
 
+def _summary_controls(table, rules, transactions, *, columns, sheet, formulas):
+    """Prove declared controls independently of the transaction-table boundary.
+
+    A bank may print balances/totals in another column after `ends_at`. Scan
+    those declarations across the complete sheet, but never use them to invent
+    transactions or silently repair source money. Every printed copy of a
+    control must agree, so a page subtotal sharing a total's label refutes the
+    reading; a missing control is unsafe even when the running chain holds.
+    """
+    if not rules:
+        return []
+    expected = {}
+    for row in transactions:
+        if row.get('code') or row.get('balance_cents') is None:
+            continue
+        totals = expected.setdefault(row['account'], {'opening': row['balance_cents'] - row['amount_cents'],
+                                                      'debit': 0, 'credit': 0})
+        totals['closing'] = row['balance_cents']
+        totals['debit'] += max(-row['amount_cents'], 0)
+        totals['credit'] += max(row['amount_cents'], 0)
+    findings = []
+    for rule in rules:
+        kind, value_column = rule['kind'], rule['value_column']
+        matches = [(number, cells) for number, cells in enumerate(table, 1) if _matches(cells, [rule])]
+        if not matches:
+            findings.append({'row': 0, 'sheet': sheet, 'code': 'statement_summary',
+                             'reason': f'The declared {CONTROLS[kind]} labelled "{rule.get("starts_with")}" is not in the sheet.'})
+        for number, cells in matches:
+            account_column = rule.get('account_column') or (columns.get('account') or {}).get('column')
+            account = cell_text(cells[account_column - 1]) if account_column and account_column <= len(cells) else ''
+            # A control printed twice, as in a header summary and a footer, is checked at every copy.
+            reason = _control_fault(cells, number, value_column, expected.get(account, {}).get(kind), formulas,
+                                    signed=kind not in ('debit', 'credit'))
+            if reason:
+                findings.append({'row': number, 'sheet': sheet, 'code': 'statement_summary',
+                                 'reason': f'Row {number}, column {value_column}: the printed {CONTROLS[kind]} {reason}'})
+    return findings
+
+
+CONTROLS = {'opening': 'opening balance', 'closing': 'closing balance', 'debit': 'debit total', 'credit': 'credit total'}
+
+
+def _control_fault(cells, number, column, expected, formulas, *, signed):
+    """Why one printed control does not prove the reading, worded for whoever corrects it; None when it does.
+
+    A value that cannot be read is the source's fault and says so; one that differs gives both amounts, so the
+    reader can tell a wrong column from a statement that does not add up.
+    """
+    if (number, column) in formulas:
+        return 'is a formula with no saved value. Recalculate and save the statement in Excel.'
+    if column > len(cells) or cells[column - 1] in (None, ''):
+        return 'is empty.'
+    try:
+        amount = money(cells[column - 1])
+    except ValueError:
+        return f'{cell_text(cells[column - 1])} is not an amount in paise.'
+    if not signed and amount < 0:
+        return f'{_paise(amount)} is negative.'
+    if expected is None:
+        return f'{_paise(amount)} has no transactions to check it against.'
+    if amount != expected:
+        return f'{_paise(amount)} differs from the transactions, which come to {_paise(expected)}.'
+    return None
+
+
+def _paise(cents):
+    return f'{Decimal(cents) / 100:.2f}'
+
+
 def apply_layout(table, layout, header_index, *, sheet='', formulas=frozenset(), occurrences=None, today=None):
     """Canonical rows through a declared layout, proven per account.
 
@@ -181,6 +267,8 @@ def apply_layout(table, layout, header_index, *, sheet='', formulas=frozenset(),
             break
         if _matches(cells, rules.get('ignore')):
             continue
+        if _matches(cells, rules.get('summary')):
+            continue  # Independently checked, including controls after ends_at.
         account = cell_text(get(cells, columns.get('account')))
         if _matches(cells, rules.get('opening')) or _matches(cells, rules.get('closing')):
             kind = 'opening' if _matches(cells, rules.get('opening')) else 'closing'
@@ -261,7 +349,17 @@ def apply_layout(table, layout, header_index, *, sheet='', formulas=frozenset(),
     alternative = {'dmy': 'mdy', 'mdy': 'dmy'}.get(order)
     date_proven = not ambiguous_dates or _order_forced(ambiguous_dates, alternative, today)
     transactions = [r for r in rows if r.get('kind') != 'opening']
-    proof = {'amounts': bool(columns.get('balance')) and bool(proven_accounts), 'date_order': date_proven,
+    summary_findings = _summary_controls(table, rules.get('summary'),
+                                        [r for r in chain if r.get('kind') != 'opening'],
+                                        columns=columns, sheet=sheet, formulas=formulas)
+    if findings or summary_findings:
+        for row in transactions:
+            if not row.get('code'):
+                row.update(code='statement_summary' if summary_findings else 'statement_closing',
+                           reason='The statement summary could not be verified. Check the original statement before entering its transactions.')
+        findings.extend(summary_findings)
+    proof = {'amounts': bool(columns.get('balance')) and bool(proven_accounts) and not findings, 'date_order': date_proven,
+             'summary': not summary_findings if rules.get('summary') else None,
              'accounts': sorted(proven_accounts), 'samples': [{k: r.get(k) for k in ('date', 'amount_cents', 'balance_cents', 'account', 'narration')}
                                                                for r in transactions[:3] if not r.get('code')]}
     return [*transactions, *findings], proof

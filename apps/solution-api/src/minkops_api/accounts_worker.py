@@ -1,4 +1,4 @@
-"""Application bootstrap retaining the existing worker launch command."""
+"""Worker bootstrap: the lanes that serve run items, hosted for good or drained to idle."""
 
 import argparse
 import logging
@@ -7,36 +7,30 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from minkops_platform.accounts.worker import (
-    WORKER_LANES,
-    cleanup_once,
-    process,
-    run_forever,
-    work_once,
-)
-
-__all__ = ["cleanup_once", "process", "work_once", "main"]
+from minkops_platform.lanes import LANES, Host
+from minkops_platform.worker_hosting import drain, serve
 
 
 def main():
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--drain", action="store_true", help="Exit when idle for scale-to-zero hosting"
-    )
-    parser.add_argument('--lanes', type=int, choices=range(1, WORKER_LANES + 1),
-                        default=WORKER_LANES, help='Concurrent runs within provisioned memory')
+    parser.add_argument("--drain", action="store_true", help="Exit when idle for scale-to-zero hosting")
+    parser.add_argument("--lanes", type=int, choices=range(1, 17), default=LANES,
+                        help="Concurrent bill and statement sessions")
     args = parser.parse_args()
-    if args.drain:
+    url = os.environ["DATABASE_URL"]
+    # On exit the host hands the items it still holds to a successor, sessions included.
+    with Host(url, lanes=args.lanes) as host:
+        if args.drain:
+            drain(url, host)
+        else:
+            serve(url)
+    if args.drain and os.getenv("WORKER_JOB_RESOURCE"):
         from minkops_connectors.cloud_run import run_job
-        from minkops_platform.worker_hosting import dispatch, drain
+        from minkops_platform.worker_hosting import dispatch
 
-        drain(os.environ["DATABASE_URL"], lanes=args.lanes)
-        if os.getenv("WORKER_JOB_RESOURCE"):
-            dispatch(os.environ["DATABASE_URL"], run_job)
-    else:
-        run_forever(os.environ["DATABASE_URL"], lanes=args.lanes)
+        dispatch(url, run_job)
 
 
 if __name__ == "__main__":

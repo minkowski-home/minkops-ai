@@ -1,76 +1,18 @@
 /** Native adapters only. Business approvals and task authority remain server-side. */
-import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import {
-  lstat,
-  readdir,
-  readFile,
-  realpath,
-  open,
-  rename,
-  unlink,
-} from "node:fs/promises";
-import { join, dirname, basename, sep, extname } from "node:path";
-export { inspectExcel, excelSchemaBytes } from './discovery.js';
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { join, sep } from "node:path";
 // The Windows companion's native surface. Tests import implementation modules
 // directly; only what the companion and its operator scripts call is exported.
 export { readTallyReferences } from './tally-references.js';
-export { checkTally, requireOpenCompany, readOpenCompanies, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
-export { discoverClientContext, saveDiscoveryPackage } from './client-context.js';
-export { saveTallyBill } from './tally.js';
+export { checkTally, requireOpenCompany, readOpenCompanies, sharedSession, tallyTransport, tallyProcesses, tallyCrashEvents, readTallyIni } from './tally-session.js';
 
-const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const SUPPORTED = /\.(xlsx|csv|pdf|png|jpe?g|webp)$/i;
 const EXCLUDED = new Set([
   "ground_truth",
   "ground-truth",
   "pr-infra-sample-bills",
 ]);
-const runningWrites = new Map();
-
-/** Export only to the path chosen by the native Save As dialog. No web-supplied
- * paths or folder traversal are accepted by the desktop bridge. */
-export async function saveCatalogSnapshot(path, snapshot) {
-  if (extname(path).toLowerCase() !== ".json")
-    throw new Error("Choose a JSON file.");
-  const bytes = Buffer.from(JSON.stringify(snapshot, null, 2));
-  if (bytes.length > 64_000_000)
-    throw new Error("Catalog exceeds the 64 MB export limit.");
-  try {
-    const existing = await lstat(path);
-    if (!existing.isFile() || existing.isSymbolicLink())
-      throw new Error("Choose a regular file for the catalog.");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const parent = await realpath(dirname(path));
-  const temporary = join(parent, `.minkops-export-${randomUUID()}.tmp`);
-  let handle;
-  try {
-    handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await handle.close();
-    handle = null;
-    await rename(temporary, join(parent, basename(path)));
-  } finally {
-    await handle?.close();
-    await unlink(temporary).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-  }
-}
-
-async function workbookBytes(path) {
-  if ((await lstat(path)).size > 5_000_000)
-    throw new Error("The local workbook is too large.");
-  const bytes = await readFile(path, {
-    flag: constants.O_RDONLY | (constants.O_NOFOLLOW || 0),
-  });
-  if (!bytes.length || bytes.length > 5_000_000)
-    throw new Error("The local workbook is invalid or too large.");
-  return bytes;
-}
 
 function relativeParts(path) {
   if (
@@ -163,52 +105,6 @@ export async function inventory(root) {
   return files;
 }
 
-/** Save only server-approved bytes. A repeated receipt never repeats an append. */
-export async function replaceApproved(root, spec, approved, backup) {
-  if (extname(spec.path).toLowerCase() !== ".xlsx")
-    throw new Error("Only approved Excel workbooks can be saved.");
-  const target = await containedPath(root, spec.path);
-  const previous = runningWrites.get(target) || Promise.resolve();
-  const operation = previous
-    .catch(() => {})
-    .then(async () => {
-      if (approved.length > 5_000_000 || hash(approved) !== spec.after_sha256)
-        throw new Error("Approved workbook failed its integrity check.");
-      const current = await workbookBytes(target);
-      const currentHash = hash(current);
-      if (currentHash === spec.after_sha256) return current;
-      if (currentHash !== spec.before_sha256)
-        throw new Error(
-          "The local workbook changed. Refresh discovery before saving.",
-        );
-      await backup(current);
-      const temporary = join(dirname(target), `.minkops-${randomUUID()}.tmp`);
-      try {
-        const handle = await open(temporary, "wx", 0o600);
-        try {
-          await handle.writeFile(approved);
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        await containedPath(root, spec.path);
-        if (hash(await workbookBytes(target)) !== spec.before_sha256)
-          throw new Error("The local workbook changed before saving.");
-        await rename(temporary, target);
-        const saved = await workbookBytes(target);
-        if (hash(saved) !== spec.after_sha256)
-          throw new Error("The saved workbook could not be verified.");
-        return saved;
-      } finally {
-        await unlink(temporary).catch(() => {});
-      }
-    });
-  runningWrites.set(target, operation);
-  try {
-    return await operation;
-  } finally {
-    if (runningWrites.get(target) === operation) runningWrites.delete(target);
-  }
-}
-export { inspectTallyAttention } from "./tally.js";
+export { createSupplier } from "./tally.js";
 export { saveVoucher } from "./voucher.js";
+export { runSync } from "./sync.js";

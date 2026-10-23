@@ -1,56 +1,61 @@
-<!-- @dsCard group="Operator Console" viewport="1280x800" name="Accounts desk" subtitle="Client context and company-aware bill review" -->
+<!-- @dsCard group="Operator Console" viewport="1280x800" name="Accounts desk" subtitle="Starting a run and reviewing what it proposes" -->
 <!doctype html>
 <html lang="en" data-theme="minkops-light">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Accounts desk design specimen</title>
   <link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../../console.css">
-  <link rel="stylesheet" href="../../accounts.css"><link rel="stylesheet" href="preview.css">
+  <link rel="stylesheet" href="../../accounts.css">
 </head>
 <body>
-  <main class="console-content">
-    <header class="section-heading"><div><h1>Accounts desk</h1><p>Design specimen · synthetic records</p></div>
-      <label class="theme-picker">Theme<select id="theme"><option value="minkops-light">Minkops Light</option><option value="minkops-dark">Minkops Dark</option><option value="slate-light">Slate Light</option><option value="slate-dark">Slate Dark</option></select></label>
+  <!-- The launch panel sits on a workflow's page and the review on its run's task page; both are shown here. -->
+  <main class="route-screen detail-screen">
+    <header class="detail-heading"><div><h2>Bill entry</h2><p>Accounts desk design specimen · synthetic records</p></div>
+      <label class="theme-picker">Theme<select id="theme" aria-label="Theme"><option value="minkops-light">Minkops Light</option><option value="minkops-dark">Minkops Dark</option><option value="slate-light">Slate Light</option><option value="slate-dark">Slate Dark</option></select></label>
     </header>
-    <section class="accounts-panel"><h3>Enter bills into Excel</h3><p>Read bills, review the entries, and update the right existing workbook.</p>
-      <div class="accounts-toolbar"><button class="button button-ghost" disabled>Connect local folder</button><button class="button button-ghost" disabled>Upload files</button></div>
-      <details open><summary>Accounts folder · 4 files · Local folder</summary><div class="accounts-file-list">
-        <label><input type="checkbox" checked> bills/materials.pdf</label><label><input type="checkbox" checked> bills/scanned-bill.png</label>
-      </div></details>
-      <details class="accounts-config"><summary>Run configuration</summary><div class="accounts-field-grid">
-        <label>Input types<select><option>PDFs and images</option><option>PDFs</option><option>Images</option></select></label>
-        <label>Review policy<select><option>Approve every output</option><option>Only exceptions</option></select></label>
-        <label>Output platform<select disabled><option>Excel · update existing sheets</option></select></label>
-      </div></details><button class="button button-primary" disabled>Run bill entry</button>
+    <form class="config-panel launch-panel">
+      <div class="section-heading"><div><h2>Start a run</h2><p>Choose the files to read, and whose books they belong to.</p></div></div>
+      <div class="accounts-field-grid">
+        <label>Client<select><option>Example Infra</option></select></label>
+        <label>Files<input type="file" multiple disabled></label>
+        <label>Review<select><option>As the workflow is set</option><option>Approve every entry</option><option>Only exceptions</option></select></label>
+        <label>Company<select><option>The company each bill is addressed to</option><option>Example Infra (2026-27)</option></select></label>
+      </div>
+      <button class="button button-primary" disabled>Start run</button>
+    </form>
+    <section class="run-review" aria-label="Review">
+      <header class="review-heading"><div><h3>Review</h3><p>1 needs a decision · 1 ready to approve · 1 saved in Tally</p></div>
+        <button class="button button-primary" disabled>Save ready entries</button></header>
+      <ol class="review-list">
+        <li class="review-row review-row--proposed">
+          <div class="review-row__main"><div class="review-row__heading"><span class="record-status record-status--proposed">Ready to approve</span></div>
+            <h4>Example Office Systems</h4><p class="review-row__detail">No. EOS/26/0412 · 2026-09-01 · Example Infra · Purchase</p>
+            <p class="review-note">This supplier's bills have not been booked this way before. Review the voucher type and ledgers before approving.</p></div>
+          <span class="review-row__amount">1,88,800.00</span>
+          <div class="review-row__actions"><button class="button button-primary" disabled>Approve</button><button class="button button-ghost" disabled>Do nothing</button><button class="button button-ghost" aria-expanded="true" disabled>Hide details</button></div>
+          <div class="review-detail"><table class="review-lines"><caption>The entry Minkops proposes</caption><tbody>
+            <tr><th scope="row">Example Office Systems</th><td>Cr</td><td>1,88,800.00</td></tr>
+            <tr><th scope="row">Office Cabins</th><td>Dr</td><td>1,60,000.00</td></tr>
+            <tr><th scope="row">Input CGST 9%</th><td>Dr</td><td>14,400.00</td></tr>
+            <tr><th scope="row">Input SGST 9%</th><td>Dr</td><td>14,400.00</td></tr></tbody></table>
+            <p>E-invoice verified by NIC IRP 1, IRN 4f2c…9e1a.</p>
+            <ul class="review-evidence"><li>total: “Invoice total 188,800.00” (page 1)</li></ul></div>
+        </li>
+        <li class="review-row review-row--held">
+          <div class="review-row__main"><div class="review-row__heading"><span class="record-status record-status--held">Needs a decision</span><span class="record-hold">Settlement unclear</span></div>
+            <h4>NEFT/EXAMPLE STEEL/ON ACCOUNT</h4><p class="review-row__detail">2026-06-02 · paid to Example Steel · Example Bank Current</p>
+            <p class="review-note">No set of open bills adds up to this amount, and the narration names none of them.</p></div>
+          <span class="review-row__amount">-2,000.00</span>
+          <div class="review-row__actions"><button class="button button-ghost" disabled>On account, settling no bill</button><button class="button button-ghost" disabled>Settle 2,000.00 of ES/OB/001 (5,000.00 open)</button><button class="button button-ghost" disabled>Do nothing</button><button class="button button-ghost" disabled>Recheck</button><button class="button button-ghost" disabled>Details</button></div>
+        </li>
+        <li class="review-row review-row--saved">
+          <div class="review-row__main"><div class="review-row__heading"><span class="record-status record-status--saved">Saved in Tally</span></div>
+            <h4>Example Inventory Depot</h4><p class="review-row__detail">No. EID/STK/001 · 2026-06-02 · Example Infra · Purchase</p></div>
+          <span class="review-row__amount">28,202.00</span>
+          <div class="review-row__actions"><button class="button button-ghost" disabled>Details</button></div>
+        </li>
+      </ol>
     </section>
-    <section class="accounts-panel"><h3>Discover Tally sources</h3><p>Collect complete masters for all loaded companies and recent vouchers, then review obscure client conventions.</p>
-      <div class="accounts-field-grid"><label>Vouchers from<input type="date" value="2026-07-01"></label><label>Vouchers through<input type="date" value="2026-10-10"></label></div>
-      <p class="quiet-state">All masters are included regardless of these dates. Excel discovery includes sheets, headers and formula text.</p><button class="button button-primary" disabled>Discover sources</button>
-    </section>
-    <section class="accounts-panel"><h3>Enter bills into Tally</h3><p>Read all selected bills, review their company and ledger, then save entries company by company.</p>
-      <div class="accounts-field-grid"><label>Company selection<select><option>Infer from each bill · any discovered company</option><option>Use one company for this run</option></select></label></div>
-      <article class="accounts-bill"><h4>Bill 1 → Example Company</h4><p>Company: Example Company · Buyer registration matches the bill</p><p>Vendor: Example Materials · Entry awaits review</p></article><button class="button button-primary" disabled>Approve entries</button>
-    </section>
-    <section class="accounts-panel"><h3>Source discovery</h3><p>Confirm the purpose, field meanings and record keys for each sheet and table.</p>
-      <label class="config-field">Find a workbook, sheet or table<input type="search" placeholder="Search files, sheets or tables"></label>
-      <details open><summary>Purchases / Materials · 3 columns · Destination</summary><p class="quiet-state">accounts/records.xlsx</p>
-        <div class="accounts-field-grid"><label>Purpose<select><option>Bill-entry destination</option><option>Reference data</option><option>Ignore</option></select></label><label>Header row<input type="number" value="4"></label></div>
-        <div class="accounts-table"><table><thead><tr><th>Column</th><th>Value type</th><th>Business meaning</th><th>Required</th><th>Record key</th></tr></thead><tbody>
-          <tr><td>Supplier</td><td>String</td><td>vendor</td><td><input type="checkbox" checked aria-label="Require supplier"></td><td><input type="checkbox" checked aria-label="Supplier is key"></td></tr>
-          <tr><td>Document</td><td>String</td><td>invoice_number</td><td><input type="checkbox" checked aria-label="Require document"></td><td><input type="checkbox" checked aria-label="Document is key"></td></tr>
-          <tr><td>Gross</td><td>Number</td><td>total</td><td><input type="checkbox" checked aria-label="Require gross"></td><td><input type="checkbox" aria-label="Gross is key"></td></tr>
-        </tbody></table></div>
-      </details><details><summary>Suppliers · 8 columns · Reference data</summary><p>Reference mappings appear here.</p></details>
-      <button class="button button-primary" disabled>Confirm source mappings</button>
-    </section>
-    <section class="accounts-panel"><h3>Bill entry</h3><article class="accounts-bill"><h4>Bill 1 → Purchases / Materials</h4>
-      <p class="quiet-state">Destination: accounts/records.xlsx · Purchases / Materials</p><div class="accounts-field-grid">
-        <label>Supplier<input value="Example Materials"></label><label>Document<input value="EX-001"></label><label>Gross<input type="number" value="1180"></label>
-      </div><div class="accounts-findings"><strong>Needs review</strong><p>No purchase-order register was supplied. Matching is not established.</p></div>
-      <details><summary>Source evidence · 3 fields</summary><dl><dt>Gross · page 1</dt><dd>Total: 1,180</dd></dl></details></article>
-      <label class="accounts-check"><input type="checkbox">I reviewed and acknowledge the unresolved findings.</label><button class="button button-primary" disabled>Approve Excel entries</button>
-    </section>
-    <section class="accounts-panel"><h3>Bill entry</h3><p>Excel entries saved in place and verified.</p><details><summary>accounts/records.xlsx · Saved and verified</summary><ul><li>Purchases / Materials · row 17 · append</li></ul></details></section>
   </main>
   <script>document.getElementById('theme').addEventListener('change', function () { document.documentElement.dataset.theme = this.value; });</script>
 </body>

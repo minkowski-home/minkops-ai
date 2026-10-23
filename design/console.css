@@ -81,6 +81,8 @@ button { cursor: pointer; }
 
 .back-link { display: inline-block; margin-bottom: 24px; border: 0; font: var(--type-label); }
 .detail-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; padding-bottom: 30px; border-bottom: var(--rule-default); }
+/* A title of long file names wraps inside its column rather than pushing the status off a phone's screen. */
+.detail-heading > div { min-width: 0; overflow-wrap: anywhere; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(240px, 1fr); gap: 24px; margin-top: 28px; }
 .config-panel, .related-panel { display: grid; align-content: start; gap: 20px; padding: 24px; border: var(--rule-default); background: var(--surface-raised); }
 .config-panel .section-heading { display: flex; justify-content: space-between; gap: 12px; }

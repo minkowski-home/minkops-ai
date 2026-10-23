@@ -1,12 +1,14 @@
-"""Bill proposals as N-line vouchers: identities from discovery, rules in code, values from the bill."""
+"""The bill gate: a proposal's identities bound to its company's pinned masters, its values checked against the bill."""
 
 import copy
+import re
 import unittest
 from datetime import date
 
+import pytest
+
 from minkops_platform.accounts import vouchers
-from minkops_platform.accounts.bills import HoldReason
-from minkops_platform.accounts.client_context import targets_from_snapshot
+from minkops_platform.accounts.vouchers import HoldReason
 
 LEDGERS = [
     ("Acme Cement", "Sundry Creditors", "No"), ("Purchase 18%", "Purchase Accounts", "Yes"),
@@ -14,7 +16,8 @@ LEDGERS = [
     ("Input SGST 9%", "Duties & Taxes", "No"), ("Input CGST 2.5%", "Duties & Taxes", "No"),
     ("Input SGST 2.5%", "Duties & Taxes", "No"), ("Freight Inward", "Direct Expenses", "No"),
     ("Round Off", "Indirect Expenses", "No"), ("TDS Payable 194C", "Duties & Taxes", "No"),
-    ("Electricity", "Indirect Expenses", "No"),
+    ("Electricity", "Indirect Expenses", "No"), ("Retention Payable", "Current Liabilities", "No"),
+    ("Container Deposit", "Deposits (Asset)", "No"),
 ]
 TYPES = [
     {"NAME": "Purchase", "@_RESERVEDNAME": "Purchase", "GUID": "vt-purchase"},
@@ -24,64 +27,73 @@ TYPES = [
     {"NAME": "Old Purchase", "PARENT": "Purchase", "GUID": "vt-old", "ISACTIVE": "No"},
     {"NAME": "Payment", "@_RESERVEDNAME": "Payment", "GUID": "vt-payment"},
 ]
+COMPANY = {"name": "Test", "guid": "company", "books_from": date(2026, 4, 1), "tally_port": 9001}
+REMOTE = "12345678-1234-5234-8234-123456789abc"
 
 
-def guid(name):
-    return name.lower().replace(" ", "-").replace("%", "pct") + "-guid"
+def guid(name, key="company"):
+    base = name.lower().replace(" ", "-").replace("%", "pct") + "-guid"
+    return base if key == "company" else f"{key}-{base}"
 
 
-def company(name="Test", key="company"):
-    masters = [{"type": "LEDGER", "data": {"NAME": n, "GUID": guid(n) if key == "company" else f"{key}-{guid(n)}",
-                                           "PARENT": parent, "ALTERID": "5", "ISCOSTCENTRESON": costs}}
-               for n, parent, costs in LEDGERS]
+def view(key="company"):
+    """A company's pinned mirror, in the shape mirror.company_view returns."""
+    masters = [{"type": "LEDGER", "data": {"NAME": n, "GUID": guid(n, key), "PARENT": parent, "ALTERID": "5",
+                                           "ISCOSTCENTRESON": costs}} for n, parent, costs in LEDGERS]
+    # A supplier whose balance Tally keeps bill by bill.
+    masters.append({"type": "LEDGER", "data": {"NAME": "Billwise Traders", "GUID": guid("Billwise Traders", key),
+                                               "PARENT": "Sundry Creditors", "ALTERID": "5", "ISBILLWISEON": "Yes"}})
+    # Stock: a purchase ledger that affects inventory, items in their units, and two godowns.
+    masters.append({"type": "LEDGER", "data": {"NAME": "Purchase Stock 18%", "GUID": guid("Purchase Stock 18%", key),
+                                               "PARENT": "Purchase Accounts", "ALTERID": "5", "AFFECTSSTOCK": "Yes"}})
+    masters += [{"type": "UNIT", "data": {"NAME": name, "GUID": f"unit-{name}", "DECIMALPLACES": places,
+                                          "ISSIMPLEUNIT": simple}}
+                for name, places, simple in (("Bag", "0", "Yes"), ("MT", "3", "Yes"), ("Box of 10 Nos", "0", "No"))]
+    masters += [{"type": "STOCKITEM", "data": {"NAME": name, "GUID": guid(name, key), "ALTERID": "7", "BASEUNITS": unit,
+                                               "ISBATCHWISEON": batches}}
+                for name, unit, batches in (("OPC Cement 53", "Bag", "No"), ("TMT Bar 12mm", "MT", "No"),
+                                            ("Primer", "Bag", "Yes"), ("Anchor Bolts", "Box of 10 Nos", "No"))]
+    masters += [{"type": "GODOWN", "data": {"NAME": name, "GUID": guid(name, key)}}
+                for name in ("Main Location", "Site 4 Store")]
     masters += [{"type": "VOUCHERTYPE", "data": dict(t)} for t in TYPES]
     masters += [{"type": "COSTCATEGORY", "data": {"NAME": "Sites", "GUID": "cat-sites"}},
                 {"type": "COSTCENTRE", "data": {"NAME": "Site 4", "GUID": "cc-site-4", "CATEGORY": "Sites"}},
-                {"type": "COSTCENTRE", "data": {"NAME": "Head Office", "GUID": "cc-ho", "CATEGORY": "Primary Cost Category"}}]
-    return {"company": name, "company_guid": key, "port": 9000, "status": "ready",
-            "identity": {"NAME": name, "GUID": key, "BOOKSFROM": "20260401"},
-            "masters": {"status": "ready", "count": len(masters), "records": masters},
-            "vouchers": {"status": "ready", "count": 0, "records": []}}
+                {"type": "COSTCENTRE", "data": {"NAME": "Site 9", "GUID": "cc-site-9", "CATEGORY": "Sites"}},
+                {"type": "COSTCENTRE", "data": {"NAME": "Head Office", "GUID": "cc-ho",
+                                                "CATEGORY": "Primary Cost Category"}}]
+    return {"company": "Test", "company_guid": key, "identity": {"NAME": "Test", "GUID": key},
+            "masters": {"records": masters}}
 
 
-def config(*companies):
-    companies = companies or (company(),)
-    snapshot = {"format_version": "2", "period": {"from": "2026-04-01", "to": "2026-10-31"}, "companies": list(companies)}
-    targets = targets_from_snapshot(snapshot, "device", "discovery")
-    for target in targets:
-        pinned = next(c for c in target["purchase_voucher_types"] if c["name"] == "Purchase GST")
-        target["voucher_type"] = pinned["identity"]
-    return {"tally_target": {"device_id": "device", "discovery_id": "discovery", "companies": targets,
-                             "company_mode": "infer", "locked_company_guid": None},
-            "source_catalog_snapshot": {"sources": [{"tool": "tally", "key": "tally", "snapshot": snapshot}]}}
-
-
-def line(role, ledger, side, amount, *, tax=None, centre=None):
-    return {"role": role, "ledger_guid": guid(ledger), "side": side, "amount": amount, "tax": tax,
+def line(role, ledger, side, amount, *, tax=None, tds=None, centre=None):
+    return {"role": role, "ledger_guid": guid(ledger), "side": side, "amount": amount, "tax": tax, "tds": tds,
             "cost_centre_guid": centre[0] if centre else None, "cost_category_guid": centre[1] if centre else None,
             "evidence": f"Printed {role} line"}
 
 
 def proposal(**changes):
-    """A two-rate GST bill with freight: total 6355.00."""
+    """A two-rate GST bill with freight: taxable 5560.00, tax 795.00, total 6355.00."""
     record = {
-        "source_file_id": "bill-1", "operation": "append", "company_guid": "company",
-        "company_evidence": "Buyer GSTIN matches Test.",
+        "bill": 1, "company_guid": "company", "company_evidence": "Buyer GSTIN matches Test.",
         "document": {"kind": "invoice", "number": "INV/26/0412", "date": "2026-10-14", "total": 6355.00,
-                     "supplier_name": "ACME CEMENT", "supplier_gstin": "27AAACA1234A1Z5", "origin": "domestic"},
+                     "supplier_name": "ACME CEMENT", "supplier_gstin": "27AAACA1234A1Z5", "origin": "domestic",
+                     "buyer_gstin": "27ABCDE1234F1Z5", "taxable": None, "tax": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "vt-purchase-gst",
-                    "party": {"ledger_guid": guid("Acme Cement"), "new_supplier": False, "evidence": "GSTIN matches ledger."},
+                    "party": {"ledger_guid": guid("Acme Cement"), "new_supplier": False,
+                              "evidence": "GSTIN matches ledger."},
                     "lines": [
                         line("expense", "Purchase 18%", "debit", 4000.00),
                         line("expense", "Purchase 5%", "debit", 1500.00),
                         line("tax", "Input CGST 9%", "debit", 360.00, tax={"head": "cgst", "rate": 9, "taxable": 4000.00}),
                         line("tax", "Input SGST 9%", "debit", 360.00, tax={"head": "sgst", "rate": 9, "taxable": 4000.00}),
-                        line("tax", "Input CGST 2.5%", "debit", 37.50, tax={"head": "cgst", "rate": 2.5, "taxable": 1500.00}),
-                        line("tax", "Input SGST 2.5%", "debit", 37.50, tax={"head": "sgst", "rate": 2.5, "taxable": 1500.00}),
+                        line("tax", "Input CGST 2.5%", "debit", 37.50,
+                             tax={"head": "cgst", "rate": 2.5, "taxable": 1500.00}),
+                        line("tax", "Input SGST 2.5%", "debit", 37.50,
+                             tax={"head": "sgst", "rate": 2.5, "taxable": 1500.00}),
                         line("freight", "Freight Inward", "debit", 60.00),
                     ]},
-        "evidence": [{"field": "number", "page": 1, "quote": "Invoice No INV/26/0412"}],
-        "exceptions": [], "findings": [],
+        "supplier_details": None, "evidence": [{"field": "number", "page": 1, "quote": "Invoice No INV/26/0412"}],
+        "exception": None,
     }
     for path, value in changes.items():
         target = record
@@ -92,205 +104,622 @@ def proposal(**changes):
     return record
 
 
-class ResolvedBillTest(unittest.TestCase):
-    def test_a_multi_rate_bill_with_freight_resolves_to_balanced_native_lines(self):
-        bill = vouchers.check(proposal(), config())
+def item(name, quantity, rate, amount, godowns, ledger="Purchase Stock 18%"):
+    return {"item_guid": guid(name), "quantity": quantity, "rate": rate, "amount": amount, "ledger_guid": guid(ledger),
+            "godowns": [{"godown_guid": guid(godown), "quantity": q, "amount": a} for godown, q, a in godowns],
+            "evidence": f"Printed item line {name}"}
+
+
+def stocked(*items, total=127440.00):
+    """Cement and steel bought item-wise: taxable 108000.00, CGST and SGST 9720.00 each."""
+    record = proposal(**{"document.total": total})
+    record["voucher"]["items"] = list(items) or [
+        item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 60, 22800.00), ("Site 4 Store", 40, 15200.00)]),
+        item("TMT Bar 12mm", 1.25, 56000, 70000.00, [("Site 4 Store", 1.25, 70000.00)])]
+    taxable = sum(entry["amount"] for entry in record["voucher"]["items"])
+    record["voucher"]["lines"] = [
+        line("tax", "Input CGST 9%", "debit", round(taxable * 0.09, 2), tax={"head": "cgst", "rate": 9, "taxable": taxable}),
+        line("tax", "Input SGST 9%", "debit", round(taxable * 0.09, 2), tax={"head": "sgst", "rate": 9, "taxable": taxable})]
+    return record
+
+
+def check(record, **options):
+    return vouchers.check(copy.deepcopy(record), view(), COMPANY, **options)
+
+
+def held(record, **options):
+    """The hold a proposal raises, as (code, message)."""
+    try:
+        check(record, **options)
+    except HoldReason as refusal:
+        return refusal.code, str(refusal)
+    raise AssertionError("The proposal passed the gate.")
+
+
+class BoundBillTest(unittest.TestCase):
+    def test_a_multi_rate_bill_with_freight_binds_to_balanced_native_lines_and_one_plan(self):
+        bill = check(proposal())
         self.assertEqual((bill.family, bill.voucher_type["NAME"], bill.party), ("purchase", "Purchase GST", "Acme Cement"))
-        self.assertEqual(bill.lines[0], {"ledger": "Acme Cement", "side": "credit", "amount_cents": 635500, "allocation": None})
+        self.assertEqual(bill.lines[0], {"ledger": "Acme Cement", "side": "credit", "amount_cents": 635500,
+                                         "allocation": None})
         self.assertEqual(sum(ln["amount_cents"] for ln in bill.lines if ln["side"] == "debit"), 635500)
         self.assertEqual(bill.identity, vouchers.document_identity("Acme Cement", "INV/26/0412", date(2026, 10, 14)))
-        self.assertEqual(bill.summary, {"vendor": "Acme Cement", "invoice_number": "INV/26/0412", "date": "2026-10-14",
-                                        "total": 6355.0, "tax": 795.0})
-        plan = bill.native_plan("12345678-1234-5234-8234-123456789abc", "append", None)
-        self.assertEqual((plan["format_version"], plan["family"], plan["fence"]), (5, "purchase", "retry_after_read"))
+        self.assertEqual(bill.destination_key, "bill:company")
+        plan = bill.native_plan(REMOTE)
+        self.assertEqual((plan["format_version"], plan["family"], plan["fence"], plan["port"]),
+                         (6, "purchase", "retry_after_read", 9001))
+        self.assertEqual(plan["header"], {"date": "2026-10-14", "reference": "INV/26/0412", "party_ledger": "Acme Cement",
+                                          "narration": "Minkops reviewed bill INV/26/0412", "tag": None})
         self.assertEqual(plan["duplicate"]["families"], ["purchase", "journal"])
         self.assertEqual(plan["duplicate"]["window"], {"from": "2026-04-01", "to": "2027-03-31"})
-        self.assertEqual(plan["references"]["ledgers"]["Freight Inward"], {"GUID": guid("Freight Inward"), "PARENT": "Direct Expenses", "ALTERID": "5"})
-        self.assertIs(vouchers.upgrade(plan, identity=bill.identity), plan)
+        self.assertEqual(plan["references"]["ledgers"]["Freight Inward"],
+                         {"GUID": guid("Freight Inward"), "PARENT": "Direct Expenses", "ALTERID": "5"})
+        self.assertEqual(bill.preview()["lines"][0], {"ledger": "Acme Cement", "side": "credit", "amount": 6355.0})
 
-    def test_a_printed_round_off_balances_the_bill_within_one_rupee(self):
+    def test_a_printed_round_off_of_at_most_a_rupee_balances_the_bill(self):
         rounded = proposal(**{"document.total": 6355.40})
         rounded["voucher"]["lines"].append(line("round_off", "Round Off", "debit", 0.40))
-        self.assertEqual(vouchers.check(rounded, config()).lines[0]["amount_cents"], 635540)
+        self.assertEqual(check(rounded).lines[0]["amount_cents"], 635540)
         too_large = proposal(**{"document.total": 6357.00})
         too_large["voucher"]["lines"].append(line("round_off", "Round Off", "debit", 2.00))
         twice = proposal(**{"document.total": 6355.40})
-        twice["voucher"]["lines"] += [line("round_off", "Round Off", "debit", 0.20), line("round_off", "Round Off", "debit", 0.20)]
+        twice["voucher"]["lines"] += [line("round_off", "Round Off", "debit", 0.20),
+                                      line("round_off", "Electricity", "debit", 0.20)]
         for record in (too_large, twice):
-            with self.subTest(record=record["voucher"]["lines"][-1]), self.assertRaises(HoldReason):
-                vouchers.check(record, config())
+            with self.subTest(lines=len(record["voucher"]["lines"])):
+                self.assertEqual(held(record)[0], "source_values_conflict")
 
-    def test_lines_that_do_not_reach_the_printed_total_hold(self):
-        with self.assertRaises(HoldReason) as held:
-            vouchers.check(proposal(**{"document.total": 6400.00}), config())
-        self.assertEqual(held.exception.code, "source_values_conflict")
+    def test_lines_short_of_the_printed_total_hold_and_say_by_how_much(self):
+        code, message = held(proposal(**{"document.total": 6356.00}))
+        self.assertEqual(code, "source_values_conflict")
+        # The refusal names both figures, and that only a printed round-off may close a gap.
+        self.assertIn("The lines come to 6,355.00, but the bill's printed total is 6,356.00.", message)
+        self.assertIn("round-off the bill prints", message)
 
-    def test_tax_lines_must_follow_their_rate_and_split_evenly(self):
-        wrong_rate = proposal(**{"voucher.lines.2.amount": 400.00, "voucher.lines.3.amount": 400.00, "document.total": 6435.00})
+    def test_tax_lines_follow_their_printed_rate_and_central_and_state_halves_match(self):
+        wrong_rate = proposal(**{"voucher.lines.2.amount": 400.00, "voucher.lines.3.amount": 400.00,
+                                 "document.total": 6435.00})
         uneven = proposal(**{"voucher.lines.2.amount": 359.00, "voucher.lines.3.amount": 361.00})
+        for record in (wrong_rate, uneven):
+            with self.subTest(cgst=record["voucher"]["lines"][2]["amount"]):
+                self.assertEqual(held(record)[0], "source_values_conflict")
+        # Printed paise rounding of a tax amount is not a conflict.
         paise = proposal(**{"voucher.lines.4.amount": 37.49, "voucher.lines.5.amount": 37.49, "document.total": 6354.98})
-        for record, code in ((wrong_rate, "source_values_conflict"), (uneven, "source_values_conflict")):
-            with self.subTest(code=code), self.assertRaises(HoldReason) as held:
-                vouchers.check(record, config())
-            self.assertEqual(held.exception.code, code)
-        self.assertEqual(vouchers.check(paise, config()).summary["tax"], 794.98)
+        self.assertEqual(check(paise).lines[0]["amount_cents"], 635498)
+
+    def test_printed_totals_expose_amounts_that_already_include_tax(self):
+        # Booked from a tax-inclusive amount column, the bill balances with no tax lines at all: the input tax is lost.
+        inclusive = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 4720.00),
+                                                  line("expense", "Purchase 5%", "debit", 1575.00),
+                                                  line("freight", "Freight Inward", "debit", 60.00)]})
+        self.assertEqual(check(inclusive).lines[0]["amount_cents"], 635500)
+        printed = {"document.taxable": 5560.00, "document.tax": 795.00}
+        code, message = held({**inclusive, "document": {**inclusive["document"], "taxable": 5560.00, "tax": 795.00}})
+        self.assertEqual(code, "source_values_conflict")
+        self.assertIn("The lines claim 6,355.00 of taxable value, but the bill prints 5,560.00.", message)
+        self.assertEqual(check(proposal(**printed)).lines[0]["amount_cents"], 635500)
+        # A bill printing no tax at all (an exempt or unregistered supply) binds its lines to none.
+        exempt = proposal(**{"document.total": 6355.00, "document.tax": 0, "voucher.lines": [
+            line("expense", "Purchase 18%", "debit", 6355.00)]})
+        self.assertEqual(check(exempt).lines[0]["amount_cents"], 635500)
+        code, message = held({**inclusive, "document": {**inclusive["document"], "tax": 0},
+                              "voucher": {**inclusive["voucher"], "lines": proposal()["voucher"]["lines"]}})
+        self.assertIn("but the bill prints 0.00", message)
 
     def test_an_expense_bill_can_be_a_journal_and_a_supplier_credit_note_a_debit_note(self):
-        journal = proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal", "document.total": 1180.00,
-                              "voucher.lines": [line("expense", "Electricity", "debit", 1000.00),
-                                                line("tax", "Input CGST 9%", "debit", 90.00, tax={"head": "cgst", "rate": 9, "taxable": 1000.00}),
-                                                line("tax", "Input SGST 9%", "debit", 90.00, tax={"head": "sgst", "rate": 9, "taxable": 1000.00})]})
-        bill = vouchers.check(journal, config())
-        self.assertEqual((bill.family, bill.native_plan("12345678-1234-5234-8234-123456789abc", "append", None)["duplicate"]["families"]),
+        journal = proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal",
+                              "document.total": 1180.00, "voucher.lines": [
+                                  line("expense", "Electricity", "debit", 1000.00),
+                                  line("tax", "Input CGST 9%", "debit", 90.00,
+                                       tax={"head": "cgst", "rate": 9, "taxable": 1000.00}),
+                                  line("tax", "Input SGST 9%", "debit", 90.00,
+                                       tax={"head": "sgst", "rate": 9, "taxable": 1000.00})]})
+        bill = check(journal)
+        # A Journal-booked bill is still found as a duplicate among Purchases, and the other way round.
+        self.assertEqual((bill.family, bill.native_plan(REMOTE)["duplicate"]["families"]),
                          ("journal", ["purchase", "journal"]))
-        note = proposal(**{"document.kind": "credit_note", "voucher.family": "debit_note", "voucher.voucher_type_guid": "vt-debit-note"})
+        note = proposal(**{"document.kind": "credit_note", "voucher.family": "debit_note",
+                           "voucher.voucher_type_guid": "vt-debit-note"})
         for ln in note["voucher"]["lines"]:
             ln["side"] = "credit"
-        credit = vouchers.check(note, config())
+        credit = check(note)
         self.assertEqual(credit.lines[0]["side"], "debit")
-        self.assertEqual(credit.identity, vouchers.document_identity("Acme Cement", "INV/26/0412", date(2026, 10, 14), series="credit_note"))
-        plan = credit.native_plan("12345678-1234-5234-8234-123456789abc", "append", None)
-        self.assertEqual(plan["duplicate"]["families"], ["debit_note"])
-        mismatched = proposal(**{"document.kind": "credit_note"})
-        with self.assertRaises(HoldReason):
-            vouchers.check(mismatched, config())
+        self.assertEqual(credit.identity, vouchers.document_identity("Acme Cement", "INV/26/0412", date(2026, 10, 14),
+                                                                     series="credit_note"))
+        self.assertEqual(credit.native_plan(REMOTE)["duplicate"]["families"], ["debit_note"])
+        self.assertEqual(held(proposal(**{"document.kind": "credit_note"}))[0], "classification_uncertain")
 
     def test_cost_allocations_resolve_only_within_their_category_on_enabled_ledgers(self):
-        allocated = proposal(**{"voucher.lines.0.cost_centre_guid": "cc-site-4", "voucher.lines.0.cost_category_guid": "cat-sites"})
-        bill = vouchers.check(allocated, config())
-        self.assertEqual(bill.lines[1]["allocation"], {"category": "Sites", "category_guid": "cat-sites", "centre": "Site 4", "centre_guid": "cc-site-4"})
-        for record in (proposal(**{"voucher.lines.0.cost_centre_guid": "cc-ho", "voucher.lines.0.cost_category_guid": "cat-sites"}),
-                       proposal(**{"voucher.lines.1.cost_centre_guid": "cc-site-4", "voucher.lines.1.cost_category_guid": "cat-sites"})):
-            with self.assertRaises(HoldReason):
-                vouchers.check(record, config())
+        allocated = proposal(**{"voucher.lines.0.cost_centre_guid": "cc-site-4",
+                                "voucher.lines.0.cost_category_guid": "cat-sites"})
+        self.assertEqual(check(allocated).lines[1]["allocation"], {"category": "Sites", "category_guid": "cat-sites",
+                                                                   "centre": "Site 4", "centre_guid": "cc-site-4"})
+        other_category = proposal(**{"voucher.lines.0.cost_centre_guid": "cc-ho",
+                                     "voucher.lines.0.cost_category_guid": "cat-sites"})
+        disabled_ledger = proposal(**{"voucher.lines.1.cost_centre_guid": "cc-site-4",
+                                      "voucher.lines.1.cost_category_guid": "cat-sites"})
+        for record in (other_category, disabled_ledger):
+            with self.subTest(centre=record["voucher"]["lines"][0]["cost_centre_guid"]):
+                self.assertEqual(held(record)[0], "classification_uncertain")
 
-    def test_identities_come_only_from_the_routed_company_and_its_pinned_choices(self):
-        other = company("Other", "other")
-        foreign_ledger = proposal(**{"voucher.lines.6.ledger_guid": "other-" + guid("Freight Inward")})
-        wrong_type = proposal(**{"voucher.voucher_type_guid": "vt-payment"})
-        unpinned = proposal(**{"voucher.voucher_type_guid": "vt-purchase"})
-        inactive = proposal(**{"voucher.voucher_type_guid": "vt-old"})
-        repeated = proposal(**{"voucher.lines.6.ledger_guid": guid("Purchase 18%")})
-        for record in (foreign_ledger, wrong_type, unpinned, inactive, repeated):
-            with self.subTest(voucher=record["voucher"]["voucher_type_guid"]), self.assertRaises(HoldReason):
-                vouchers.check(record, config(company(), other))
+    def test_identities_come_only_from_the_routed_company(self):
+        cases = {
+            "another company's ledger": proposal(**{"voucher.lines.6.ledger_guid": guid("Freight Inward", "other")}),
+            "a payment type": proposal(**{"voucher.voucher_type_guid": "vt-payment"}),
+            "an inactive type": proposal(**{"voucher.voucher_type_guid": "vt-old"}),
+            "a ledger used twice": proposal(**{"voucher.lines.6.ledger_guid": guid("Purchase 18%")}),
+            "the supplier as a line": proposal(**{"voucher.lines.6.ledger_guid": guid("Acme Cement")}),
+        }
+        for case, record in cases.items():
+            with self.subTest(case):
+                self.assertIn(held(record)[0], ("voucher_type_unresolved", "classification_uncertain"))
 
-    def test_tds_waits_for_a_confirmed_posting_profile(self):
-        record = proposal(**{"document.total": 6355.00})
-        record["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 40.00))
-        with self.assertRaises(HoldReason) as held:
-            vouchers.check(record, config())
-        self.assertEqual(held.exception.code, "classification_uncertain")
+    def test_tds_follows_its_section_and_rate_and_reduces_only_what_the_supplier_is_owed(self):
+        tds = {"section": "194C", "rate": 1}
+        deducted = proposal()
+        deducted["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 55.00, tds=tds))
+        bill = check(deducted)
+        # One percent of the 5,500.00 contract value, never of GST or freight.
+        self.assertEqual(bill.lines[0], {"ledger": "Acme Cement", "side": "credit", "amount_cents": 630000,
+                                         "allocation": None})
+        wrong = proposal()
+        wrong["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 63.55, tds=tds))
+        backwards = proposal()
+        backwards["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "debit", 55.00, tds=tds))
+        unstated = proposal()
+        unstated["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 55.00))
+        self.assertEqual(held(wrong)[0], "source_values_conflict")
+        self.assertEqual(held(backwards)[0], "classification_uncertain")
+        self.assertEqual(held(unstated)[0], "classification_uncertain")
 
-    def test_new_suppliers_foreign_documents_and_dates_before_the_books_hold_with_their_reasons(self):
-        new = proposal(**{"voucher.party": {"ledger_guid": None, "new_supplier": True, "evidence": "No ledger has this GSTIN."}})
-        cases = ((new, "supplier_missing"),
-                 (proposal(**{"voucher.party.ledger_guid": None}), "supplier_unresolved"),
-                 (proposal(**{"document.origin": "foreign"}), "identity_rule_unknown"),
-                 (proposal(**{"document.date": "2026-03-31"}), "date_before_books"))
-        for record, code in cases:
-            with self.subTest(code=code), self.assertRaises(HoldReason) as held:
-                vouchers.check(record, config())
-            self.assertEqual(held.exception.code, code)
-        self.assertEqual(vouchers.summary(new, config())["vendor"], "ACME CEMENT")
-        self.assertIsNotNone(vouchers.check(new, config(), assume_new_supplier=True))
+    def test_suppliers_documents_and_dates_the_gate_cannot_book_hold_with_their_reasons(self):
+        new = proposal(**{"voucher.party": {"ledger_guid": None, "new_supplier": True, "evidence": "No GSTIN match."}})
+        cases = ((new, {}, "supplier_missing"),
+                 (proposal(**{"voucher.party.ledger_guid": None}), {}, "supplier_unresolved"),
+                 (proposal(**{"document.origin": "foreign"}), {}, "identity_rule_unknown"),
+                 (proposal(**{"document.date": "2026-03-31"}), {}, "date_before_books"),
+                 (proposal(), {"until": "2026-09-30"}, "date_outside_company_period"))
+        for record, options, code in cases:
+            with self.subTest(code=code):
+                self.assertEqual(held(record, **options)[0], code)
+        self.assertIn("has no ledger in Test. Create it, then this bill can be saved.", held(new)[1])
+        # Once a person approves creating it, the printed name is the supplier's ledger.
+        created = check(new, assume_new_supplier=True)
+        self.assertEqual((created.party, created.identity),
+                         ("ACME CEMENT", vouchers.document_identity("Acme Cement", "INV/26/0412", date(2026, 10, 14))))
 
-    def test_malformed_amounts_never_reach_a_plan(self):
+    def test_a_bill_by_bill_supplier_is_owed_a_new_reference_named_by_the_invoice(self):
+        billwise = {"voucher.party.ledger_guid": guid("Billwise Traders")}
+        plan = check(proposal(**billwise)).native_plan(REMOTE)
+        party = plan["lines"][0]
+        self.assertEqual((plan["format_version"], party["ledger"], party["bills"]), (6, "Billwise Traders", [
+            {"name": "INV/26/0412", "type": "New Ref", "amount_cents": party["amount_cents"]}]))
+        # Other suppliers' lines carry no reference.
+        self.assertNotIn("bills", check(proposal()).native_plan(REMOTE)["lines"][0])
+        # A debit note adjusts a bill it would have to name; that is entered in Tally.
+        note = proposal(**billwise, **{"document.kind": "credit_note", "voucher.family": "debit_note",
+                                       "voucher.voucher_type_guid": "vt-debit-note"})
+        note["voucher"]["lines"] = [{**line, "side": "credit"} for line in note["voucher"]["lines"]]
+        self.assertEqual(held(note)[0], "unsupported_structure")
+
+    def test_a_bill_booked_item_wise_carries_each_item_to_its_godowns_and_purchase_ledger(self):
+        bill = check(stocked())
+        plan = bill.native_plan(REMOTE)
+        # Tally books the items' value on their purchase ledger: one line for both items, as its readback reports.
+        self.assertEqual([(ln["ledger"], ln["side"], ln["amount_cents"]) for ln in plan["lines"]], [
+            ("Acme Cement", "credit", 12744000), ("Purchase Stock 18%", "debit", 10800000),
+            ("Input CGST 9%", "debit", 972000), ("Input SGST 9%", "debit", 972000)])
+        self.assertEqual(plan["inventory"], [
+            {"item": "OPC Cement 53", "unit": "Bag", "quantity": "100", "rate": "380", "side": "debit",
+             "amount_cents": 3800000, "ledger": "Purchase Stock 18%", "godowns": [
+                 {"godown": "Main Location", "quantity": "60", "amount_cents": 2280000},
+                 {"godown": "Site 4 Store", "quantity": "40", "amount_cents": 1520000}]},
+            {"item": "TMT Bar 12mm", "unit": "MT", "quantity": "1.25", "rate": "56000", "side": "debit",
+             "amount_cents": 7000000, "ledger": "Purchase Stock 18%", "godowns": [
+                 {"godown": "Site 4 Store", "quantity": "1.25", "amount_cents": 7000000}]}])
+        self.assertEqual(plan["references"]["stock_items"]["TMT Bar 12mm"],
+                         {"GUID": guid("TMT Bar 12mm"), "BASEUNITS": "MT"})
+        self.assertEqual(plan["references"]["godowns"], {"Main Location": {"GUID": guid("Main Location")},
+                                                         "Site 4 Store": {"GUID": guid("Site 4 Store")}})
+        self.assertEqual(bill.booking, {"voucher_type": {"NAME": "Purchase GST", "GUID": "vt-purchase-gst"},
+                                        "ledgers": ["Purchase Stock 18%"], "items": True})
+        # A bill booked to ledgers carries no inventory, and its booking says so.
+        self.assertNotIn("inventory", check(proposal()).native_plan(REMOTE))
+        self.assertEqual(check(proposal()).booking["ledgers"], ["Freight Inward", "Purchase 18%", "Purchase 5%"])
+
+    def test_items_tally_cannot_take_as_proposed_hold_with_their_reasons(self):
+        cement = item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])
+        cases = {
+            "batches": (stocked(item("Primer", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])),
+                        "unsupported_structure", "Primer tracks batches"),
+            "compound unit": (stocked(item("Anchor Bolts", 100, 380, 38000.00, [("Main Location", 100, 38000.00)])),
+                              "unsupported_structure", "Anchor Bolts is counted in a compound unit"),
+            "rate times quantity": (stocked(item("OPC Cement 53", 100, 390, 38000.00, [("Main Location", 100, 38000.00)])),
+                                    "source_values_conflict", "100 at 390 comes to 39,000.00"),
+            "fractional bags": (stocked(item("OPC Cement 53", 100.5, 378.11, 38000.00,
+                                             [("Main Location", 100.5, 38000.00)])),
+                                "source_values_conflict", "OPC Cement 53 is counted in Bag to 0 decimal places"),
+            "godowns short": (stocked(item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 90, 34200.00)])),
+                              "classification_uncertain", "OPC Cement 53's godowns must take its 100 Bag and 38,000.00"),
+            "ledger without stock": (stocked(item("OPC Cement 53", 100, 380, 38000.00, [("Main Location", 100, 38000.00)],
+                                                  ledger="Purchase 18%")),
+                                     "classification_uncertain", "Purchase 18% must have inventory values affected"),
+        }
+        for case, (record, code, reason) in cases.items():
+            with self.subTest(case):
+                found = held(record)
+                self.assertEqual(found[0], code)
+                self.assertIn(reason, found[1])
+        # Items are bought on a Purchase invoice; an item ledger is the items' own line.
+        journal = stocked(cement, total=44840.00)
+        journal["voucher"].update(family="journal", voucher_type_guid="vt-journal")
+        self.assertEqual(held(journal)[0], "unsupported_structure")
+        doubled = stocked(cement, total=44840.00)
+        doubled["voucher"]["lines"].append(line("expense", "Purchase Stock 18%", "debit", 100.00))
+        self.assertEqual(held(doubled)[0], "classification_uncertain")
+
+    def test_values_the_bill_did_not_give_or_gave_malformed_never_reach_a_plan(self):
+        # An unread origin is a missing value, not a foreign supplier.
+        self.assertEqual(held(proposal(**{"document.origin": None})),
+                         ("required_value_missing", "The bill's origin must be read from it."))
+        self.assertEqual(held(proposal(**{"document.number": " ", "document.total": None}))[1],
+                         "The bill's number, total must be read from it.")
+        self.assertEqual(held(proposal(document=None))[0], "required_value_missing")
         for record in (proposal(**{"voucher.lines.0.amount": 4000.001}), proposal(**{"voucher.lines.0.amount": -4000.00}),
                        proposal(**{"voucher.lines.0.side": "sideways"}), proposal(**{"document.date": "14/10/2026"})):
-            with self.assertRaises(HoldReason):
-                vouchers.check(copy.deepcopy(record), config())
+            with self.subTest(line=record["voucher"]["lines"][0], date=record["document"]["date"]):
+                self.assertIn(held(record)[0], ("source_values_conflict", "required_value_missing"))
+
+
+class PrintedAdjustmentsTest(unittest.TestCase):
+    """What a bill prints as held back, adjusted or refundable is carried by the voucher, or a person decides."""
+
+    def held(self, record):
+        try:
+            check(record)
+        except HoldReason as refusal:
+            return refusal.code, str(refusal), refusal.final
+        raise AssertionError("The proposal passed the gate.")
+
+    def test_retention_held_back_is_its_own_line_on_the_suppliers_side(self):
+        printed = {"document.adjustments": [{"kind": "retention", "amount": 355.00, "evidence": "Retention 355.00"}]}
+        self.assertEqual(self.held(proposal(**printed)), ("classification_uncertain", (
+            "The bill holds back 355.00 as retention from what the supplier is paid. Carry it as a retention line on "
+            "the supplier's side, to the ledger Test keeps it in; if it keeps none, propose classification_uncertain."),
+            False))
+        retained = proposal(**printed)
+        retained["voucher"]["lines"].append(line("retention", "Retention Payable", "credit", 355.00))
+        plan = check(retained).native_plan(REMOTE)
+        # The supplier is owed the total less what is held back; the expense stays at the bill's full value.
+        self.assertEqual({ln["ledger"]: ln["amount_cents"] for ln in plan["lines"] if ln["side"] == "credit"},
+                         {"Acme Cement": 600000, "Retention Payable": 35500})
+        retained["voucher"]["lines"][-1]["side"] = "debit"
+        self.assertIn("on the supplier's side", self.held(retained)[1])
+
+    def test_a_refundable_deposit_is_its_own_line_never_an_expense(self):
+        printed = {"document.adjustments": [{"kind": "deposit", "amount": 60.00, "evidence": "Refundable deposit 60.00"}]}
+        self.assertEqual(self.held(proposal(**printed))[:2], ("classification_uncertain", (
+            "The bill charges a refundable deposit of 60.00, which is not an expense. Carry it as a deposit line to "
+            "the ledger Test keeps deposits in; if it keeps none, propose classification_uncertain.")))
+        deposited = proposal(**printed)
+        deposited["voucher"]["lines"][-1] = line("deposit", "Container Deposit", "debit", 60.00)
+        self.assertTrue(check(deposited))
+
+    def test_an_advance_adjusted_is_settled_in_tally_and_the_bill_waits_for_a_person(self):
+        advanced = check(proposal(**{"document.adjustments": [
+            {"kind": "advance", "amount": 1000.00, "evidence": "Less advance ADV-21 1,000.00"}]}))
+        # The bill is booked at its full value: the advance was paid before, and is matched against it in Tally.
+        self.assertEqual(advanced.native_plan(REMOTE)["lines"][0]["amount_cents"], 635500)
+        self.assertIn("The bill adjusts an advance of 1,000.00 already paid. Minkops books the bill at its full value; "
+                      "match it against that advance in Tally.", advanced.notes)
+
+
+# A GST-registered company as TallyPrime keeps it: GST switched on, a registration as a tax unit, tax ledgers marked
+# as GST duties with their heads and rates, and a supplier whose ledger holds its registration and mailing state.
+BUYER, ACME = "27ABCDE1234F1Z5", "27AAACA1234A1Z5"
+
+
+def gst_view(*, registrations=(("Test Maharashtra", BUYER),), supplier=ACME):
+    gst = view()
+    gst["identity"] = {**gst["identity"], "ISGSTON": "Yes", "STATENAME": "Maharashtra"}
+    for record in gst["masters"]["records"]:
+        data = record["data"]
+        match = re.fullmatch(r"Input ([CS])GST ([\d.]+)%", data.get("NAME", ""))
+        if match:
+            data.update(TAXTYPE="GST", GSTDUTYHEAD="CGST" if match[1] == "C" else "SGST/UTGST", RATEOFTAXCALCULATION=match[2])
+        if data.get("NAME") == "Acme Cement" and supplier:
+            data["LEDGSTREGDETAILS.LIST"] = [{"APPLICABLEFROM": "20170701", "GSTIN": supplier, "GSTREGISTRATIONTYPE": "Regular",
+                                              "PLACEOFSUPPLY": "Maharashtra"}]
+            data["LEDMAILINGDETAILS.LIST"] = {"APPLICABLEFROM": "20170701", "STATE": "Maharashtra", "COUNTRY": "India"}
+    gst["masters"]["records"] += [{"type": "TAXUNIT", "data": {"@_NAME": name, "GSTREGNUMBER": number}}
+                                  for name, number in registrations]
+    return gst
+
+
+def gst_proposal(**changes):
+    """The two-rate bill with its lines' GST rates and supply: freight is untaxed."""
+    record = proposal(**{"voucher.lines.0.gst_rate": 18, "voucher.lines.0.supply": "goods",
+                         "voucher.lines.1.gst_rate": 5, "voucher.lines.1.supply": "goods",
+                         "voucher.lines.6.gst_rate": 0, **changes})
+    return record
+
+
+def gst_check(record, **options):
+    return vouchers.check(copy.deepcopy(record), options.pop("in_view", None) or gst_view(), COMPANY, **options)
+
+
+def gst_held(record, **options):
+    try:
+        gst_check(record, **options)
+    except HoldReason as refusal:
+        return refusal.code, str(refusal)
+    raise AssertionError("The proposal passed the gate.")
+
+
+class GstReturnsTest(unittest.TestCase):
+    """What a purchase into a GST-registered company states for Tally's returns, and the GST checks before it."""
+
+    def test_a_purchase_states_the_suppliers_registration_the_place_of_supply_and_each_taxed_lines_rates(self):
+        bound = gst_check(gst_proposal())
+        plan = bound.native_plan(REMOTE)
+        self.assertEqual(plan["gst"], {"party": {"gstin": ACME, "registration_type": "Regular", "state": "Maharashtra",
+                                                 "country": "India", "place_of_supply": "Maharashtra"},
+                                       "company_gstin": BUYER, "registration": None})
+        stated = {ln["ledger"]: ln.get("gst") for ln in plan["lines"]}
+        self.assertEqual(stated["Purchase 18%"], {"taxability": "Taxable", "supply": "Goods",
+                                                  "rates": {"cgst": "9", "sgst": "9", "igst": "18", "cess": "0"}})
+        self.assertEqual(stated["Purchase 5%"]["rates"], {"cgst": "2.5", "sgst": "2.5", "igst": "5", "cess": "0"})
+        # The untaxed freight, the tax lines and the supplier state nothing of their own.
+        self.assertEqual({ln for ln, details in stated.items() if details}, {"Purchase 18%", "Purchase 5%"})
+        self.assertEqual(bound.notes, [])
+        # A company without GST switched on states nothing for returns, whatever the bill charges.
+        self.assertNotIn("gst", check(proposal()).native_plan(REMOTE))
+
+    def test_each_taxed_line_carries_a_rate_the_bills_tax_lines_charge(self):
+        one = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 5000.00),
+                                            line("tax", "Input CGST 9%", "debit", 450.00, tax={"head": "cgst", "rate": 9, "taxable": 5000.00}),
+                                            line("tax", "Input SGST 9%", "debit", 450.00, tax={"head": "sgst", "rate": 9, "taxable": 5000.00})],
+                          "document.total": 5900.00, "voucher.lines.0.gst_rate": None, "voucher.lines.0.supply": "services"})
+        # At one rate, every line that does not say otherwise is taxed at it.
+        [taxed] = [ln for ln in gst_check(one).native_plan(REMOTE)["lines"] if ln.get("gst")]
+        self.assertEqual((taxed["ledger"], taxed["gst"]["supply"], taxed["gst"]["rates"]["igst"]), ("Purchase 18%", "Services", "18"))
+        # At several, each line says its own, and the lines at each rate must come to the value taxed at it.
+        self.assertIn("more than one GST rate", gst_held(proposal())[1])
+        code, reason = gst_held(gst_proposal(**{"voucher.lines.0.gst_rate": 5, "voucher.lines.1.gst_rate": 18}))
+        self.assertEqual(code, "source_values_conflict")
+        self.assertIn("taxed at 18% come to 1500.00", reason)
+        self.assertIn("rate the bill's tax lines charge", gst_held(gst_proposal(**{"voucher.lines.6.gst_rate": 12}))[1])
+        # Goods or services: the line says, or its ledger does in Tally.
+        self.assertEqual(gst_held(gst_proposal(**{"voucher.lines.0.supply": None}))[0], "classification_uncertain")
+        typed = gst_view()
+        next(r for r in typed["masters"]["records"] if r["data"].get("NAME") == "Purchase 18%")["data"]["GSTTYPEOFSUPPLY"] = "Goods"
+        self.assertTrue(gst_check(gst_proposal(**{"voucher.lines.0.supply": None}), in_view=typed))
+
+    def test_input_tax_is_claimed_only_on_a_bill_that_names_the_companys_gstin(self):
+        # Registered, the company claims tax only where the bill prints it as the buyer: read again if it does.
+        code, reason = gst_held(gst_proposal(**{"document.buyer_gstin": None}))
+        self.assertEqual(code, "classification_uncertain")
+        self.assertEqual(reason, (
+            "Test can claim input tax only on a bill that prints its GSTIN as the buyer's. Give buyer_gstin as the "
+            "bill prints it. If it prints none, propose classification_uncertain: whether the tax is claimed or is "
+            "part of the cost is a person's call."))
+        # An untaxed bill needs no buyer GSTIN: the company's only registration is assumed.
+        untaxed = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 5000.00)],
+                              "document.total": 5000.00, "document.buyer_gstin": None})
+        self.assertTrue(gst_check(untaxed))
+        # GST on in Tally with no GSTIN there: nothing can be claimed, and no reading changes that.
+        try:
+            gst_check(gst_proposal(), in_view=gst_view(registrations=()))
+        except HoldReason as refusal:
+            self.assertEqual((refusal.code, refusal.final), ("classification_uncertain", True))
+            self.assertEqual(str(refusal), (
+                "Test has GST switched on in Tally but no GSTIN there, so it cannot claim this bill's input tax. "
+                "Add the company's GSTIN in Tally, or decide whether the tax is part of the cost."))
+        else:
+            raise AssertionError("A company without a GSTIN claimed input tax.")
+        # GST off in Tally: tax ledgers are the company's own bookkeeping, and its bills are not held for them.
+        self.assertTrue(check(proposal()))
+
+    def test_of_several_registrations_the_bill_names_the_one_it_is_addressed_to(self):
+        several = gst_view(registrations=(("Test Maharashtra", BUYER), ("Test Karnataka", "29ABCDE1234F1Z1")))
+        self.assertIn("give the buyer GSTIN", gst_held(gst_proposal(**{"document.buyer_gstin": None}), in_view=several)[1])
+        self.assertEqual(gst_held(gst_proposal(**{"document.buyer_gstin": "07ABCDE1234F1Z9"}), in_view=several)[0],
+                         "company_unresolved")
+        plan = gst_check(gst_proposal(**{"document.buyer_gstin": "29abcde1234f1z1"}), in_view=several).native_plan(REMOTE)
+        self.assertEqual(plan["gst"]["registration"], {"name": "Test Karnataka", "gstin": "29ABCDE1234F1Z1"})
+        # Addressed to the Karnataka registration from a Maharashtra supplier, the supply is inter-state.
+        self.assertEqual(plan["gst"]["party"]["place_of_supply"], "Karnataka")
+
+    def test_tax_heads_the_supplys_states_rule_out_go_to_a_person(self):
+        igst = proposal(**{"voucher.lines": [line("expense", "Purchase 18%", "debit", 5000.00, ),
+                                             line("tax", "Electricity", "debit", 900.00, tax={"head": "igst", "rate": 18, "taxable": 5000.00})],
+                           "document.total": 5900.00, "voucher.lines.0.supply": "goods"})
+        [note] = gst_check(igst).notes
+        self.assertIn("charges IGST, but its supplier and place of supply are both in Maharashtra", note)
+        # CGST and SGST on a supply printed as delivered to another state.
+        [note] = gst_check(gst_proposal(**{"document.place_of_supply": "Karnataka (29)"})).notes
+        self.assertIn("its supplier is in Maharashtra and its place of supply is in Karnataka, where IGST applies", note)
+        self.assertEqual(gst_check(gst_proposal(**{"document.place_of_supply": "Maharashtra"})).notes, [])
+        self.assertEqual(gst_held(gst_proposal(**{"document.place_of_supply": "Atlantis"}))[0], "source_values_conflict")
+
+    def test_a_tax_line_is_carried_by_a_ledger_for_its_head_and_rate(self):
+        # Tally marks a GST duty ledger with its head and rate.
+        swapped = gst_proposal(**{"voucher.lines.2.ledger_guid": guid("Input SGST 9%"),
+                                  "voucher.lines.3.ledger_guid": guid("Input CGST 9%")})
+        # Both swapped lines are named at once.
+        self.assertEqual(gst_held(swapped), ("classification_uncertain", "Input SGST 9% is a SGST/UTGST ledger in Tally, so "
+                                             "it cannot carry CGST at 9%. Choose the CGST ledger. Input CGST 9% is a CGST "
+                                             "ledger in Tally, so it cannot carry SGST at 9%. Choose the SGST "
+                                             "ledger."))
+        rated = gst_proposal(**{"voucher.lines.4.ledger_guid": guid("Input CGST 9%"), "voucher.lines.2.ledger_guid": guid("Input CGST 2.5%")})
+        self.assertIn("Input CGST 2.5% is set to 2.5% in Tally, but the bill charges CGST at 9%", gst_held(rated)[1])
+        # A ledger Tally does not mark is read by what its name claims; a central or state ledger may name the combined rate.
+        self.assertIn("named for SGST", held(proposal(**{"voucher.lines.2.ledger_guid": guid("Input SGST 9%"),
+                                                          "voucher.lines.3.ledger_guid": guid("Input CGST 9%")}))[1])
+        self.assertIn("named for another rate", held(proposal(**{"voucher.lines.4.ledger_guid": guid("Input CGST 9%"),
+                                                                 "voucher.lines.2.ledger_guid": guid("Input CGST 2.5%")}))[1])
+        combined = view()
+        for record in combined["masters"]["records"]:
+            if record["data"]["NAME"] in ("Input CGST 9%", "Input SGST 9%"):
+                record["data"]["NAME"] = record["data"]["NAME"].replace("9%", "18%")
+        self.assertTrue(vouchers.check(copy.deepcopy(proposal()), combined, COMPANY))
+
+    def test_a_bills_supplier_gstin_is_its_ledgers(self):
+        self.assertEqual(gst_held(gst_proposal(**{"document.supplier_gstin": "27AAACZ9999Z1Z9"}))[0], "supplier_unresolved")
+
+    def test_tally_is_told_only_what_it_can_use(self):
+        # A supplier whose ledger has no GSTIN: Tally cannot claim the bill's tax, and the person is told why.
+        unregistered = gst_check(gst_proposal(), in_view=gst_view(supplier=None))
+        self.assertNotIn("gst", unregistered.native_plan(REMOTE))
+        self.assertEqual(unregistered.notes, ["Tally's GST returns cannot claim this bill's tax: Acme Cement has no GSTIN in "
+                                              "Tally. Add the supplier's GSTIN to its ledger there."])
+        # An item-wise purchase states the supplier's registration; its items' rates are Tally's own.
+        items = gst_check(stocked()).native_plan(REMOTE)
+        self.assertEqual(items["gst"]["party"]["gstin"], ACME)
+        self.assertFalse(any(ln.get("gst") for ln in items["lines"]))
+        # A debit note states the supplier's registration too; a journal, neither.
+        note = gst_proposal(**{"document.kind": "credit_note", "voucher.family": "debit_note",
+                               "voucher.voucher_type_guid": "vt-debit-note"})
+        for ln in note["voucher"]["lines"]:
+            ln["side"] = "credit"
+        debit = gst_check(note).native_plan(REMOTE)
+        self.assertEqual((debit["gst"]["party"]["gstin"], any(ln.get("gst") for ln in debit["lines"])), (ACME, False))
+        journal = gst_check(gst_proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal"}))
+        self.assertNotIn("gst", journal.native_plan(REMOTE))
 
 
 if __name__ == "__main__":
     unittest.main()
 
 
-def pattern(**changes):
-    """A confirmed posting pattern for the fixture company."""
-    from minkops_platform.accounts.posting_profiles import validate
-    from minkops_platform.accounts.vouchers import Masters
-
-    payload = {"company_guid": "company",
-               "families": {"invoice": {"family": "purchase", "voucher_type_guid": "vt-purchase-gst"},
-                            "credit_note": {"family": "debit_note", "voucher_type_guid": "vt-debit-note"}},
-               "invoice_number": {"fields": ["REFERENCE", "NARRATION"]},
-               "round_off": {"ledger_guid": guid("Round Off"), "max_cents": 50},
-               "tds": {"deducted_at": "booking", "ledgers": [{"ledger_guid": guid("TDS Payable 194C"), "section": "194C", "rate": 1}]},
-               "party_groups": ["Sundry Creditors"], "practice": [], "summary": ["Purchases: Purchase GST"], **changes}
-    return validate(payload, Masters(company()), "company")
+def practised(practices, *extra):
+    """The company's view with practices its books or its client settled, and any further masters."""
+    company = view()
+    company["masters"]["records"] += [{"type": "LEDGER", "data": {"ALTERID": "5", **data}} for data in extra]
+    return {**company, "practices": practices}
 
 
-def with_pattern(payload):
-    settings = config()
-    settings["posting_profiles"] = {"company": {"id": "p", "version": 1, **payload}}
-    return settings
+DUTY_CGST = {"NAME": "CGST Input 9% (GST)", "GUID": guid("CGST Input 9% (GST)"), "PARENT": "Duties & Taxes",
+             "TAXTYPE": "GST", "GSTDUTYHEAD": "CGST", "RATEOFTAXCALCULATION": "9"}
 
 
-class PostingPatternTest(unittest.TestCase):
-    def test_a_parent_group_ancestry_change_invalidates_a_pattern(self):
-        from minkops_platform.accounts.posting_profiles import holds, validate
-        from minkops_platform.accounts.vouchers import Masters
+def test_a_company_that_posts_gst_to_its_duty_ledgers_refuses_one_merely_named_for_the_tax():
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(proposal(), practised({"gst_ledgers": {"use": "gst_duty"}}, DUTY_CGST), COMPANY)
+    assert (refused.value.code, str(refused.value)) == (
+        "classification_uncertain", "Test posts GST to the ledgers Tally sets up as GST duties: use CGST Input 9% (GST) "
+                                    "for CGST at 9%.")
+    # Where no duty ledger carries a head and rate, the ledger named for it stays right; as it does for a company
+    # whose bills follow each supplier's earlier ones.
+    assert vouchers.check(proposal(), practised({"gst_ledgers": {"use": "gst_duty"}}), COMPANY)
+    assert vouchers.check(proposal(), practised({"gst_ledgers": {"use": "history"}}, DUTY_CGST), COMPANY)
 
-        original = company()
-        original['masters']['records'].append({'type': 'GROUP', 'data': {
-            'NAME': 'Indirect Expenses', 'GUID': 'group-indirect', 'PARENT': 'Expenses'}})
-        pinned = validate(pattern(), Masters(original), 'company')
-        regrouped = copy.deepcopy(original)
-        regrouped['masters']['records'][-1]['data']['PARENT'] = 'Current Liabilities'
-        self.assertFalse(holds(pinned, Masters(regrouped)))
 
-    def test_a_confirmed_pattern_allows_its_tds_and_sets_the_supplier_line(self):
-        record = proposal()
-        record["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 55.00))
-        bill = vouchers.check(record, with_pattern(pattern()))
-        self.assertEqual(bill.lines[0], {"ledger": "Acme Cement", "side": "credit", "amount_cents": 630000, "allocation": None})
-        self.assertEqual(bill.native_plan("12345678-1234-5234-8234-123456789abc", "append", None)["duplicate"]["number_fields"],
-                         ["REFERENCE", "NARRATION"])
-        wrong_rate = proposal()
-        wrong_rate["voucher"]["lines"].append(line("tds", "TDS Payable 194C", "credit", 110.00))
-        with self.assertRaises(HoldReason):
-            vouchers.check(wrong_rate, with_pattern(pattern()))
+def test_a_company_that_books_discounts_net_refuses_a_discount_line():
+    discounted = proposal(**{"voucher.lines.0.amount": 4100.00})
+    discounted["voucher"]["lines"].append(line("discount", "Trade Discount", "credit", 100.00))
+    trade = {"NAME": "Trade Discount", "GUID": guid("Trade Discount"), "PARENT": "Indirect Incomes"}
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(discounted, practised({"discounts": {"booked": "net"}}, trade), COMPANY)
+    assert str(refused.value) == ("Test books a printed discount net: book each line at its discounted value, with no "
+                                  "discount line.")
+    assert vouchers.check(discounted, practised({"discounts": {"booked": "separately"}}, trade), COMPANY)
 
-    def test_bills_outside_the_pattern_are_misses_not_silent_posts(self):
-        journal = proposal(**{"voucher.family": "journal", "voucher.voucher_type_guid": "vt-journal"})
-        rounded = proposal(**{"document.total": 6355.40})
-        rounded["voucher"]["lines"].append(line("round_off", "Freight Inward", "debit", 0.40))
-        rounded["voucher"]["lines"][6]["ledger_guid"] = guid("Purchase 5%")  # keep ledgers distinct
-        too_big = proposal(**{"document.total": 6355.80})
-        too_big["voucher"]["lines"].append(line("round_off", "Round Off", "debit", 0.80))
-        for record, code in ((journal, "posting_profile_miss"), (too_big, "source_values_conflict")):
-            with self.subTest(code=code), self.assertRaises(HoldReason) as held:
-                vouchers.check(record, with_pattern(pattern()))
-            self.assertEqual(held.exception.code, code)
-        with self.assertRaises(HoldReason):
-            vouchers.check(rounded, with_pattern(pattern()))
-        outsider = with_pattern(pattern(party_groups=["Duties & Taxes"]))
-        with self.assertRaises(HoldReason) as held:
-            vouchers.check(proposal(), outsider)
-        self.assertEqual(held.exception.code, "posting_profile_miss")
 
-    def test_patterns_name_only_discovered_identities_and_survive_master_edits(self):
-        from minkops_platform.accounts.posting_profiles import carry_forward, holds, validate
-        from minkops_platform.accounts.vouchers import Masters
+def test_a_ledger_on_several_lines_is_refused_with_how_to_book_it():
+    """A bill's items to one ledger are one voucher line: the session is told to add them up."""
+    split = proposal()
+    split["voucher"]["lines"][1]["ledger_guid"] = guid("Purchase 18%")
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(split, view(), COMPANY)
+    assert (refused.value.code, str(refused.value)) == (
+        "classification_uncertain", "Purchase 18% is on more than one line: give it one line with the sum of the "
+                                    "bill's amounts it carries, or one line for each cost centre or GST rate the bill "
+                                    "splits it by.")
+    supplier = proposal()
+    supplier["voucher"]["lines"][0]["ledger_guid"] = guid("Acme Cement")
+    with pytest.raises(HoldReason) as refused:
+        vouchers.check(supplier, view(), COMPANY)
+    assert str(refused.value) == "Acme Cement is the supplier's ledger: Minkops writes its line from the bill's total."
 
-        for bad in ({"round_off": {"ledger_guid": "nowhere", "max_cents": 50}},
-                    {"families": {"invoice": {"family": "purchase", "voucher_type_guid": "vt-journal"}, "credit_note": None}},
-                    {"party_groups": ["Imaginary Group"]}, {"invoice_number": {"fields": []}}):
-            with self.subTest(bad=bad), self.assertRaises(ValueError):
-                pattern(**bad)
-        edited = company()
-        for record in edited["masters"]["records"]:
-            record["data"]["ALTERID"] = "99"
-        self.assertTrue(holds(pattern(), Masters(edited)))
-        regrouped = company()
-        next(r for r in regrouped["masters"]["records"] if r["data"].get("NAME") == "Round Off")["data"]["PARENT"] = "Direct Expenses"
-        self.assertFalse(holds(pattern(), Masters(regrouped)))
-        sibling = company("Test (2027-28)", "next")
-        carried = carry_forward(pattern(), Masters(sibling), "next")
-        self.assertEqual(carried["round_off"]["ledger_guid"], "next-" + guid("Round Off"))
-        self.assertEqual(carried["families"]["invoice"]["voucher_type_guid"], "vt-purchase-gst")
-        missing = company("Test (2027-28)", "next")
-        missing["masters"]["records"] = [r for r in missing["masters"]["records"] if r["data"].get("NAME") != "Round Off"]
-        self.assertIsNone(carry_forward(pattern(), Masters(missing), "next"))
-        self.assertTrue(validate(carried, Masters(sibling), "next"))
+
+def test_a_ledger_split_across_cost_centres_is_one_line_carrying_each_share():
+    """B11: 60% to one project, 40% to another, on one cost-centre ledger. Protocol 7 writes it; nothing else needs 7."""
+    plain = check(proposal()).native_plan(REMOTE)
+    assert plain["format_version"] == 6 and not any(ln.get("allocations") for ln in plain["lines"])
+    split = proposal()
+    split["voucher"]["lines"][0:1] = [
+        line("expense", "Purchase 18%", "debit", 2400.00, centre=("cc-site-4", "cat-sites")),
+        line("expense", "Purchase 18%", "debit", 1600.00, centre=("cc-site-9", "cat-sites"))]
+    plan = check(split).native_plan(REMOTE)
+    assert plan["format_version"] == 7
+    [carried] = [ln for ln in plan["lines"] if ln["ledger"] == "Purchase 18%"]
+    assert (carried["amount_cents"], carried["allocation"]) == (400000, None)
+    assert carried["allocations"] == [
+        {"category": "Sites", "category_guid": "cat-sites", "centre": "Site 4", "centre_guid": "cc-site-4", "amount_cents": 240000},
+        {"category": "Sites", "category_guid": "cat-sites", "centre": "Site 9", "centre_guid": "cc-site-9", "amount_cents": 160000}]
+    # The readback must show each centre's share, in Tally's sign.
+    assert [(a["centre"], a["amount_cents"]) for a in vouchers._allocations(plan)] == [("Site 4", -240000), ("Site 9", -160000)]
+    # A share without its centre, or one centre twice, is not a split: the lines are summed instead.
+    for centres in ((("cc-site-4", "cat-sites"), None), (("cc-site-4", "cat-sites"), ("cc-site-4", "cat-sites"))):
+        unclear = proposal()
+        unclear["voucher"]["lines"][0:1] = [line("expense", "Purchase 18%", "debit", 2400.00, centre=centres[0]),
+                                            line("expense", "Purchase 18%", "debit", 1600.00, centre=centres[1])]
+        with pytest.raises(HoldReason, match="Purchase 18% is on more than one line"):
+            check(unclear)
+
+
+def test_one_ledger_at_two_gst_rates_is_two_lines():
+    """B03: one purchase ledger carries goods at 5% and 18%; each rate is its own line for Tally's returns."""
+    rated = gst_proposal(**{"voucher.lines.1.ledger_guid": guid("Purchase 18%")})
+    plan = gst_check(rated).native_plan(REMOTE)
+    assert plan["format_version"] == 7
+    assert sorted((ln["amount_cents"], ln["gst"]["rates"]["igst"]) for ln in plan["lines"] if ln["ledger"] == "Purchase 18%") == [
+        (150000, "5"), (400000, "18")]
+
+
+def test_every_faulty_line_is_named_at_once():
+    """Refused one line at a time, a session corrects one per attempt and is held before it sees the rest."""
+    faulty = proposal()
+    faulty["voucher"]["lines"][1]["cost_centre_guid"], faulty["voucher"]["lines"][1]["cost_category_guid"] = (
+        "cc-site-4", "cat-sites")
+    faulty["voucher"]["lines"][2]["ledger_guid"] = guid("Input SGST 9%")
+    with pytest.raises(HoldReason) as refused:
+        check(faulty)
+    assert refused.value.code == "classification_uncertain"
+    assert "Purchase 5% must enable cost centres in Tally before allocating it." in str(refused.value)
+    assert "Input SGST 9%" in str(refused.value).split("allocating it.")[1]
+
+
+def split_bill(*carried):
+    """The two-rate bill whose 18% goods (4,000.00) it prints as split 60/40 between two sites."""
+    record = proposal(**{"document.cost_split": [
+        {"name": "Site 4", "amount": None, "percent": 60, "evidence": "Site 4 bears 60%"},
+        {"name": "Site 9", "amount": None, "percent": 40, "evidence": "Site 9 bears 40%"}]})
+    if carried:
+        record["voucher"]["lines"][0:1] = [line("expense", "Purchase 18%", "debit", amount, centre=centre)
+                                           for amount, centre in carried]
+    return record
+
+
+def test_a_split_the_bill_prints_is_carried_on_its_cost_centres_or_refused():
+    """B11 and B12: a session that books the supplier's usual ledger, which keeps no cost centres, must not drop it."""
+    with pytest.raises(HoldReason) as refused:
+        check(split_bill())
+    assert (refused.value.code, refused.value.final) == ("classification_uncertain", False)
+    assert str(refused.value) == (
+        "The bill splits its cost between Site 4 (60%) and Site 9 (40%), but the voucher allocates none of it. "
+        "Carry each part on its cost centre, on a ledger that keeps them; if the company has no such ledger for "
+        "this cost, propose classification_uncertain and name the split.")
+    sites = (("cc-site-4", "cat-sites"), ("cc-site-9", "cat-sites"))
+    assert check(split_bill((2400.00, sites[0]), (1600.00, sites[1])))
+    # Carried at other shares, it is not the bill's split.
+    with pytest.raises(HoldReason, match="allocates 50% and 50%"):
+        check(split_bill((2000.00, sites[0]), (2000.00, sites[1])))
+    # Printed as amounts, the centres carry those amounts.
+    amounts = split_bill((2400.00, sites[0]), (1600.00, sites[1]))
+    amounts["document"]["cost_split"] = [{"name": "Site 4", "amount": 2400.00, "percent": None, "evidence": "2,400.00"},
+                                         {"name": "Site 9", "amount": 1600.00, "percent": None, "evidence": "1,600.00"}]
+    assert check(amounts)
+    # A bill printing no split, or one part only, needs no allocation.
+    assert check(proposal(**{"document.cost_split": None}))

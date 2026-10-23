@@ -3,9 +3,45 @@
 import os
 import threading
 import unittest
+from unittest.mock import patch
 
+import factory
 import psycopg
 from psycopg.rows import dict_row
+
+from minkops_platform import work
+
+
+def test_dispatch_coalesces_before_allocating_another_database_connection(monkeypatch):
+    from minkops_platform import worker_hosting
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    def dispatch(*args):
+        calls.append(True)
+        entered.set()
+        assert release.wait(3)
+        return True
+    monkeypatch.setattr(worker_hosting, '_dispatch', dispatch)
+    results = []
+    thread = threading.Thread(target=lambda: results.append(worker_hosting.dispatch('unused', None)))
+    thread.start()
+    try:
+        assert entered.wait(3)
+        assert worker_hosting.dispatch('unused', None) is False
+        assert calls == [True]
+    finally:
+        release.set()
+        thread.join(3)
+    assert results == [True]
+
+
+def test_dispatch_connection_failure_releases_its_process_fence(monkeypatch):
+    from minkops_platform import worker_hosting
+    def unavailable(*args, **kwargs):
+        raise psycopg.OperationalError('connection budget temporarily unavailable')
+    monkeypatch.setattr(worker_hosting.psycopg, 'connect', unavailable)
+    assert worker_hosting.dispatch('unused', None) is False
+    assert worker_hosting.dispatch('unused', None) is False
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
@@ -16,6 +52,8 @@ class WorkerWakeupTests(unittest.TestCase):
             c.execute(
                 "UPDATE worker_wakeup SET generation=generation+1,acknowledged=0,lease_until=NULL"
             )
+        self.connection = factory.connect()
+        self.addCleanup(self.connection.close)
 
     def test_failed_dispatch_remains_durable_and_success_coalesces(self):
         from minkops_platform.worker_hosting import dispatch
@@ -29,190 +67,104 @@ class WorkerWakeupTests(unittest.TestCase):
         self.assertFalse(dispatch(self.url, lambda: calls.append(True)))
         self.assertEqual(len(calls), 1)
 
-    def test_idle_drain_acknowledges_only_observed_generation(self):
-        from minkops_platform.worker_hosting import drain
+    def drain(self, host, **options):
+        from minkops_platform import worker_hosting
+        with patch.object(worker_hosting.time, "sleep"), patch.object(worker_hosting, "enforce") as enforce:
+            return worker_hosting.drain(self.url, host, **options), enforce.call_count
 
-        calls = []
-
-        def work(url):
-            calls.append(True)
-            if len(calls) == 1:
-                with psycopg.connect(url) as c:
-                    c.execute("UPDATE worker_wakeup SET generation=generation+1")
-            return False
-
-        self.assertEqual(drain(self.url, work=work, cleanup=lambda _: False, lanes=1), 0)
-        self.assertEqual(len(calls), 2)
+    def wakeup(self):
         with psycopg.connect(self.url, row_factory=dict_row) as c:
-            row = c.execute("SELECT * FROM worker_wakeup").fetchone()
-            self.assertEqual(row["generation"], row["acknowledged"])
-            self.assertIsNone(row["lease_until"])
+            return c.execute("SELECT * FROM worker_wakeup").fetchone()
 
-    def test_default_drain_starts_four_lanes_and_waits_before_acknowledging(self):
-        from minkops_platform.worker_hosting import drain
+    def test_an_idle_drain_acknowledges_only_the_generation_it_observed(self):
+        def bump():
+            with psycopg.connect(self.url) as c:
+                c.execute("UPDATE worker_wakeup SET generation=generation+1")
+        host = Lanes(busy=[], settled=[True, True], during=[bump])
+        acknowledged, _ = self.drain(host)
+        self.assertTrue(acknowledged)
+        row = self.wakeup()
+        self.assertEqual(row["generation"], row["acknowledged"])
+        self.assertIsNone(row["lease_until"])
+        self.assertEqual(host.waits, 2)  # the work that arrived during the first look is looked at again
 
-        barrier = threading.Barrier(4, timeout=5)
-        lock = threading.Lock()
-        started = 0
+    def test_the_runner_lease_is_published_while_lanes_work_and_cleared_on_acknowledging(self):
+        seen = []
+        def observe():
+            row = self.wakeup()
+            seen.append((row["lease_until"] is not None, row["generation"] > row["acknowledged"]))
+        acknowledged, _ = self.drain(Lanes(busy=[True], settled=[True], during=[observe, observe]))
+        self.assertTrue(acknowledged)
+        self.assertEqual(seen, [(True, True), (True, True)])
+        self.assertIsNone(self.wakeup()["lease_until"])
 
-        def work(url):
-            nonlocal started
-            with lock:
-                started += 1
-                first = started <= 4
-            if not first:
-                return False
-            barrier.wait()
-            with psycopg.connect(url, row_factory=dict_row) as c:
-                row = c.execute("SELECT * FROM worker_wakeup").fetchone()
-                self.assertGreater(row["generation"], row["acknowledged"])
-                self.assertIsNotNone(row["lease_until"])
-            return True
+    def test_busy_or_unsettled_lanes_delay_the_acknowledgement_while_run_limits_keep_being_enforced(self):
+        host = Lanes(busy=[True, True], settled=[False, True])
+        acknowledged, monitored = self.drain(host)
+        self.assertTrue(acknowledged)
+        self.assertEqual((host.checks, monitored), (2, 4))
 
-        self.assertEqual(drain(self.url, work=work, cleanup=lambda _: False), 4)
-        with psycopg.connect(self.url) as c:
-            self.assertTrue(
-                c.execute("SELECT generation=acknowledged FROM worker_wakeup").fetchone()[0]
-            )
-
-    def test_runner_publishes_lease_before_submitting_any_lane(self):
-        from concurrent.futures import ThreadPoolExecutor
-        from unittest.mock import patch
-
-        from minkops_platform.worker_hosting import drain
-
-        testcase = self
-
-        class ObservedPool(ThreadPoolExecutor):
-            def submit(self, fn, *args, **kwargs):
-                with psycopg.connect(testcase.url) as c:
-                    testcase.assertIsNotNone(
-                        c.execute("SELECT lease_until FROM worker_wakeup").fetchone()[0]
-                    )
-                return super().submit(fn, *args, **kwargs)
-
-        with patch("minkops_platform.worker_hosting.ThreadPoolExecutor", ObservedPool):
-            self.assertEqual(drain(self.url, work=lambda _: False, cleanup=lambda _: False), 0)
-
-    def test_drain_replenishes_idle_lanes_without_waiting_for_slow_sibling(self):
-        from minkops_platform.worker_hosting import drain
-
-        slow_started, replacement_started = threading.Event(), threading.Event()
-        lock = threading.Lock()
-        calls = 0
-
-        def work(url):
-            nonlocal calls
-            with lock:
-                calls += 1
-                index = calls
-            if index == 1:
-                slow_started.set()
-                self.assertTrue(replacement_started.wait(5))
-            elif index == 2:
-                self.assertTrue(slow_started.wait(5))
-            elif index == 3:
-                replacement_started.set()
-            else:
-                return False
-            return True
-
-        self.assertEqual(drain(self.url, lanes=2, work=work, cleanup=lambda _: False), 3)
-
-    def test_another_runner_exits_without_claiming_work(self):
-        from minkops_platform.worker_hosting import RUNNER_LOCK, drain
-
+    def test_another_runner_keeps_the_drain_from_starting(self):
+        from minkops_platform.worker_hosting import RUNNER_LOCK
         with psycopg.connect(self.url, autocommit=True) as c:
             c.execute("SELECT pg_advisory_lock(%s)", (RUNNER_LOCK,))
-            self.assertEqual(drain(self.url, work=lambda _: self.fail("overlapping execution")), 0)
+            host = Lanes(busy=[], settled=[])
+            self.assertEqual(self.drain(host), (False, 0))
+            self.assertEqual(host.waits, 0)
 
-    def test_timeout_leaves_pending_work_for_successor(self):
-        from minkops_platform.worker_hosting import drain
+    def test_a_drain_that_reaches_its_deadline_leaves_the_work_to_a_successor(self):
+        host = Lanes(busy=[], settled=[])
+        acknowledged, _ = self.drain(host, max_seconds=0)
+        self.assertFalse(acknowledged)
+        self.assertTrue(host.stopped_claiming)
+        row = self.wakeup()
+        self.assertGreater(row["generation"], row["acknowledged"])
+        self.assertIsNone(row["lease_until"])
 
-        self.assertEqual(drain(self.url, max_seconds=0, work=lambda _: True), 0)
-        with psycopg.connect(self.url, row_factory=dict_row) as c:
-            row = c.execute("SELECT * FROM worker_wakeup").fetchone()
-            self.assertGreater(row["generation"], row["acknowledged"])
-            self.assertIsNone(row["lease_until"])
-
-    def test_lane_exception_waits_for_sibling_before_releasing_runner(self):
-        from minkops_platform.worker_hosting import RUNNER_LOCK, drain
-
-        barrier = threading.Barrier(2, timeout=5)
-        lock = threading.Lock()
-        calls = 0
-
-        def work(url):
-            nonlocal calls
-            with lock:
-                calls += 1
-                index = calls
-            barrier.wait()
-            if index == 1:
-                raise RuntimeError("lane failure")
-            with psycopg.connect(url, autocommit=True) as c:
-                self.assertFalse(
-                    c.execute("SELECT pg_try_advisory_lock(%s)", (RUNNER_LOCK,)).fetchone()[0]
-                )
-            return True
-
+    def test_a_failing_drain_releases_its_lock_and_lease_for_a_successor(self):
+        from minkops_platform.worker_hosting import RUNNER_LOCK
+        def fail():
+            raise RuntimeError("lane failure")
         with self.assertRaisesRegex(RuntimeError, "lane failure"):
-            drain(self.url, lanes=2, work=work, cleanup=lambda _: False)
+            self.drain(Lanes(busy=[True], settled=[], during=[fail]))
+        self.assertIsNone(self.wakeup()["lease_until"])
         with psycopg.connect(self.url, autocommit=True) as c:
-            self.assertTrue(
-                c.execute("SELECT pg_try_advisory_lock(%s)", (RUNNER_LOCK,)).fetchone()[0]
-            )
+            self.assertTrue(c.execute("SELECT pg_try_advisory_lock(%s)", (RUNNER_LOCK,)).fetchone()[0])
             c.execute("SELECT pg_advisory_unlock(%s)", (RUNNER_LOCK,))
 
-    def test_monitor_runs_while_every_lane_is_waiting_for_a_silent_provider(self):
-        from concurrent.futures import wait as real_wait
-        from unittest.mock import patch
+    def test_a_queued_item_bumps_the_wake_up_only_when_it_commits(self):
+        before = self.wakeup()["generation"]
+        tenant = factory.tenant(self.connection)
+        factory.run(self.connection, tenant, factory.client(self.connection, tenant),
+                    factory.workflow(self.connection, tenant), factory.user(self.connection, tenant),
+                    [work.ItemSpec("bill", {"file_id": "a"})])
+        self.assertEqual(self.connection.execute("SELECT generation FROM worker_wakeup").fetchone()["generation"],
+                         before + 1)
+        self.connection.rollback()
+        self.assertEqual(self.wakeup()["generation"], before)
 
-        from minkops_platform.worker_hosting import drain
-        started, cancelled = threading.Event(), threading.Event()
-        def work(url):
-            started.set()
-            self.assertTrue(cancelled.wait(5), 'The occupied lane prevented timeout enforcement')
-            return False
-        def monitor(url):
-            if started.is_set():
-                cancelled.set()
-        def short_wait(futures, **kwargs):
-            return real_wait(futures,timeout=0.02,return_when=kwargs['return_when'])
-        with patch('minkops_platform.run_limits.enforce',side_effect=monitor) as check, \
-             patch('minkops_platform.worker_hosting.wait',side_effect=short_wait):
-            drain(self.url,lanes=1,work=work,cleanup=lambda _:False)
-        self.assertGreaterEqual(check.call_count,2)
-        self.assertTrue(cancelled.is_set())
 
-    def test_wakeup_is_transactional(self):
-        with psycopg.connect(self.url) as c:
-            before = c.execute("SELECT generation FROM worker_wakeup").fetchone()[0]
-            tenant = c.execute(
-                "INSERT INTO tenants(slug,name) VALUES(gen_random_uuid()::text,'Wakeup test') RETURNING id"
-            ).fetchone()[0]
-            actor = c.execute(
-                "INSERT INTO users(email,name,password_hash) VALUES(gen_random_uuid()::text || '@example.com','Wakeup test','unused') RETURNING id"
-            ).fetchone()[0]
-            task = c.execute(
-                "INSERT INTO tasks(tenant_id,title) VALUES(%s,'Wakeup test') RETURNING id",
-                (tenant,),
-            ).fetchone()[0]
-            c.execute(
-                "INSERT INTO workflows(tenant_id,key,name) VALUES(%s,'source-discovery','Wakeup test')",
-                (tenant,),
-            )
-            c.execute(
-                """INSERT INTO workflow_runs(tenant_id,task_id,actor_id,workflow_key,
-                   definition_version,request_key,request_hash,config,file_ids)
-                   VALUES(%s,%s,%s,'source-discovery','0.6.0',gen_random_uuid(),
-                          'test','{}','[]')""",
-                (tenant, task, actor),
-            )
-            self.assertEqual(
-                c.execute("SELECT generation FROM worker_wakeup").fetchone()[0], before + 1
-            )
-            c.rollback()
-            self.assertEqual(
-                c.execute("SELECT generation FROM worker_wakeup").fetchone()[0], before
-            )
+class Lanes:
+    """A lanes host as drain sees it: busy for some looks, then settled or not, running a step during each wait."""
+
+    def __init__(self, *, busy, settled, during=()):
+        self.busy, self.settled_answers, self.during = list(busy), list(settled), list(during)
+        self.waits = self.checks = 0
+        self.stopped_claiming = False
+
+    def wait_idle(self, timeout):
+        self.waits += 1
+        if self.during:
+            self.during.pop(0)()
+        return not (self.busy.pop(0) if self.busy else False)
+
+    def settled(self, connection):
+        self.checks += 1
+        return self.settled_answers.pop(0) if self.settled_answers else True
+
+    def stop_claiming(self):
+        self.stopped_claiming = True
+
+
+if __name__ == "__main__":
+    unittest.main()

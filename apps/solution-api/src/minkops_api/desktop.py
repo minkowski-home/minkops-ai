@@ -6,18 +6,20 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from minkops_platform import desktop
+from minkops_platform.accounts import sync
 from minkops_platform.errors import ServiceError
 
-from .auth import Db, User, require_csrf, tenant_access
+from .auth import Db, User, database_pool, require_csrf, tenant_access
 
 router = APIRouter()
 
 
-def call(action, *args):
+def call(action, *args, **kwargs):
     try:
-        return action(*args)
+        return action(*args, **kwargs)
     except ServiceError as error:
         status = {
             "invalid": 422,
@@ -39,7 +41,7 @@ class Launch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     device_id: UUID
     request_key: UUID
-    operation: Literal["tally.probe", "files.refresh", "accounts.save", "tally.save", "tally.statement"]
+    operation: Literal["tally.probe", "files.refresh"]
     input: dict = Field(default_factory=dict)
 
 
@@ -79,6 +81,31 @@ def launch(slug: str, body: Launch, request: Request, user: User, connection: Db
     return call(desktop.launch, connection, tenant, user, body.model_dump(mode="json"))
 
 
+class DeviceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tally_port: int = Field(ge=1, le=65535)
+
+
+@router.patch("/api/tenants/{slug}/desktop/devices/{device_id}")
+def update_device(slug: str, device_id: UUID, body: DeviceSettings, request: Request, user: User, connection: Db):
+    require_csrf(request)
+    tenant, member = tenant_access(slug, user, connection)
+    return call(sync.set_port, connection, tenant, user, member, device_id, body.tally_port)
+
+
+@router.post("/api/tenants/{slug}/desktop/devices/{device_id}/sync", status_code=202)
+def request_sync(slug: str, device_id: UUID, request: Request, user: User, connection: Db):
+    require_csrf(request)
+    tenant, member = tenant_access(slug, user, connection)
+    return call(sync.request, connection, tenant, user, member, device_id)
+
+
+@router.get("/api/tenants/{slug}/desktop/devices/{device_id}/companies")
+def device_companies(slug: str, device_id: UUID, user: User, connection: Db):
+    tenant, member = tenant_access(slug, user, connection)
+    return call(sync.companies, connection, tenant, user, member, device_id)
+
+
 @router.get("/api/tenants/{slug}/desktop/sources")
 def sources(slug: str, user: User, connection: Db):
     tenant, _ = tenant_access(slug, user, connection)
@@ -104,10 +131,36 @@ def worker_device(request: Request, connection: Db):
     authorization = request.headers.get("authorization", "")
     if not authorization.startswith("Bearer ") or len(authorization) > 200:
         raise HTTPException(401, "Reconnect this PC from Minkops.")
-    return call(desktop.authenticate, connection, authorization[7:])
+    device = call(desktop.authenticate, connection, authorization[7:])
+    # A short independent transaction prevents a streamed/slow receipt from
+    # withholding presence while its authorization fence remains in force.
+    with database_pool().connection() as pulse:
+        call(desktop.touch_presence, pulse, device)
+    return device
 
 
 Device = Annotated[dict, Depends(worker_device)]
+
+
+@router.post("/api/desktop/worker/heartbeat")
+def heartbeat(device: Device):
+    """Authentication records presence without claiming or extending any job.
+
+    The answer carries the PC's Tally port, so the companion's own checks and
+    diagnostics read the same Tally its jobs do.
+    """
+    return {"tally_port": device["tally_port"]}
+
+
+class Installation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    installation_id: UUID
+
+
+@router.post("/api/desktop/worker/installation")
+def installation(body: Installation, device: Device, connection: Db):
+    """Companion 0.11.2+: this PC's record takes the installation ID derived from its machine and Windows user."""
+    return call(desktop.adopt_installation, connection, device, body.installation_id)
 
 
 @router.post("/api/desktop/worker/claim")
@@ -132,20 +185,20 @@ def claim(
     },
 )
 async def finish(job_id: UUID, request: Request, device: Device, connection: Db):
-    # Bound the wire payload before JSON allocation; base64 snapshots can be
-    # larger than multipart uploads. The domain enforces decoded file limits.
+    # Bound the wire payload before JSON allocation: a folder refresh carries
+    # its files in base64. The domain enforces decoded file limits.
     chunks = []
     size = 0
     async for chunk in request.stream():
         size += len(chunk)
-        if size > 96_000_000:
-            raise HTTPException(413, "Discovery exceeds the supported transfer size.")
+        if size > 48_000_000:
+            raise HTTPException(413, "This receipt exceeds the supported transfer size.")
         chunks.append(chunk)
     try:
         body = Receipt.model_validate(json.loads(b"".join(chunks)))
     except (ValueError, TypeError, UnicodeDecodeError) as error:
         raise HTTPException(422, "Invalid local task receipt.") from error
-    return call(desktop.finish, connection, device, job_id, body.model_dump(mode="json"))
+    return await run_in_threadpool(call, desktop.finish, connection, device, job_id, body.model_dump(mode="json"))
 
 
 @router.post("/api/desktop/worker/diagnostics", status_code=201)
@@ -158,6 +211,24 @@ async def diagnostics(request: Request, device: Device, connection: Db):
     except (ValueError, UnicodeDecodeError) as error:
         raise HTTPException(422, "Invalid diagnostics.") from error
     return call(desktop.send_diagnostics, connection, device, payload)
+
+
+@router.post("/api/desktop/worker/jobs/{job_id}/sync")
+async def sync_page(job_id: UUID, request: Request, device: Device, connection: Db):
+    """One bounded page of a running sync; resending the same page is safe."""
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > 12_000_000:
+            raise HTTPException(413, "A sync page is limited to 12 MB.")
+        chunks.append(chunk)
+    try:
+        page = json.loads(b"".join(chunks))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise HTTPException(422, "Invalid sync page.") from error
+    if not isinstance(page, dict):
+        raise HTTPException(422, "Invalid sync page.")
+    return await run_in_threadpool(call, desktop.sync_page, connection, device, job_id, page)
 
 
 @router.get("/api/desktop/worker/jobs/{job_id}/plan")

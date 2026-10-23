@@ -1,48 +1,53 @@
 # Workflow support diagnostics
 
-Apply `db/migrations/0002_workflow_diagnostics.sql` with the normal migration
-runner before releasing the API/worker. The bounded production `--drain` and
-continuous local worker both use four independent AI lanes. Native destination
-writes retain their existing ordering, approval and reconciliation rules.
+Support engineers with database access can follow a run end to end. Every query
+is scoped to one tenant; take the run from its task (`runs.task_id`). Nothing here
+is shown to customers, and no diagnostics endpoint exists.
 
-Engineers/support with database access can inspect a task and all its child runs:
+**The run and its items.** Each item is one bill file, statement chunk or layout,
+with its state, attempts and the last failure's code and reason:
 
 ```sql
-SELECT d.created_at, r.id AS run_id, r.parent_run_id, r.workflow_key,
-       r.state, r.session_id, r.turn_id, d.level, d.event_type,
-       d.summary, d.details, r.error
-FROM workflow_run_diagnostics d
-JOIN workflow_runs r ON (r.tenant_id, r.id) = (d.tenant_id, d.run_id)
-WHERE r.tenant_id = :tenant_id AND r.task_id = :task_id
-ORDER BY d.created_at, d.id;
+SELECT ordinal, kind, state, attempt, error_code, error, waiting_on, queued_at, started_at, finished_at
+FROM run_items WHERE tenant_id = :tenant_id AND run_id = :run_id ORDER BY ordinal;
 ```
 
-`worker.claimed` includes run age and queued wait in milliseconds. Stage records
-cover preparation, hosted execution/result retrieval, schema/business validation,
-outcome persistence and environment cleanup. AI start records include file IDs,
-byte sizes, pinned model and whether execution resumes a saved session. Hosted
-events retain event kinds and session/turn identifiers with database timestamps.
-This establishes overlapping AI execution and separates queue/provider/validation
-delay; it does not attribute provider time to undocumented internal operations.
+**What each session looked up and proposed.** Every tool call is logged once per
+session and call ID, with the answer the model was given:
 
-Errors include exception type, code frame locations, HTTP status/SQLSTATE when
-available, and exact schema path/rule. Raw schema instances remain in the existing
-saved proposal; raw provider exceptions, reasoning, documents, request XML and
-credentials are excluded from diagnostics. The product timeline remains concise.
-Each diagnostic uses a short independent transaction so failure rollback cannot
-erase it or accidentally commit business work. Database/lock timeouts are bounded;
-a diagnostic outage emits a server fallback without changing business outcomes.
+```sql
+SELECT c.session_id, c.name, c.success, c.duration_ms, c.arguments, left(c.answer, 500) AS answer
+FROM tool_calls c JOIN run_items i ON i.id = c.item_id
+WHERE i.tenant_id = :tenant_id AND i.run_id = :run_id ORDER BY i.ordinal, c.created_at;
+```
 
-Native job events, human-readable errors and verified receipts are already durable:
+**Sessions and spend.** Each attempt's provider session, with the usage its turn
+reported (`work.usage` sums them for a run):
+
+```sql
+SELECT i.ordinal, s.attempt, s.session_id, s.opened_at, s.finished_at, s.closed, s.usage
+FROM item_sessions s JOIN run_items i ON i.id = s.item_id
+WHERE i.tenant_id = :tenant_id AND i.run_id = :run_id ORDER BY i.ordinal, s.opened_at;
+```
+
+**What waits for a person.** A record's status, holds and the reasons its
+reviewer reads:
+
+```sql
+SELECT position, kind, status, hold_codes, review_reasons, version
+FROM run_records WHERE tenant_id = :tenant_id AND run_id = :run_id ORDER BY item_id, position;
+```
+
+**Native work.** Syncs, saves and checks on the PC, with their receipts, and the
+diagnostics a PC sent (versions, the Tally session and recent outcomes; never
+bill data):
 
 ```sql
 SELECT id, device_id, operation, state, input, result, error, created_at, updated_at
-FROM desktop_jobs
-WHERE tenant_id = :tenant_id AND task_id = :task_id
-ORDER BY created_at;
+FROM desktop_jobs WHERE tenant_id = :tenant_id AND task_id = :task_id ORDER BY created_at;
 ```
 
-Windows crash details remain in the companion's local diagnostic file. No customer
-diagnostics screen or public diagnostics endpoint is introduced. These records
-currently follow run retention and cascade on run deletion; choose an explicit
-time-based retention policy when the support evidence volume warrants it.
+Windows crash details stay in the companion's local diagnostic file, and Send
+diagnostics stores a PC's summary in `desktop_diagnostics` for 30 days (see
+[Windows app](windows-app.md#tally-session-diagnostics-and-uncertain-writes)).
+Provider reasoning, documents, request XML and credentials are never recorded.

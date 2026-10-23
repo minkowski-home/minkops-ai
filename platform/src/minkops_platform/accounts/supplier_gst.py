@@ -49,14 +49,38 @@ def _normal(value):
     return " ".join(str(value or "").split()).casefold()
 
 
+def jurisdiction(value):
+    """Resolve known printed jurisdiction names and optional matching GST codes.
+
+    Never use fuzzy substrings: `Andhra Pradesh (37)` is valid evidence while
+    the same name paired with another code cannot authorize a permanent master.
+    """
+    text = _normal(value).replace("&", "and")
+    aliases = {"orissa": "odisha", "pondicherry": "puducherry", "uttaranchal": "uttarakhand",
+               "nct delhi": "delhi", "new delhi": "delhi"}
+    code = None
+    match = re.fullmatch(r"(.+?)\s*(?:\((\d{1,2})\)|\s*-\s*(\d{1,2}))", text)
+    leading = re.fullmatch(r"(\d{1,2})\s*-\s*(.+)", text)
+    if match:
+        text, code = match[1].strip(), (match[2] or match[3]).zfill(2)
+    elif leading:
+        code, text = leading[1].zfill(2), leading[2].strip()
+    text = aliases.get(text, text)
+    names = {_normal(state_name(k)): k for k in STATES if k not in ("25", "28")}
+    found = names.get(text)
+    if found is None or (code is not None and found != code):
+        raise ValueError("GST jurisdiction name and code must identify one supported state.")
+    return state_name(found)
+
+
 def validate_details(details, *, company_state, tax):
     if not isinstance(details, dict):
         raise ValueError("Printed GST details are required.")
     number = gstin(details.get("gstin"))
     state = state_name(number[:2])
-    if details.get("state_code") != number[:2] or _normal(details.get("state")) != _normal(state):
+    if details.get("state_code") != number[:2] or jurisdiction(details.get("state")) != state:
         raise ValueError("Supplier state differs from its GSTIN.")
-    if _normal(company_state) != _normal(state) or _normal(details.get("place_of_supply")) != _normal(state):
+    if jurisdiction(company_state) != state or jurisdiction(details.get("place_of_supply")) != state:
         raise ValueError("Cross-state or unconfirmed place of supply needs manual review in v1.")
     registration = details.get("registration_type")
     if registration not in ("Regular", "Composition") or (registration == "Composition" and tax):
@@ -84,7 +108,13 @@ def validate_details(details, *, company_state, tax):
     for field, values in (("registration_type", [registration]), ("state", [state]),
                           ("place_of_supply", [state]), ("address", [*address, pin])):
         printed = _normal(" ".join(by_field[field]))
-        if any(_normal(value) not in printed for value in values):
+        # A recognized printed alias remains valid source evidence even though
+        # the permanent master uses the canonical jurisdiction name.
+        if field in ("state", "place_of_supply"):
+            present = any(_normal(value) in printed for value in (state, details[field]))
+        else:
+            present = all(_normal(value) in printed for value in values)
+        if not present:
             raise ValueError("Supplier field evidence must contain its approved values.")
     return {"gstin": number, "registration_type": registration, "state_code": number[:2], "state": state,
             "place_of_supply": state, "address": address, "pincode": pin}
@@ -95,7 +125,7 @@ def scalar(value):
 
 
 def native_values(value, names):
-    """Full discovery retains version-specific nested native GST registrations."""
+    """Values of these fields anywhere in a master: Tally nests GST registrations differently by version."""
     values = set()
     if isinstance(value, dict):
         for key, child in value.items():
@@ -109,31 +139,30 @@ def native_values(value, names):
     return values
 
 
-def creation_plan(run, record, selected):
-    details = record.get("supplier_details")
+def creation_plan(details, view, *, tax, issued):
+    """The supplier master Minkops may create in this company, from the bill's printed GST details.
+
+    `view` is the company's pinned mirror view. The new ledger copies the GST
+    and mailing shape of one same-company Regular creditor (the template);
+    nothing else is copied. Returns None for a bill without tax or GST details,
+    whose supplier is created as a plain creditor.
+    """
     if details is None:
-        if record["data"].get("tax"):
+        if tax:
             raise ValueError("GST supplier details are missing.")
         return None
-    if run["config"].get("tally_target", {}).get("supplier_creation_version") != 1:
-        raise ValueError("This pinned workflow does not support GST supplier creation.")
-    guid = selected["references"]["company_guid"]
-    companies = [company for source in run["config"].get("source_catalog_snapshot", {}).get("sources", [])
-                 if source.get("tool") == "tally" for company in source.get("snapshot", {}).get("companies", [])
-                 if company.get("company_guid") == guid]
-    if len(companies) != 1:
-        raise ValueError("Confirm full same-company Source Discovery first.")
-    company = companies[0]
-    state = scalar(company["identity"].get("STATENAME")) or scalar(company["identity"].get("PRIORSTATENAME"))
-    validated = validate_details(details, company_state=state, tax=record["data"].get("tax"))
-    ledgers = [master["data"] for master in company["masters"]["records"] if master["type"] == "LEDGER"]
+    identity = view["identity"]
+    state = scalar(identity.get("STATENAME")) or scalar(identity.get("PRIORSTATENAME"))
+    validated = validate_details(details, company_state=state, tax=tax)
+    records = view["masters"]["records"]
+    ledgers = [record["data"] for record in records if record["type"] == "LEDGER"]
     gst_fields = {"GSTIN", "PARTYGSTIN", "LEDGSTIN"}
-    if validated["gstin"] in native_values(company["identity"], gst_fields | {"GSTREGISTRATIONNUMBER"}):
+    if validated["gstin"] in native_values(identity, gst_fields | {"GSTREGISTRATIONNUMBER", "GSTREGNUMBER"}):
         raise ValueError("Supplier GSTIN matches the destination company; verify the printed party roles.")
     if any(validated["gstin"] in native_values(master, gst_fields) for master in ledgers):
-        raise ValueError("A discovered ledger already carries this GSTIN; resolve its identity first.")
-    groups = {scalar(master["data"].get("@_NAME") or master["data"].get("NAME")): scalar(master["data"].get("PARENT"))
-              for master in company["masters"]["records"] if master["type"] == "GROUP"}
+        raise ValueError("A ledger already carries this GSTIN; resolve its identity first.")
+    groups = {scalar(record["data"].get("@_NAME") or record["data"].get("NAME")): scalar(record["data"].get("PARENT"))
+              for record in records if record["type"] == "GROUP"}
 
     def creditor(master):
         parent = scalar(master.get("PARENT"))
@@ -158,10 +187,11 @@ def creation_plan(run, record, selected):
             continue
         templates.append(master)
     if not templates:
-        raise ValueError("No compatible GST-registered supplier template exists in this company.")
+        raise ValueError("No compatible GST-registered supplier exists in this company to model the new ledger on.")
     master = min(templates, key=lambda m: (scalar(m.get("GUID")), scalar(m.get("@_NAME") or m.get("NAME"))))
-    return {"version": 1, **validated, "applicable_from": record["data"]["date"], "template": {"name": scalar(master.get("@_NAME") or master.get("NAME")),
-            "guid": scalar(master["GUID"]), "alter_id": scalar(master.get("ALTERID"))}}
+    return {"version": 1, **validated, "applicable_from": issued,
+            "template": {"name": scalar(master.get("@_NAME") or master.get("NAME")), "guid": scalar(master["GUID"]),
+                         "alter_id": scalar(master.get("ALTERID"))}}
 
 
 def verified_supplier(master, expected):

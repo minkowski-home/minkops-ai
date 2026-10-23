@@ -1,388 +1,399 @@
 # Bill entry
 
-Bill entry connects the shared desktop/web review to the registered Windows
-companion and confirmed Source discovery context. The mock-client composition
-installs it for `mock-tenant`; PR Infra does not. No customer rules or data are
-added.
-The existing hosted Agents API runs all Accounts proposals on `gpt-6-luna`;
-launch rejects another model. The model never writes financial systems.
+Bill entry 1.0 reads purchase bills and saves each one as the client's own
+reviewed, verified Tally voucher: a Purchase, Journal or Debit Note. It runs on
+the accounts desk's run model (`platform/src/minkops_platform/accounts/bill_entry.py`,
+the `desk.bill` handler). The mock-client composition installs it for
+`mock-tenant`; PR Infra's binding does not yet include it. Sessions use
+`gpt-6-luna` through the OpenAI hosted Agents API. The model only reads and
+proposes: Minkops owns every check, approval, duplicate search, write and
+readback.
 
-## Bill selection and settings
+## Launching a run
 
-Select **Destination PC** before launching Bill entry from the web. The picker
-lists this account's PCs, labels offline/expired registrations, and remembers the
-choice per account/workflow in this browser. Multiple PCs require an explicit
-choice unless a choice was already saved. A missing or expired saved PC never
-switches automatically to another machine.
+A run covers one client business. It starts from the workflow's page and is
+reviewed on its task page; see [Accounts desk](accounts-desk.md#in-the-console).
+Both use the runs API, under `/api/tenants/{slug}/clients/{client}`:
 
-Discovery is loaded for that PC only. Tally company choices and Excel destination
-catalogs come from its latest discovery; missing/incomplete discovery blocks launch.
-Dashboard Quick Run retains the same PC even when another PC has newer discovery.
-Changing the picker without launching sends Quick Run back to setup rather than
-using its older target. A later folder rebind cannot reroute an approved Excel save,
-and an explicitly PC-directed save cannot fall back to a browser folder.
-
-Bill entry has one settings panel: its initial values are saved tenant defaults.
-Edits apply to the current run; only workspace editors can persist them with
-**Save defaults** or change workflow status. Catalog and company choices stay
-contextual under **Destination and checks**. New Tally runs honor the selected
-review mode. **Only exceptions** dispatches clean supported bills independently;
-uncertain inputs stay in Attention. **All outputs** and client-wide review policies
-retain explicit approval. Already-pinned legacy runs keep their original behavior.
-
-Workflow 0.11.1 selects company/catalog-scoped master references with identity
-evidence from full Discovery, including aliases and relevant native voucher history.
-The server supplies canonical ledger names before business identity and monetary
-validation; spelling, spacing and language differences alone do not force review.
-Foreign, ambiguous, invented or stale references remain held. New supplier creation
-requires an explicit positive lookup outcome and the existing operator decision;
-an unresolved match is not a new supplier. Purchase classification excludes the
-current invoice's own voucher as supporting history. Similar references retain
-every token; similar dates or amounts alone do not establish duplicate identity.
-
-Workflow 0.12.0 replaces free-text findings with typed exceptions. The model can
-block a bill only with a code from a closed list of genuine blockers (unreadable
-source, not a bill, unclear bill count, missing value, conflicting values,
-unclear company or supplier, missing supplier, uncertain ledger, unsupported
-structure). Everything else is a non-blocking internal note: successful checks,
-absent optional values, and similarity to an existing voucher. Native
-reconciliation alone decides duplicates. Attention labels come from the code.
-Under Only exceptions, held bills are flagged in shared Attention. A file may
-contain one bill plus copies and companion documents (e-way bill, IRN
-acknowledgement, challan, PO); those corroborate a single record. Runs pinned to
-earlier versions keep their free-text contract.
-
-Workflow 0.12.1 closes three gaps found by the 39-bill paid evaluation. Supplier
-identity must come from what the bill prints; when a printed name such as a
-shared leading word fits two supplier ledgers, the bill is held as Supplier
-unclear, because purpose and purchase history may choose an expense ledger but
-never a creditor. Split CGST/SGST is checked against the run's capability flag
-before any hold. Itemized goods posted to a ledger that the company's own
-history books as plain accounting vouchers follow that practice rather than
-being held for inventory. Workflow 0.12.2 validates a scanned GSTIN's check
-character before comparing it: a read that fails the check is re-read as an OCR
-error instead of being treated as a conflicting buyer.
-
-Before any import, a bill dated before its company's Tally "Books beginning from"
-date (collected in discovery's company identity) is held as **Before books
-begin**. Tally cannot record such a voucher; Minkops never moves the source date.
-Older discovery snapshots without the date skip this preflight.
-
-The grouped file selector supports individual/group/all selection and search.
-Selections persist in this browser by source ID and path, including an explicitly
-empty selection. Refresh preserves choices when snapshot IDs change, removes
-missing files and leaves new files unchecked. Upload cancellation submits nothing;
-source loading failures offer a retry without overwriting saved choices.
-
-Connected PCs shows device readiness independently of workflows. **Check
-connections** opens the chosen PC's tool panel without submitting a job. Its
-explicit **Check Tally connection** action uses the existing read-only
-`tally.probe` job, owner checks, CSRF token and request key. Offline checks wait
-for reconnection; expired PCs must reconnect first.
-
-The browser regression suite uses synthetic sources and intercepts every API
-request. It never runs a live Windows or Tally adapter. From
-`apps/solution-web`, run `npm run test:browser` after installing Playwright's
-Chromium (`npx playwright install chromium`). To use an existing Chromium,
-run `CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`.
-Screenshots and failure artifacts default to `/tmp/minkops-ui-tests`; override
-with `MINKOPS_UI_ARTIFACTS`. Unit tests remain `npm test`.
-
-## Workflow
-
-### Exception review and export
-
-### v1 settings and handler policy
-
-New UI launches are Tally-only. Read bills groups the input format, Tally
-destination groups discovery/company/voucher-type choices, and Review and save
-groups review mode. Exact ledger/amount validation, duplicates and native
-readback are mandatory. Excel/Both/draft and Excel-only checks are hidden in
-v1; pinned legacy runs retain their adapters and recovery contracts.
-
-The server owns the following maximum handler matrix. It further removes write
-actions when mandatory values, company/master identity, source evidence or
-supplier-creation prerequisites fail. Recheck appears only for an unresolved
-input; saved/rejected/writing bills and runs outside review offer no decisions.
-Best guess retains its separate human-review Attention after native save.
-
-| Typed code | Maximum handlers |
+| Call | Purpose |
 | --- | --- |
-| `source_unreadable` | Best guess write, Do nothing, Recheck |
-| `classification_uncertain` | Best guess write, Do nothing, Recheck |
-| `manual_review` | Best guess write, Do nothing, Recheck |
+| `POST /api/tenants/{slug}/accounts/sources` | Upload bill files (multipart `files` and their relative `paths`); returns their file IDs |
+| `POST /runs` | `{workflow: "bill-entry", file_ids, request_key, config}`; a repeated request key returns the same run |
+| `GET /runs/{id}/status` | Small status: run state, item and record counts, blockers |
+| `GET /runs/{id}/records` | One summary per bill, paged with `after` |
+| `GET /records/{id}` | One bill's proposal, evidence, lines and Tally observation |
+| `POST /records/{id}/decisions` | `{action, version, detail}`: one of the bill's offered actions, with the detail it was offered with |
+| `POST /runs/{id}/approve` | Write ready bills: approve every proposal that needs no review |
+
+Stop and pause are task controls (`POST /api/tenants/{slug}/tasks/{task}/control`).
+
+A run takes 1–50 PDF, PNG, JPEG or WebP files, at most 40 MB together, each
+selected once. Its settings are:
+
+- `review_mode`: `all_outputs` (every proposal waits for approval; the tenant
+  default) or `only_exceptions` (bills that pass every check and follow the
+  client's precedent are written once the whole run is read);
+- `company_mode`: `infer` (each bill routes to the company it is addressed to)
+  or `locked`, with `locked_company_guid` one of the client's companies.
+
+Each file becomes one item. It waits until every PC holding the client's
+companies has refreshed its Tally copy into the server's mirror, then the run
+pins that mirror version: every check in the run reads the same books.
+
+## Reading a file
+
+Each file is read in its own tool session: every page as an image, plus the
+PDF's text layer where it has one and what any signed e-invoice QR code on it
+registers (see [Signed e-invoices](#signed-e-invoices)). The session looks things up in the pinned
+books with read-only tools, each logged per call:
+
+- `find_company`: the client's companies, with every GSTIN each is registered under;
+- `find_ledger`: by name, alias, GSTIN or bank account, with each ledger's group and description;
+- `voucher_types` and `cost_centres`;
+- `party_history`: how the client booked a supplier's or a ledger's earlier vouchers, including their stock items
+  and the godowns those went to;
+- `find_stock_item` and `godowns`: stock items by name, alias or HSN code, with their units, and the company's stores;
+- `check_gstin`: whether a GSTIN read from the bill is valid, and its state;
+- `memory`, `rules` and `practice`: what Minkops learnt about a supplier, the client's own rules, and how a
+  company keeps its books (see [Memory and practice](#memory-and-practice)).
+
+A session meets companies and masters only as short references, never their
+GUIDs: the input names each company (`C1`), and every lookup gives the masters it
+finds theirs (`L12` for a ledger, `T2` for a voucher type, `S4`, `G1` and `K3` for
+stock items, godowns and cost centres). Each stands for one company or master for
+the whole file (`item_refs`), so a resumed session keeps the references it read. A
+proposal may cite only references its own session was given. Tally numbers a
+company's masters in sequence, so a guessed or mistyped GUID could name another
+real ledger; a reference no lookup issued names none, and is refused with the
+lookup that finds the right one. A cost centre's category follows from the centre.
+
+It then gives its final answer: `count`, the number of bills the file holds, and
+the bills numbered in the order they appear. The provider constrains that answer
+to the proposal's schema (`PROPOSAL` in `bill_entry.py`), so its shape cannot be
+wrong; every value in it still comes from the bill and the lookups. Companion pages
+such as e-way bills, challans and annexures corroborate a bill and are never bills
+themselves. Each bill is then checked and either accepted, rejected with a reason
+the session can act on, or held. What is rejected goes back to the same session,
+which answers again with those bills corrected, at most twice
+(`tools.CORRECTIONS`); a bill still rejected then holds for that reason. A reading
+that changes a printed fact after a refusal goes to review. Where the PDF has a text layer, the
+total and any round-off must be amounts that layer prints. When the file is read
+again, bills a person has already decided keep their numbers. A bill that follows
+one of the client's rules cites its ID, and the proposal keeps the text it
+followed. A receipt-register stamp (DMR, GRN or MRN) is read as printed, with its
+number and date.
+
+## The gate
+
+`accounts/vouchers.py` `check` binds a proposal to its company's pinned masters
+and proves it:
+
+- every identity is a master of the routed company, resolved from the references
+  the proposal cites: the voucher type of the right family, the supplier, and a
+  distinct ledger per line;
+- the supplier's line is computed from the printed total, and the other lines
+  reach it exactly;
+- each tax line matches its printed rate and taxable value within a rupee, and
+  central and state halves agree. Its ledger is one for its head and rate: as
+  Tally marks a GST duty ledger, or else as its name says;
+- the bill's supplier GSTIN is the supplier ledger's, when the ledger has one;
+- the bill's printed taxable and tax totals bind the lines that claim them, so a
+  tax-inclusive amount column cannot drop the input tax;
+- a printed round-off of at most a rupee is its own line, never folded into the purchase;
+- cost centres belong to their category, on a ledger that enables them. A ledger
+  the bill splits across centres is one line carrying each centre's share, and a
+  ledger taxed at several GST rates is one line per rate (plan protocol 7, which
+  only such a bill needs); lines nothing sets apart are summed. A split the bill
+  prints between two or more sites or projects is carried on cost centres at its
+  printed amounts or percentages, matched by share, or the bill is refused, then
+  held;
+- TDS follows its section and rate, on the expense value only;
+- the date is the one the bill prints: it must agree with the date the session
+  quoted (read day first or month first) and be a plausible bill date, or the
+  bill is read again. Only then does it fall within the company's books: a bill
+  before they begin, or after a year-split sibling takes over, holds at once;
+- input tax is claimed only by a registered buyer the bill names: a company with
+  GST on in Tally but no GSTIN holds, and a registered company's bill printing no
+  buyer GSTIN is read again, then held. A company with GST off keeps its tax
+  ledgers as plain bookkeeping;
+- what the bill prints as held back or adjusted is carried: retention or
+  contractual withholding as a retention line on the supplier's side, which
+  reduces what it is owed as TDS does, and a refundable deposit as its own line,
+  never expense. An advance already paid is matched in Tally; the bill is booked
+  at its full value with a note, so standing approval leaves it to a person;
+- a supplier that keeps bill-by-bill balances gets the bill recorded under its
+  invoice number (a New Ref on the supplier's line). Its credit note holds as
+  `unsupported_structure`, because it must name the bill it adjusts: enter it in
+  Tally.
+
+Some holds no later attempt may change, only a person's recheck: a date
+outside the books, a foreign supplier's invoice (whose numbering year is
+unknown), or a missing supplier. Foreign-currency bills cannot be saved yet, nor
+can items Tally keeps in batches (see [Item-wise purchases](#item-wise-purchases)).
+The session proposes such a bill as `unsupported_structure`, naming the
+structure. A bill that merely lists goods with HSN codes and quantities is
+booked to the ledger the client uses, unless the client books such purchases
+item-wise.
+
+## Signed e-invoices
+
+An e-invoice carries a QR code its Invoice Registration Portal (IRP) signed. Bill
+reading decodes every QR code on a page (`minkops_connectors/documents.py`, from a
+300 DPI render) and keeps those that are signed e-invoices
+(`minkops_connectors/einvoice.py`). Each is:
+
+- **verified** when a pinned IRP key verifies its signature, within the IRN
+  generation period that key signed;
+- **altered** when it names a pinned certificate whose signature fails: the bill
+  holds at once for a person to check with the supplier;
+- **unverified** when its key is not pinned. It is still the invoice's own
+  machine-readable data, but no proof the IRP registered it.
+
+The session is told what each code registers. A code belongs to the bill with its
+number, or to a file's only bill when it is the file's only code. That bill's
+reading must agree with its number, kind, date, total and seller GSTIN; a reading
+that does not is refused, saying what the code registers. Its buyer GSTIN must be
+one the routed company is registered under, or the bill holds as
+`company_unresolved`. A verified code is kept on the bill's facts with its IRP and
+IRN.
+
+The pinned keys are production signing keys only, in
+`connectors/src/minkops_connectors/einvoice_signers/`, each listed in
+`signers.json` with its IRP, IRN generation period, SHA-1 thumbprint (the code's
+`kid`) and the official URL it came from. They cover NIC's IRP 1 (August 2020
+onwards) and IRP 2 (April 2023 onwards), and IRIS's IRP 6 until June 2026. To add a
+key, download it from the IRP's own key page, check its thumbprint against a real
+code it signed, and add its entry. Codes from the IRPs not pinned yet (3, 4 and 5),
+or from a newer IRIS key, read as unverified.
+
+## Item-wise purchases
+
+A supplier whose purchases the client books item-wise in Tally gets its bills booked
+the same way. For each item line of the bill the session proposes, in `voucher.items`:
+
+- the stock item;
+- its quantity in that item's own unit, with the printed rate and amount;
+- the purchase ledger that carries its value;
+- the godowns it goes to.
+
+The gate (`accounts/vouchers.py`) proves:
+
+- each item is a stock item of the company, counted in a simple unit and not kept in
+  batches;
+- the quantity keeps to its unit's decimal places, and quantity times rate reaches the
+  printed amount within a rupee;
+- the purchase ledger has inventory values affected, as Tally requires;
+- the godowns take the item's whole quantity and amount between them.
+
+Items carry the bill's taxable value. Tally books each purchase ledger's items as one
+ledger line, so the plan does too, and its readback must carry every item, godown,
+quantity, rate and amount. Only a Purchase invoice carries items; goods returned on a
+credit note are entered in Tally.
+
+An item-wise purchase also depends on the company's practice. Where Receipt Notes or
+purchase orders track the goods, the purchase must name the note or order it follows,
+so the bill holds for entry in Tally, and no later reading can recast it. While either
+practice is open, the bill waits on its question, and the answer, or a later sync that
+settles it, releases the bill. Confirmation by use tells the two treatments apart: a
+supplier booked item-wise before has no precedent for a bill booked to ledgers, and the
+reverse.
+
+## Review
+
+Once every file is read, a bill repeated across files is written once, and files
+that print different versions of one bill all hold. A proposal goes to review,
+whatever the review mode, when:
+
+- it books the supplier differently from every earlier voucher of theirs (another
+  voucher type or expense ledger, or without the stock items they carried). The
+  note names what the supplier's last bill was booked to beside this one. One
+  approval confirms the booking, which memory then holds as a precedent;
+- it books the supplier the way someone changed in Tally since Minkops saved it,
+  or the way a best guess first did;
+- its reading changed after a refusal;
+- it is a copy of a bill in another file, or a best guess;
+- the same bill (buyer, supplier, number, date and total as printed) is held in
+  another file. Each copy names the other, so the proposed one is not written while
+  its copy waits for a reason no one has seen. Two held copies name each other
+  too, so the one settled first is never entered again from the other;
+- it adjusts an advance already paid, which a person matches in Tally.
+
+The session never learns of these notes, so it cannot rebook a sound bill to
+avoid review.
+
+Each held bill offers the actions its codes allow. The matrix is defined once in
+`accounts/holds.py`, pinned by `platform/tests/test_holds.py`; a code outside it
+offers only Do nothing and Recheck.
+
+| Codes | Actions |
+| --- | --- |
+| `company_unresolved`, `supplier_unresolved`, `not_a_bill`, `multiple_bills_unclear`, `required_value_missing`, `source_values_conflict`, `unsupported_structure`, `date_before_books`, `date_outside_company_period`, `identity_rule_unknown`, `voucher_type_unresolved`, `extraction_failed` | Do nothing, Recheck |
+| `classification_uncertain`, `source_unreadable` | Best guess write, Do nothing, Recheck |
 | `supplier_missing` | Create this ledger, Do nothing, Recheck |
-| `not_a_bill` | Do nothing, Recheck |
-| `multiple_bills_unclear` | Do nothing, Recheck |
-| `required_value_missing` | Do nothing, Recheck |
-| `source_values_conflict` | Do nothing, Recheck |
-| `company_unresolved` | Do nothing, Recheck |
-| `supplier_unresolved` | Do nothing, Recheck |
-| `unsupported_structure` | Do nothing, Recheck |
-| `date_before_books` | Do nothing, Recheck |
-| `destination_changed` | Do nothing, Recheck |
-| `voucher_type_unresolved` | Do nothing, Recheck |
-| `identity_rule_unknown` | Do nothing, Recheck |
-| `date_outside_company_period` | Do nothing, Recheck |
-| `posting_profile_miss` | Best guess write, Do nothing, Recheck |
-| `extraction_failed` | Do nothing, Recheck |
-| `run_stopped` | Do nothing, Recheck (only after an active review) |
-| `human_review` | Do nothing, Recheck; shared Attention has Done/Refresh |
-| `company_not_open`, `no_company`, `duplicate_company` | Retry save, Do nothing |
-| `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response` | Retry save, Do nothing |
-| `rejected`, `save_hold`, `save_held` | Retry save, Do nothing |
-| `save_waiting`, `save_interrupted`, `pc_unavailable` | Retry save, Do nothing |
+| `company_not_open`, `no_company`, `duplicate_company`, `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response`, `rejected`, `save_waiting`, `save_interrupted`, `save_held` | Retry save, Do nothing |
+| `run_stopped`, `destination_changed` | Do nothing |
+| `practice_question` | Do nothing; the answer in Attention releases it |
 
-Unknown future codes offer only Do nothing/Recheck until a handler is explicitly
-supported. The UI consumes server-derived actions and never infers eligibility
-from free-text findings. Mark Done and Refresh remain shared Attention actions.
+Best guess write is offered only when the held bill's complete candidate passes
+the gate, and Create this ledger only when the supplier can be created safely
+(below). Recheck reads the file again in a new attempt of its session, against
+the run's pinned books. Decisions are idempotent per record version: the same
+decision sent twice returns one receipt. Stop is final: unsaved bills hold as
+`run_stopped`, and writes no PC has started are withdrawn. A ledger, voucher type
+or cost allocation that changed in Tally after the run read the books holds as
+`destination_changed`; start a new run for that bill.
 
-**Apply to all similar** is offered for Create this ledger, Retry save, Do
-nothing and Recheck only when the server can identify a shared subject. New
-suppliers group by company GUID, normalized printed name and GSTIN. Native save
-holds group by company and typed hold reason; books-date and voucher-type holds
-also have company-scoped subjects. Ambiguous suppliers/ledger pairs and Best
-guess write have no bulk action in v1.
+## Memory and practice
 
-A fresh server preview shows the subject and count before confirmation. The
-apply request is fenced to that cohort and revision: changed bills require a
-new preview. All member audits and state changes commit together. One bulk save
-uses one approval; one supplier group creates one native job, then continues
-every still-matching, explicitly authorized proposal after readback. Other
-pending writes do not strand a verified supplier continuation. Recheck refreshes
-discovery once and creates independent bounded child sessions. Repeated requests
-return the existing result without queuing another write or duplicating audit.
+Treatment follows, in order: a legible handwritten instruction on the bill, the
+client's rules, what Minkops learnt, then the books' history. Tally's masters and
+the gate bind all of them. Memory belongs to the client business and the Accounts
+desk employee (`accounts/memory.py`):
 
-`attention_events.detail` stores a versioned decision record: company, code,
-structured subject, action, actor, source/trigger item, proposal, count, stable
-decision tuple and snapshot token. MIN-132 can reuse this record for client
-memory; this release does not remember or automatically reuse choices.
+- **Bookings.** A verified save a person approved is one way its supplier's bills
+  are booked: the voucher type and expense ledgers, by GUID, and whether it was
+  booked item-wise. Approving the same
+  booking again uses its entry; a supplier booked two ways has two. A best guess
+  stays unconfirmed until a person approves a bill booked that way.
+- **Upkeep.** Every sync revalidates the entries. An edit made in Tally to a voucher
+  an entry was learnt from, or its deletion, demotes the entry, and the next bill
+  booked that way goes to review. An entry whose ledgers are missing from three
+  syncs in a row retires. A renamed ledger is still the same booking.
+- **Rules.** Plain-text instructions only people write, scoped to a workflow or
+  company, versioned and cited by ID. Sessions read every active rule in scope,
+  so a client keeps at most 30 active rules per employee.
+- **Practice.** After every sync, deterministic probes settle how a company keeps
+  its books, such as where it types invoice numbers, whether it records
+  receipt-register numbers, whether Receipt Notes or purchase orders track its
+  goods, whether purchases post GST to the ledgers Tally sets up as GST duties or to
+  others named for the tax, and whether a printed discount is booked net or to a
+  discount ledger. A probe the history cannot settle raises one one-click question per
+  company in [Attention](attention.md). Each mirror version records the probes run
+  on it, so a probe added later meets books that have not changed since.
 
-### Exception sheet contents
+Practice shapes the plan. A company that records receipt-register numbers in the
+narration gets the stamp there. Once settled, the gate enforces the GST ledgers and
+discounts a company uses: a GST line on a ledger merely named for the tax is refused
+where the company posts to a duty ledger for that head and rate, naming it, and a
+discount line where the company books net. A taxed bill, or one with a discount line,
+waits while that question is open. While that question is open, a bill with a stamp
+holds as `practice_question`; the answer re-checks it, and standing approval then
+writes a clean one. Duplicates are sought where the company types invoice
+numbers, or in both the reference and the narration while that is unsettled.
 
-Review lists only bills that Minkops has not successfully saved. Saved bills and
-verified duplicates appear in a collapsed count ("saved · already in Tally").
-Each remaining proposal or unresolved input has a plain-language sentence from
-its typed exception or native save outcome, never from model findings. Do nothing
-preserves that reason in durable deferred state and shared Attention.
+The memory page shows a client's entries, with their status and the evidence
+behind them, and its rules. Every member who can reach the client reads it, and
+only admins disable, enable or delete entries or change rules
+(`/api/tenants/{slug}/clients/{client}/memory`).
 
-**Export CSV** downloads the same server-owned projection in web and Windows.
-It is available once results are combined and the run is in review, completed,
-failed or stopped; processing and active saves disable it with an explanation.
-`GET /api/tenants/{slug}/accounts/runs/{id}/unsaved-bills.csv` uses the run's
-tenant authorization and private/no-store response headers. The UTF-8 BOM makes
-Excel detect the encoding, and text cells are escaped against spreadsheet
-formulas without changing negative numeric amounts.
+## GST returns
 
-The sheet contains source file, invoice, supplier, date, the proposed voucher
-lines (`Ledger Dr/Cr amount`), total tax, gross total, company, status, reason
-and Attention ID.
-Statuses are **Needs attention**, **Save held**, and **Not written (Do nothing)**.
-Saved and duplicate bills are excluded. Multi-bill PDFs have one row per bill;
-inputs with no proposal have one file row. The open file-level bill Attention ID
-is preferred, then the supplier ID; several bills may share that ID.
+Tally's GST returns read a purchase from the voucher itself. Rehearsed on
+TallyPrime (22 October 2026), an imported purchase without the supplier's GST
+details, or without each taxed line's rates stated in the voucher, is filed
+under Uncertain Transactions, whatever its masters say. With them it is
+included. Tally also accepted a tax head its states rule out, and a line rate
+its tax does not bear, so `accounts/gst.py` checks both first.
 
-1. Connect the Windows PC and grant the destination folder. Run Source discovery
-   and confirm Excel header mappings, then explicitly refresh the real workbook
-   before using it as a destination. For Tally, confirm the selected company's
-   complete version 2 context package. Each run pins company identities, full
-   masters, recent vouchers and reviewed notes as authorized JSON inputs; Bill
-   Entry has no schema search or reference collection job.
-2. Choose one locked company for the run, or let each bill route to any company
-   in discovery using buyer identity and evidenced client context. The scan saves
-   its company GUID and selection evidence; uncertain routing requires handoff.
-   Upload/select PDFs and images. Excel, Tally and Both remain visible configuration
-   choices. Mock-client's trusted solution policy enables only Tally for Bill entry;
-   disabled choices cannot be enabled by changing preferences or launch payloads.
-   Source discovery independently supports Excel, Tally and Both.
-   Combined Bill entry writes are reserved for a later verified adapter contract;
-   the API rejects Both rather than silently using only one destination.
-   Multiple inputs create independent durable hosted sessions under one task.
-   Four worker lanes process them concurrently; a provider failure affects only
-   its bill. The parent aggregates persisted proposals and unresolved inputs.
-3. Review concise bill identifiers and choose Write bill, Best guess write,
-   Create this ledger (when supported), or Do nothing. Accounting corrections
-   belong in Tally/Excel; Minkops has no value editor, correction prompt or
-   append/update selector. After external correction and discovery refresh,
-   Recheck bill retries only that unresolved input. Completed sibling writes stay
-   intact. Good bills can continue independently. See [shared attention](attention.md).
-4. All scans are persisted before approval. Approval commits immutable plans
-   and queues serial native work grouped by company before returning.
-   The tray companion can finish after the UI closes. Web and desktop use the
-   same API, review component and task state. A browser-only Excel folder still
-   needs an open page and its local permission.
+Whatever the company keeps in Tally, a bill whose `buyer_gstin` is another of the
+client's companies' is `company_unresolved`, naming that company
+(`bill_entry._addressed`): the GSTIN routes a bill, never a name it resembles. The
+check reads every company in the run, and the client's companies whose PC was
+disconnected at their last copy; a bill addressed to one of those holds at once,
+since no reading of this run can reach its books.
 
-## Source accuracy and recovery
+For a company with GST switched on in Tally:
 
-Business identity uses supplier, invoice number and the Indian April–March
-invoice year (`accounts/vouchers.py` `invoice_year`): supplier serials are unique
-within it, whatever financial year the buyer's books use. Excel otherwise uses complete confirmed
-business keys. IDs do not depend on a task, uploaded filename or processing order.
-Existing external rows/vouchers and backfills are checked against destination
-data, rather than relying only on prior application history.
+- **The registration.** The bill's `buyer_gstin` names which of the company's
+  registrations bought; among several it is required, and must be one of them.
+- **The supplier.** The voucher states the supplier's GSTIN, registration type,
+  state and country, from its ledger as of the bill's date. A taxed bill whose
+  supplier ledger has no GSTIN waits for review: Tally cannot claim its tax.
+- **The place of supply.** As the bill prints it, else the state of the
+  registration it is addressed to.
+- **Tax heads.** CGST and SGST apply within one state and IGST between two. A
+  bill charging the other waits for review, since a supply from a special
+  economic zone, or an import, is the usual exception.
+- **Each taxed line.** A Purchase's expense, freight and other-charge lines
+  state their taxability, goods or services, and their rate for every duty
+  head. A bill at one rate gives it to every line; at several, each line gives
+  its `gst_rate`, and the lines at each rate must come to the value its tax
+  lines tax.
 
-Exact duplicates produce an alert and no additional row/voucher. A different
-version is held for an explicit one-click decision. Excel corrections compare observed values
-against extraction-time values and recheck current destination bytes. Tally
-corrections compare the complete fetched voucher fingerprint, then target its
-observed original date and MASTER ID. Another intervening edit requires another
-review. Updates retain the observed voucher GUID; Tally may assign its own GUID
-on creation.
+A Debit Note states the supplier's details; an item-wise purchase does too, its
+items' rates being Tally's own. After a save, the readback must show the
+details as written, and carries Tally's verdict. A bill saved but not included,
+such as an item-wise purchase whose stock items carry no GST details, keeps a
+note saying so: its entry is sound, and its tax is completed in Tally from
+GSTR-3B's uncertain transactions.
 
-Approved plans keep the format they were approved in. A protocol-5 companion
-(0.9.0+) receives each one as a v5 voucher (header plus balanced ledger lines,
-see [Windows app](windows-app.md#companion-090-contracts)) searched within the
-bill's invoice year; its receipt is verified against that upgrade and stored in
-the usual observation shape. The invoice identity hash is unchanged, so vouchers
-saved earlier keep their remote IDs and reservations. Plans without discovered
-ledger and voucher-type GUIDs keep their original writer until they drain.
-Refresh observes bills with the same reader as the save, so a reader change is
-never mistaken for an edit made in Tally.
+## Saving
 
-Pending writes reserve the workbook, or the company GUID and bill identity,
-across runs and registered PCs. Confirmed Tally company/ledger identities and
-versions are rechecked natively before saving. Each write requires exact saved
-bytes or voucher/ledger/amount readback. Completion of one native job cannot
-complete a batch with pending or held bills.
+An approved bill becomes a durable native write (`accounts/writes.py`): a
+protocol 6 plan with the header, balanced lines, the identities they name, any
+bill reference, and the items of an item-wise purchase.
+The PC runs one `tally.write` at a time. The companion searches the bill's
+invoice year for the same supplier and document number, among Purchase and
+Journal vouchers for an invoice and Debit Notes for a credit note, then reports
+one outcome:
 
-Consequential jobs are not automatically repeated after lease expiry. Explicit
-Resume saves first reconciles the destination, handling an already applied write
-without adding it again. Persisted receipts are replayed before another native
-job. A save that finished but was refused or held by its destination returns
-to review with Retry save, which re-sends the same proposal after the fix.
-Cancellation releases pending reservations and preserves applied changes.
-A late cancelled receipt records what was saved without restoring success or
-rewinding newer observed workbook bytes. Independent external writers can still
-race Tally's separate read/import calls: ambiguous matches or mismatched readback
-require reconciliation, never a claimed successful save.
+- **saved**: no such voucher existed; the new one reads back exactly as approved;
+- **duplicate**: Tally already has exactly this voucher, so nothing is added;
+- **correction**: Tally has this bill with another date, total, ledgers or line
+  amounts. The bill holds, and its reason names what differs. Nothing is overwritten;
+- **attention**: a typed native hold, such as the company not being open.
 
-A provider stream that drops after the bill's turn started is reattached to
-the same turn, up to three times, and its result read as usual; no session or
-input is resubmitted. A failure before the turn exists is ambiguous, so the
-bill stays unresolved for an explicit Recheck bill. While saves wait for the
-destination PC, the run names that PC and asks to keep Minkops running there.
+Business identity is the supplier, the document number and the Indian April–March
+invoice year (`vouchers.invoice_year`): supplier serials are unique within it,
+whatever year the buyer's books use. A write interrupted mid-import is never sent
+again; Retry save reconciles first. Bill saves use the user's own open Tally
+session, and Minkops never starts, closes or restarts Tally. See
+[the Windows companion](windows-app.md).
 
-## Supported mapping
+## New suppliers
 
-Excel uses actual confirmed headers, sheet/table boundaries and types; it does
-not impose a universal invoice schema. Existing workbook protections, formulas,
-styles, hash checks, native backups and atomic replacement remain in force.
+When no ledger is the bill's supplier, the session sets `party.new_supplier` and
+reads the supplier's GST details from the bill: GSTIN, registration type, state
+and state code, place of supply, address and PIN, each with its page and quote.
+The bill holds as Missing supplier. Create this ledger is offered only when:
 
-From bill-entry 0.14 Tally has no fixed field list. The AI proposes the voucher
-the client's own practice records for each document: the family (an invoice is
-a Purchase or a Journal; a supplier credit note is a Debit Note), the voucher
-type, the supplier and every other line (role, ledger, side, amount, optional
-cost centre/category and tax head/rate/base), each selected by native GUID from
-the routed company's pinned discovery (`accounts/vouchers.py` `check`). The
-application only binds and proves it:
+- no ledger already has the printed name or GSTIN;
+- the GSTIN passes its check character, and the printed state and state code
+  match it;
+- the supplier, the company and the place of supply are in one state (a
+  cross-state supplier is created by hand in v1), and a Composition supplier
+  charges no tax;
+- every detail is quoted from the bill, with a six-digit PIN;
+- the company has a Regular GST creditor to model the ledger on;
+- the bill passes every other check once the supplier exists.
 
-- every identity belongs to the routed company, is active where that matters,
-  and every ledger is distinct; purchases use the run's chosen voucher type;
-- the server computes the supplier line from the printed total, and debits must
-  equal credits to the paisa;
-- each tax line is within one rupee of its own printed rate × taxable value, and
-  central and state halves of one rate and base are equal;
-- at most one printed round-off of at most one rupee;
-- cost centres must belong to the chosen category on a ledger that enables them;
-- TDS waits for a confirmed posting profile; a foreign supplier holds
-  (`identity_rule_unknown`), because only the Indian invoice year identifies a
-  document;
-- inventory, bill-wise allocations and foreign currency are connector limitations
-  the AI reports as `unsupported_structure`, naming the structure.
-
-**Posting patterns.** Each company's way of recording supplier documents is
-derived once (the `posting_profile` stage reads that company's discovery only)
-and stored as a versioned client profile. Code proves every identity it names;
-a member confirms it once from the Attention card "Confirm posting pattern"
-(**Confirm** / **Do nothing**), and the company's bills wait until then. Bills are
-then checked against it: its voucher type per document kind, supplier party
-groups, round-off ledger and cap, TDS ledgers with their section and rate
-(deducted on the expense value), and where supplier document numbers are
-recorded for duplicate checks. A bill that does not fit holds as
-`posting_profile_miss`; three misses retire the pattern. A year-split sibling
-inherits a confirmed pattern when every identity re-binds by exact name and
-parent group, and newer discovery keeps a pattern while its identities and
-groups still hold, so routine master edits never ask again. Concurrent runs
-share one derivation; a failed derivation releases the company so its bills
-hold and the next run derives again.
-
-Approved bills are stored as native v5 plans (Windows companion 0.9.0+, see
-[Windows app](windows-app.md#companion-090-contracts)) and reviewed through a
-server-built preview of exactly those lines; `data` keeps only the document
-summary (supplier, number, date, total, tax) that attention, policies and exports
-read. Proposals pinned to 0.13 or earlier keep their fixed Purchase mapping and
-writer until they drain (MIN-155). This accounting voucher contract does not
-assert statutory filing readiness.
-
-The adapter uses bounded fixed XML exports/imports on the PC's loopback port;
-there is no renderer-supplied XML, URL, TDL or shell. Tally's documented correction
-selector needs its original DATE and MASTER ID. References:
-[Tally sample XML](https://help.tallysolutions.com/sample-xml/) and
-[Tally voucher alteration](https://help.tallysolutions.com/scenario-2/).
-
-## Synthetic companies and saves
-
-Synthetic Tally companies, bills and expected outcomes for live checks come from
-the [five-company rehearsal](tally-rehearsal.md); labelled packages are graded
-with the fixture scorer described under Verification. Never point either at a
-real client company.
-
-Discovery is mandatory before dependent workflows, with manual refresh afterward.
-Its date range applies only to vouchers; all masters are exported comprehensively.
-No scheduling is introduced.
-
-Bill saves run against the user's open Tally session; Minkops never starts or
-restarts Tally. Before each save the run's company must be open and match the
-discovered GUID; otherwise the bill holds ("Open company in Tally") and Retry save
-continues once it is open. Reads may repeat after a timeout; an uncertain import is
-never automatically resent. Read-only reconciliation distinguishes an
-already-applied bill, a conflicting version and an absent bill requiring review and
-Retry save. Native rejections are classified (date, permission, voucher type,
-voucher number, ledger) into short labels; Tally's own text stays in diagnostics.
-See [the Windows companion](windows-app.md).
-
-Each run writes with a purchase voucher type pinned per company from discovered
-masters (automatic when only one is active, otherwise chosen at launch), and checks
-duplicates across every purchase-based type, including inactive ones; a matching
-Journal voucher holds. Choosing "Use one company for this run" suits practices that
-keep one Tally company per financial year. **Show details** on each proposal lists
-the company, voucher type, date, ledgers and amounts it will enter.
+A person's decision queues `tally.supplier`. The companion imports the ledger
+only when no ledger has its name, so a retry reads back the one it created. The
+readback must show exactly one creditor under Sundry Creditors carrying every
+approved statutory and mailing value. The bill is then checked again with the
+new supplier and written. Other bills of the same supplier in the run are
+proposed with it too, and wait for review.
 
 ## Verification
 
-Offline tests replace the paid proposal boundary and exercise real PostgreSQL,
-authenticated API transport and immutable financial plans. They cover
-117/118/119 wiring, parallel sessions, isolated failures, duplicate uploads,
-backfills, corrections, stale review, cross-PC reservations, receipt replay,
-lease expiry, stopped tasks and late receipts. Native tests run on Windows and
-Linux and include the Tally alteration selector regression. Shared UI build,
-lint and web tests are run. The review shows concise identifiers and one-click
-decisions; detailed evidence and logs remain internal (see [attention](attention.md)).
-Live checks against real Tally companies use the
-[five-company rehearsal](tally-rehearsal.md) and the labelled fixture scoring
-below; see [the Windows companion](windows-app.md) for distribution limitations.
+- `platform/tests/test_bill_entry.py` runs bills end to end on PostgreSQL with
+  scripted sessions calling the real tools.
+- `test_bill_vouchers.py` and `test_vouchers.py` pin the gate and the receipts.
+- The companion's tests cover the writer and supplier creation.
 
-### Scoring and replaying labelled fixture packages
+Live checks use the [five-company rehearsal](tally-rehearsal.md) and the
+PR Infra UAT pack, recorded in [the rebuild evidence](rebuild/evidence.md).
 
-A fixture package holds `bills/*.pdf` and `evidence/expected-bills.json` with
-the expected outcome of every input. Select only `bills/` as inputs.
-`scripts/bill_entry_fixtures.py` grades a finished run per input as correct,
-an unnecessary hold, a wrong reason, a wrong save or a missed exception. The
-last two are critical and make the command exit nonzero. Use `--rerun` when
-the inputs were already saved and every create should now be a duplicate, and
-`--dry` for an All outputs run graded before saving. Educational Tally accepts
-only voucher dates on the 1st, 2nd and 31st; a correct bill held solely for its
-date passes.
-
-`replay` processes a launched run with the answers a correct agent returns,
-so everything after extraction is exercised on real documents without paid
-sessions. Stop the normal worker first; replay claims only the named run.
+A labelled fixture package holds `bills/*.pdf` and `evidence/expected-bills.json`.
+Select only `bills/` as inputs; the answers never reach a model.
+`scripts/bill_entry_fixtures.py` grades each input of a finished run as correct,
+an unnecessary hold, a wrong reason, a wrong save or a missed exception. The last
+two are critical and make the command exit nonzero. It also reports the timings
+and tokens. Use `--dry` for an All outputs run graded before saving, and `--rerun`
+when the inputs were already saved and every new bill should now be a duplicate.
+Educational Tally accepts only voucher dates on the 1st, 2nd and 31st; a correct
+bill held solely for its date passes.
 
 ```sh
-uv run --all-packages python scripts/bill_entry_fixtures.py replay RUN_ID packages/<package>
 uv run --all-packages python scripts/bill_entry_fixtures.py score RUN_ID packages/<package> [--dry|--rerun]
 ```
-
-### GST supplier creation (0.13 / Windows 0.8)
-
-Create this ledger requires printed GSTIN, registration type, state, place of supply, address and PIN with literal page evidence, deterministic checksum/state validation, and a compatible registered supplier template in the same confirmed company. Existing GSTIN aliases, missing evidence and cross-state creation require manual handling in v1. Older pinned runs retain their prior behavior. The native callback must verify every approved statutory and mailing field before a bill is queued; an import acknowledgement alone is insufficient.

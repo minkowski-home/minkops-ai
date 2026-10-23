@@ -1,20 +1,17 @@
 # Bill entry
 
-Reads PDF and image bills, routes each to one company, and proposes the client's
-own voucher (Purchase, Journal or Debit Note) from confirmed discovery for
-one-click review and a verified save. Client business schemas are discovered and
-confirmed; nothing client-specific is encoded here.
+Reads PDF and image bills for one client business. Each file is read in its own
+tool session, every bill in it is routed to the company it is addressed to, and
+reviewed bills are saved as verified Purchase, Journal or Debit Note vouchers in
+the client's own Tally. A new supplier's ledger is created only when a person
+approves it.
 
-- `workflow.json` declares the handler (`accounts.bill`), tenant and run
-  configuration, the hosted execution bundle (`gpt-6-luna`) and its stages.
-- `SKILL.md` and `execution-instructions.md` guide the main extraction turn;
-  `stages/triage.md` routes bills to companies first and
-  `stages/posting-profile.md` derives a company's posting pattern once.
-- `agent-output.schema.json` and each stage's schema validate hosted proposals
-  before review. `output.schema.json` is the descriptor's generic result
-  contract; Accounts does not validate against it.
+- `workflow.json` declares the handler (`desk.bill`), its configuration and the
+  sessions it runs (`gpt-6-luna`).
+- `SKILL.md` is the procedure: reading the pages, finding the buyer and the
+  supplier, and proposing the client's own voucher with `propose`.
 
-The application owns approvals, business checks and verified writes; client
-instructions (see `solutions/<client>/…/bill-entry/`) are additive. See
-[Bill entry](../../../../docs/bill-entry.md) for settings, review decisions,
-recovery and verification.
+The handler owns every check, approval and write; a client's procedure (see
+`solutions/<client>/…/bill-entry/`) only adds instructions. See
+[Bill entry](../../../../docs/bill-entry.md) for checks, review, writes and
+recovery.

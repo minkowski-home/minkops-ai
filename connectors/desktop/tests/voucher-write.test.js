@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {saveVoucher, readVouchers, validatePlan, voucherFamilies} from '../src/voucher.js';
+import {classifyRejection, saveVoucher, readVouchers, validatePlan, voucherFamilies} from '../src/voucher.js';
 import {TallyUnavailable} from '../src/tally-session.js';
 
 const id = '12345678-1234-5234-8234-123456789abc';
@@ -43,12 +43,17 @@ const types = [
   {NAME: 'Journal', '@_RESERVEDNAME': 'Journal', GUID: 'j'}, {NAME: 'Debit Note', '@_RESERVEDNAME': 'Debit Note', GUID: 'vt-dn'},
   {NAME: 'Payment', '@_RESERVEDNAME': 'Payment', GUID: 'vt-payment'}, {NAME: 'Contra', '@_RESERVEDNAME': 'Contra', GUID: 'vt-contra'},
 ];
-const snapshot = ({ledgerRecords, typeRecords = types, centres = [{NAME: 'Site 4', GUID: 'cc'}]} = {}) => ({collections: [
+const stockRecords = [{NAME: 'Cement', GUID: 'item-cement', BASEUNITS: 'Bag', ISBATCHWISEON: 'No'}];
+const godownRecords = [{NAME: 'Main Location', GUID: 'gd-main'}, {NAME: 'Site Store', GUID: 'gd-site'}];
+const snapshot = ({ledgerRecords, typeRecords = types, centres = [{NAME: 'Site 4', GUID: 'cc'}], items = stockRecords,
+  godowns = godownRecords} = {}) => ({collections: [
   {category: 'company', status: 'ready', records: [{GUID: 'company', ISCOSTCENTRESON: 'Yes'}]},
   {category: 'ledgers', status: 'ready', records: ledgerRecords ?? ledgers.map(NAME => ({NAME, GUID: `${NAME}-guid`, PARENT: 'Group', ALTERID: ' 12 ', ISCOSTCENTRESON: 'Yes'}))},
   {category: 'voucher_types', status: 'ready', records: typeRecords},
   {category: 'cost_centres', status: 'ready', records: centres.map(c => ({CATEGORY: 'Sites', ...c}))},
   {category: 'cost_categories', status: 'ready', records: [{NAME: 'Sites', GUID: 'cat'}]},
+  {category: 'stock_items', status: 'ready', records: items},
+  {category: 'godowns', status: 'ready', records: godowns},
 ]});
 const signed = line => line.side === 'credit' ? line.amount_cents : -line.amount_cents;
 /** The voucher Tally would return for exactly this plan. */
@@ -58,7 +63,13 @@ const observed = (plan, overrides = {}) => ({
   narration: plan.header.tag ? `[Minkops ${plan.header.tag}:${plan.remote_id}] ${plan.header.narration}` : plan.header.narration,
   tag: plan.header.tag ? plan.remote_id : null, unsupported: false, fingerprint: 'v5:existing',
   entries: plan.lines.map(l => ({ledger: l.ledger, amount_cents: signed(l)})).sort((a, b) => a.ledger.localeCompare(b.ledger) || a.amount_cents - b.amount_cents),
-  allocations: plan.lines.filter(l => l.allocation).map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})),
+  allocations: plan.lines.flatMap(l => (l.allocations ?? (l.allocation ? [{...l.allocation, amount_cents: l.amount_cents}] : []))
+    .map(a => ({ledger: l.ledger, category: a.category, centre: a.centre, amount_cents: l.side === 'credit' ? a.amount_cents : -a.amount_cents}))),
+  bills: plan.lines.flatMap(l => (l.bills ?? []).map(b => ({ledger: l.ledger, name: b.name ?? null, type: b.type,
+    amount_cents: l.side === 'credit' ? b.amount_cents : -b.amount_cents}))),
+  inventory: (plan.inventory ?? []).map(e => ({item: e.item, unit: e.unit, quantity: e.quantity, rate: e.rate,
+    amount_cents: -e.amount_cents, ledger: e.ledger,
+    godowns: e.godowns.map(g => ({godown: g.godown, quantity: g.quantity, amount_cents: -g.amount_cents}))})),
   ...overrides,
 });
 const accepted = '<RESPONSE><CREATED>1</CREATED><ALTERED>0</ALTERED><ERRORS>0</ERRORS></RESPONSE>';
@@ -79,6 +90,90 @@ function harness(reads, {reply = accepted, references: refs = snapshot(), fence 
   };
   return io;
 }
+
+// A purchase into a GST-registered company: the supplier's registration, the place of supply and each taxed line's
+// rates, stated in the voucher as Tally's returns need them.
+const gstPurchase = {
+  ...purchase, format_version: 6,
+  gst: {party: {gstin: '37AAQCS1234F1Z9', registration_type: 'Regular', state: 'Andhra Pradesh', country: 'India',
+    place_of_supply: 'Andhra Pradesh'}, company_gstin: '37ABCPR1234Q1ZB', registration: null},
+  lines: purchase.lines.map(l => l.ledger === 'Purchase 18%'
+    ? {...l, gst: {taxability: 'Taxable', supply: 'Goods', rates: {cgst: '9', sgst: '9', igst: '18', cess: '0'}}} : l),
+};
+
+test('a GST purchase states what Tally\'s returns need, and its receipt carries Tally\'s verdict', async () => {
+  const io = harness([[], [observed(gstPurchase, {gst: {status: 'included'}})]]);
+  const result = await saveVoucher(gstPurchase, io.options);
+  assert.equal(result.outcome, 'saved');
+  assert.equal(result.current.gst.status, 'included');
+  const body = io.imports[0];
+  assert.ok(body.includes('<PARTYLEDGERNAME>Supplier A</PARTYLEDGERNAME><STATENAME>Andhra Pradesh</STATENAME><COUNTRYOFRESIDENCE>India'
+    + '</COUNTRYOFRESIDENCE><GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE><PARTYGSTIN>37AAQCS1234F1Z9</PARTYGSTIN>'
+    + '<PLACEOFSUPPLY>Andhra Pradesh</PLACEOFSUPPLY><PERSISTEDVIEW>'));
+  // The company's only registration is Tally's to attach; the voucher names one only among several.
+  assert.ok(!body.includes('<CMPGSTIN>'));
+  const taxed = body.match(/<ALLLEDGERENTRIES\.LIST><LEDGERNAME>Purchase 18%<\/LEDGERNAME>.*?<\/ALLLEDGERENTRIES\.LIST>/)[0];
+  assert.ok(taxed.includes('<GSTOVRDNTAXABILITY>Taxable</GSTOVRDNTAXABILITY><GSTOVRDNTYPEOFSUPPLY>Goods</GSTOVRDNTYPEOFSUPPLY>'
+    + '<GSTRATEINFERAPPLICABILITY>Specify in Voucher</GSTRATEINFERAPPLICABILITY>'));
+  assert.deepEqual([...taxed.matchAll(/<GSTRATEDUTYHEAD>([^<]+)<\/GSTRATEDUTYHEAD><GSTRATEVALUATIONTYPE>Based on Value<\/GSTRATEVALUATIONTYPE><GSTRATE>([^<]+)</g)]
+    .map(m => [m[1], m[2]]), [['CGST', '9'], ['SGST/UTGST', '9'], ['IGST', '18'], ['Cess', '0'], ['State Cess', '0']]);
+  // The cost allocation still follows the line's own fields.
+  assert.ok(taxed.includes('<CATEGORYALLOCATIONS.LIST><CATEGORY>Sites</CATEGORY>'));
+  const tax = body.match(/<ALLLEDGERENTRIES\.LIST><LEDGERNAME>Input CGST<\/LEDGERNAME>.*?<\/ALLLEDGERENTRIES\.LIST>/)[0];
+  assert.ok(!tax.includes('GSTRATE'));
+  const several = {...gstPurchase, gst: {...gstPurchase.gst, registration: {name: 'Andhra Pradesh Registration', gstin: '37ABCPR1234Q1ZB'}}};
+  const named = harness([[], [observed(several)]]);
+  await saveVoucher(several, named.options);
+  assert.ok(named.imports[0].includes('<GSTREGISTRATION>Andhra Pradesh Registration</GSTREGISTRATION><CMPGSTIN>37ABCPR1234Q1ZB</CMPGSTIN>'));
+});
+
+// Protocol 7: one ledger split across cost centres, and one ledger taxed at two rates on two lines.
+const office = {category: 'Sites', category_guid: 'cat', centre: 'Head Office', centre_guid: 'cc-ho'};
+const split = {
+  ...gstPurchase, format_version: 7,
+  lines: [
+    {ledger: 'Supplier A', side: 'credit', amount_cents: 118040, allocation: null},
+    {ledger: 'Purchase 18%', side: 'debit', amount_cents: 60000, allocation: null,
+      allocations: [{...site, amount_cents: 36000}, {...office, amount_cents: 24000}],
+      gst: {taxability: 'Taxable', supply: 'Goods', rates: {cgst: '9', sgst: '9', igst: '18', cess: '0'}}},
+    {ledger: 'Purchase 18%', side: 'debit', amount_cents: 40000, allocation: null,
+      gst: {taxability: 'Taxable', supply: 'Goods', rates: {cgst: '2.5', sgst: '2.5', igst: '5', cess: '0'}}},
+    {ledger: 'Input CGST', side: 'debit', amount_cents: 9000, allocation: null},
+    {ledger: 'Input SGST', side: 'debit', amount_cents: 9000, allocation: null},
+    {ledger: 'Round Off', side: 'debit', amount_cents: 40, allocation: null},
+  ],
+};
+
+test('protocol 7 writes one ledger across cost centres, and one ledger at two rates, and reads them back exactly', async () => {
+  const io = harness([[], [observed(split)]], {references: snapshot({centres: [{NAME: 'Site 4', GUID: 'cc'}, {NAME: 'Head Office', GUID: 'cc-ho'}]})});
+  const result = await saveVoucher(split, io.options);
+  assert.equal(result.outcome, 'saved');
+  const [allocated, second] = [...io.imports[0].matchAll(/<ALLLEDGERENTRIES\.LIST><LEDGERNAME>Purchase 18%<\/LEDGERNAME>.*?<\/ALLLEDGERENTRIES\.LIST>/g)].map(m => m[0]);
+  // One category, both its centres, each with its own share of the line.
+  assert.ok(allocated.includes('<AMOUNT>-600.00</AMOUNT>'));
+  assert.ok(allocated.includes('<CATEGORYALLOCATIONS.LIST><CATEGORY>Sites</CATEGORY><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>'
+    + '<COSTCENTREALLOCATIONS.LIST><NAME>Site 4</NAME><AMOUNT>-360.00</AMOUNT></COSTCENTREALLOCATIONS.LIST>'
+    + '<COSTCENTREALLOCATIONS.LIST><NAME>Head Office</NAME><AMOUNT>-240.00</AMOUNT></COSTCENTREALLOCATIONS.LIST></CATEGORYALLOCATIONS.LIST>'));
+  assert.ok(second.includes('<AMOUNT>-400.00</AMOUNT>') && second.includes('<GSTRATE>5</GSTRATE>') && !second.includes('CATEGORYALLOCATIONS'));
+  // A readback whose centres differ from the plan is not the approved voucher.
+  const moved = observed(split, {allocations: observed(split).allocations.map(a => a.centre === 'Head Office' ? {...a, centre: 'Site 9'} : a)});
+  const other = harness([[], [moved], [moved]], {references: snapshot({centres: [{NAME: 'Site 4', GUID: 'cc'}, {NAME: 'Head Office', GUID: 'cc-ho'}]})});
+  assert.notEqual((await saveVoucher(split, other.options)).outcome, 'saved');
+});
+
+test('only protocol 7 repeats a ledger or splits a line across cost centres, and its shares add up to the line', () => {
+  assert.doesNotThrow(() => validatePlan(split));
+  assert.throws(() => validatePlan({...split, format_version: 6}), /repeated ledger|allocations/);
+  const lines = structuredClone(split.lines);
+  lines[1].allocations[1].amount_cents = 23999;
+  assert.throws(() => validatePlan({...split, lines}), /allocations/);
+  const both = structuredClone(split.lines);
+  both[1].allocation = site;
+  assert.throws(() => validatePlan({...split, lines: both}), /allocations/);
+  // The supplier's line is never repeated, whatever the protocol.
+  const twice = [...structuredClone(split.lines), {ledger: 'Supplier A', side: 'credit', amount_cents: 1, allocation: null}];
+  assert.throws(() => validatePlan({...split, lines: twice}));
+});
 
 test('plans are validated before any native call', async () => {
   const bad = [
@@ -102,6 +197,15 @@ test('plans are validated before any native call', async () => {
     {...payment, duplicate: {...payment.duplicate, match: {ledger: 'HDFC', side: 'debit', amount_cents: 1770}}},
     {...payment, duplicate: {...contra.duplicate, match: payment.duplicate.match}},
     {...payment, remote_id: 'not-a-uuid'},
+    // GST details: protocol 6, a purchase or debit note, a valid GSTIN, every party field, and stated rates.
+    {...gstPurchase, format_version: 5},
+    {...gstPurchase, family: 'journal', voucher_type: {NAME: 'Journal', GUID: 'j'}, lines: purchase.lines},
+    {...gstPurchase, gst: {...gstPurchase.gst, party: {...gstPurchase.gst.party, gstin: '37AAQCS1234'}}},
+    {...gstPurchase, gst: {...gstPurchase.gst, party: {...gstPurchase.gst.party, place_of_supply: ''}}},
+    {...gstPurchase, gst: {...gstPurchase.gst, registration: {name: 'Other', gstin: '07ABCPR1234Q1ZB'}}},
+    {...purchase, format_version: 6, lines: gstPurchase.lines},
+    {...gstPurchase, lines: gstPurchase.lines.map(l => l.gst ? {...l, gst: {...l.gst, supply: 'Both'}} : l)},
+    {...gstPurchase, lines: gstPurchase.lines.map(l => l.gst ? {...l, gst: {...l.gst, rates: {...l.gst.rates, igst: '18%'}}} : l)},
   ];
   for (const plan of bad) {
     const io = harness([[]]);
@@ -109,6 +213,7 @@ test('plans are validated before any native call', async () => {
     assert.equal(io.companyChecks + io.imports.length, 0);
   }
   assert.equal(validatePlan(purchase), purchase);
+  assert.equal(validatePlan(gstPurchase), gstPurchase);
 });
 
 test('one import carries every line with native signs, allocations and the pinned voucher type', async () => {
@@ -147,6 +252,93 @@ test('disabled or regrouped cost allocations hold before importing a voucher', a
   }
 });
 
+// Protocol 6: a bill-by-bill ledger's line carries its bill references.
+const billed = {...purchase, format_version: 6,
+  lines: purchase.lines.map((l, i) => i === 0 ? {...l, bills: [{name: 'INV-17', type: 'New Ref', amount_cents: 118040}]} : l)};
+const settling = {...payment, format_version: 6, lines: [
+  {ledger: 'HDFC', side: 'credit', amount_cents: 150000, allocation: null},
+  {ledger: 'Supplier A', side: 'debit', amount_cents: 150000, allocation: null, bills: [
+    {name: 'INV-17', type: 'Agst Ref', amount_cents: 118040}, {name: null, type: 'On Account', amount_cents: 31960}]}],
+  duplicate: {...payment.duplicate, match: {ledger: 'HDFC', side: 'credit', amount_cents: 150000}}};
+
+test('bill references are written with their ledger line, in native signs, and required on readback', async () => {
+  const io = harness([[], [observed(billed)]]);
+  assert.equal((await saveVoucher(billed, io.options)).outcome, 'saved');
+  assert.ok(io.imports[0].includes('<LEDGERNAME>Supplier A</LEDGERNAME><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE><AMOUNT>1180.40</AMOUNT>'
+    + '<BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>New Ref</BILLTYPE><AMOUNT>1180.40</AMOUNT></BILLALLOCATIONS.LIST>'));
+  const payments = harness([[], [observed(settling)]]);
+  const paid = await saveVoucher(settling, payments.options);
+  assert.equal(paid.outcome, 'saved');
+  assert.deepEqual(paid.current.bills, [{ledger: 'Supplier A', name: 'INV-17', type: 'Agst Ref', amount_cents: -118040},
+    {ledger: 'Supplier A', name: null, type: 'On Account', amount_cents: -31960}]);
+  assert.ok(payments.imports[0].includes('<BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>Agst Ref</BILLTYPE><AMOUNT>-1180.40</AMOUNT>'
+    + '</BILLALLOCATIONS.LIST><BILLALLOCATIONS.LIST><BILLTYPE>On Account</BILLTYPE><AMOUNT>-319.60</AMOUNT></BILLALLOCATIONS.LIST>'));
+  // A readback missing the reference is not the approved voucher.
+  const lost = harness([[], [observed(billed, {bills: []})]]);
+  assert.equal((await saveVoucher(billed, lost.options)).hold, 'uncertain_import');
+  const bad = [
+    {...purchase, lines: billed.lines},
+    {...billed, lines: billed.lines.map((l, i) => i === 0 ? {...l, bills: [{name: 'INV-17', type: 'New Ref', amount_cents: 100}]} : l)},
+    {...billed, lines: billed.lines.map((l, i) => i === 0 ? {...l, bills: [{name: 'INV-17', type: 'Credit', amount_cents: 118040}]} : l)},
+    {...billed, lines: billed.lines.map((l, i) => i === 0 ? {...l, bills: [{type: 'New Ref', amount_cents: 118040}]} : l)},
+    {...settling, lines: settling.lines.map((l, i) => i === 1 ? {...l, bills: [{name: 'X', type: 'On Account', amount_cents: 150000}]} : l)},
+  ];
+  for (const plan of bad) await assert.rejects(saveVoucher(plan, harness([[]]).options), /Unsupported voucher plan/);
+});
+
+// Protocol 6: a purchase booked item-wise; its purchase ledger line carries the items' value.
+const stocked = {...purchase, format_version: 6,
+  lines: [{ledger: 'Supplier A', side: 'credit', amount_cents: 118000, allocation: null},
+    {ledger: 'Purchase 18%', side: 'debit', amount_cents: 100000, allocation: null},
+    {ledger: 'Input CGST', side: 'debit', amount_cents: 9000, allocation: null},
+    {ledger: 'Input SGST', side: 'debit', amount_cents: 9000, allocation: null}],
+  inventory: [{item: 'Cement', unit: 'Bag', quantity: '2.5', rate: '400', side: 'debit', amount_cents: 100000, ledger: 'Purchase 18%',
+    godowns: [{godown: 'Main Location', quantity: '1.5', amount_cents: 60000}, {godown: 'Site Store', quantity: '1', amount_cents: 40000}]}],
+  references: {...references, stock_items: {Cement: {GUID: 'item-cement', BASEUNITS: 'Bag'}},
+    godowns: {'Main Location': {GUID: 'gd-main'}, 'Site Store': {GUID: 'gd-site'}}}};
+
+test('an item-wise purchase is written in the invoice view with its godowns, and read back item by item', async () => {
+  const io = harness([[], [observed(stocked)]]);
+  const result = await saveVoucher(stocked, io.options);
+  assert.equal(result.outcome, 'saved');
+  assert.deepEqual(result.current.inventory[0].godowns[1], {godown: 'Site Store', quantity: '1', amount_cents: -40000});
+  const body = io.imports[0];
+  for (const fragment of [
+    'VCHTYPE="Purchase GST" OBJVIEW="Invoice Voucher View"', '<PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW><ISINVOICE>Yes</ISINVOICE>',
+    '<LEDGERENTRIES.LIST><LEDGERNAME>Supplier A</LEDGERNAME><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE><AMOUNT>1180.00</AMOUNT></LEDGERENTRIES.LIST>',
+    '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><RATE>400/Bag</RATE>'
+      + '<ACTUALQTY>2.5 Bag</ACTUALQTY><BILLEDQTY>2.5 Bag</BILLEDQTY><AMOUNT>-1000.00</AMOUNT>',
+    '<BATCHALLOCATIONS.LIST><GODOWNNAME>Main Location</GODOWNNAME><BATCHNAME>Primary Batch</BATCHNAME><AMOUNT>-600.00</AMOUNT>'
+      + '<ACTUALQTY>1.5 Bag</ACTUALQTY><BILLEDQTY>1.5 Bag</BILLEDQTY></BATCHALLOCATIONS.LIST>',
+    '<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>Purchase 18%</LEDGERNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><AMOUNT>-1000.00</AMOUNT>',
+  ]) assert.ok(body.includes(fragment), fragment);
+  // The purchase ledger is written only inside its item, never as a ledger entry of its own.
+  assert.ok(!body.includes('<LEDGERNAME>Purchase 18%</LEDGERNAME><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE><AMOUNT>-1000.00</AMOUNT></LEDGERENTRIES.LIST>'));
+  // A readback whose stock went to another godown, or without the item, is not the approved voucher.
+  const moved = observed(stocked);
+  moved.inventory[0].godowns = [{godown: 'Main Location', quantity: '2.5', amount_cents: -100000}];
+  for (const current of [moved, observed(stocked, {inventory: []})])
+    assert.equal((await saveVoucher(stocked, harness([[], [current]]).options)).hold, 'uncertain_import');
+  const bad = [
+    {...stocked, format_version: 5},
+    {...stocked, inventory: [{...stocked.inventory[0], side: 'credit'}]},
+    {...stocked, inventory: [{...stocked.inventory[0], quantity: '2.50.1'}]},
+    {...stocked, inventory: [{...stocked.inventory[0], ledger: 'Input CGST'}]},
+    {...stocked, inventory: [{...stocked.inventory[0], godowns: [stocked.inventory[0].godowns[0]]}]},
+    {...stocked, inventory: [{...stocked.inventory[0], godowns: stocked.inventory[0].godowns.map(g => ({...g, quantity: '1.2'}))}]},
+    {...stocked, references: {...stocked.references, godowns: {'Main Location': {GUID: 'gd-main'}}}},
+    {...stocked, family: 'journal', duplicate: {...stocked.duplicate, families: ['journal']}},
+  ];
+  for (const plan of bad) await assert.rejects(saveVoucher(plan, harness([[]]).options), /Unsupported voucher plan/);
+  // A stock item recounted in another unit or now kept in batches, or a godown replaced, is not what the run read.
+  for (const refs of [snapshot({items: [{...stockRecords[0], BASEUNITS: 'Kg'}]}), snapshot({items: [{...stockRecords[0], ISBATCHWISEON: 'Yes'}]}),
+    snapshot({godowns: [godownRecords[0], {NAME: 'Site Store', GUID: 'other'}]})]) {
+    const changed = harness([[]], {references: refs});
+    assert.equal((await saveVoucher(stocked, changed.options)).hold, 'destination_changed');
+    assert.equal(changed.imports.length, 0);
+  }
+});
+
 test('a supplier credit note is a Debit Note with the party debited', async () => {
   const note = {...purchase, family: 'debit_note', voucher_type: {NAME: 'Debit Note', GUID: 'vt-dn'},
     lines: purchase.lines.map(l => ({...l, side: l.side === 'credit' ? 'debit' : 'credit'})),
@@ -175,11 +367,43 @@ test('voucher reads are bounded to the calendar window and parsed into comparabl
     guid: 'g', master_id: '7', date: '20261001', voucher_type: 'Purchase GST', reference: 'INV-17', number: '12',
     narration: `[Minkops statement:${id}] UPI`, party_ledger: 'Supplier A', tag: id, unsupported: false, fingerprint: undefined,
     entries: [{ledger: 'Purchase 18%', amount_cents: -118040}, {ledger: 'Supplier A', amount_cents: 118040}],
-    allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}],
+    allocations: [{ledger: 'Purchase 18%', category: 'Sites', centre: 'Site 4', amount_cents: -118040}], bills: [], inventory: [],
+    gst: {party_gstin: '', registration_type: '', state: '', country: '', place_of_supply: '', company_gstin: '', status: 'unknown'},
   });
   assert.match(record.fingerprint, /^v5:[a-f0-9]{64}$/);
-  const inventory = voucher('20261001').replace('</VOUCHER>', '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME></ALLINVENTORYENTRIES.LIST></VOUCHER>');
-  assert.equal((await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(inventory)}))[0].unsupported, true);
+  // Tally's GST verdict and the party details it stored are read back, and never move the fingerprint.
+  assert.ok(bodies[0].includes('PARTYGSTIN,') && bodies[0].includes('VCHGSTSTATUSISINCLUDED'));
+  const verdict = (flag, value = 'Yes') => voucher('20261001').replace('<VOUCHERTYPENAME>', '<PARTYGSTIN>37AAQCS1234F1Z9</PARTYGSTIN>'
+    + `<PLACEOFSUPPLY>Andhra Pradesh</PLACEOFSUPPLY><VCHGSTSTATUSISAPPLICABLE>Yes</VCHGSTSTATUSISAPPLICABLE><${flag}>${value}</${flag}><VOUCHERTYPENAME>`);
+  const read = async xmlText => (await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(xmlText)}))[0];
+  const included = await read(verdict('VCHGSTSTATUSISINCLUDED'));
+  assert.equal(included.fingerprint, record.fingerprint);
+  assert.deepEqual([included.gst.party_gstin, included.gst.place_of_supply, included.gst.status], ['37AAQCS1234F1Z9', 'Andhra Pradesh', 'included']);
+  assert.equal((await read(verdict('VCHGSTSTATUSISUNCERTAIN'))).gst.status, 'uncertain');
+  assert.equal((await read(verdict('VCHGSTSTATUSISINCLUDED', 'No'))).gst.status, 'unknown');
+  // Bill references are read with their ledger; they no longer make a voucher unsupported.
+  const referenced = voucher('20261001').replace('<AMOUNT>1180.40</AMOUNT></ALLLEDGERENTRIES.LIST>',
+    '<AMOUNT>1180.40</AMOUNT><BILLALLOCATIONS.LIST><NAME>INV-17</NAME><BILLTYPE>New Ref</BILLTYPE><AMOUNT>1180.40</AMOUNT>'
+    + '</BILLALLOCATIONS.LIST></ALLLEDGERENTRIES.LIST>');
+  const [withBills] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(referenced)});
+  assert.deepEqual([withBills.unsupported, withBills.bills],
+    [false, [{ledger: 'Supplier A', name: 'INV-17', type: 'New Ref', amount_cents: 118040}]]);
+  // Tally's own export of an item-wise purchase: each item with its godowns and the ledger that carries its value.
+  const batch = (godown, qty, amount, order = ' Not Applicable') => `<BATCHALLOCATIONS.LIST><GODOWNNAME>${godown}</GODOWNNAME>`
+    + `<BATCHNAME>Primary Batch</BATCHNAME><AMOUNT>${amount}</AMOUNT><ACTUALQTY>${qty} Bag</ACTUALQTY><BILLEDQTY>${qty} Bag</BILLEDQTY>`
+    + `<ORDERNO>${order}</ORDERNO><TRACKINGNUMBER> Not Applicable</TRACKINGNUMBER></BATCHALLOCATIONS.LIST>`;
+  const item = (order) => '<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>Cement</STOCKITEMNAME><RATE>472.16/Bag</RATE>'
+    + '<ACTUALQTY>2.500 Bag</ACTUALQTY><BILLEDQTY>2.500 Bag</BILLEDQTY><AMOUNT>-1180.40</AMOUNT>'
+    + batch('Main Location', '1.500', '-708.24', order) + batch('Site Store', '1.000', '-472.16')
+    + '<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>Purchase 18%</LEDGERNAME><AMOUNT>-1180.40</AMOUNT></ACCOUNTINGALLOCATIONS.LIST>'
+    + '</ALLINVENTORYENTRIES.LIST></VOUCHER>';
+  const [stock] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20261001').replace('</VOUCHER>', item()))});
+  assert.deepEqual([stock.unsupported, stock.inventory], [false, [{item: 'Cement', unit: 'Bag', quantity: '2.5', rate: '472.16',
+    amount_cents: -118040, ledger: 'Purchase 18%', godowns: [{godown: 'Main Location', quantity: '1.5', amount_cents: -70824},
+      {godown: 'Site Store', quantity: '1', amount_cents: -47216}]}]]);
+  // Stock tracked against an order is more than a plan states.
+  const [ordered] = await readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20261001').replace('</VOUCHER>', item('PO-7')))});
+  assert.equal(ordered.unsupported, true);
   await assert.rejects(readVouchers({company: 'Test', port: 9000, window: purchase.duplicate.window}, {request: reply(voucher('20270401'))}), /outside the requested window/);
 });
 
@@ -306,4 +530,23 @@ test('voucher families follow reserved names through custom parents, keeping ina
   assert.equal(family.has('sales'), false);
   assert.equal(active.has('site purchase'), false);
   assert.equal(active.has('purchase gst'), true);
+});
+
+test("Tally's rejection reasons map to one short action each", () => {
+  const cases = {
+    "Voucher date is out of the financial year": "date",
+    "Date is before Books beginning date": "date",
+    "You are not authorised to create Vouchers": "permission",
+    "Access denied for this user": "permission",
+    "Voucher Type 'Purchase GST' does not exist": "voucher_type",
+    "Voucher Number is required": "voucher_number",
+    "Ledger 'Supplier' does not exist!": "ledger",
+    "Something unusual": "other",
+  };
+  for (const [reason, code] of Object.entries(cases)) {
+    const rejection = classifyRejection(reason);
+    assert.equal(rejection.code, code, reason);
+    assert.ok(rejection.message.length <= 300);
+    assert.doesNotMatch(rejection.message, new RegExp(reason.slice(0, 12)), "native text stays in diagnostics");
+  }
 });

@@ -1,1 +1,0 @@
-{"type":"object","required":["records","findings"],"properties":{"records":{"type":"array","items":{"type":"object"}},"findings":{"type":"array"}},"additionalProperties":false}

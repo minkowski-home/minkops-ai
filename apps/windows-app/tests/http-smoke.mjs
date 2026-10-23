@@ -10,8 +10,11 @@ import {
   checkTally,
 } from "../../../connectors/desktop/src/index.js";
 import { CompanionWorker } from "../../../platform/desktop-runtime/src/worker.js";
+import { PLAN_VERSION } from "../../../platform/desktop-runtime/src/jobs.js";
 
 const origin = process.env.MINKOPS_SMOKE_URL;
+// The companion this build ships, as the server sees it.
+const VERSION = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
 assert.ok(
   /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(origin || ""),
   "Use an isolated localhost API",
@@ -32,7 +35,8 @@ async function api(
     headers: {
       ...(form ? {} : { "Content-Type": "application/json" }),
       ...(credential
-        ? { Authorization: `Bearer ${credential}`, 'X-Minkops-Plan-Version': '3', 'X-Minkops-Companion-Version': '0.7.0' }
+        ? { Authorization: `Bearer ${credential}`, 'X-Minkops-Plan-Version': String(PLAN_VERSION),
+            'X-Minkops-Companion-Version': VERSION }
         : { Cookie: cookie, "x-csrf-token": csrf }),
     },
     body: body === undefined ? undefined : form ? body : JSON.stringify(body),

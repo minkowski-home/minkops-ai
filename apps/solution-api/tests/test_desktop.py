@@ -5,6 +5,8 @@ import os
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from unittest.mock import patch
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -16,6 +18,22 @@ URL = os.getenv("TEST_DATABASE_URL")
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class DesktopTests(unittest.TestCase):
+    def test_authenticated_activity_and_heartbeat_refresh_presence_without_claiming(self):
+        self.pair()
+        job, _ = self.launch()
+        for path, body, status in ((self.worker_base + "/diagnostics", {"companion": {"version": "0.10.0"}}, 201),
+                                   (self.worker_base + "/heartbeat", {}, 200)):
+            with psycopg.connect(URL) as c:
+                c.execute("UPDATE desktop_devices SET last_seen_at=now()-interval '5 minutes' WHERE id=%s", (self.device["id"],))
+            response = self.client.post(path, headers=self.worker, json=body)
+            self.assertEqual(response.status_code, status, response.text)
+            with psycopg.connect(URL) as c:
+                self.assertTrue(c.execute("SELECT last_seen_at>now()-interval '5 seconds' FROM desktop_device_presence WHERE device_id=%s", (self.device["id"],)).fetchone()[0])
+                self.assertEqual(c.execute("SELECT state FROM desktop_jobs WHERE id=%s", (job["id"],)).fetchone()[0], "queued")
+        self.assertEqual(self.client.post(self.worker_base + "/heartbeat", json={}).status_code, 401)
+        self.client.delete(self.base + f"/devices/{self.device['id']}", headers=self.csrf)
+        self.assertEqual(self.client.post(self.worker_base + "/heartbeat", headers=self.worker, json={}).status_code, 401)
+
     def test_bound_folder_refresh_validates_snapshot_and_replays_once(self):
         self.pair()
         accounts = f"/api/tenants/{self.slug}/accounts"
@@ -116,6 +134,62 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.client.post('/api/desktop/worker/claim', headers=self.worker, json={}).status_code, 401)
 
+    def test_busy_authenticated_work_does_not_block_presence_or_other_authentication(self):
+        """A long receipt retains revocation fencing without serializing heartbeats."""
+        from psycopg.rows import dict_row
+
+        from minkops_platform import desktop
+
+        self.pair()
+        with psycopg.connect(URL, row_factory=dict_row) as busy:
+            desktop.authenticate(busy, self.device['credential'])
+            with psycopg.connect(URL, row_factory=dict_row) as pulse:
+                pulse.execute("SET LOCAL lock_timeout='250ms'")
+                device = desktop.authenticate(pulse, self.device['credential'])
+                desktop.touch_presence(pulse, device)
+            # The slow operation still fences revocation until its transaction ends.
+            with psycopg.connect(URL, row_factory=dict_row) as revoker:
+                revoker.execute("SET LOCAL lock_timeout='250ms'")
+                with self.assertRaises(psycopg.errors.LockNotAvailable):
+                    desktop.revoke(revoker, {'id': device['tenant_id']},
+                                   {'id': device['owner_id']}, device['id'])
+        with psycopg.connect(URL) as c:
+            self.assertTrue(c.execute(
+                "SELECT last_seen_at>now()-interval '5 seconds' FROM desktop_device_presence WHERE device_id=%s",
+                (self.device['id'],),
+            ).fetchone()[0])
+
+    def test_heartbeat_completes_while_a_receipt_is_processing(self):
+        from minkops_platform import desktop
+
+        self.pair()
+        job, _ = self.launch()
+        claim = self.client.post(self.worker_base + '/claim', headers=self.worker, json={}).json()
+        entered, release = Event(), Event()
+        finish = desktop.finish
+
+        def slow_finish(*args):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('Receipt was not released')
+            return finish(*args)
+
+        def submit():
+            with TestClient(app) as client:
+                return client.post(self.worker_base + f"/jobs/{job['id']}/finish", headers=self.worker,
+                    json={'claim_token': claim['claim_token'], 'result': {'available': True, 'companies': []}})
+
+        with patch.object(desktop, 'finish', slow_finish), ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(submit)
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertEqual(self.client.post(self.worker_base + '/heartbeat',
+                    headers=self.worker, json={}).status_code, 200)
+                self.assertFalse(pending.done(), 'The receipt must remain in progress during the pulse')
+            finally:
+                release.set()
+            self.assertEqual(pending.result(timeout=2).status_code, 200)
+
     def test_receipt_transport_rejects_malformed_and_oversized_json(self):
         self.pair()
         job, _ = self.launch()
@@ -142,7 +216,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=old, json={}).status_code, 401
         )
-        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        self.worker = {"Authorization": "Bearer " + rotated.json()["credential"], "X-Minkops-Companion-Version": "0.11.0"}
         self.assertEqual(
             self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()[
                 "id"
@@ -206,6 +280,40 @@ class DesktopTests(unittest.TestCase):
             404,
         )
 
+    def test_a_connected_pc_adopts_its_machine_identity_and_keeps_its_record(self):
+        """Any profile of the same Windows user on the same PC then reconnects as this record, companies and all."""
+        self.pair()
+        # Companions derive machine identities as name-based (version 5) UUIDs; profile IDs are random (version 4).
+        machine = str(uuid.uuid5(uuid.NAMESPACE_URL, "machine-a"))
+        route = self.worker_base + "/installation"
+        self.assertEqual(self.client.post(route, json={"installation_id": machine}).status_code, 401)
+        adopted = self.client.post(route, headers=self.worker, json={"installation_id": machine})
+        self.assertEqual(adopted.status_code, 200, adopted.text)
+        self.assertEqual(adopted.json(), {"installation_id": machine})
+        # Idempotent: a companion that lost the answer asks again.
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": machine}).status_code, 200)
+        # Another profile on the same PC registers with the machine identity and finds the same record.
+        again = self.client.post(self.base + "/devices", headers=self.csrf,
+                                 json={"name": "Office PC", "installation_id": machine})
+        self.assertEqual(again.json()["id"], self.device["id"])
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": machine}).status_code,
+                         401, "the rotated-out credential no longer speaks for the record")
+        self.worker["Authorization"] = "Bearer " + again.json()["credential"]
+        # An identity another of the owner's records holds is never taken from it.
+        other = self.client.post(self.base + "/devices", headers=self.csrf,
+                                 json={"name": "Laptop", "installation_id": str(uuid.uuid4())}).json()
+        taken = self.client.post(route, headers={"Authorization": "Bearer " + other["credential"]},
+                                 json={"installation_id": machine})
+        self.assertEqual(taken.status_code, 409, taken.text)
+        # A record bound to one machine never moves to another's: a profile copied or roamed to a second PC must not
+        # take this PC's record, its companies and its writes with it.
+        moved = self.client.post(route, headers=self.worker,
+                                 json={"installation_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "machine-b"))})
+        self.assertEqual(moved.status_code, 409, moved.text)
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": "not-a-uuid"}).status_code, 422)
+        self.assertEqual(self.client.post(route, headers=self.worker, json={"installation_id": str(uuid.uuid4())}).status_code,
+                         422, "a random ID names no machine")
+
     def setUp(self):
         os.environ["DATABASE_URL"] = URL
         os.environ["AUTH_DEV_MODE"] = "1"
@@ -241,7 +349,7 @@ class DesktopTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         self.device = response.json()
-        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.7.0"}
+        self.worker = {"Authorization": "Bearer " + self.device["credential"], "X-Minkops-Companion-Version": "0.11.0"}
         self.worker_base = "/api/desktop/worker"
         return self.device
 
@@ -274,6 +382,20 @@ class DesktopTests(unittest.TestCase):
                 "SELECT token_hash FROM desktop_devices WHERE id=%s", (self.device["id"],)
             ).fetchone()[0]
         self.assertNotEqual(stored, self.device["credential"])
+
+    def test_the_pc_checks_and_reports_on_its_own_tally_port(self):
+        """On a shared server each Windows user's Tally has its own port; every check uses this PC's."""
+        self.pair()
+        changed = self.client.patch(f"{self.base}/devices/{self.device['id']}", headers=self.csrf,
+                                    json={"tally_port": 9101})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        listed = next(d for d in self.client.get(self.base + "/devices").json() if d["id"] == self.device["id"])
+        self.assertEqual(listed["tally_port"], 9101)
+        heartbeat = self.client.post(self.worker_base + "/heartbeat", headers=self.worker, json={})
+        self.assertEqual(heartbeat.json(), {"tally_port": 9101})
+        job, _ = self.launch()
+        claimed = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+        self.assertEqual((claimed["id"], claimed["tally_port"]), (job["id"], 9101))
 
     def test_web_start_worker_claim_finish_and_idempotent_receipt(self):
         self.pair()
@@ -346,9 +468,10 @@ class DesktopTests(unittest.TestCase):
         job, _ = self.launch()
         first = self.worker
         self.pair()
-        self.assertIsNone(
-            self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
-        )
+        # The second PC is handed only its own work: the first read of its Tally, never the first PC's job.
+        own = self.client.post(self.worker_base + "/claim", headers=self.worker, json={}).json()
+        self.assertEqual((own["operation"], own["input"]), ("tally.sync", {"reason": "background"}))
+        self.assertNotEqual(own["id"], job["id"])
         route = self.worker_base + f"/jobs/{job['id']}/finish"
         self.assertEqual(
             self.client.post(
@@ -409,11 +532,11 @@ class DesktopTests(unittest.TestCase):
 
     def test_each_poll_records_the_companion_version_pc_and_session(self):
         self.pair()
-        self.claim_as({"X-Minkops-Companion-Version": "0.7.0", "X-Minkops-Host": "PRAHLAD-GADHWAL",
+        self.claim_as({"X-Minkops-Companion-Version": "0.7.0", "X-Minkops-Host": "OFFICE-PC-07",
                        "X-Minkops-Session": "remote"})
         [device] = self.client.get(self.base + "/devices").json()
         self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
-                         ("0.7.0", "PRAHLAD-GADHWAL", True))
+                         ("0.7.0", "OFFICE-PC-07", True))
         self.claim_as({"X-Minkops-Companion-Version": "not a version", "X-Minkops-Host": "x" * 81})
         [device] = self.client.get(self.base + "/devices").json()
         self.assertEqual((device["companion_version"], device["hostname"], device["remote_session"]),
@@ -426,17 +549,28 @@ class DesktopTests(unittest.TestCase):
         body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
         outdated = self.client.post(self.base + "/jobs", headers=self.csrf, json=body)
         self.assertEqual(outdated.status_code, 409, outdated.text)
-        self.assertIn("Update Minkops on Office PC to 0.7.0 or later", outdated.json()["detail"])
-        self.claim_as({"X-Minkops-Companion-Version": "0.6.10"})
-        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
-        self.claim_as({"X-Minkops-Companion-Version": "0.10.0"})
+        self.assertIn("Update Minkops on Office PC to 0.11.0 or later", outdated.json()["detail"])
+        # Only a companion that confirms Tally is its user's own and reads back a bill's GST receives Tally work.
+        for version in ("0.6.10", "0.9.1", "0.10.0"):
+            self.claim_as({"X-Minkops-Companion-Version": version})
+            self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 409)
+        self.claim_as({"X-Minkops-Companion-Version": "0.11.0", "X-Minkops-Session": "remote"})
         self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
+
+    def test_an_older_companion_is_handed_no_tally_work_already_queued(self):
+        """A save queued while the PC ran a current companion is never claimed by an older one it is replaced with."""
+        self.pair()
+        self.claim_as({"X-Minkops-Companion-Version": "0.11.0"})
+        body = {"device_id": self.device["id"], "operation": "tally.probe", "request_key": str(uuid.uuid4()), "input": {}}
+        self.assertEqual(self.client.post(self.base + "/jobs", headers=self.csrf, json=body).status_code, 202)
+        self.assertIsNone(self.claim_as({"X-Minkops-Companion-Version": "0.10.0"}).json())
+        self.assertEqual(self.claim_as({"X-Minkops-Companion-Version": "0.11.0"}).json()["operation"], "tally.probe")
 
     def bundle(self, **extra):
         return {
             "collected_at": "2026-10-14T07:47:18.907Z",
             "companion": {"version": "0.7.0"},
-            "windows": {"hostname": "PRAHLAD-GADHWAL", "remote_session": False},
+            "windows": {"hostname": "OFFICE-PC-07", "remote_session": False},
             "tally": {"session": {"state": "not_running"}, "processes": []},
             **extra,
         }
@@ -456,7 +590,7 @@ class DesktopTests(unittest.TestCase):
         self.assertRegex(sent.json()["reference"], r"^D-[0-9A-HJKMNP-TV-Z]{6}$")
         [(reference, kind, job_id, payload)] = self.stored_diagnostics()
         self.assertEqual((reference, kind, job_id), (sent.json()["reference"], "requested", None))
-        self.assertEqual(payload["windows"]["hostname"], "PRAHLAD-GADHWAL")
+        self.assertEqual(payload["windows"]["hostname"], "OFFICE-PC-07")
         for invalid in (self.bundle(bills=["private"]), self.bundle(tally={"x": "y" * 70_000}), []):
             self.assertEqual(self.client.post(route, headers=self.worker, json=invalid).status_code, 422)
         self.assertEqual(self.client.post(route, json=self.bundle()).status_code, 401)

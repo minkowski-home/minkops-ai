@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 import psycopg
 from psycopg.conninfo import make_conninfo
 
-from minkops_platform.installation import install, load_solution
+from minkops_platform.installation import install, load_solution, provision_tenant
 
 ORIGIN = "https://minkops-ai-console.web.app"
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,15 +55,9 @@ def main(email, state_dir, install_workflows):
             return
         if not user or not user[1]:
             raise RuntimeError("Owner must verify the production email first")
-        tenant = connection.execute("INSERT INTO tenants(slug,name) VALUES('mock-tenant','Minkops release demo') ON CONFLICT(slug) DO NOTHING RETURNING id").fetchone()
-        if not tenant:
-            tenant = connection.execute("SELECT id FROM tenants WHERE slug='mock-tenant'").fetchone()
-            member = connection.execute("SELECT role FROM memberships WHERE tenant_id=%s AND user_id=%s", (tenant[0], user[0])).fetchone()
-            if not member or member[0] != "admin":
-                raise RuntimeError("Existing workspace is not owned by this demo administrator")
-        else:
-            connection.execute("INSERT INTO memberships(tenant_id,user_id,role) VALUES(%s,%s,'admin')", (tenant[0], user[0]))
-        installed = install(connection, load_solution(ROOT, "mock-client"), actor_email=email)
+        demo = load_solution(ROOT, "mock-client")
+        provision_tenant(connection, demo, name="Minkops release demo", owner_email=email)
+        installed = install(connection, demo, actor_email=email)
     print(f"Installed {len(installed)} trusted demo workflows. No resource access granted.")
 
 

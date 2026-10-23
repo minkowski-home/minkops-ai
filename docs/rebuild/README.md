@@ -1,0 +1,455 @@
+# Accounts desk rebuild
+
+This is the handoff for rebuilding Bill Entry and Statement Entry from scratch,
+agreed on 21 October 2026. It records every decision so far and how to carry
+on from another machine. The evidence behind each decision is in
+[evidence.md](evidence.md).
+
+## Where things stand
+
+- **This branch, `accounts-desk/rebuild`, starts from `maintenance/retire-legacy-paths`.**
+  - That branch removed every legacy path: the fixed-field bill contract, the Excel bill destination, plan protocol 4, guessed runtime bindings, and the launch voucher-type picker.
+  - Migration `0019` stops unfinished runs that still depended on those paths.
+  - Source shrank by 10.7%, and the Accounts package by 26%.
+- **`platform/workflow-reliability` is left untouched and will most likely be discarded.**
+  - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
+  - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
+- **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
+- **Next: [demo readiness and learning loops](demo-readiness.md)** (agreed 23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, batched uploads, and the acceptance runs before deployment.
+
+## Continue on Windows
+
+**Clone.** `.gitattributes` keeps LF line endings in every checkout: migration checksums are taken over exact bytes, so a CRLF checkout would make an unchanged migration look edited.
+
+```powershell
+git clone git@github.com:minkowski-home/minkops-ai.git
+cd minkops-ai
+git switch accounts-desk/rebuild
+```
+
+**Tools you need:**
+- `uv`, which manages Python 3.12 (see `.python-version`);
+- Node 24;
+- Docker Desktop, for PostgreSQL 16;
+- TallyPrime Educational, for rehearsals.
+
+**Set UTF-8 mode in every shell.** On Windows, Python 3.12 otherwise reads files as cp1252, and the docs and skills contain characters such as `→` and `₹`.
+
+```powershell
+$env:PYTHONUTF8 = "1"
+uv sync --all-packages
+docker run -d --name minkops-test-pg -e POSTGRES_PASSWORD=<choose-one> -p 5434:5432 postgres:16
+$env:TEST_DATABASE_URL = "postgresql://postgres:<choose-one>@127.0.0.1:5434/postgres"
+$env:AUTH_DEV_MODE = "1"
+uv run --all-packages pytest platform/tests apps/solution-api/tests connectors/tests db/tests apps/corporate-website/api/tests infra/tests scripts/tests -q
+uv run --all-packages ruff check .
+```
+
+Pytest creates and drops its own database on that server; see [isolated integration tests](../../db/README.md#isolated-integration-tests). Then the companion and web checks:
+
+```powershell
+cd apps/windows-app; npm ci; npm test; npm run build
+cd ../solution-web; npm ci; npm test; npm run lint; npm run build
+```
+
+`npm run package:win` (in `apps/windows-app`) builds the installer. See [Windows app](../windows-app.md#build-and-run) for publishing.
+
+**Baseline on this branch** (macOS, 21 October 2026): 617 Python tests, plus 413 subtests; 108 companion tests; 51 web tests; ruff, lint and both builds clean. The Playwright browser tests, a live companion run against Tally, and a production restore rehearsal have not been run.
+
+**Working from WSL 2** (how this build was done): keep the checkout on the Linux filesystem, which keeps LF endings, and run TallyPrime on Windows. The companion's adapters address Tally at `127.0.0.1`, so relay it into WSL first:
+
+```bash
+python3 scripts/wsl_tally_forward.py
+```
+
+Then check that the five rehearsal companies are open with their pinned GUIDs:
+
+```bash
+node scripts/rehearsal_status.mjs
+```
+
+`scripts/companion_dev.mjs` is a headless companion for running the stack end to end from WSL. It runs the Windows app's job executor and connectors against a local server and the relayed Tally, and keeps its credentials in `~/.local/state/minkops-dev/companion`, so never point it at production. Register it once as a member, with their password on stdin, then run it:
+
+```bash
+node scripts/companion_dev.mjs register http://127.0.0.1:8000 mock-tenant demo@example.com < password-file
+```
+
+```bash
+node scripts/companion_dev.mjs run
+```
+
+PostgreSQL 16 can run from PGDG packages extracted into the user's home without root; Node 24 can run from the official tarball. Package the Windows installer from a Windows-local copy, because WSL symlinks break the packaging tools.
+
+**Sample client files are not in git.** One ICICI statement for September 2026 and two scanned March 2026 bills were shared on 21 October; copy them to the Windows machine yourself. Keep real files in a private, encrypted fixture store, and commit only synthetic look-alikes.
+
+## Working agreements
+
+These come from the original machine's assistant memory and from `AGENTS.md`:
+
+- Excel is retired as a bill destination for good. It is no longer part of the Bill Entry workflow.
+- Open or merge PRs only when explicitly asked, and only into `staging`.
+- Before any merge into `staging`, park and push a `backup/staging-pre-<issue>` branch.
+- Never mention tool or assistant attribution in commit or PR messages.
+
+## Decisions
+
+### Kept, non-negotiable
+
+- **Identity.**
+  - Bill identity is supplier, printed number and the Indian April–March invoice year, pinned by the golden hashes in `platform/tests/test_vouchers.py`.
+  - Statement row identity is `row_identity` in `connectors/src/minkops_connectors/statement.py`: reference, date, amount, balance and occurrence.
+  - Narration tokens are `uuid5("minkops:{tenant_id}:…")`.
+- **Write safety.**
+  - Record a durable intent before import.
+  - Never resend an uncertain import.
+  - Reserve each company GUID and bill.
+  - Recheck masters by GUID and AlterID before a save, and require an exact readback after it.
+  - Keep the Stop and late-receipt semantics.
+  - Use only fixed native operations.
+- **The Windows companion (`connectors/desktop/src`) stays as it is**, apart from the additions below.
+- **Accounting judgment.**
+  - The printed supplier decides supplier identity.
+  - Holds use a closed list of codes, and the server owns which actions each code allows.
+  - Check the GSTIN check character and the books-beginning date.
+  - Never sample masters.
+  - Prove statements against their balances.
+  - Posting patterns are derived, confirmed, reused, and retired after three misses. The rebuild keeps them as memory entries, confirmed by use (Structure 5 and 7).
+- **Product principles.**
+  - One-click decisions, with no value editor.
+  - Done and Refresh must rest on evidence.
+  - A best-guess save stays under review.
+  - **A failed check must say so; it never silently drops an action.**
+
+### Structure
+
+1. **The server schedules; it never sequences reasoning.**
+   - Each bill, or each chunk of statement rows, gets its own session, and sessions run in parallel.
+   - Company routing and practice questions are answered by lookups inside that session.
+   - Results stream out as each one finishes.
+   - There is no triage stage, no posting-profile stage, and no merge wait.
+2. **Sync replaces Source Discovery as a workflow.**
+   - The server keeps a mirror per PC and company: every master, plus vouchers synced incrementally.
+   - A workflow declares only which voucher families and periods it needs, and how fresh they must be.
+   - The sync never uses AI and never authorises a write.
+3. **Mirror versions.**
+   - Rows carry `synced_in` and `superseded_in`, and a run pins one version number. Nothing is copied into runs.
+   - Scheduling state lives in its own table, never in run JSON.
+4. **Two workflow layers.**
+   - **Core workflow** (`employees/accounts-desk/workflows/<wf>`) holds only rules that generalise.
+   - **Client-specific workflow** (`solutions/<client>/employees/accounts-desk/workflows/<wf>/`, through `variant.json` and `client-instructions.md`) holds procedure written with the client, reviewed in the repo and built on top of core.
+   - Nothing client-specific goes into core.
+5. **Employee memory.**
+   - It is runtime data, not a workflow layer: kept per client business and per employee, shared by all of that employee's workflows.
+   - It is looked up only when needed, never loaded into context up front.
+   - An admin edits both of its parts, per employee.
+   - **Structured part:** contract-like key-values, learnt from the one-click options offered during errors and ambiguities, and from outcomes that were both verified and accepted.
+     - An edit made in Tally demotes an entry.
+     - Entries carry their evidence and the GUIDs they refer to.
+     - They are revalidated on every sync, re-bind to year-split siblings, and retire after three misses.
+   - **Unstructured part:** plain-text instructions that are only ever stated by people, never inferred or learnt. They are scoped and versioned, and proposals cite them by ID.
+   - **Practice probes and practice questions.**
+     - The sync runs deterministic probes over the mirror. Examples: are Receipt Notes in use; do narrations carry receipt-register numbers; are bank payments booked to individual party ledgers or to one ledger with cost centres.
+     - A probe that settles the question becomes a structured entry.
+     - An inconclusive probe raises one one-click question per company, and the chosen option becomes a structured entry.
+     - **No question ever blocks a run.** Only the bills that depend on it hold, and answering releases them through the same idempotent decision path as every other decision.
+6. **Precedence.**
+   - On **facts**, the printed bill wins.
+   - On **treatment**, the order is:
+     1. a legible handwritten instruction on this bill (an unclear one holds, and the note is shown);
+     2. unstructured instructions;
+     3. structured entries;
+     4. native history.
+   - Tally masters and the server's checks are hard constraints that no tier can override. Every override is recorded.
+7. **Confirmation by use** replaces the "Confirm posting pattern" card. A bill that relies on an unconfirmed entry goes to review, and one approval confirms the entry.
+8. **Lookups are function tools.**
+   - The session reports `requires_action`; the worker answers with `agent.session.input.tool_result`. Pending calls survive in `AgentSession.required_actions`, so a restarted worker answers them on reattach.
+   - Tools are read-only, scoped to the run, logged, and accept lists of subjects.
+   - They are shaped like MCP, so they can later be served as a remote MCP server.
+9. **`propose` tool.**
+   - The server checks each proposal immediately.
+   - The agent gets at most two resubmissions.
+   - Any resubmission that changes printed facts is flagged for review.
+10. **Plumbing.**
+    - Three settings layers: the workflow definition, client policy and client memory.
+    - One review surface for every workflow.
+    - Decisions are idempotent per actor, item and version.
+    - Wake-ups come from committed events.
+    - Status responses stay small.
+    - No dispatch on every request.
+
+### v1 scope
+
+- **Tenancy is designed for both** single businesses and accounting practices: tenant → client business → company, with per-client access.
+- **Company lookup searches every GSTIN a company has.** The sample bills route to a state registration different from the one tied to the bank account.
+- **TallyPrime only.** The companion reports the version it finds.
+- **Tally may run on the accountant's PC or on a hosted cloud/RDP server.**
+  - The installer is already per-user, and the Tally port is already set per PC.
+  - Still needed: a signed installer and a checklist for hosting providers.
+  - On a multi-user host, each Windows user counts as a separate PC.
+- **The mirror lives on our server**, in a dedicated Cloud SQL (PostgreSQL 16) instance created at the fresh start. This is for isolating client books and for connection headroom, not for speed.
+- **Fresh start, with new tenants.**
+  - Bills are unaffected.
+  - Statement rows that overlap earlier saves hold as `possible_existing`, so nothing double-posts.
+  - PR Infra statements resume after the old build's last saved period.
+- **Bill-wise references.**
+  - A bill on a bill-by-bill ledger records a New Ref equal to the supplier's invoice number.
+  - A payment settles its open bill with Agst Ref.
+  - Partial, multi-bill and net-of-TDS payments get one-click buttons for the candidate bills.
+- **Inventory.**
+  - Items with quantity, rate, unit and godown are in, including multiple godowns.
+  - Batches and order or receipt-note tracking hold, each with a named reason.
+  - If the receipt-register probe or its question shows Receipt Notes are in use, receipt-note tracking moves into scope.
+- **The first sync covers the current and previous financial years**, then runs incrementally.
+- **Statements are CSV and XLSX only.**
+- **Targets.**
+  - 50 bills from launch to all proposed in 10 minutes: about 2 minutes per bill across 10–12 lanes.
+  - A month of about 1,250 statement rows proposed in 15 minutes, in chunks of about 100 rows. This one is a default, open to review.
+
+### Defaults, open to review
+
+- **Memory editing.** Only admins edit memory, per employee. Each client gets a memory page showing the structured part as key-values with their evidence, and the unstructured part as plain text. Either can be disabled or deleted.
+- **AI provider.** The OpenAI hosted Agents API (`gpt-6-luna`), used only through `runtime/openai_hosted.py`. Skills stay provider-neutral.
+- **Same repository.** New modules sit beside the old ones, and each old module is deleted once a slice replaces it.
+- **Sync timing.** A sync probe runs before each run, and in the background while the companion is idle.
+- **Unrecognised masters.** A missing stock item holds. A newly seen company raises one card to authorise it.
+
+## Client-specific knowledge from the PR Infra samples
+
+This belongs in PR Infra's client-specific workflows and memory, never in core:
+
+- **Receipt-register stamps.** Bills carry a receipt-register ("DMR") stamp, and the file names start with that number. How DMR is recorded in Tally is unknown; a probe or a practice question will settle it.
+- **Site codes.** The statement's remarks field carries site codes, and bills carry handwritten site notes such as "DBM Plant Direct".
+- **Bulk NEFT batches** go to many individual payees. How these are booked is unknown; a probe or a practice question will settle it.
+- **Large receipts come from a related company.**
+- **NEFT returns: book both legs.** This is seeded as an unstructured instruction in PR Infra's Accounts desk memory, which an admin can edit or remove.
+
+## Sync algorithm
+
+Items marked † must be verified in the TallyPrime rehearsal; sources are in [evidence.md](evidence.md#tally-incremental-sync-research).
+
+1. **Identify each company** by PC, GUID, company number, name and BooksFrom, never by GUID alone, because Split Company GUIDs are uncertain†. Also fix the companion's duplicate-GUID message, which names the wrong company.
+2. **Probe** `$AltMstId`, `$AltVchId`, `$LastVoucherDate` and `$BooksFrom`. Treat an empty AltVchId as 0. Stop if nothing changed.
+3. **Regression guard.** If a marker drops, the identity or BooksFrom changes, or the company moved to another PC, rebuild in full into a new version.
+4. **Delta.**
+   - Read the markers first.
+   - Fetch masters and vouchers with `$AlterID` greater than the stored values.
+   - Fetch vouchers in date batches of at most 5,000, sized by per-date counts.
+   - Keep cancelled, optional and post-dated flags†.
+   - Upsert by GUID, and commit the markers last.
+5. **Deletion sweep**, whenever markers move and nightly.
+   - Compare a per-date census of GUID and AlterID with the per-date counts.
+   - A missing GUID becomes a tombstone, and a changed one is refetched.
+   - **Never record a deletion when the census and the counts disagree.** A truncated response can still report `STATUS=1`.
+6. **Auto-numbered voucher types:** during the sweep, re-pull each voucher's number by GUID.
+7. **Practice probes** run after each sync, as SQL over the mirror.
+8. **Send Tally one request at a time**, with long timeouts. An abandoned request still keeps Tally busy. Don't rely on the Edit Log or `ISDELETED`.
+9. **The run's "Get ready" step waits** for the probe and delta. An offline PC, a closed Tally or a missing company shows as a named blocker.
+
+## Lookup tools (v1)
+
+- **Companies and ledgers:** `find_company` (by any GSTIN or name), `find_ledger` (by name, GSTIN, alias or bank account), `ledger`, `voucher_types`.
+- **History and open bills:** `party_history`, `open_bills(party)`.
+- **Stock:** `find_stock_item` (by name, part number or HSN).
+- **Statement pairing:** `pair_return(utr)`.
+- **Memory:** `memory(subjects, kinds)`, `rules(subjects)`, `practice(company)`.
+- **Proposals:** `propose`.
+
+Every tool accepts a list of subjects.
+
+## Writer: plan protocol 6
+
+- **Protocol 6 adds two things to v5:**
+  - bill allocations (New Ref and Agst Ref);
+  - inventory entries (item, quantity, rate, unit and godown, with their accounting allocation).
+- **Readback** must cover every allocation and inventory line.
+- **Duplicate strategies and fences** are unchanged.
+- **Minimum companion:** protocol 6 ships with companion 0.10.0, which becomes the minimum version.
+
+## Build slices
+
+Each slice works end to end against a real TallyPrime company before the next one starts.
+
+0. **Acceptance harness.**
+   - Golden bill hashes and the code-to-actions matrix test.
+   - The 39-bill labelled fixtures, with the `scripts/bill_entry_fixtures.py` scorer extended to report timing.
+   - The [five-company rehearsal](../tally-rehearsal.md).
+   - The tests the [runtime review](../reviews/2026-10-21-bill-entry-runtime-review.md) found missing: confirming after the worker has drained, losing the response after a commit, and the same decision sent twice.
+   - Private PR Infra fixtures, with synthetic copies in the repo.
+1. **Foundation.**
+   - The dedicated database instance.
+   - Tenant, client business and company, with per-client access.
+   - Run and scheduling tables.
+   - Event wake-ups and small status responses.
+2. **Sync and mirror,** with versions and practice probes. Rehearse the † items: split companies, cancelled and optional vouchers, deletions, and feature fields.
+3. **Session tool loop** in `openai_hosted.py`.
+   - Answer `requires_action`, including after a reattach.
+   - Log every tool call.
+   - Run asynchronous lanes with a small memory footprint.
+4. **Statement slice.**
+   - Learnt XLSX and CSV layouts, reusing `statement_layouts` and the balance proof in `statement.py`, including the footer totals and the metadata that identifies the bank ledger.
+   - Chunked row proposals, checked by `validated_plan`.
+   - NEFT-return pairing.
+   - Save and readback.
+   - A re-run finds duplicates, and an interrupted save never writes twice.
+5. **Bill slice.**
+   - Read the scan.
+   - Look up the company across all its GSTINs.
+   - Consult memory, practice and history.
+   - `propose`: the `vouchers.check` logic plus a check for tax-inclusive line amounts.
+   - Handwritten instructions and confirmation by use.
+   - Save and readback.
+6. **Memory, rules and practice questions.**
+   - Accepted outcomes become entries, and edits made in Tally demote them.
+   - The admin memory page and the question cards.
+   - The PR Infra client-specific workflow and its seeded instruction.
+7. **Bill-wise link.**
+   - New Ref on bills, the `open_bills` lookup, and Agst Ref on payments.
+   - Candidate-bill buttons.
+   - Protocol-6 allocations with readback.
+8. **Inventory.**
+   - Item lines and godowns.
+   - Holds for batches and orders, or receipt-note tracking if the probe calls for it.
+   - Protocol-6 inventory readback.
+9. **E-invoice QR check** (feasibility first).
+   - Decode the signed QR and verify its signature.
+   - Pin supplier, buyer, number, date and total from it.
+   - A conflict with what was read from the scan holds the bill.
+10. **Review surface and Attention per client,** with a query cache and cancellable reads.
+11. **Hosted Tally.**
+    - A signed installer.
+    - A check on multi-user hosts.
+    - The provider checklist.
+12. **Performance.**
+    - Run 10–12 lanes.
+    - Benchmark both targets, then tune.
+13. **Cut-over.**
+    - Create fresh tenants; PR Infra statements resume after the old build's last period.
+    - Park the old build with a tag and a reproducible deploy.
+    - Delete the old modules.
+
+## Reused code
+
+- **Companion:** `connectors/desktop/src/voucher.js`, `tally.js` and `tally-session.js` (the writer, Tally sessions and guards), plus `client-context.js`, whose collection became the sync (`sync.js`).
+- **Statement reading:** `connectors/src/minkops_connectors/statement.py`.
+- **Accounts checks** (`platform/src/minkops_platform/accounts/`): `vouchers.py`, `statement_layouts.py`, `validated_plan` in `statement_routing.py` and `supplier_gst.py`. `tally_writes.py` and `posting_profiles.py` were retired with the staged pipeline; the checks of theirs that still apply live in `vouchers.py` and `writes.py`.
+- **Platform:** `attention.py`, `run_controls.py`, `desktop.py` and `runtime/openai_hosted.py`.
+- **Workflow installation:** `minkops_api.install_workflows`, with variants.
+- **Infrastructure:** `infra/provision_database.py`, `configure_runtime.py`, `deploy_runtime.py` and `verify_database_restore.py`.
+
+## Verification
+
+- **Automated tests.**
+  - pytest against real PostgreSQL.
+  - Node tests for the companion.
+  - Playwright for the review surface.
+- **TallyPrime rehearsal** covering:
+  - duplicates and interrupted saves;
+  - split companies and deletions;
+  - cancelled and optional vouchers;
+  - bill-wise settlement and inventory readback;
+  - NEFT returns.
+- **Scoring.**
+  - Zero critical outcomes, meaning no wrong saves and no missed exceptions.
+  - Both performance targets met.
+  - The PR Infra fixtures pass.
+- **Restore rehearsal** on the new database instance.
+
+## Risks
+
+| Risk | Handling |
+| --- | --- |
+| Tally IDs or markers behave unexpectedly | Regression guard, census guard, the † rehearsal |
+| A wrong memory entry spreads | Learn only from approvals; edits made in Tally demote; a removable memory page |
+| Questions stall work | Hold only the dependent bills; release them through the idempotent decision path |
+| Prompt injection through bills or narrations | Read-only, scoped tools; every call logged |
+| The agent argues past a check | Resubmission limit; changes to printed facts go to review |
+| Crumpled or low-quality scans | Hold with a reason; the QR check where available |
+| Provider concurrency limits or cost | Measure in slice 12 and revise the cost envelope |
+| Retaining mirror data (India's DPDP Act) | Retention and deletion policy before production |
+| Large first syncs | Background sync with visible progress |
+
+## Pending (doesn't block starting)
+
+- A PR Infra statement covering the March 2026 payments for the two sample bills: the client's own fixture for the bill-to-payment link, which slice 7 rehearsed on synthetic books.
+
+## Progress
+
+Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.2 in Educational mode, from 21 October 2026. The baseline before any rebuild commit: 617 Python tests plus 413 subtests on PostgreSQL 16.15, 108 companion tests, 51 web tests, with lint, ruff and both builds clean.
+
+| Slice | State | Evidence |
+| --- | --- | --- |
+| 0. Acceptance harness | Done | One closed hold matrix pinned by a golden test (`test_holds.py`). Golden bill, statement-row and narration-token identities (`test_vouchers.py`). Synthetic look-alikes of the PR Infra statement and bills, with private-file structure checks (`test_synthetic_fixtures.py`). The five-company rehearsal is verified live (`scripts/rehearsal_status.mjs`). The runtime review's missing tests land with slice 1's decision path, and scorer timing with slice 5's bill runs. |
+| 1. Foundation | Done | Code and tests provision the dedicated instance (`test_database_provisioning.py`); it has not been created or deployed. Client businesses, per-client access and company identity are in migration `0020` (`test_clients.py`). The run model is in migration `0021`: leased items, versioned records, idempotent decisions, commit-time wake-ups and bounded status (`test_work.py`, `test_runs_api.py`). That includes the runtime review's missing cases: confirming after the worker drained, a response lost after commit, and the same decision twice. 663 Python tests pass. |
+| 2. Sync and mirror | Done | The versioned mirror, the sync protocol with its regression and census guards, practice probes and background refresh (`test_mirror.py`, `test_sync.py`, `test_practice.py`, `test_sync_api.py`, `sync.test.js`, `jobs.test.js`). Rehearsed live through the headless companion: all five companies were found, authorised and mirrored in full in 14 s, matching Tally's own voucher counts and seven master types exactly. A created voucher arrived as a delta, a cancellation as a flag, and a deletion as a census tombstone ([evidence](evidence.md#rehearsed-on-tallyprime-edit-log-1172-21-october-2026)). Source Discovery is replaced by the sync; it is deleted with the staged bill and statement pipelines in slices 4–5, which still read it. |
+| 3. Session tool loop | Done | Tool sessions without an execution environment (`run_tool_session` in `openai_hosted.py`): every pending call is answered exactly once, including after a dropped stream or a worker restart. A lost creation is found again by its metadata, and a failed turn reports the provider's code (`test_tool_sessions.py`, against a protocol-faithful fake). Every call is validated against its contract and logged once per session and call ID (`test_tools.py`, migration `0024`). Lanes (`lanes.py`, migration `0025`): threads sharing a four-connection pool, fenced writes, one heartbeat, LISTEN wake-ups, handoff on exit, retries, and a closer that records late usage and deletes sessions (`test_lanes.py`). They run inside the existing worker; its drain acknowledges a wake-up only when no item is runnable, and the recovery sweep counts run items (`test_worker_recovery.py`). Live with `gpt-6-luna`, one bill-shaped item ran through real lanes in about 20 s; the protocol facts are in the [evidence](evidence.md#the-tool-loop-measured-live-21-october-2026). 723 Python tests pass. |
+| 4. Statement slice | Done | Statement entry 1.0 runs on the run model (`accounts/statement_entry.py`). Layouts are proved by balances and printed controls, with one layout session per unseen format and a date-order question that parks the sheet (`statement_layouts.py`). Chunks of up to 100 rows are routed through the desk lookups (`desk_tools.py`), and `propose` checks every row with `validated_plan`. Transfers are paired into one Contra, repeats in overlapping statements are written once, and a gap between statements raises one item (migration `0028`). Approved rows are durable `native_writes`, one `tally.write` at a time per PC, never re-sent after an interrupted save (`writes.py`, migrations `0026`–`0027`). The staged pipeline is deleted (`test_statement_entry.py`). Live, the PR Infra UAT scenarios S01–S06 behaved as specified, and a two-bank rehearsal saved and verified 10 vouchers in Tally ([evidence](evidence.md#statement-entry-rehearsed-live-21-october-2026)). 706 Python tests pass. |
+| 5. Bill slice | Done | Bill entry 1.0 runs on the run model (`accounts/bill_entry.py`). One tool session per file reads every page as an image and, where the PDF has one, its text layer (`minkops_connectors/documents.py`). It routes each bill to the company it is addressed to, by any of that company's GSTINs, and proposes the client's own voucher. `propose` checks each bill at once with `vouchers.check`, whose printed taxable and tax totals expose tax-inclusive amounts. A total or round-off must be one the text layer prints. Confirmation by use: a booking unlike the supplier's history (another voucher type or ledger, or without the stock items it carried) waits for review even under standing approval, and one approval confirms it. A legible handwritten note is followed and quoted, and an unclear one holds. A bill repeated across files is written once, and differing versions all hold. Approved bills are native writes reconciled by document identity. A new supplier is created only on a person's decision and verified by readback (`tally.supplier`, migration `0029`). Source Discovery, the hosted-environment runtime and the staged bill pipeline are deleted (`test_bill_entry.py`, `test_bill_vouchers.py`). Live, the PR Infra UAT bills behaved as specified on a company that already held B01–B03, and the 15-bill synthetic package scored 15 of 15, its 8 saves verified in 27 s. Create this ledger created and verified a supplier ([evidence](evidence.md#bill-entry-rehearsed-live-21-october-2026)). 406 Python tests pass, fewer than slice 4's because the staged pipeline's tests went with it. |
+| 6. Memory, rules and questions | Done | Employee memory per client business (`accounts/memory.py`). Verified saves a person approved become bookings (a supplier's voucher type and expense ledgers) and routings (a payee's counter ledger), one entry per treatment. One approval confirms a booking, so standing approval writes the next bill booked the same way. Every sync revalidates entries: an edit made in Tally demotes one, and one whose ledgers are missing from three syncs retires. Rules are people's own, versioned and cited by ID; sessions read every active rule, at most 30 per client and employee. Practice cards are answered through Attention's receipted decision path, and the bills that waited on them are released. Plans follow settled practice: receipt-register numbers in the narration, and the invoice number fields to search for duplicates. Sessions look up `memory`, `rules` and `practice`. An admin page and API edit memory (`test_memory.py`, `test_practice.py`, `test_memory_api.py`, `memory.spec.js`). PR Infra's installation creates its client business, seeds its agreed NEFT-return rule and adds its client procedure to both workflows. Live, a rule was cited, a practice answered, bookings and routings learnt, and an edit made in Tally demoted a booking; the next reading followed the corrected books ([evidence](evidence.md#memory-and-practice-rehearsed-live-21-october-2026)). 414 Python tests pass. |
+| 7. Bill-wise link | Done | Plan protocol 6 carries bill references on any line, and the companion reads them back (`voucher.js`; companion 0.10.0 is now the minimum). A bill to a supplier that keeps bill-by-bill balances opens a New Ref under its invoice number; its credit note holds, because it must name the bill it adjusts. `mirror.open_bills` balances each bill from its origin: a New Ref, an Advance, or a ledger's opening bill when the books begin inside the mirror's window. Cancelled and optional vouchers settle nothing. A statement row to such a ledger settles its open bills (`accounts/settlement.py`): the bills the narration names, the only open bills that add up to the amount, or on account when nothing is open. A run's rows claim what they settle, so no balance is settled twice. Any other allocation holds as `bill_unresolved`, with one Settle button per allocation (`test_settlement.py`, `test_mirror.py`, `test_statement_entry.py`). A tool call that fails now rolls back its writes. Live on Third Tally Company, opening and New Ref bills balanced as Tally does. Four payments settled them by name, by amount and by one click, and a bill Minkops entered was settled by a payment Minkops entered, every reference verified in Tally ([evidence](evidence.md#bill-wise-settlement-rehearsed-live-21-october-2026)). 436 Python tests pass. |
+| 8. Inventory | Done | A bill the client books item-wise carries its items (`vouchers.check`). Each is a stock item in its own unit, and quantity times rate reaches the printed amount. Its purchase ledger, which must affect inventory, carries its value, and its godowns take it whole. Tally books each purchase ledger's items as one line, so the plan does, and protocol 6's readback compares every item, godown, quantity, rate and amount. Batch-tracked items hold for entry in Tally. So do item-wise purchases where Receipt Notes or purchase orders track goods; a new `purchase_orders` probe settles the latter. Sessions look up `find_stock_item` and `godowns`, and bookings are learnt and compared item-wise or not. Each mirror version records the probes run on it, so a probe added later meets unchanged books, and a practice the books settle releases the bills waiting on it (`test_bill_vouchers.py`, `test_bill_entry.py`, `test_sync.py`, `voucher-write.test.js`). Live, an item-wise purchase of three items to two godowns was saved and verified in 3 s ([evidence](evidence.md#item-wise-purchases-rehearsed-live-22-october-2026)). 443 Python tests pass. |
+| 9. E-invoice QR | Done | Feasible, and built. Bill reading decodes every QR code on a page from a 300 DPI render (`zxing-cpp`), and keeps the signed e-invoices (`minkops_connectors/einvoice.py`). Each is verified against pinned production IRP keys, selected by the certificate thumbprint the code names and the IRN generation period each key signed. A code is verified, altered (a pinned certificate whose signature fails, which holds the bill at once) or unverified (an IRP whose keys are not pinned). The session is told what each code registers, and a bill's reading must agree with its number, kind, date, total and seller GSTIN; its buyer GSTIN must be the routed company's (`test_einvoice.py`, `test_bill_entry.py`). The pinned keys are NIC's IRP 1 and 2 and IRIS's IRP 6, from their official key pages; NIC's own published sample code verifies against them. IRPs 3–5 are not pinned yet ([evidence](evidence.md#signed-e-invoice-qr-codes-22-october-2026)). 448 Python tests pass. |
+| 10. Review surface | Done | One review for every workflow's run (`RunReview.tsx`, `review.ts`), driven by what the handler reports and the decisions the server offers: each record's status in words, its holds and reasons, one button per decision with the detail it carries (such as a settlement choice), Save ready entries, and the proposed entry, items, settled bills, e-invoice, evidence, rules and Tally's voucher. It reads through the shared query cache, whose reads cancel when nothing watches them, and follows the run's activity. A run starts from its workflow's page with the client, the files and only the settings the workflow declares (`LaunchRun.tsx`). Attention groups by client, and an item or task of a client the member cannot reach is not found by its ID. Run summaries now count as the review does, and every amount meant for people is grouped as Indian accounts write it (`test_work.py`, `test_lanes.py`, `test_attention_api.py`, `test_workspace.py`, `review.test.ts`, `review.spec.js`). Live, a run of 15 bills was reviewed in the console, and a new bill was launched, approved and saved from it ([evidence](evidence.md#review-surface-rehearsed-live-22-october-2026)). 460 Python tests pass. |
+| 11. Hosted Tally | Done | On a server several Windows users share, Minkops reads only each user's own Tally. One read-only observation names the Windows session serving the PC's Tally port beside the companion's own. The connection check, every save's preflight and the sync refuse a Tally in another session (`other_session`); on a remote session that cannot tell, they refuse rather than assume (`ownership_unknown`) (`tally-session.test.js`, `sync.test.js`). A PC's Tally port reached its syncs and saves, but Check Tally connection and diagnostics read 9000; now every job and heartbeat carries it, and Connected PCs sets it (`test_desktop.py`, `jobs.test.js`, `devices.spec.js`). The server sends Tally work to a remote session only from companion 0.11.0. A release is signed: `npm run package:win` refuses to build without the certificate and its publisher, electron-builder pins the signer for updates, and Windows must trust the installer. Publication refuses an installer its publisher did not sign (`package.test.js`, `test_hosting_release.py`). The provider checklist is [Hosted Tally](../hosted-tally.md). Neither a certificate nor a shared server is available here, so both are on the manual testing list. 465 Python tests pass. |
+| 12. Performance | Done | Both targets met on the local stack with 12 lanes, now the default and the deployed setting: 50 labelled bills read in 5 min 30 s (target 10), and a synthetic month of 1,232 statement rows in 4 min 31 s (target 15), though with payees no rehearsal company holds, so that run measures the pipeline rather than routing ([evidence](evidence.md#performance-benchmarked-live-22-october-2026)). Lookups average 3 ms; the model is the limit. Sessions now cite companies and masters only by short references their lookups issued (migration 0031, `test_bill_entry.py`), so a guessed or mistyped GUID can no longer name another real master, and reasons a person reads name them. Every attempt's session counts toward a run's usage (migration 0030, `work.usage`, `test_lanes.py`). Round trips the benchmark exposed are gone: a bill printing no tax, an empty GSTIN check, and lookups of more than 20 subjects. 466 Python tests pass. |
+| 13. Cut-over | Done | The old build's schema is retired. Migration 0032 drops the tables, view, triggers and functions of the staged pipeline, Source Discovery and the hosted-environment runtime, and refuses a database that still holds the old build's work, so that history is never dropped. `migrate.py` refuses a database from before the baseline, and the archived upgrade path is gone (`test_migrations.py`). A client's workspace is created for its verified administrator together with its composition (`install_workflows --create-tenant`, `test_installation.py`). The deployment mounted the new instance while the runtime's secret still named the shared one; the runtime's secrets now open the new instance and sit beside the parked build's, which stay untouched for a rollback (`test_runtime_deployment.py`). Retention keeps a parked build's images. Support diagnostics describe the run model ([workflow diagnostics](../workflow-diagnostics.md)). The [runbook](cutover.md) parks the old build, provisions and deploys, creates workspaces, says where PR Infra's statements resume, and rolls back. Rolling back includes reinstalling the parked companion, because the rebuilt one cannot run the parked build's jobs. Nothing is deployed. Live on the final build, a new bill and a statement were entered from the console and verified in Tally. A supplier payment citing a stock code was held as inventory; statement entry 1.1.1 enters it ([evidence](evidence.md#cut-over-and-the-final-build-checked-live-22-october-2026)). Afterwards, bills into a GST-registered company state what Tally's GST returns need, and Tally includes them; a tax head the states rule out, or a tax ledger for another head or rate, is caught first (bill entry 1.2.0, companion 0.11.0 the minimum; [evidence](evidence.md#gst-returns-rehearsed-live-22-october-2026)). 478 Python tests pass. |
+
+**After the slices: replacing a PC** (22 October 2026). A disconnected PC's companies leave the client's books, and the PC that replaces it continues them. One click on the found company's card moves the client's company there, keeping its memory, rules, practice, statement continuity and save history (`clients.authorise_company`, migration 0034). Each mirror version records the PC it was read from (migration 0033), so the first refresh there reads the books in full, and no run pins the old copy. Vouchers an older copy lacks are named on one card, and memory learnt from them is demoted. A save the old PC had begun holds as interrupted; saves it had not begun go to the new PC. Some books are never continued: another client's, a year-split part, and books another connected PC holds, even when two admins decide at once. The console's card now decides found companies, which before needed the API (`test_clients.py`, `test_sync.py`, `test_mirror.py`, `test_statement_entry.py`, `test_sync_api.py`, `company-cards.spec.js`). Live, two headless companions reading the same Tally moved the five rehearsal companies from one to the other. Each was rebuilt in full in 10 s and matched the old copy exactly ([evidence](evidence.md#replacing-a-pc-rehearsed-live-22-october-2026)). See [Replacing a PC](../accounts-desk.md#replacing-a-pc). 487 Python tests pass.
+
+**Carried into later slices:**
+
+- **Upkeep:** the pinned e-invoice signing keys. IRPs 3–5 are not pinned: Clear's published certificate link refuses downloads, and the other two portals list their keys only in the browser. IRIS's newest listed key expired on 20 June 2026, and NIC's current keys run to 1 May 2027. Each new key is added as the bill entry doc describes.
+- **Deferred: admins disconnecting a member's PC.** Only a PC's owner can disconnect it (`desktop.revoke` checks ownership). A client's books continue on a replacing PC only once the old one is disconnected, so a PC whose owner has left blocks the move. The decision to let workspace admins disconnect any member's PC was deferred on 22 October 2026.
+
+**For the next manual testing phase** (steps that need a person at Tally or Windows):
+
+- **A first pass of the UAT bills.** The PR Infra UAT company already holds B01–B03 and B03's supplier from the staged build.
+  1. Restore the pre-UAT backup the pack records, or a copy of the company without them.
+  2. Run B01–B03.
+  3. Expect B01 and B02 saved, and B03 held as Missing supplier with Create this ledger. After that decision, expect one new supplier with its statutory fields, and one purchase.
+
+- **Split Company Data.**
+  1. Split a copy of a rehearsal company in Tally's UI.
+  2. Open both halves and request a sync.
+  3. Expect the sibling with the new BooksFrom to raise its own "New company found" card, and the original to keep its mirror.
+- **Replace a PC.** On the local stack, the rehearsal companies are authorised for "Rehearsal companies" on the
+  headless companion (`gauss-PC-Sikar-HEADLESS`), which was disconnected on 22 October.
+  1. Connect Minkops Dev on Windows with the same companies open in Tally, then refresh it under Connected PCs.
+  2. Expect one "New company found" card per company, offering Continue Rehearsal companies' books here. While the
+     old PC was still connected, the card would offer only Not a client's books.
+  3. Continue one company. Expect its memory page entries and rules unchanged, its first refresh full with reason
+     `pc_changed`, no "Older copy of the books" card, and a bill saved through Minkops Dev.
+  4. Before continuing another company, restore an older backup of it in Tally. Expect "Older copy of the books"
+     naming the vouchers entered since that backup.
+- **Interrupt a save.**
+  1. Approve a statement row, and close the companion while it writes.
+  2. Reopen the companion.
+  3. Expect the row to hold as Save interrupted. Retry save then either finds the voucher in Tally (saved) or holds it
+     as an uncertain import; it never imports twice.
+- **Restore an older backup.**
+  1. Back up a rehearsal company, add a voucher and sync.
+  2. Restore the backup in Tally's UI and sync again.
+  3. Expect a full rebuild with reason `marker_regressed`, and the added voucher gone from the new version.
+- **A signed release.** On Windows, with the organization's code-signing certificate:
+  1. In `apps/windows-app`, set `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` and `MINKOPS_WINDOWS_PUBLISHER` (the certificate's common name), then run `npm run package:win`.
+  2. Expect it to report the installer signed by that publisher. Record the publisher, size and SHA-256 in `windows-release.json`, without `"unsigned"`.
+  3. Install it over 0.9.1. Expect no SmartScreen warning, a later signed update to install, and an unsigned one to be refused.
+- **A shared server.** On a Remote Desktop host with two Windows users, each with Tally on its own port and Minkops 0.11.0 connected:
+  1. Follow [Checking a server](../hosted-tally.md#checking-a-server).
+  2. Expect each user to see only their own companies, and a port set to the other user's Tally to be refused as theirs.
+- **A real month of statements.** No local company holds a client's payees, so the 1,232-row benchmark could
+  only measure the pipeline. Run a client's real month against the company its payees are in, and expect most rows
+  proposed within the 15-minute target.
+- **A real e-invoice.** No available bill carries a signed e-invoice QR code.
+  1. Run a PR Infra supplier's e-invoice (one printed by NIC's or IRIS's IRP) through Bill entry.
+  2. Expect its QR code read as verified and the bill's facts to name the IRP and IRN; a misread total is refused
+     with the registered one.
+- **GST returns in Tally's own screen.** Minkops reads Tally's verdict for its returns from each voucher; the
+  screen itself was not opened.
+  1. In Pradeepraj Infra, open GSTR-3B for October 2026.
+  2. Expect MKQA/GST/001 among the purchases included in returns, not under Uncertain Transactions.
+  3. For a client whose purchases are item-wise, check that its stock items carry GST rates: an item-wise
+     purchase on items without them stays Uncertain, and Minkops notes so on the saved bill.
+- **Bills in Tally's own reports.** The slice 7 rehearsal checked bill references through Tally's XML export only.
+  1. In Third Tally Company, open Display More Reports > Statements of Accounts > Outstandings > Ledger for QA18 Billwise Steel.
+  2. Expect only QA18/OB/001 pending, with 3,000.00 open. QA18/BW/101, QA18/BW/102 and QA18/BW/103 should be cleared by
+     the payments Minkops entered.

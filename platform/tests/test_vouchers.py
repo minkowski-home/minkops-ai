@@ -1,35 +1,41 @@
-"""Plan protocol 5: legacy plans upgrade losslessly and receipts verify exactly."""
+"""Plan protocol 6: one voucher contract whose receipts verify exactly."""
 
-import copy
 import unittest
 from datetime import date
 
 from minkops_platform.accounts import vouchers
-from minkops_platform.accounts.bills import business_identity
 
 ID = "12345678-1234-5234-8234-123456789abc"
 LEDGERS = {name: {"GUID": f"{name}-guid", "PARENT": "Group", "ALTERID": "12"}
            for name in ("Supplier", "Purchases", "CGST", "SGST", "Tax", "HDFC", "Bank Charges")}
 
+IDENTITY = vouchers.document_identity("Supplier", "MOCK-1", date(2026, 10, 1))
 BILL = {
-    "company": "Test", "port": 9000, "remote_id": ID, "operation": "append", "expected": None,
-    "discovery_id": "d", "format_version": 3,
-    "data": {"invoice_number": "MOCK-1", "vendor": "Supplier", "date": "2026-10-01", "purchase_ledger": "Purchases",
-             "subtotal": 100, "tax": 18, "tax_ledger": None, "total": 118, "cost_code": None},
-    "tax_allocations": [{"ledger": "CGST", "amount": 9}, {"ledger": "SGST", "amount": 9}],
-    "references": {"company_guid": "company", "ledgers": LEDGERS,
-                   "voucher_type": {"NAME": "Purchase GST", "GUID": "vt", "PARENT": "Purchase", "ALTERID": "3"}},
+    "format_version": 5, "operation": "append", "company": "Test", "port": 9000, "remote_id": ID,
+    "family": "purchase", "fence": "retry_after_read", "company_guid": "company",
+    "voucher_type": {"NAME": "Purchase GST", "GUID": "vt"},
+    "header": {"date": "2026-10-01", "reference": "MOCK-1", "party_ledger": "Supplier",
+               "narration": "Minkops reviewed bill MOCK-1", "tag": None},
+    "lines": [{"ledger": "Supplier", "side": "credit", "amount_cents": 11800, "allocation": None},
+              {"ledger": "Purchases", "side": "debit", "amount_cents": 10000, "allocation": None},
+              {"ledger": "CGST", "side": "debit", "amount_cents": 900, "allocation": None},
+              {"ledger": "SGST", "side": "debit", "amount_cents": 900, "allocation": None}],
+    "references": {"company_guid": "company", "ledgers": {k: LEDGERS[k] for k in ("Supplier", "Purchases", "CGST", "SGST")}},
+    "duplicate": {"strategy": "document", "families": ["purchase", "journal"], "party_ledger": "Supplier",
+                  "number": "MOCK-1", "number_fields": ["REFERENCE"], "window": {"from": "2026-04-01", "to": "2027-03-31"}},
+    "expected": None,
+    "identity": {"version": 2, "series": "invoice", "rule": "in_invoice_year", "hash": IDENTITY},
 }
-STATEMENT = {
-    "format_version": 4, "operation": "append", "company": "Test", "company_guid": "company", "port": 9000,
-    "remote_id": ID, "destination_key": "statement:company:HDFC",
-    "voucher_type": {"NAME": "Payment", "GUID": "vt-payment"},
-    "allocation": {"category": "Sites", "centre": "Site 4", "category_guid": "cat", "centre_guid": "cc"},
+# What statement_routing.validated_plan resolves for one bank-charge payment.
+RESOLVED = {
+    "family": "payment", "lines": None, "company": "Test", "company_guid": "company", "port": 9000,
     "data": {"date": "2026-10-01", "amount_cents": -1770, "bank_ledger": "HDFC", "counter_ledger": "Bank Charges",
              "reference": "", "narration": "NEFT charges"},
+    "allocation": {"category": "Sites", "centre": "Site 4", "category_guid": "cat", "centre_guid": "cc"},
+    "voucher_type": {"NAME": "Payment", "GUID": "vt-payment"},
     "references": {"company_guid": "company", "ledgers": {k: LEDGERS[k] for k in ("HDFC", "Bank Charges")}},
 }
-IDENTITY = business_identity(BILL["data"])
+STATEMENT = vouchers.statement_voucher(RESOLVED, remote_id=ID, identity="row")
 
 
 def observed(plan, **overrides):
@@ -46,6 +52,15 @@ def observed(plan, **overrides):
         "allocations": [{"ledger": ln["ledger"], "category": ln["allocation"]["category"], "centre": ln["allocation"]["centre"],
                          "amount_cents": next(e["amount_cents"] for e in signed if e["ledger"] == ln["ledger"])}
                         for ln in plan["lines"] if ln["allocation"]],
+        "bills": [{"ledger": ln["ledger"], "name": bill.get("name"), "type": bill["type"],
+                   "amount_cents": bill["amount_cents"] if ln["side"] == "credit" else -bill["amount_cents"]}
+                  for ln in plan["lines"] for bill in ln.get("bills") or []],
+        # Tally reports an inward item's amounts negative, like the debit line that carries its value.
+        "inventory": [{"item": entry["item"], "unit": entry["unit"], "quantity": entry["quantity"],
+                       "rate": entry["rate"], "amount_cents": -entry["amount_cents"], "ledger": entry["ledger"],
+                       "godowns": [{"godown": place["godown"], "quantity": place["quantity"],
+                                    "amount_cents": -place["amount_cents"]} for place in entry["godowns"]]}
+                      for entry in plan.get("inventory") or []],
         "fingerprint": "v5:" + "a" * 64,
     }
     current.update(overrides)
@@ -58,63 +73,44 @@ class InvoiceYearTest(unittest.TestCase):
         self.assertEqual(vouchers.invoice_year(date(2027, 4, 1)), 2027)
         self.assertEqual(vouchers.invoice_window(date(2027, 3, 31)), {"from": "2026-04-01", "to": "2027-03-31"})
 
-    def test_invoice_identity_is_byte_identical_to_the_saved_bill_identity(self):
-        for day in ("2026-10-01", "2027-03-31", "2027-04-01"):
-            data = {**BILL["data"], "vendor": "  Supplier ", "invoice_number": "mock-1", "date": day}
-            self.assertEqual(vouchers.document_identity("Supplier", "MOCK-1", date.fromisoformat(day)), business_identity(data))
+    def test_document_identity_never_changes_for_vouchers_already_in_tally(self):
+        # Saved vouchers, remote IDs and pending reservations all derive from these bytes.
+        self.assertEqual(vouchers.document_identity("  Supplier ", "mock-1", date(2026, 10, 1)),
+                         "e49806dbc9499a06a79a03e636fd212c410a04e6895c81dd447872e06133b471")
+        self.assertEqual(vouchers.document_identity("Supplier", "MOCK-1", date(2026, 10, 1), series="credit_note"),
+                         "1678d9ba34152e0ffb930fefbf9d2d03a4a11c0913de6e28d5b48273606fb8bc")
         march = vouchers.document_identity("Supplier", "MOCK-1", date(2027, 3, 31))
         self.assertNotEqual(march, vouchers.document_identity("Supplier", "MOCK-1", date(2027, 4, 1)))
         self.assertNotEqual(vouchers.document_identity("Supplier", "MOCK-1", date(2026, 10, 1), series="credit_note"),
                             vouchers.document_identity("Supplier", "MOCK-1", date(2026, 10, 1)))
 
 
-class UpgradeTest(unittest.TestCase):
-    def test_split_tax_bill_becomes_balanced_lines_with_its_invoice_window(self):
-        plan = vouchers.upgrade(BILL, identity=IDENTITY)
-        self.assertEqual(plan["format_version"], 5)
-        self.assertEqual((plan["family"], plan["fence"], plan["company_guid"]), ("purchase", "retry_after_read", "company"))
-        self.assertEqual(plan["voucher_type"], {"NAME": "Purchase GST", "GUID": "vt"})
-        self.assertEqual(plan["lines"], [
-            {"ledger": "Supplier", "side": "credit", "amount_cents": 11800, "allocation": None},
-            {"ledger": "Purchases", "side": "debit", "amount_cents": 10000, "allocation": None},
-            {"ledger": "CGST", "side": "debit", "amount_cents": 900, "allocation": None},
-            {"ledger": "SGST", "side": "debit", "amount_cents": 900, "allocation": None},
-        ])
-        self.assertEqual(plan["header"], {"date": "2026-10-01", "reference": "MOCK-1", "party_ledger": "Supplier",
-                                          "narration": "Minkops reviewed bill MOCK-1", "tag": None})
-        self.assertEqual(plan["duplicate"], {"strategy": "document", "families": ["purchase", "journal"],
-                                             "party_ledger": "Supplier", "number": "MOCK-1", "number_fields": ["REFERENCE"],
-                                             "window": {"from": "2026-04-01", "to": "2027-03-31"}})
-        self.assertEqual(plan["identity"], {"version": 2, "series": "invoice", "rule": "in_invoice_year", "hash": IDENTITY})
-        self.assertEqual(plan["references"]["ledgers"]["CGST"], LEDGERS["CGST"])
-        self.assertNotIn("Tax", plan["references"]["ledgers"])
+class StatementIdentityTest(unittest.TestCase):
+    """Re-runs and the writer's tag check depend on these exact bytes."""
 
-    def test_single_tax_ledger_and_corrections_carry_over(self):
-        legacy = copy.deepcopy(BILL)
-        legacy.pop("tax_allocations")
-        legacy.update(format_version=3, operation="update", expected={"guid": "g", "fingerprint": "v5:x", "vendor": "Supplier"})
-        legacy["data"]["tax_ledger"] = "Tax"
-        plan = vouchers.upgrade(legacy, identity=IDENTITY)
-        self.assertEqual([ln["ledger"] for ln in plan["lines"]], ["Supplier", "Purchases", "Tax"])
-        self.assertEqual((plan["operation"], plan["expected"]), ("update", {"guid": "g", "fingerprint": "v5:x"}))
+    def test_statement_row_identity_never_changes(self):
+        from minkops_connectors.statement import row_identity
 
-    def test_plans_without_pinned_native_identities_are_served_as_they_are(self):
-        unpinned = copy.deepcopy(BILL)
-        unpinned["references"].pop("voucher_type")
-        no_company = copy.deepcopy(BILL)
-        no_company["references"]["company_guid"] = None
-        no_ledger = copy.deepcopy(BILL)
-        no_ledger["references"]["ledgers"] = {k: v for k, v in LEDGERS.items() if k != "SGST"}
-        legacy = {**BILL, "references": None}
-        cost = copy.deepcopy(BILL)
-        cost["data"]["cost_code"] = "SITE-4"
-        for plan in (unpinned, no_company, no_ledger, legacy, cost):
-            self.assertIsNone(vouchers.upgrade(plan, identity=IDENTITY))
+        row = {"reference": "  S123 456 ", "date": "2026-09-01", "amount_cents": -1_500_000, "balance_cents": 98_765_432}
+        self.assertEqual(row_identity(row, 1), "5e5edb759d4aac94d0447fd5cf4aa37580f90bf018ba702747267474c5838862")
+        # A repeated transaction keeps a distinct identity by its occurrence.
+        self.assertEqual(row_identity(row, 2), "0182c6e6212e016d6847faf414c9c01e26169a22e2c31ddae1cb2c8f208f6b16")
+        self.assertEqual(row_identity({**row, "reference": "s123 456"}, 1), row_identity(row, 1))
 
+    def test_narration_tokens_include_the_tenant_and_never_change(self):
+        identity = "5e5edb759d4aac94d0447fd5cf4aa37580f90bf018ba702747267474c5838862"
+        tenant = "6f1e4c9a-2b7d-4e10-9c3a-5d8b7a6f0e21"
+        key = "statement:company-guid:QA18 Bank Current"
+        self.assertEqual(vouchers.narration_token(tenant, key, identity), "3bf1ae78-bdbb-56d5-96fe-1eeb4e74fd68")
+        self.assertNotEqual(vouchers.narration_token("8a1f0d3e-0000-4000-8000-000000000001", key, identity),
+                            vouchers.narration_token(tenant, key, identity))
+
+
+class StatementVoucherTest(unittest.TestCase):
     def test_payment_keeps_its_tag_reference_and_allocation_and_lists_proven_siblings(self):
         sibling = "87654321-4321-5321-8321-cba987654321"
-        plan = vouchers.upgrade(STATEMENT, identity="row", distinct=[sibling])
-        self.assertEqual((plan["family"], plan["fence"]), ("payment", "strict"))
+        plan = vouchers.statement_voucher(RESOLVED, remote_id=ID, identity="row", distinct=[sibling])
+        self.assertEqual((plan["format_version"], plan["family"], plan["fence"]), (6, "payment", "strict"))
         self.assertEqual(plan["lines"], [
             {"ledger": "HDFC", "side": "credit", "amount_cents": 1770, "allocation": None},
             {"ledger": "Bank Charges", "side": "debit", "amount_cents": 1770,
@@ -125,33 +121,19 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual(plan["duplicate"], {"strategy": "tag", "window": {"from": "2026-10-01", "to": "2026-10-01"},
                                              "match": {"ledger": "HDFC", "side": "credit", "amount_cents": 1770},
                                              "distinct": [sibling]})
-        receipt = vouchers.upgrade({**STATEMENT, "data": {**STATEMENT["data"], "amount_cents": 500, "reference": "UTR9"},
-                                    "voucher_type": {"NAME": "Receipt", "GUID": "vt-receipt"}, "allocation": None}, identity="row")
+        self.assertEqual(plan["identity"], {"version": 2, "series": "statement", "rule": "statement_row", "hash": "row"})
+        receipt = vouchers.statement_voucher({**RESOLVED, "family": "receipt", "allocation": None,
+                                              "data": {**RESOLVED["data"], "amount_cents": 500, "reference": "UTR9"},
+                                              "voucher_type": {"NAME": "Receipt", "GUID": "vt-receipt"}},
+                                             remote_id=ID, identity="row")
         self.assertEqual((receipt["family"], receipt["header"]["reference"]), ("receipt", "UTR9"))
         self.assertEqual([(ln["ledger"], ln["side"]) for ln in receipt["lines"]], [("HDFC", "debit"), ("Bank Charges", "credit")])
-
-    def test_v5_plans_and_unknown_formats_are_not_rewritten(self):
-        plan = vouchers.upgrade(BILL, identity=IDENTITY)
-        self.assertIs(vouchers.upgrade(plan, identity=IDENTITY), plan)
-        self.assertIsNone(vouchers.upgrade({**STATEMENT, "format_version": 7}, identity="row"))
-
-    def test_legacy_statement_upgrade_compares_siblings_in_both_plan_formats(self):
-        from minkops_platform.desktop import _native_plan
-
-        same = vouchers.upgrade({**STATEMENT, "remote_id": "same-v5"}, identity="same")
-        other = vouchers.upgrade({**STATEMENT, "remote_id": "other-v5",
-            "data": {**STATEMENT["data"], "amount_cents": 1770}}, identity="other")
-        for plan in (same, other):
-            plan["destination_key"] = STATEMENT["destination_key"]
-        run = {"result": {"records": [{"plan": p} for p in (STATEMENT, same, other)]}}
-        upgraded = _native_plan(run, {"plan": STATEMENT, "identity": "legacy"}, 5)
-        self.assertEqual(upgraded["duplicate"]["distinct"], ["same-v5"])
 
 
 class ReceiptTest(unittest.TestCase):
     def setUp(self):
-        self.bill = vouchers.upgrade(BILL, identity=IDENTITY)
-        self.statement = vouchers.upgrade(STATEMENT, identity="row")
+        self.bill = BILL
+        self.statement = STATEMENT
 
     def test_a_bill_receipt_becomes_the_stored_observation_shape(self):
         view = vouchers.observed_bill(self.bill, "saved", observed(self.bill), identity=IDENTITY)
@@ -160,7 +142,7 @@ class ReceiptTest(unittest.TestCase):
             "invoice_number": "MOCK-1", "vendor": "Supplier", "voucher_type": "Purchase GST",
             "entries": [{"ledger": "CGST", "amount": -900}, {"ledger": "Purchases", "amount": -10000},
                         {"ledger": "SGST", "amount": -900}, {"ledger": "Supplier", "amount": 11800}],
-            "fingerprint": "v5:" + "a" * 64,
+            "bills": [], "inventory": [], "fingerprint": "v5:" + "a" * 64,
         })
 
     def test_tampered_bill_receipts_are_rejected(self):
@@ -183,54 +165,107 @@ class ReceiptTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             vouchers.observed_bill(self.bill, "correction", observed(self.bill, reference="MOCK-2"), identity=IDENTITY)
 
+    def test_a_save_stating_gst_reads_back_what_it_wrote_and_keeps_tallys_verdict(self):
+        party = {"gstin": "27AAACA1234A1Z5", "registration_type": "Regular", "state": "Maharashtra", "country": "India",
+                 "place_of_supply": "Maharashtra"}
+        bill = {**self.bill, "format_version": 6, "gst": {"party": party, "company_gstin": "27ABCDE1234F1Z5",
+                                                          "registration": None}}
+        stored = {"party_gstin": party["gstin"], "registration_type": "Regular", "state": "Maharashtra", "country": "India",
+                  "place_of_supply": "Maharashtra", "company_gstin": "27ABCDE1234F1Z5", "status": "uncertain"}
+        view = vouchers.observed_bill(bill, "saved", observed(bill, gst=stored), identity=IDENTITY)
+        self.assertEqual(view["gst"]["status"], "uncertain")
+        # A companion that cannot read GST back, a detail Tally did not keep, or another registration, is not verified.
+        for current in (observed(bill), observed(bill, gst={**stored, "place_of_supply": ""}),
+                        observed(bill, gst={**stored, "company_gstin": "29ABCDE1234F1Z1"}),
+                        observed(bill, gst={**stored, "status": "maybe"}), observed(bill, gst={"status": "included"})):
+            with self.subTest(current=current.get("gst")), self.assertRaises(ValueError):
+                vouchers.observed_bill(bill, "saved", current, identity=IDENTITY)
+        # Found already in Tally, a person's own entry is judged on its accounting alone.
+        self.assertEqual(vouchers.observed_bill(bill, "duplicate", observed(bill), identity=IDENTITY)["guid"],
+                         observed(bill)["guid"])
+
+    def test_a_correction_says_how_the_voucher_tally_already_has_differs(self):
+        def reason(**overrides):
+            current = observed(self.bill, **overrides)
+            vouchers.observed_bill(self.bill, "correction", current, identity=IDENTITY)
+            return vouchers.correction_reason(self.bill, current).removesuffix(
+                " Review it there; Minkops did not add a second voucher.")
+
+        swapped = [{"ledger": "Supplier", "amount_cents": 11800}, {"ledger": "Purchases", "amount_cents": -10000},
+                   {"ledger": "Input CGST", "amount_cents": -900}, {"ledger": "Input SGST", "amount_cents": -900}]
+        self.assertEqual(reason(lines=swapped),
+                         "Tally's voucher for MOCK-1 posts to Input CGST, Input SGST instead of CGST, SGST.")
+        larger = [{"ledger": "Supplier", "amount_cents": 12980}, {"ledger": "Purchases", "amount_cents": -11000},
+                  {"ledger": "CGST", "amount_cents": -990}, {"ledger": "SGST", "amount_cents": -990}]
+        self.assertEqual(reason(lines=larger, date="20261002"), "Tally's voucher for MOCK-1 is dated 2026-10-02; "
+                                                                "comes to 129.80, not 118.00, with other amounts for "
+                                                                "CGST, Purchases, SGST.")
+        extra = [*observed(self.bill)["lines"], {"ledger": "Round Off", "amount_cents": -1}]
+        self.assertEqual(reason(lines=extra), "Tally's voucher for MOCK-1 also posts to Round Off.")
+        allocated = [{"ledger": "Purchases", "category": "Sites", "centre": "Site 4", "amount_cents": -10000}]
+        self.assertEqual(reason(allocations=allocated), "Tally's voucher for MOCK-1 has other cost allocations.")
+
+    def test_a_bill_by_bill_receipt_must_carry_the_approved_references(self):
+        billed = {**BILL, "format_version": 6, "lines": [
+            {**BILL["lines"][0], "bills": [{"name": "MOCK-1", "type": "New Ref", "amount_cents": 11800}]},
+            *BILL["lines"][1:]]}
+        view = vouchers.observed_bill(billed, "saved", observed(billed), identity=IDENTITY)
+        self.assertEqual(view["bills"], [{"ledger": "Supplier", "name": "MOCK-1", "type": "New Ref", "amount_cents": 11800}])
+        for bills in ([], [{"ledger": "Supplier", "name": "MOCK-2", "type": "New Ref", "amount_cents": 11800}]):
+            with self.subTest(bills=bills), self.assertRaises(ValueError):
+                vouchers.observed_bill(billed, "saved", observed(billed, bills=bills), identity=IDENTITY)
+
+    def test_a_bill_booked_item_wise_must_read_back_every_item_and_godown(self):
+        stocked = {**BILL, "format_version": 6, "lines": [
+            BILL["lines"][0], {"ledger": "Purchases", "side": "debit", "amount_cents": 10000, "allocation": None},
+            *BILL["lines"][2:]], "inventory": [
+            {"item": "Cement", "unit": "Bag", "quantity": "2", "rate": "50", "side": "debit", "amount_cents": 10000,
+             "ledger": "Purchases", "godowns": [{"godown": "Main Location", "quantity": "1", "amount_cents": 5000},
+                                                {"godown": "Site Store", "quantity": "1", "amount_cents": 5000}]}]}
+        view = vouchers.observed_bill(stocked, "saved", observed(stocked), identity=IDENTITY)
+        self.assertEqual(view["inventory"][0]["godowns"][1], {"godown": "Site Store", "quantity": "1",
+                                                              "amount_cents": -5000})
+        moved = observed(stocked)
+        moved["inventory"][0]["godowns"] = [{"godown": "Main Location", "quantity": "2", "amount_cents": -10000}]
+        for current in (moved, observed(stocked, inventory=[]), observed(BILL)):
+            with self.subTest(inventory=current["inventory"]), self.assertRaises(ValueError):
+                vouchers.observed_bill(stocked, "saved", current, identity=IDENTITY)
+        # A bill booked to ledgers is not matched by a voucher that moved stock.
+        with self.assertRaises(ValueError):
+            vouchers.observed_bill(BILL, "saved", observed(stocked), identity=IDENTITY)
+
     def test_a_saved_correction_must_keep_the_voucher_it_replaced(self):
-        legacy = {**BILL, "operation": "update", "expected": {"guid": "a1b2c3d4-0000-4000-8000-000000000001", "fingerprint": "v5:x"}}
-        plan = vouchers.upgrade(legacy, identity=IDENTITY)
+        plan = {**BILL, "operation": "update", "expected": {"guid": "a1b2c3d4-0000-4000-8000-000000000001", "fingerprint": "v5:x"}}
         with self.assertRaises(ValueError):
             vouchers.observed_bill(plan, "saved", observed(plan), identity=IDENTITY)
         kept = observed(plan, guid="a1b2c3d4-0000-4000-8000-000000000001", voucher_type="Purchase")
         self.assertEqual(vouchers.observed_bill(plan, "saved", kept, identity=IDENTITY)["voucher_type"], "Purchase")
 
     def test_a_statement_receipt_must_carry_its_tag_lines_and_allocation(self):
-        view = vouchers.observed_statement(self.statement, STATEMENT, observed(self.statement))
-        self.assertEqual(view["allocation"], STATEMENT["allocation"])
+        view = vouchers.observed_statement(self.statement, observed(self.statement))
+        self.assertEqual(view["allocations"], [{"ledger": "Bank Charges", "category": "Sites", "centre": "Site 4", "amount_cents": -1770}])
         self.assertEqual(view["entries"], [{"ledger": "Bank Charges", "amount": -1770}, {"ledger": "HDFC", "amount": 1770}])
         self.assertEqual(view["tag"], ID)
         for current in (observed(self.statement, tag=None), observed(self.statement, allocations=[]),
                         observed(self.statement, voucher_type="Receipt"), observed(self.statement, date="20261002")):
             with self.subTest(current=current), self.assertRaises(ValueError):
-                vouchers.observed_statement(self.statement, STATEMENT, current)
+                vouchers.observed_statement(self.statement, current)
 
-
-    def test_a_refresh_observation_must_name_the_same_document(self):
-        target = {"vendor": "Supplier", "invoice_number": "MOCK-1"}
-        view = vouchers.observed_document(observed(self.bill), target)
-        self.assertEqual((view["invoice_number"], view["vendor"], view["fingerprint"][:3]), ("MOCK-1", "Supplier", "v5:"))
-        self.assertIsNone(vouchers.observed_document(observed(self.bill, reference="MOCK-2"), target))
-        self.assertIsNone(vouchers.observed_document(observed(self.bill, party_ledger="Other"), target))
-        self.assertIsNone(vouchers.observed_document({"lines": []}, target))
-
-
-class AttentionReaderTest(unittest.TestCase):
-    def test_protocol_five_refreshes_read_the_invoice_window_unless_an_older_reader_saved_the_baseline(self):
-        from minkops_platform.attention import native_target
-        target = {"tool": "tally", "date": "2027-03-31", "vendor": "Supplier", "invoice_number": "MOCK-1", "baseline": None}
-        self.assertEqual(native_target(target, 5)["document"],
-                         {"window": {"from": "2026-04-01", "to": "2027-03-31"}, "number_fields": ["REFERENCE"],
-                          "families": ["purchase", "journal"]})
-        self.assertNotIn("document", native_target(target, 4))
-        self.assertNotIn("document", native_target({**target, "baseline": {"fingerprint": "a" * 64}}, 5))
-        self.assertIn("document", native_target({**target, "baseline": {"fingerprint": "v5:" + "a" * 64}}, 5))
-        self.assertNotIn("document", native_target({**target, "date": None}, 5))
-
-    def test_a_reader_change_is_never_mistaken_for_an_edit_in_tally(self):
-        from minkops_platform.attention import resolved
-        baseline = {"guid": "g", "fingerprint": "a" * 64}
-        item = {"kind": "review", "target": {"baseline": baseline}}
-        self.assertFalse(resolved(item, {"valid": True, "current": {"guid": "g", "fingerprint": "v5:" + "b" * 64}}))
-        self.assertTrue(resolved(item, {"valid": True, "current": {"guid": "g", "fingerprint": "b" * 64}}))
-        v5 = {"kind": "review", "target": {"baseline": {"guid": "g", "fingerprint": "v5:" + "a" * 64}}}
-        self.assertTrue(resolved(v5, {"valid": True, "current": {"guid": "g", "fingerprint": "v5:" + "b" * 64}}))
+    def test_a_payment_to_a_bill_by_bill_party_must_read_back_the_bills_it_settles(self):
+        settled = vouchers.statement_voucher({**RESOLVED, "allocation": None, "bills": [
+            {"type": "Agst Ref", "name": "SM/101", "amount_cents": 1000}, {"type": "On Account", "amount_cents": 770}]},
+            remote_id=ID, identity="row")
+        self.assertEqual(settled["lines"][1]["bills"], [{"type": "Agst Ref", "name": "SM/101", "amount_cents": 1000},
+                                                        {"type": "On Account", "amount_cents": 770}])
+        # The counter line is a debit, so Tally reports its references negative.
+        view = vouchers.observed_statement(settled, observed(settled))
+        self.assertEqual(view["bills"], [
+            {"ledger": "Bank Charges", "name": "SM/101", "type": "Agst Ref", "amount_cents": -1000},
+            {"ledger": "Bank Charges", "name": None, "type": "On Account", "amount_cents": -770}])
+        for bills in ([], [{"ledger": "Bank Charges", "name": "SM/102", "type": "Agst Ref", "amount_cents": -1000},
+                           {"ledger": "Bank Charges", "name": None, "type": "On Account", "amount_cents": -770}]):
+            with self.subTest(bills=bills), self.assertRaises(ValueError):
+                vouchers.observed_statement(settled, observed(settled, bills=bills))
 
 
 if __name__ == "__main__":

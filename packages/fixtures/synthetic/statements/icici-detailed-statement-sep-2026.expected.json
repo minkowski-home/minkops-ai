@@ -1,0 +1,89 @@
+{
+  "file": "icici-detailed-statement-sep-2026.xlsx",
+  "header_row": 17,
+  "transactions": 1232,
+  "withdrawals": 1203,
+  "deposits": 29,
+  "opening_cents": 5890759234,
+  "closing_cents": 1274074642,
+  "withdrawal_cents": 25611108323,
+  "deposit_cents": 20994423731,
+  "families": {
+    "INF/NEFT": {
+      "withdrawals": 700,
+      "deposits": 0
+    },
+    "UPI": {
+      "withdrawals": 204,
+      "deposits": 4
+    },
+    "RTGS": {
+      "withdrawals": 120,
+      "deposits": 10
+    },
+    "MMT/IMPS": {
+      "withdrawals": 103,
+      "deposits": 3
+    },
+    "NEFT-RETURN": {
+      "withdrawals": 0,
+      "deposits": 8
+    },
+    "BIL/ONL": {
+      "withdrawals": 6,
+      "deposits": 0
+    },
+    "other": {
+      "withdrawals": 17,
+      "deposits": 2
+    },
+    "INF/INFT": {
+      "withdrawals": 53,
+      "deposits": 2
+    }
+  },
+  "neft_returns": [
+    {
+      "utr": "HDN488228165984",
+      "date": "2026-09-01",
+      "amount_cents": 1120000
+    },
+    {
+      "utr": "AUN874011935363",
+      "date": "2026-09-01",
+      "amount_cents": 1750000
+    },
+    {
+      "utr": "UBN508522791759",
+      "date": "2026-09-01",
+      "amount_cents": 1410000
+    },
+    {
+      "utr": "CNN934277101886",
+      "date": "2026-09-02",
+      "amount_cents": 3320000
+    },
+    {
+      "utr": "RMN336017179341",
+      "date": "2026-09-10",
+      "amount_cents": 2850000
+    },
+    {
+      "utr": "BAN524037160052",
+      "date": "2026-09-13",
+      "amount_cents": 339196
+    },
+    {
+      "utr": "PUN971210338120",
+      "date": "2026-09-18",
+      "amount_cents": 3100000
+    },
+    {
+      "utr": "CNN161156669058",
+      "date": "2026-09-25",
+      "amount_cents": 4450000
+    }
+  ],
+  "educational_date_rows": 199,
+  "distinct_payees": 881
+}

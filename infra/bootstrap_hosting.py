@@ -25,10 +25,15 @@ def budgets():
     api = GoogleApi(PROJECT)
     budgets_url = f"https://billingbudgets.googleapis.com/v1/billingAccounts/{BILLING}/budgets"
     budgets = api.request(budgets_url).get("budgets", [])
-    for title, amount, capped in (("Minkops hosting monthly target CAD 15", "15", False),
-                                  ("Minkops Cloud Run spend cap CAD 10", "10", True)):
-        if any(item["displayName"] == title for item in budgets):
-            continue
+    # Reserve CAD8 for Minkops' shared SQL allocation and CAD2 for reporting/
+    # enforcement lag. Alerts cannot impose a universal cloud hard stop.
+    for title, previous_title, amount, capped in (
+        ("Minkops exclusive resources target CAD 10", "Minkops hosting monthly target CAD 15", "10", False),
+        ("Minkops Cloud Run spend cap CAD 6", "Minkops Cloud Run spend cap CAD 10", "6", True),
+    ):
+        matches = [item for item in budgets if item['displayName'] in (title, previous_title)]
+        if len(matches) > 1:
+            raise RuntimeError('Duplicate Minkops budgets require reconciliation before updating cost controls.')
         filters = {"projects": [f"projects/{PROJECT}"], "calendarPeriod": "MONTH"}
         body = {"displayName": title, "budgetFilter": filters,
                 "amount": {"specifiedAmount": {"units": amount, "currencyCode": "CAD"}},
@@ -38,7 +43,22 @@ def budgets():
             filters.update(services=["services/152E-C115-5142"],
                            creditTypesTreatment="EXCLUDE_ALL_CREDITS")
             body["spendCap"] = {"inputState": "CONFIGURED"}
-        result = api.request(budgets_url, body)
+        if matches:
+            existing = matches[0]
+            body['name'] = existing['name']
+            if existing.get('etag'):
+                body['etag'] = existing['etag']
+            fields = 'displayName,budgetFilter,amount,thresholdRules,notificationsRule'
+            if capped:
+                # An existing cap's scope stays unchanged. Google accepts the
+                # amount/state update with its original normalized filters.
+                body.update({key: existing[key] for key in
+                    ('budgetFilter', 'thresholdRules', 'notificationsRule', 'ownershipScope') if key in existing})
+                fields = 'displayName,amount,spendCap.inputState'
+            result = api.request(f"https://billingbudgets.googleapis.com/v1/{existing['name']}?updateMask={fields}",
+                                 body, method='PATCH')
+        else:
+            result = api.request(budgets_url, body)
         print(f"Budget ready: {result['displayName']}; cap={result.get('spendCap', {}).get('outputState', 'alerts only')}")
 
 
