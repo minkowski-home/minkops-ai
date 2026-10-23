@@ -7,6 +7,10 @@ is kept off-site, owner-only, and its database, roles, secrets, images and insta
 are removed. Myndral's shared instance, and everything else Myndral uses (its
 databases, users, SMTP secrets and their access), stay untouched.
 
+Sections 1 to 4 ran on 23 October 2026 ([evidence](evidence.md#cut-over-23-october-2026)).
+Sections 5 to 7 create each client's workspace, PR Infra's first, and section 8
+holds for every later release.
+
 Commands run from the repository root as the authenticated owner (see
 [operator deployment](../../infra/README.md#operator-deployment)). `DIR` is a new
 private directory for the new instance's credentials, such as
@@ -25,7 +29,8 @@ gcloud run services list --project=minkops-ai-prod --region=us-central1 --format
 ## 2. Provision the rebuild's database
 
 1. Read the tier of Myndral's instance, the owner's chosen tier (about US$15 a
-   month), and record it against the [envelope](../../infra/README.md#production):
+   month; `db-f1-micro` on 23 October 2026), and record it against the
+   [envelope](../../infra/README.md#production):
 
    ```bash
    gcloud sql instances describe myndral-db --project=myndral-prod --format='value(settings.tier)'
@@ -118,7 +123,8 @@ Only after the new deployment serves, so the old database no longer changes:
 For PR Infra, and each later client:
 
 1. Through the proxy, as the runtime role, with the console's address for the
-   sign-up link:
+   sign-up link. If a local PostgreSQL already holds 5433, as the dev stack's does,
+   run the proxy on a free port and put that port in the URL:
 
    ```bash
    export DATABASE_URL="$(python3 -c 'import json, sys; print("postgresql://minkops_app:{runtime_password}@127.0.0.1:5433/minkops".format(**json.load(open(sys.argv[1]))))' DIR/database.json)" PUBLIC_APP_URL=https://app.minkops.com

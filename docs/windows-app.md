@@ -5,8 +5,8 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.11.5 (plan protocol 8; see its contracts below);
-the last release recorded in `windows-release.json` is 0.9.1. The server refuses
+This revision builds companion 0.11.5 (plan protocol 8; see its contracts below),
+which `windows-release.json` records as released, an unsigned candidate. The server refuses
 Tally work from companions older than 0.11.0. The companion works only with the companies open
 in the user's own Tally, reports typed session states, sends diagnostics and
 updates itself. For Tally on a hosted server, see [Hosted Tally](hosted-tally.md). Its Tally sync uses HTTP/XML exports and needs no
