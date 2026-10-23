@@ -16,6 +16,8 @@ class SolutionDefinitionTests(unittest.TestCase):
     def test_mock_solution_resolves_owned_workflows_and_employee_defaults(self):
         installation = load_solution(REPOSITORY_ROOT, "mock-client")
         self.assertEqual(installation.tenant_slug, "mock-tenant")
+        # Its client business holds the five rehearsal companies (docs/tally-rehearsal.md).
+        self.assertEqual(installation.client, {"slug": "rehearsal", "name": "Rehearsal companies"})
         self.assertEqual([e.metadata["key"] for e in installation.employees], ["accounts-desk"])
         self.assertEqual(set(installation.workflows), {"bill-entry", "statement-entry"})
         self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "desk.bill")
