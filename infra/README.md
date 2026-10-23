@@ -82,22 +82,23 @@ by loading a logical backup into a new disposable database with
 `verify_database_restore.py`, using PostgreSQL 16 client tools to match
 production; never restore over a live database as a test.
 
-Cost envelope: **CAD 20/month**, set while Minkops shared Myndral's instance:
-CAD 8 for half that fixed SQL footprint, a CAD 10 target for Minkops-exclusive
-resources, and CAD 2 of contingency. Since the cut-over, `minkops-books` is
-Minkops' alone and bills to `minkops-ai-prod`: a 31-day month costs about
-CAD 13.48 before backups and network, 744 hours at CAD 0.014874825/hour plus
-10 GiB at CAD 0.2408305/GiB-month (the Google catalog's CAD rates on 21 October
-2026). The envelope, and the CAD 10 project alert below, which now counts the
-instance, wait on the owner's revision. Review FX, backups, storage growth and
+Cost envelope: **CAD 27/month**, set by the owner on 23 October 2026 for the
+dedicated instance: about CAD 15 for `minkops-books` with its backups, a CAD 10
+target for Minkops-exclusive resources, and CAD 2 of contingency. (It was CAD 20
+while Minkops shared Myndral's instance.) The instance bills to `minkops-ai-prod`:
+a 31-day month costs about CAD 13.48 before backups and network, 744 hours at
+CAD 0.014874825/hour plus 10 GiB at CAD 0.2408305/GiB-month (the Google
+catalog's CAD rates on 21 October 2026). Review FX, backups, storage growth and
 actual billing monthly. A second SQL instance is not provisioned merely to bypass
 inefficient queries; benchmark the corrected paths first.
 
-`bootstrap_hosting.py` updates the existing project alert to CAD 10 and the
-Cloud Run-only gross spend cap to CAD 6, leaving room for Hosting, artifacts,
-secrets and logs inside the exclusive target. Project alerts trigger at 50%,
-80% and 100%. The recovery check does not start idle worker jobs. These controls
-are conservative operating limits, **not a provider-guaranteed CAD 20 hard stop**:
+`bootstrap_hosting.py` sets the project alert to CAD 25, the instance and the
+exclusive target together, and the Cloud Run-only gross spend cap to CAD 6,
+leaving room for Hosting, artifacts, secrets and logs inside the exclusive
+target. Project alerts trigger at 50%, 80% and 100%; the 50% alert is routine,
+since the instance alone reaches it near each month's end. The recovery check
+does not start idle worker jobs. These controls are conservative operating
+limits, **not a provider-guaranteed CAD 27 hard stop**:
 Google's spend-cap enforcement is delayed, excludes persistent SQL/storage, and
 the Budgets API does not expose actual accrued spend. Before paid rollouts,
 check the billing report and retain the contingency; do not silently increase a

@@ -25,11 +25,12 @@ def budgets():
     api = GoogleApi(PROJECT)
     budgets_url = f"https://billingbudgets.googleapis.com/v1/billingAccounts/{BILLING}/budgets"
     budgets = api.request(budgets_url).get("budgets", [])
-    # Reserve CAD8 for Minkops' shared SQL allocation and CAD2 for reporting/
-    # enforcement lag. Alerts cannot impose a universal cloud hard stop.
+    # The project target covers minkops-books with its backups (about CAD 15) and
+    # Minkops-exclusive resources (CAD 10); the envelope's other CAD 2 absorbs
+    # reporting and enforcement lag. Alerts cannot impose a universal cloud hard stop.
     for title, previous_title, amount, capped in (
-        ("Minkops exclusive resources target CAD 10", "Minkops hosting monthly target CAD 15", "10", False),
-        ("Minkops Cloud Run spend cap CAD 6", "Minkops Cloud Run spend cap CAD 10", "6", True),
+        ("Minkops project target CAD 25", "Minkops exclusive resources target CAD 10", "25", False),
+        ("Minkops Cloud Run spend cap CAD 6", None, "6", True),
     ):
         matches = [item for item in budgets if item['displayName'] in (title, previous_title)]
         if len(matches) > 1:

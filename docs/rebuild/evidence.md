@@ -706,7 +706,9 @@ The rebuild went live by the [runbook](cutover.md), from `main`.
   model key.
 - **Cost.** The instance bills to `minkops-ai-prod`. At the catalog rates `infra/README.md` records, a 31-day month
   costs about CAD 13.48 before backups and network, where the envelope reserved CAD 8 for Minkops' half of the shared
-  instance. The envelope, and the project's CAD 10 alert, which now counts the instance, wait on the owner.
+  instance. The same day the owner revised the envelope to CAD 27 (about CAD 15 for the instance with backups,
+  CAD 10 for Minkops-exclusive resources, CAD 2 of contingency), and the project alert, which counts the instance,
+  to CAD 25.
 - **Runtime.** `solution:rebuild-20261023-db786c7` (digest `sha256:8f38285f…`), built from `main` at `db786c7` with
   `infra/solution.Dockerfile` and checked with `install_workflows mock-client --validate-only`. It serves the API,
   the 12-lane worker job and the recovery service on `minkops-books`, each Ready with all traffic. The interest API
