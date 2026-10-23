@@ -23,10 +23,11 @@ class WorkflowContractTests(unittest.TestCase):
                 bundle = definition.session_bundle
                 self.assertEqual((definition.metadata["owner"], definition.metadata["handler"]),
                                  ("accounts-desk", handler))
-                # Accuracy before speed: high effort, on the provider's fast tier, which keeps the same model.
+                # Medium effort on the default tier, as the 50-bill pack run of 2026-10-22 used. High effort on the
+                # fast tier is set aside until a comparison of the two shows which reads bills better.
                 self.assertEqual((bundle["key"], bundle["definition_version"], bundle["model"], bundle["reasoning_effort"],
                                   bundle["service_tier"]),
-                                 (key, definition.metadata["version"], "gpt-6-luna", "high", "fast"))
+                                 (key, definition.metadata["version"], "gpt-6-luna", "medium", None))
                 self.assertEqual(sorted(bundle["stages"]), stages)
                 # The skill's manifest is checked, then left out of what a session is told.
                 self.assertFalse(bundle["instructions"].startswith("---"))

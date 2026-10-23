@@ -1,6 +1,6 @@
 {
   "key": "statement-entry",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "name": "Statement entry",
   "description": "Read CSV/XLSX bank statements, route each row to the client's Tally ledgers, and save reviewed, verified Payment, Receipt and Contra vouchers.",
   "owner": "accounts-desk",
@@ -17,8 +17,7 @@
   },
   "sessions": {
     "model": "gpt-6-luna",
-    "reasoning_effort": "high",
-    "service_tier": "fast",
+    "reasoning_effort": "medium",
     "stages": {
       "layout": "stages/layout.md"
     }
