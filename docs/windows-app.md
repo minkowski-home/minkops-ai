@@ -293,8 +293,11 @@ than converted into misleading object strings.
 Closing the main window leaves the native worker in the tray; a web-requested
 sync or save finishes there, and reopening shows its result.
 
-Native suites pass on Linux and Windows; Windows skips only a file-symlink test
-that requires creation privileges (the same guard runs on Linux). A fresh
+Native suites pass on Linux and Windows. Windows skips the state-move test of a
+roaming file that cannot be read, which needs POSIX permissions, and, without
+symlink creation privileges, a file-symlink test (the same guard runs on Linux).
+0.11.3's move was verified on a Windows 11 PC upgrading Minkops Dev from 0.11.2:
+the connected PC kept its record and credential and ran a Tally check. A fresh
 Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
