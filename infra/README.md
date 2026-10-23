@@ -2,9 +2,9 @@
 
 Python tools here provision, configure, deploy, audit and recover hosting/cloud
 resources. `google_api.py` is their shared operator-only client, outside the app
-image. Keep workflow/demo operations in `scripts/`: `provision_demo.py` prepares
-the verified demo owner and installation. Those have separate responsibilities
-from cloud infrastructure and must remain opt-in.
+image. Keep workflow and demo operations out of here: a workspace, the demo's
+included, is created with `python -m minkops_api.install_workflows`, which has
+separate responsibilities from cloud infrastructure and must remain opt-in.
 
 `compose.yml` runs the local OLTP PostgreSQL database. The API and durable
 Accounts worker are separate processes sharing that database. Sessions run on

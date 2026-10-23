@@ -8,21 +8,10 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
+from minkops_api.service import call as _call
 from minkops_platform import files
-from minkops_platform.errors import ServiceError
 
 router = APIRouter(prefix="/api/tenants/{slug}/accounts")
-
-
-def _call(action, *args, **kwargs):
-    try:
-        return action(*args, **kwargs)
-    except ServiceError as error:
-        status = {"invalid": 422, "not_found": 404, "forbidden": 403, "conflict": 409}[error.kind]
-        # Structured context (such as the receipt that won a conflict) travels
-        # with the message so the client can show the authoritative outcome.
-        detail = {"message": str(error), **error.payload} if error.payload else str(error)
-        raise HTTPException(status, detail) from error
 
 
 @router.get("/sources")
