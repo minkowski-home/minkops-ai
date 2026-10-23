@@ -115,9 +115,12 @@ def invoice_number_field(purchases, **_):
 
 
 def bank_payments(payments, ledgers, groups, **_):
+    """Whether bank payments go to each party's own ledger, or to one ledger split by cost centre; for the former, the
+    groups its payees' ledgers sit under, most used first, which a new payee's ledger is offered under."""
     banks = {row["name"] for row in ledgers if mirror.under(row["parent"], ["Bank Accounts"], groups)}
     parties = {row["name"] for row in ledgers if mirror.under(row["parent"], ["Sundry Creditors", "Sundry Debtors"], groups)}
-    counters, to_parties, with_centres = Counter(), 0, 0
+    parents = {row["name"]: row["parent"] for row in ledgers}
+    counters, under, to_parties, with_centres = Counter(), Counter(), 0, 0
     considered = 0
     for voucher in payments:
         names = set(voucher["ledgers"])
@@ -126,12 +129,15 @@ def bank_payments(payments, ledgers, groups, **_):
         considered += 1
         others = names - banks
         counters.update(others)
+        under.update(parents[name] for name in others if parents.get(name))
         to_parties += bool(others & parties)
         with_centres += "CATEGORYALLOCATIONS.LIST" in str(voucher["data"])
     evidence = {"bank_payments": considered, "to_party_ledgers": to_parties, "with_cost_centres": with_centres,
                 "distinct_counter_ledgers": len(counters)}
     if considered >= ENOUGH and to_parties / considered >= 0.8:
-        return Finding("bank_payments", {"style": "party_ledgers"}, evidence)
+        total = sum(under.values())
+        return Finding("bank_payments", {"style": "party_ledgers", "groups": [
+            {"group": group, "share": round(n / total, 2)} for group, n in under.most_common(10)]}, evidence)
     top = counters.most_common(1)
     if considered >= ENOUGH and top and top[0][1] / considered >= 0.8 and with_centres / considered >= 0.5:
         ledger = next(row for row in ledgers if row["name"] == top[0][0])

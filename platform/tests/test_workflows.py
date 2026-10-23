@@ -108,7 +108,7 @@ class InstructionContractTests(unittest.TestCase):
     def test_the_bill_instructions_name_only_fields_tools_and_codes_that_exist(self):
         from minkops_platform.accounts import bill_entry, desk_tools
         # Fields of the session's input and of lookup answers, which no answer schema declares.
-        given = {"decided_bills", "gst_duty", "description"}
+        given = {"decided_bills", "gst_duty", "description", "learnt"}
         self.check(load_definition(WORKFLOWS / "bill-entry").instructions, bill_entry.PROPOSAL.tool.input_schema,
                    set(desk_tools.TOOLS) | set(bill_entry.BILL_TOOLS) | given)
 

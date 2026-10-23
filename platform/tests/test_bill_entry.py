@@ -302,11 +302,11 @@ def companion(desk, respond=saved):
     """The PC claims its next native write, fetches the stored plan, and reports `respond(operation, plan)`."""
     db = desk["db"]
     device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
-    job = desktop.claim(db, device, desktop.companion_report("0.11.0", "Rehearsal PC", "console"))
-    if job is None or job["operation"] not in ("tally.write", "tally.supplier"):
+    job = desktop.claim(db, device, desktop.companion_report("0.11.5", "Rehearsal PC", "console"))
+    if job is None or job["operation"] not in ("tally.write", "tally.ledger"):
         db.rollback()
         return None
-    plan = desktop.plan(db, device, job["id"], job["claim_token"], 6)
+    plan = desktop.plan(db, device, job["id"], job["claim_token"], 8)
     desktop.finish(db, device, job["id"], {"claim_token": job["claim_token"], "result": respond(job["operation"], plan)})
     db.commit()
     return job["operation"], plan
@@ -675,64 +675,93 @@ def new_supplier(company, n=1, number="CS/26/0001", total=8850.0):
     return entry
 
 
-def created(details_state="Andhra Pradesh"):
-    """The companion created the ledger, read Tally's masters back, and exported the new ledger's GST details."""
+def created(**changes):
+    """The companion created the ledger as planned and read it back in full from Tally; `changes` are where Tally's
+    readback differs."""
     def respond(operation, plan):
-        assert operation == "tally.supplier"
-        return {"company_guid": plan["company_guid"], "current": None,
-                "ledgers": [{"@_NAME": "Sunrise Office Systems", "GUID": "g-sunrise", "PARENT": "Sundry Creditors"},
-                            {"@_NAME": plan["vendor"], "GUID": "g-new", "PARENT": "Sundry Creditors", "ALTERID": "7"}],
-                "supplier": {"@_NAME": plan["vendor"], "GUID": "g-new", "PARENT": "Sundry Creditors",
-                             "LEDGSTREGDETAILS.LIST": {"GSTIN": CABINS, "GSTREGISTRATIONTYPE": "Regular",
-                                                       "PLACEOFSUPPLY": "Andhra Pradesh"},
-                             "LEDMAILINGDETAILS.LIST": {"STATE": details_state, "PINCODE": "522001",
-                                                        "ADDRESS.LIST": {"ADDRESS": ["Plot 12, Auto Nagar, Guntur"]}}}}
+        assert operation == "tally.ledger"
+        ledger = plan["ledger"]
+        master = {"@_NAME": ledger["name"], "GUID": "g-new", "PARENT": ledger["under"], "ALTERID": "7",
+                  "ISBILLWISEON": "Yes" if ledger["billwise"] else "No",
+                  "BILLCREDITPERIOD": f"{ledger['credit_period']} Days" if ledger["credit_period"] else "",
+                  "LEDGSTREGDETAILS.LIST": {"GSTIN": ledger["gst"]["gstin"],
+                                            "GSTREGISTRATIONTYPE": ledger["gst"]["registration_type"]},
+                  "LEDMAILINGDETAILS.LIST": {"STATE": ledger["mailing"]["state"], "PINCODE": ledger["mailing"]["pincode"],
+                                             "ADDRESS.LIST": {"ADDRESS": ledger["mailing"]["address"]}}}
+        return {"company_guid": plan["company_guid"], "ledger": {**master, **changes}}
     return respond
 
 
-def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(desk):
-    names = names_of(desk["company"])
-    company = desk["company"]["guid"]
+def test_a_new_supplier_is_created_in_tallys_terms_only_on_approval_and_its_bills_then_follow(desk):
+    """Cabin Services has no ledger: its bill holds, offering a form laid out like Tally's ledger creation, filled from
+    the bill. The person approves the supplier and how the bill is entered; the companion creates the ledger and reads
+    it back, and only a readback showing every approved field lets the bill be entered with it."""
+    from minkops_platform.accounts import memory
+    db, names, company = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
     lookup = [("find_ledger", {"subjects": [CABINS, "Cabin Services"]})]
     fake = by_file(**{"cabins-1.pdf": [lookup, *proposing(names, new_supplier(company))],
-                      "cabins-2.pdf": proposing(names, new_supplier(company, number="CS/26/0002",
-                                                                                         total=1180.0))})
+                      "cabins-2.pdf": proposing(names, new_supplier(company, number="CS/26/0002", total=1180.0))})
     run = launch(desk, {"cabins-1.pdf": B03, "cabins-2.pdf": B03_NEXT})
     read(desk, fake, run)
-    session = next(s for s in fake.created if header(s)["file"] == "cabins-1.pdf")
-    assert answers(session, "find_ledger")[0]["results"][0]["ledgers"] == []
     first, second = records(desk, run)
     # The gate holds a bill whose supplier has no ledger at its first proposal: only a person may create one.
-    assert answers(session, "propose")[0]["bills"][0]["status"] == "held" and first["checks"]["submissions"] == 1
     assert (first["hold_codes"], first["review_reasons"]) == (["supplier_missing"], [
         "Supplier 'Cabin Services UAT' has no ledger in Rehearsal Infra Private Limited. Create it, then this bill "
         "can be saved."])
     # The supplier may also be one of the company's ledgers under another name: a person may choose it instead.
     assert actions(first) == ["supplier", "choose", "nothing", "retry"]
-    detail = bill_entry.HANDLER.detail(desk["db"], work.get_run(desk["db"], desk["tenant"]["id"], run["id"]), first)
-    assert (detail["new_supplier"]["name"], detail["new_supplier"]["gstin"]) == ("Cabin Services UAT", CABINS)
-    assert desk["db"].execute("SELECT count(*) AS n FROM native_writes WHERE run_id=%s", (run["id"],)).fetchone()["n"] == 0
-    # The readback disagrees with the bill's GST details: nothing is written and the bill keeps its offer.
-    assert decide(desk, first, "supplier")["status"] == "writing"
-    operation, plan = companion(desk, created(details_state="Telangana"))
-    assert (plan["kind"], plan["vendor"], plan["gst_supplier"]["gstin"]) == ("supplier", "Cabin Services UAT", CABINS)
-    assert plan["gst_supplier"]["template"]["name"] == "Sunrise Office Systems"
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    shown = bill_entry.HANDLER.detail(db, current, first)
+    form = shown["new_ledger"]["form"]
+    # No supplier of the company's says how it keeps balances yet: the person chooses, once.
+    assert form == {"name": "Cabin Services UAT", "under": "Sundry Creditors", "groups": ["Sundry Creditors"],
+                    "billwise": None, "credit_period": None,
+                    "mailing": {"address": ["Plot 12, Auto Nagar, Guntur"], "state": "Andhra Pradesh", "country": "India",
+                                "pincode": "522001"},
+                    "gst": {"registration_type": "Regular", "gstin": CABINS}}
+    assert shown["new_ledger"]["printed"]["name"] == "Cabin Services UAT"
+    entered = {"voucher_type": "g-purchase", "lines": ["g-repairs", "g-cgst", "g-sgst"]}
+    approved = {**form, "billwise": True, "credit_period": 30}
+    # A companion older than the one that writes ledgers is asked to update first; nothing is written.
+    device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
+    desktop.claim(db, device, desktop.companion_report("0.11.4", "Rehearsal PC", "console"))
+    db.commit()
+    with pytest.raises(ServiceError, match="to 0.11.5 or later"):
+        decide(desk, first, "supplier", {"ledger": approved, **entered})
+    # Updated, the PC reports the companion that writes them.
+    device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
+    assert desktop.claim(db, device, desktop.companion_report("0.11.5", "Rehearsal PC", "console")) is None
+    db.commit()
+    with pytest.raises(ServiceError, match="Choose whether the ledger's balances are kept bill by bill"):
+        decide(desk, first, "supplier", {"ledger": form, **entered})
+    assert db.execute("SELECT count(*) AS n FROM native_writes WHERE run_id=%s", (run["id"],)).fetchone()["n"] == 0
+    assert decide(desk, first, "supplier", {"ledger": approved, **entered})["status"] == "writing"
+    # Tally's readback shows another credit period: nothing is written, and the bill says why.
+    operation, plan = companion(desk, created(BILLCREDITPERIOD="45 Days"))
+    assert (plan["kind"], plan["protocol"], plan["ledger"]["under"], plan["ledger"]["credit_period"]) == (
+        "ledger", 8, "Sundry Creditors", 30)
     first = record(desk, first)
-    assert (first["status"], first["hold_codes"], first["review_reasons"]) == (
-        "held", ["supplier_missing"], ["The supplier's GST details in Tally differ from the bill. Review the ledger "
-                                       "there."])
-    assert actions(first) == ["supplier", "choose", "nothing", "retry"] and companion(desk) is None
-    # Verified, the new ledger becomes the party: this bill is written, and the other bill from it is proposed.
-    decide(desk, first, "supplier")
+    assert (first["status"], first["hold_codes"], first["review_reasons"]) == ("held", ["supplier_missing"], [
+        "The ledger Cabin Services UAT in Tally differs from what was approved: its credit period. Review it there."])
+    assert companion(desk) is None
+    # Corrected in Tally and approved again, the ledger is read back as approved: the bill is entered as chosen.
+    decide(desk, first, "supplier", {"ledger": approved, **entered})
     companion(desk, created())
     operation, plan = companion(desk)
     assert (operation, plan["header"]["party_ledger"]) == ("tally.write", "Cabin Services UAT")
+    assert [ln["ledger"] for ln in plan["lines"]] == ["Cabin Services UAT", "Repairs and Maintenance", "Input CGST 9%",
+                                                      "Input SGST 9%"]
     assert plan["references"]["ledgers"]["Cabin Services UAT"] == {"GUID": "g-new", "PARENT": "Sundry Creditors",
                                                                    "ALTERID": "7"}
     assert record(desk, first)["status"] == "saved"
     second = record(desk, second)
     assert (second["status"], second["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])
     assert second["proposal"]["preview"]["party"] == "Cabin Services UAT"
+    # What the person chose is learnt as theirs, and the printed name stands for the ledger they created.
+    learnt = memory.entries(db, desk["tenant"]["id"], desk["client"]["id"], company_ids=[desk["company"]["id"]],
+                            kinds=["booking", "supplier_name"])
+    assert {(row["kind"], row["evidence"][-1]["kind"]) for row in learnt} == {("booking", "choice"),
+                                                                             ("supplier_name", "choice")}
 
 
 def test_exceptions_hold_with_their_reasons_and_a_chosen_treatment_must_still_pass_the_gate(desk):

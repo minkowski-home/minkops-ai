@@ -39,7 +39,7 @@ BILL_ONLY = {"practice_question": ("nothing",)}
 STATEMENT_ONLY = {
     "statement_layout_unknown": ("nothing", "retry"), "statement_layout_changed": ("nothing", "retry"),
     "statement_transfer_unpaired": ("nothing", "retry"), "statement_interpretation": ("choose", "nothing", "retry"),
-    "ledger_unresolved": ("choose", "nothing", "retry"), "branch_unresolved": ("choose", "nothing", "retry"),
+    "ledger_unresolved": ("choose", "supplier", "nothing", "retry"), "branch_unresolved": ("choose", "nothing", "retry"),
     "statement_save_waiting": ("retry_save", "nothing"), "statement_save_held": ("retry_save", "nothing"),
     # Settled by a person's choice among the allocations the open bills leave.
     "bill_unresolved": ("settle", "nothing", "retry"),

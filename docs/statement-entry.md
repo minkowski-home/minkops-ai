@@ -180,7 +180,13 @@ each settlement choice as its own button. The runs API serves:
   approve: the person's bank ledger, other side and voucher type, checked as a
   session's proposal is, then approved and saved; a refusal changes nothing),
   `alike` (approve every row of the run proposed again as a person chose for
-  another row of that payee), `nothing` (Do nothing),
+  another row of that payee), `supplier` (Create this ledger, for a row held as
+  other side unclear: a ledger for the payee as the narration prints it, under a
+  group the company already uses for bank counterparties, most used first, within
+  Sundry Creditors, Sundry Debtors, Loans & Advances (Asset), Current Liabilities
+  and their sub-groups; offered only where the company books payees to their own
+  ledgers, or its books are too new to say. Where it books them to one ledger split
+  by cost centre, that ledger is chosen instead), `nothing` (Do nothing),
   `retry` (Recheck: the row's PC reads the books afresh, then the row is proposed
   again in a new attempt of its chunk against that copy; a row left as is offers it
   too), `retry_save`, and

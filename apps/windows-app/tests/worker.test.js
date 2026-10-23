@@ -282,7 +282,7 @@ test("a typed Tally state reaches the user verbatim instead of a generic guess",
   const typed = Object.assign(new Error("Tally isn't open on OFFICE-PC-07. Open it and your companies, then try again."), {
     userSafe: true, tallyState: "not_running",
   });
-  for (const operation of ["tally.probe", "tally.sync", "tally.write", "tally.supplier", "files.refresh"])
+  for (const operation of ["tally.probe", "tally.sync", "tally.write", "tally.ledger", "files.refresh"])
     assert.equal((await failedReceipt(operation, typed)).error, typed.message);
   const long = Object.assign(new Error("x".repeat(400)), { userSafe: true });
   assert.equal((await failedReceipt("tally.probe", long)).error.length, 300);
@@ -297,7 +297,7 @@ test("untyped failures keep their safe fallback and never leak internal details"
 test("an unnamed failure tells the member what to do for that kind of job", async () => {
   const quiet = new Error("ECONNRESET at C:\\Users\\private");
   assert.match((await failedReceipt("tally.sync", quiet)).error, /Keep Tally open/);
-  assert.match((await failedReceipt("tally.supplier", quiet)).error, /Create this ledger again/);
+  assert.match((await failedReceipt("tally.ledger", quiet)).error, /Create this ledger again/);
   assert.match((await failedReceipt("files.refresh", quiet)).error, /connected folder/);
 });
 

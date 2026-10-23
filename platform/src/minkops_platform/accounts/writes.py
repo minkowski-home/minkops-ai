@@ -4,8 +4,8 @@ Approving a record stores its immutable plan as a pending write before
 anything is sent. A pending write reserves its destination identity, so no
 other run can write the same bank transaction or bill until it is verified or
 released. Each PC gets one job at a time, in approval order: `tally.write`
-saves a voucher, and `tally.supplier` creates the supplier ledger a person
-approved for a bill. The companion fences every import locally and reads back
+saves a voucher, and `tally.ledger` creates the party ledger a person approved
+(party_ledgers.py). The companion fences every import locally and reads back
 what it wrote; the run's handler checks that readback against the plan. A
 write that was interrupted is never re-sent automatically.
 """
@@ -20,11 +20,11 @@ from minkops_platform.errors import ServiceError
 
 from .vouchers import FORMAT
 
-OPERATIONS = ("tally.write", "tally.supplier")
+OPERATIONS = ("tally.write", "tally.ledger")
 
 
 def operation(plan):
-    return "tally.supplier" if plan.get("kind") == "supplier" else "tally.write"
+    return "tally.ledger" if plan.get("kind") == "ledger" else "tally.write"
 
 
 def request(connection, run, record, plan, company, *, actor):
@@ -86,9 +86,10 @@ def plan(connection, device, job, plan_version):
     write = _write(connection, device, job)
     if write["finished_at"]:
         raise ServiceError("conflict", "This Tally write is no longer pending.")
-    voucher = write["plan"].get("kind") != "supplier"
     # A plan waits for a companion that executes its protocol; an earlier pending plan stays executable.
-    if voucher and not (write["plan"].get("format_version") or FORMAT + 1) <= min(plan_version, FORMAT):
+    needed = write["plan"]["protocol"] if write["plan"].get("kind") == "ledger" else (
+        write["plan"].get("format_version") or FORMAT + 1)
+    if needed > plan_version or (write["plan"].get("kind") != "ledger" and needed > FORMAT):
         raise ServiceError("conflict", "Update Minkops on this PC to the latest version, then retry the save.")
     return {**write["plan"], "port": device["tally_port"]}
 

@@ -973,8 +973,9 @@ def test_a_chosen_other_side_is_saved_learnt_and_offered_for_the_payees_other_ro
     current = work.get_run(db, desk["tenant"]["id"], run["id"])
     actions = lambda row: [a["action"] for a in statement_entry.HANDLER.summarize(  # noqa: E731
         current, work.get_record(db, desk["tenant"]["id"], row["id"]))["actions"]]
+    # Its books too new to say how payees are booked, the payee's own ledger may be created too.
     assert (first["hold_codes"], actions(first), actions(charges)) == (
-        ["ledger_unresolved"], ["choose", "nothing", "retry"], ["approve", "choose", "nothing"])
+        ["ledger_unresolved"], ["choose", "supplier", "nothing", "retry"], ["approve", "choose", "nothing"])
     choice = statement_entry.HANDLER.detail(db, current, first)["choice"]
     assert (choice["payee"], choice["bank_ledger"]["name"], [c["name"] for c in choice["candidates"]],
             [t["name"] for t in choice["voucher_types"]]) == (
@@ -1143,3 +1144,74 @@ def test_held_and_deferred_rows_a_person_entered_in_tally_by_hand_are_reconciled
         ("duplicate", [statement_entry.BY_HAND], "v-acme"), ("duplicate", [statement_entry.BY_HAND], "v-back")]
     [learnt] = routings(desk)
     assert learnt["value"]["counter_ledger"] == "Acme Steel"
+
+
+def test_a_payees_own_ledger_is_created_in_tallys_terms_only_where_the_company_gives_payees_ledgers(desk):
+    """No ledger is Acme Steel's. Where the books cannot say how payees are booked, the row offers Create this
+    ledger, under a group a party may go under: refused under any other group or as the wrong voucher type, then
+    created, read back, and the row entered with it. A company that books payees to one ledger split by cost centre
+    is offered no such ledger."""
+    import factory
+
+    from minkops_platform import desktop
+    from minkops_platform.accounts import memory
+    db, company = desk["db"], desk["company"]
+    factory.books(db, company, [r for r in masters(company) if r["data"]["GUID"] != "g-acme"])
+    db.commit()
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {"code": "ledger_unresolved", "detail": "No ledger is Acme Steel's.",
+                                              "company_guid": company["guid"], "bank_ledger_guid": "g-icici",
+                                              "payee": "ACME STEEL"}}
+            if "ACME" in row["narration"] else booked(row, company["guid"])
+            for row in rows_of(session) if "ACME" in row["narration"] or "CHARGES" in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    acme = next(r for r in records(desk, run) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    assert [a["action"] for a in statement_entry.HANDLER.summarize(current, acme)["actions"]] == [
+        "choose", "supplier", "nothing", "retry"]
+    form = statement_entry.HANDLER.detail(db, current, acme)["new_ledger"]["form"]
+    assert (form["name"], form["under"], form["groups"]) == (
+        "ACME STEEL", None, ["Sundry Creditors", "Sundry Debtors", "Loans & Advances (Asset)", "Current Liabilities"])
+    approved = {**form, "name": "Acme Steel", "under": "Sundry Creditors", "billwise": False,
+                "gst": {"registration_type": "Unregistered"}}
+    for ledger, voucher_type, why in ((approved, "g-receipt", "Money out is entered as a Payment"),
+                                      ({**approved, "under": "Bank Accounts"}, "g-payment", "Choose a group a party")):
+        with pytest.raises(ServiceError, match=why):
+            decide(desk, acme, "supplier", {"ledger": ledger, "voucher_type": voucher_type})
+        db.rollback()
+    assert decide(desk, acme, "supplier", {"ledger": approved, "voucher_type": "g-payment"})["status"] == "writing"
+    device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
+    job = desktop.claim(db, device, desktop.companion_report("0.11.5", "Rehearsal PC", "console"))
+    plan = desktop.plan(db, device, job["id"], job["claim_token"], 8)
+    assert (job["operation"], plan["ledger"]["under"], plan["ledger"]["gst"]) == ("tally.ledger", "Sundry Creditors",
+                                                                                  None)
+    desktop.finish(db, device, job["id"], {"claim_token": job["claim_token"], "result": {
+        "company_guid": company["guid"], "ledger": {"@_NAME": "Acme Steel", "GUID": "g-acme-new",
+                                                    "PARENT": "Sundry Creditors", "ALTERID": "11", "ISBILLWISEON": "No"}}})
+    db.commit()
+    saved = companion(desk)
+    assert [line["ledger"] for line in saved["lines"]] == ["ICICI Current A/c", "Acme Steel"]
+    assert work.get_record(db, desk["tenant"]["id"], acme["id"])["status"] == "saved"
+    [learnt] = memory.entries(db, desk["tenant"]["id"], desk["client"]["id"], company_ids=[company["id"]],
+                              kinds=["routing"])
+    assert (learnt["value"]["counter_ledger"], learnt["evidence"][-1]["kind"]) == ("Acme Steel", "choice")
+    # Where payees are booked to one ledger split by cost centre, a payee gets no ledger of its own.
+    memory.record(db, tenant_id=company["tenant_id"], client_id=company["client_id"], company_id=company["id"],
+                  kind="practice", subject="bank_payments", status="confirmed", evidence={"kind": "probe"},
+                  value={"style": "one_ledger_cost_centres", "ledger": "Wages", "ledger_guid": "g-charges"})
+    db.commit()
+    again = launch(desk, {"icici-oct.csv": ICICI.replace(b"/09/2026", b"/10/2026")})
+    with host(desk, fake):
+        refreshed(desk)
+        until(lambda: all(i["state"] == "done" for i in items(desk, again)))
+    held = next(r for r in records(desk, again) if "ACME" in r["facts"]["narration"])
+    assert [a["action"] for a in statement_entry.HANDLER.summarize(current, held)["actions"]] == [
+        "choose", "nothing", "retry"]

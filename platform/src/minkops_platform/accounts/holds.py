@@ -159,10 +159,14 @@ _CATALOG = [
     ]),
     *_holds((STATEMENT,), _INTERPRETATION, [
         ("statement_interpretation", EXCEPTION, "Ledger unclear", "The ledger for this transaction could not be confirmed."),
-        ("ledger_unresolved", EXCEPTION, "Other side unclear",
-         "The other side of this transaction could not be matched to exactly one Tally ledger."),
         ("branch_unresolved", EXCEPTION, "Routing label unclear",
          "The client's routing label on this row could not be interpreted."),
+    ]),
+    # The other side is chosen among the company's ledgers, or, where it books such parties to their own ledgers,
+    # created for the payee.
+    *_holds((STATEMENT,), ("choose", "supplier", "nothing", "retry"), [
+        ("ledger_unresolved", EXCEPTION, "Other side unclear",
+         "The other side of this transaction could not be matched to exactly one Tally ledger."),
     ]),
     # A person chooses which open bills a payment settles, from the allocations the books leave open.
     *_holds((STATEMENT,), ("settle", "nothing", "retry"), [

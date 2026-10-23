@@ -28,12 +28,13 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
 from pathlib import Path
+from uuid import UUID
 
 from jsonschema import ValidationError
 
 from minkops_connectors import einvoice
 from minkops_connectors.documents import pages
-from minkops_platform import work
+from minkops_platform import desktop, work
 from minkops_platform.errors import ServiceError
 from minkops_platform.files import files_for
 from minkops_platform.lanes import Session
@@ -41,7 +42,7 @@ from minkops_platform.run_controls import control_state, require_active, resolve
 from minkops_platform.runtime.tools import Answer, Tool, ToolError
 from minkops_platform.workflows import resolve_run_config
 
-from . import desk_tools, memory, mirror, practice, supplier_gst, sync, writes
+from . import desk_tools, memory, mirror, party_ledgers, practice, supplier_gst, sync, writes
 from .desk_tools import COMPANY, Desk, reference, schema
 from .holds import ACTIONS, BILL, EXCEPTION, hold
 from .holds import actions as hold_actions
@@ -699,7 +700,7 @@ def _offers(connection, desk, bill, company, codes, count):
     allowed, view, until, offers = hold_actions(codes), desk.view(connection, company), desk.until(company), []
     if "choose" in allowed and _choosable(connection, desk, bill, company, count):
         offers.append("choose")
-    if "supplier" in allowed and _supplier_plan(bill, view, company, until) is not None:
+    if "supplier" in allowed and _creatable(bill, view, company, until):
         offers.append("supplier")
     return offers
 
@@ -1060,15 +1061,13 @@ def summarize(run, record):
 def detail(connection, run, record):
     proposal = record["proposal"] or {}
     bill = proposal.get("bill") or {}
-    supplier = {key: value for key, value in (bill.get("supplier_details") or {}).items() if key != "evidence"}
     offered = _offered(record, run)
     return {**summarize(run, record), "facts": record["facts"], "preview": proposal.get("preview"),
             "evidence": bill.get("evidence"), "lines": (bill.get("voucher") or {}).get("lines"),
             "exception": bill.get("exception"), "repeat_of": proposal.get("repeat_of"), "rules": proposal.get("rules"),
             "current": record["current"],
-            **({"choice": _choice(connection, run, record)} if "choose" in offered else {}),
-            **({"new_supplier": {"name": (bill.get("document") or {}).get("supplier_name"), **supplier}}
-               if "supplier" in offered else {})}
+            **({"choice": _choice(connection, run, record)} if "choose" in offered or "supplier" in offered else {}),
+            **({"new_ledger": _new_ledger(connection, run, record)} if "supplier" in offered else {})}
 
 
 def _choice(connection, run, record):
@@ -1125,7 +1124,7 @@ def decide(connection, run, record, action, detail, context):
     if action == "retry":
         return _recheck(connection, run, record, actor)
     if action == "supplier":
-        return _create_supplier(connection, run, record, actor=actor)
+        return _create_ledger(connection, run, record, detail, actor=actor)
     if action == "choose":
         return _choose(connection, run, record, detail, actor=actor)
     if action == "alike":
@@ -1135,25 +1134,26 @@ def decide(connection, run, record, action, detail, context):
     return _approve(connection, run, record, actor=actor)
 
 
-def _chosen(bill, types, detail):
-    """The bill as a person chose to book it: `detail` names its voucher type, its supplier, each line's ledger and,
-    for an item-wise bill, each item's purchase ledger, by GUID. Its family follows the voucher type (`types`, the
-    company's, by GUID); every amount, tax and allocation stays as the bill was read."""
+def _chosen(bill, types, detail, *, new_supplier=False):
+    """The bill as a person chose to book it: `detail` names its voucher type, its supplier (unless it is a new one
+    being created), each line's ledger and, for an item-wise bill, each item's purchase ledger, by GUID. Its family
+    follows the voucher type (`types`, the company's, by GUID); every amount, tax and allocation stays as read."""
     voucher = bill["voucher"]
     lines, items = voucher.get("lines") or [], voucher.get("items") or []
     detail = detail if isinstance(detail, dict) else {}
     named = lambda value: isinstance(value, str) and 0 < len(value) <= 200  # noqa: E731
     chosen_lines, chosen_items = detail.get("lines"), detail.get("items") or []
-    if (not named(detail.get("voucher_type")) or not named(detail.get("party")) or not isinstance(chosen_lines, list)
-            or len(chosen_lines) != len(lines) or not all(map(named, chosen_lines)) or not isinstance(chosen_items, list)
-            or len(chosen_items) != len(items) or not all(map(named, chosen_items))):
-        raise ServiceError("invalid", "Choose the voucher type, the supplier and a ledger for every line"
-                                      + (" and item." if items else "."))
+    if (not named(detail.get("voucher_type")) or not (new_supplier or named(detail.get("party")))
+            or not isinstance(chosen_lines, list) or len(chosen_lines) != len(lines) or not all(map(named, chosen_lines))
+            or not isinstance(chosen_items, list) or len(chosen_items) != len(items) or not all(map(named, chosen_items))):
+        raise ServiceError("invalid", "Choose the voucher type" + ("" if new_supplier else ", the supplier")
+                                      + " and a ledger for every line" + (" and item." if items else "."))
     family = (types.get(detail["voucher_type"]) or {}).get("family")
+    party = ({"ledger_guid": None, "new_supplier": True, "evidence": voucher["party"]["evidence"]} if new_supplier
+             else {"ledger_guid": detail["party"], "new_supplier": False, "evidence": "Chosen by a person in review."})
     return {**bill, "exception": None, "voucher": {
         **voucher, "family": family.replace(" ", "_") if family else voucher["family"],
-        "voucher_type_guid": detail["voucher_type"],
-        "party": {"ledger_guid": detail["party"], "new_supplier": False, "evidence": "Chosen by a person in review."},
+        "voucher_type_guid": detail["voucher_type"], "party": party,
         "lines": [{**line, "ledger_guid": guid} for line, guid in zip(lines, chosen_lines, strict=True)],
         **({"items": [{**item, "ledger_guid": guid} for item, guid in zip(items, chosen_items, strict=True)]}
            if items else {})}}
@@ -1349,73 +1349,72 @@ def practice_settled(connection, tenant_id, company_id, probe):
 
 # --- new suppliers ----------------------------------------------------------------------
 
-def _supplier_plan(bill, view, company, until):
-    """The supplier ledger a person may create for this bill, or None when it cannot be created safely.
-
-    The bill must name a new supplier with printed evidence and pass every
-    check once that supplier exists; a GST bill's ledger copies its company's
-    GST creditor template (supplier_gst.creation_plan).
-    """
+def _creatable(bill, view, company, until):
+    """Whether a person may create this bill's supplier: the bill names a new supplier, quoting the name it prints,
+    no ledger has that name, and the bill passes every other check once the supplier exists."""
     party = (bill.get("voucher") or {}).get("party") or {}
-    if party.get("ledger_guid") is not None or party.get("new_supplier") is not True:
-        return None
-    if not any(e["field"] == "supplier_name" and e["quote"].strip() for e in bill.get("evidence") or []):
-        return None
-    vendor = ((bill.get("document") or {}).get("supplier_name") or "").strip()
-    if any(record["type"] == "LEDGER" and mirror.normalized(supplier_gst.scalar(
-            record["data"].get("@_NAME") or record["data"].get("NAME"))) == mirror.normalized(vendor)
-           for record in view["masters"]["records"]):
-        return None  # A ledger already has this name: the supplier is not missing, only unmatched.
+    printed = memory.printed_supplier(bill)
+    if party.get("ledger_guid") is not None or party.get("new_supplier") is not True or not printed:
+        return False
+    if any(record["type"] == "LEDGER" and mirror.normalized(mirror.text(record["data"].get("@_NAME"))
+                                                            or mirror.text(record["data"].get("NAME")))
+           == mirror.normalized(printed["name"]) for record in view["masters"]["records"]):
+        return False  # A ledger already has this name: the supplier is not missing, only unmatched.
     try:
-        bound = check(bill, view, company, until=until, assume_new_supplier=True)
-        tax = sum(ln["amount_cents"] for ln, item in zip(bound.lines[1:], bill["voucher"]["lines"], strict=True)
-                  if item["role"] == "tax")
-        gst = supplier_gst.creation_plan(bill.get("supplier_details"), view, tax=tax, issued=bill["document"]["date"])
-    except ValueError:
-        return None
-    return {"kind": "supplier", "company": company["name"], "company_guid": company["guid"], "vendor": vendor,
-            "gst_supplier": gst, "destination_key": f"supplier:{company['guid']}",
-            "identity": {"hash": gst["gstin"] if gst else mirror.normalized(vendor)}}
+        check(bill, view, company, until=until, assume_new_supplier=True)
+    except HoldReason:
+        return False
+    return True
 
 
-def _create_supplier(connection, run, record, *, actor):
+def _new_ledger(connection, run, record):
+    """What Create this ledger shows: the new supplier's form in Tally's terms, filled from the bill and how the company
+    keeps its suppliers, beside what the bill prints."""
     desk, company = _destination(connection, run, record)
-    plan = _supplier_plan(record["proposal"]["bill"], desk.view(connection, company), company, desk.until(company))
-    if plan is None:
+    bill = record["proposal"]["bill"]
+    printed = {key: value for key, value in (bill.get("supplier_details") or {}).items() if key != "evidence"}
+    share = (practice.settled(connection, company, "billwise") or {}).get("share")
+    return {"form": party_ledgers.form(desk.view(connection, company), kind="supplier",
+                                       name=bill["document"]["supplier_name"].strip(), printed=printed, billwise=share),
+            "printed": {"name": bill["document"]["supplier_name"], **printed}}
+
+
+def _create_ledger(connection, run, record, detail, *, actor):
+    """A person's new supplier, from their form, with the bill as it will be entered with it: its voucher type and each
+    line's ledger. Both are checked now. The companion creates the ledger and reads it back, and once that readback is
+    verified the bill is entered as chosen (`_ledger_created`)."""
+    desk, company = _destination(connection, run, record)
+    view, bill = desk.view(connection, company), record["proposal"]["bill"]
+    if not _creatable(bill, view, company, desk.until(company)):
         raise ServiceError("conflict", "This supplier can no longer be created from the bill's details.")
     row = connection.execute("SELECT * FROM companies WHERE id=%s", (record["company_id"],)).fetchone()
+    desktop.require_companion(connection.execute("SELECT * FROM desktop_devices WHERE id=%s",
+                                                 (row["device_id"],)).fetchone(), minimum=party_ledgers.COMPANION)
+    detail = detail if isinstance(detail, dict) else {}
+    try:
+        plan = party_ledgers.plan(view, company, detail.get("ledger"), kind="supplier")
+    except ValueError as error:
+        raise ServiceError("invalid", str(error)) from None
+    treatment = {key: detail.get(key) for key in ("voucher_type", "lines", "items")}
+    types = {t["guid"]: t for t in desk.voucher_types(connection, company)}
+    try:
+        check(_chosen(bill, types, treatment, new_supplier=True), view, company, until=desk.until(company),
+              assume_new_supplier=True)
+    except HoldReason as refusal:
+        raise ServiceError("invalid", str(refusal)) from None
     if not writes.request(connection, run, record, plan, row, actor=actor):
         raise ServiceError("conflict", "This supplier is being created for another bill. Once that finishes, its bills "
                                        "here are checked again with it.")
-    work.update_record(connection, record, status="writing")
+    work.update_record(connection, record, status="writing",
+                       proposal={**record["proposal"], "creating": {**treatment, "by": str(actor)}})
     return {"status": "writing"}
 
 
-def _created_master(plan, receipt):
-    """The created supplier's identity, verified from the companion's readback, or why it cannot be trusted."""
-    if receipt.get("outcome") == "attention":
-        return None, (str(receipt.get("message") or "") or "The supplier could not be created and verified in Tally.")
-    if receipt.get("company_guid") != plan["company_guid"]:
-        return None, "Tally answered for another company, so the supplier was not verified."
-    named = [ledger for ledger in receipt.get("ledgers") or [] if isinstance(ledger, dict) and mirror.normalized(
-        supplier_gst.scalar(ledger.get("@_NAME") or ledger.get("NAME"))) == mirror.normalized(plan["vendor"])]
-    if len(named) != 1:
-        return None, "Tally does not show exactly one ledger with this supplier's name."
-    master = {"@_NAME": supplier_gst.scalar(named[0].get("@_NAME") or named[0].get("NAME")),
-              **{key: supplier_gst.scalar(named[0].get(key)) for key in ("GUID", "PARENT", "ALTERID")}}
-    if not master["GUID"] or master["PARENT"] != "Sundry Creditors":
-        return None, f"The ledger {master['@_NAME']} in Tally is not a supplier under Sundry Creditors."
-    supplier = receipt.get("supplier")
-    if plan["gst_supplier"] and not (isinstance(supplier, dict) and supplier_gst.scalar(supplier.get("GUID")) ==
-                                     master["GUID"] and supplier_gst.verified_supplier(supplier, plan["gst_supplier"])):
-        return None, "The supplier's GST details in Tally differ from the bill. Review the ledger there."
-    return master, None
-
-
-def _supplier_created(connection, run, record, write, receipt):
-    """A verified new supplier: its bills in this run are checked again with it, and the approved one is written."""
+def _ledger_created(connection, run, record, write, receipt):
+    """A new supplier verified in Tally: the bill it was created for is entered with it as the person chose, and the
+    run's other bills from that supplier are proposed with it, for review."""
     plan = write["plan"]
-    master, problem = _created_master(plan, receipt)
+    master, problem = party_ledgers.verified(plan, receipt)
     if problem:
         work.update_record(connection, record, status="held", hold_codes=["supplier_missing"],
                            review_reasons=[problem[:300]])
@@ -1423,15 +1422,25 @@ def _supplier_created(connection, run, record, write, receipt):
     created = {"type": "LEDGER", "data": master}
     desk, company = _destination(connection, run, record)
     view, until = desk.view(connection, company), desk.until(company)
+    mine = memory.printed_supplier(record["proposal"]["bill"])
     for other in connection.execute(
             """SELECT * FROM run_records WHERE run_id=%s AND company_id=%s AND id<>%s AND status='held'
                    AND hold_codes='{supplier_missing}' FOR UPDATE""",
             (run["id"], record["company_id"], record["id"])).fetchall():
-        found = _supplier_plan(other["proposal"]["bill"], view, company, until)
-        if found and found["identity"] == plan["identity"]:
+        theirs = memory.printed_supplier(other["proposal"]["bill"])
+        same = theirs and (theirs["gstin"] == mine["gstin"] if theirs["gstin"] and mine["gstin"]
+                           else mirror.normalized(theirs["name"]) == mirror.normalized(mine["name"]))
+        if same and _creatable(other["proposal"]["bill"], view, company, until):
             _with_supplier(connection, run, other, created, review=[UNPRECEDENTED])
-    if _with_supplier(connection, run, record, created, review=[]):
-        _approve(connection, run, record, actor=run["actor_id"])
+    creating = record["proposal"]["creating"]
+    types = {t["guid"]: t for t in desk.voucher_types(connection, company)}
+    bill = _chosen(record["proposal"]["bill"], types, {**creating, "party": master["GUID"]})
+    if _repropose(connection, run, record, bill, review=[], created=[created]):
+        # The person chose this supplier and treatment: what the save teaches is theirs (memory, recognition).
+        proposed = work.get_record(connection, run["tenant_id"], record["id"], lock=True)
+        work.update_record(connection, proposed, proposal={**proposed["proposal"], "chosen": {
+            "by": creating["by"], "held": "supplier_missing", "matched": None}})
+        _approve(connection, run, proposed, actor=UUID(creating["by"]))
     return {"verified": True, "outcome": "saved"}
 
 
@@ -1448,8 +1457,8 @@ def _with_supplier(connection, run, record, created, *, review):
 
 def written(connection, run, record, write, receipt):
     """A receipt from the companion: a created supplier, a verified bill, or a hold."""
-    if write["plan"].get("kind") == "supplier":
-        return _supplier_created(connection, run, record, write, receipt)
+    if write["plan"].get("kind") == "ledger":
+        return _ledger_created(connection, run, record, write, receipt)
     outcome = receipt.get("outcome")
     if outcome not in ("saved", "duplicate", "correction", "attention"):
         raise ServiceError("invalid", "Invalid Tally write receipt.")
@@ -1496,7 +1505,12 @@ def _recognised(connection, run, chosen):
     if not printed or party == chosen["proposal"]["chosen"].get("matched"):
         return
     desk, company = _destination(connection, run, chosen)
-    [ledger] = mirror.masters(connection, company["id"], company["version"], guids=[party])
+    # A supplier created for this bill is not in the run's books yet: its verified readback names it.
+    ledger = next(iter(mirror.masters(connection, company["id"], company["version"], guids=[party])), None) or next(
+        ({"guid": master["data"]["GUID"], "name": master["data"]["@_NAME"], "gstin": None}
+         for master in chosen["proposal"].get("created") or [] if master["data"]["GUID"] == party), None)
+    if ledger is None:
+        return
     memory.recognise(connection, company, name=printed["name"], gstin=printed["gstin"], ledger=ledger,
                      evidence={"kind": "choice", "run": str(run["id"]), "record": str(chosen["id"])},
                      actor_id=chosen["proposal"]["chosen"]["by"])

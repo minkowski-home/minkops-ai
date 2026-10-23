@@ -5,7 +5,7 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.11.4 (plan protocol 7; see its contracts below);
+This revision builds companion 0.11.5 (plan protocol 8; see its contracts below);
 the last release recorded in `windows-release.json` is 0.9.1. The server refuses
 Tally work from companions older than 0.11.0. The companion works only with the companies open
 in the user's own Tally, reports typed session states, sends diagnostics and
@@ -302,6 +302,29 @@ Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
 
+### Companion 0.11.5: plan protocol 8
+
+Protocol 8 adds one plan, a party ledger a person approved (`tally.ledger`,
+`accounts/party_ledgers.py`), replacing the supplier plan of earlier releases.
+Vouchers stay protocol 6 or 7. The server sends a ledger plan only to a companion
+reporting protocol 8, and a person's Create this ledger asks a PC whose companion
+is older than 0.11.5 to update first, before anything is stored. The plan states:
+
+- the ledger's `name`, the group it goes `under`, whether balances are kept
+  bill by bill (`billwise`) and the default `credit_period` in days (only for a
+  ledger kept bill by bill);
+- `mailing` details (address lines, state, country, PIN) and `gst` registration
+  (type, GSTIN, its state and the date it applies from), each optional;
+- the `shape` the company's Tally keeps them in: the dated
+  `LEDMAILINGDETAILS.LIST` and `LEDGSTREGDETAILS.LIST` of newer releases, or the
+  older fields, as the company's own ledgers show.
+
+The companion checks the plan again (`validLedgerPlan`), imports exactly these
+fields only when no ledger has the name, so a retry after a lost acknowledgement
+reads back the one it created, and returns the full ledger read back by GUID.
+The server trusts it only when every approved field reads back as written
+(`party_ledgers.verified`); otherwise it names what differs and uses nothing.
+
 ### Companion 0.11.4: plan protocol 7
 
 Protocol 7 is protocol 6 plus two shapes of a ledger line, each stated only by a
@@ -451,10 +474,8 @@ every plan exactly as approved and refuses retired formats, so a run approved
 before protocol 5 must be started again.
 
 Bill and statement records arrive as `tally.write` jobs, one at a time per PC,
-from the client's runs. A `tally.supplier` job creates one approved GST creditor:
-it is imported only when no ledger has its name, so a retry after a lost
-acknowledgement reads back the ledger it created, and the server accepts it only
-when the readback carries every approved statutory and mailing value. A
+from the client's runs. A `tally.ledger` job creates one approved party ledger
+(protocol 8, above). A
 `tally.sync` job collects the books read-only, in the pages the server asks for
 (see [the rebuild design](rebuild/design.md#sync-protocol)). See [Statement Entry](statement-entry.md)
 for routing, balances, review and recovery. The distributed Windows x64 installer remains an unsigned

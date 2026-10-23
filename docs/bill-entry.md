@@ -397,24 +397,25 @@ session, and Minkops never starts, closes or restarts Tally. See
 When no ledger is the bill's supplier, the session sets `party.new_supplier` and
 reads the supplier's GST details from the bill: GSTIN, registration type, state
 and state code, place of supply, address and PIN, each with its page and quote.
-The bill holds as Missing supplier. Create this ledger is offered only when:
+The bill holds as Missing supplier. Create this ledger is offered only when the
+session quoted the printed name, no ledger has it, and the bill passes every other
+check once the supplier exists. It opens a form laid out like Tally's ledger
+creation (`accounts/party_ledgers.py`), beside what the bill prints: the name; the
+group, Sundry Creditors or one of its sub-groups; whether balances are kept bill by
+bill, starting as most of the company's suppliers keep them (the `billwise`
+practice), or unchosen when it has none, and a default credit period; the mailing
+details; the GST registration type and GSTIN. Below it is the bill as it will be
+entered with the new supplier: its voucher type and each line's ledger, chosen with
+the picker. The server checks both: a GSTIN's check character and state, a name no
+ledger or group has, the group, the credit period, and every gate the bill must
+pass. A PC whose companion is older than 0.11.5 is asked to update first.
 
-- no ledger already has the printed name or GSTIN;
-- the GSTIN passes its check character, and the printed state and state code
-  match it;
-- the supplier, the company and the place of supply are in one state (a
-  cross-state supplier is created by hand in v1), and a Composition supplier
-  charges no tax;
-- every detail is quoted from the bill, with a six-digit PIN;
-- the company has a Regular GST creditor to model the ledger on;
-- the bill passes every other check once the supplier exists.
-
-A person's decision queues `tally.supplier`. The companion imports the ledger
-only when no ledger has its name, so a retry reads back the one it created. The
-readback must show exactly one creditor under Sundry Creditors carrying every
-approved statutory and mailing value. The bill is then checked again with the
-new supplier and written. Other bills of the same supplier in the run are
-proposed with it too, and wait for review.
+One approval queues `tally.ledger`. The companion imports the ledger only when no
+ledger has its name, so a retry reads back the one it created, and the server
+trusts the readback only when every approved field is there. The bill is then
+entered as the person chose, which teaches its booking and that the printed name
+stands for the new ledger. Other bills of the same supplier in the run are proposed
+with it too, and wait for review.
 
 ## Verification
 
