@@ -257,9 +257,10 @@ class MigrationTests(unittest.TestCase):
     def test_supplier_jobs_become_ledger_jobs_and_a_pending_supplier_creation_holds_the_upgrade(self):
         """Migration 0037 renames the supplier jobs a database already holds, and waits for any pending creation."""
         upgrade = (ROOT / "db/migrations/0037_ledger_writes.sql").read_text()
+        # The older constraint, not validated against jobs other tests left in this database.
         older = """ALTER TABLE desktop_jobs DROP CONSTRAINT desktop_jobs_operation_check;
             ALTER TABLE desktop_jobs ADD CONSTRAINT desktop_jobs_operation_check CHECK (operation = ANY (ARRAY[
-            'tally.probe','files.refresh','tally.sync','tally.write','tally.supplier']))"""
+            'tally.probe','files.refresh','tally.sync','tally.write','tally.supplier'])) NOT VALID"""
         with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
             tenant = connection.execute("INSERT INTO tenants(slug,name) VALUES (%s,'Ledgers') RETURNING id",
                                         ("ledgers-" + uuid4().hex,)).fetchone()[0]
