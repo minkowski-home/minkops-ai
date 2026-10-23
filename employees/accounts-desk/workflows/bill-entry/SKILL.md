@@ -63,10 +63,20 @@ exception's detail: name companies and ledgers there by name.
 
 ## The document
 
-Record the document as printed, never as you would compute it. A company with
-several GST registrations needs the buyer GSTIN the bill is addressed to, to
-know which registration bought. Where the PDF has a text layer, the total and
-any round-off must be figures it prints.
+Record the document as printed, never as you would compute it. Where the PDF
+has a text layer, the total and any round-off must be figures it prints.
+
+- **Date.** Write it year first, as `YYYY-MM-DD`, and quote where the bill
+  prints it. Indian bills print dates day first: `01-Oct-2026` or `01/10/2026`
+  is `2026-10-01`. A running-account bill or job card dated only by its
+  certification or completion is dated by that.
+- **Buyer GSTIN.** Give it whenever the bill prints one. A company with several
+  registrations needs it to know which bought, and input tax is claimed only on
+  a bill that names the company's GSTIN.
+- **Adjustments.** Give in `adjustments` what the bill prints as taken off, or
+  held back from, what the supplier is paid: an advance already paid and
+  adjusted, retention, contractual withholding, or a refundable deposit it
+  charges. A previous balance is none of these.
 
 ## The buyer: which company
 
@@ -118,7 +128,9 @@ Propose the voucher this client's own practice records for the document.
   - which voucher type (`voucher_types`) records them;
   - which purchase or expense ledger each purpose and rate uses;
   - which tax ledgers each head and rate uses;
-  - whether freight, discounts or a printed round-off post to their own ledgers;
+  - whether freight, handling, packing, discounts or a printed round-off post to
+    their own ledgers, or within the main purchase head: book this bill's the
+    same way, so a charge the supplier's bills kept in the main head stays there;
   - whether they were booked item-wise, with stock `items`.
 
   A ledger's `description` is the client's own note on what it records.
@@ -128,8 +140,10 @@ Propose the voucher this client's own practice records for the document.
   and that alone is no reason to hold one: book it to the purchase or expense
   ledger the client uses for those goods. Search for that ledger by the goods
   and their purpose too, not only through history. A bill needs stock items
-  only when the client records such purchases item-wise: this supplier's or
-  that ledger's earlier bills carry `items`.
+  only when the client records such purchases item-wise: this supplier's
+  earlier bills carry `items`, or, for a supplier with no history, that
+  ledger's do. Another supplier's item-wise bills on the same ledger never
+  make this supplier's bills item-wise.
 - **Item-wise purchases.** When the client books the purchase item-wise, give
   `voucher.items`, one per item line of the bill:
   - the stock item (`find_stock_item`, by its name, alias or HSN code);
@@ -143,13 +157,20 @@ Propose the voucher this client's own practice records for the document.
     supplier's goods went to before.
 
   Items carry the bill's taxable value, so they are not also expense lines.
-  Taxes, freight and a round-off remain lines. A line discount, an item kept
-  in batches, or a free quantity beyond what is billed is `unsupported_structure`.
+  Taxes, freight and a round-off remain lines. In an item-wise purchase, a line
+  discount, an item kept in batches, or a free quantity beyond what is billed is
+  `unsupported_structure`. A bill booked to ledgers carries each line at its
+  discounted value, so its line discounts need nothing more.
 - **Lines.** Post each line on the side the client's vouchers of this family
   post it. Minkops computes the supplier's line from the total.
-- **Cost centres.** When the bill allocates a cost to sites or projects, and the
-  company keeps cost centres on that ledger, give each line the cost centre
-  `cost_centres` finds for it; its category comes with it.
+- **Cost centres.** Allocate a line only when `find_ledger` shows its ledger
+  keeps cost centres (`cost_centres`) and the bill assigns the cost: to one site
+  or project, or across several with each share or percentage printed. Give one
+  line per cost centre, each with its share, even on one ledger; `cost_centres`
+  finds each centre and its category comes with it. A site or project the bill
+  merely names is no allocation on a ledger that keeps no cost centres: book the
+  bill without one. On a ledger that keeps them, several projects named with no
+  split printed is `classification_uncertain`.
 - **Taxes.** State each tax as the bill prints it: one line per head and rate.
   Its ledger is the one for that head and rate: a ledger Tally marks as a GST
   duty says so in `find_ledger` (`gst_duty`, such as `CGST at 9%`), and Minkops
@@ -159,13 +180,19 @@ Propose the voucher this client's own practice records for the document.
   `goods` for HSN-coded goods, `services` for SAC-coded services. When the bill
   taxes its lines at more than one rate, give each such line its `gst_rate` as
   printed (CGST plus SGST, or IGST), and 0 for a line it does not tax; at one
-  rate, leave `gst_rate` null. Minkops checks that the lines at each rate come
+  rate, leave `gst_rate` null. A ledger carrying goods at several rates takes one
+  line per rate. Minkops checks that the lines at each rate come
   to the value taxed at it.
 - **Taxable values.** Expense lines carry taxable values. When the bill's amount
   column includes the tax, use the taxable value and give the tax its own line.
-- **Adjustments.** A round-off line records a printed round-off of at most one
-  rupee. A TDS line is tax deducted at source under the Income-tax Act, with
-  its section and rate.
+- **Adjustment lines.** A round-off line records a printed round-off of at most
+  one rupee. A TDS line is tax deducted at source under the Income-tax Act, with
+  its section and rate. A retention line holds back printed retention or
+  contractual withholding from what the supplier is paid, on the supplier's
+  side, to the ledger the company keeps it in. A deposit line carries a
+  refundable deposit the bill charges, to the company's deposit ledger. An
+  advance adjusted needs no line: Minkops books the bill at its full value and a
+  person matches the advance in Tally.
 - **Families.** An invoice is a Purchase or Journal voucher, and a supplier's
   credit note a Debit Note.
 - **Bill-by-bill suppliers.** A supplier that keeps its balances bill by bill
@@ -185,11 +212,12 @@ Propose the voucher this client's own practice records for the document.
 - **Taxable value.** GST is charged on the value of the supply, including the
   freight, packing and other charges the bill taxes with it. A previous balance,
   an advance adjusted, a retention or a security deposit the bill shows is not
-  part of the purchase's value: book what the client's history books for such
-  amounts, or hold the bill as `classification_uncertain` when there is none.
-- **Deductions.** A contractual withholding or retention is not TDS. Book it as
-  the client's history books such deductions, or hold the bill as
-  `classification_uncertain`.
+  part of the purchase's value: report it in `adjustments`, and book it as the
+  adjustment lines say, or hold the bill as `classification_uncertain` when the
+  company keeps no ledger for it.
+- **Deductions.** A contractual withholding or retention is not TDS: it is a
+  retention line, or `classification_uncertain` when the company keeps no
+  ledger for it.
 - **Reverse charge.** A bill on which the buyer pays the tax under reverse charge
   needs the buyer's own tax entries, which Minkops cannot write yet: propose
   `unsupported_structure` and name reverse charge.
