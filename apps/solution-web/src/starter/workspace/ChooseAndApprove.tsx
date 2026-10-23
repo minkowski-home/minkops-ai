@@ -10,11 +10,11 @@ The server sends what it may be (`choice` in the record's detail) and lists the 
 the ones its session weighed first. Amounts are the source's own and are never edited here; the server checks
 the choice with every gate a proposal meets, and a refusal says why. */
 
-interface Named { guid: string; name: string }
+export interface Named { guid: string; name: string }
 interface Ledger extends Named { group?: string; gstin?: string; suggested?: boolean }
 interface Line { role: string; side: string; amount: number; ledger: Named | null; picker: string }
 interface Item { item: string | null; amount: number; ledger: Named | null }
-interface Choice {
+export interface Choice {
   company: string;
   voucher_types: Named[];
   voucher_type?: string | null;
@@ -30,7 +30,7 @@ interface Choice {
   counter_ledger?: Named | null;
 }
 
-const ROLES: Record<string, string> = {
+export const ROLES: Record<string, string> = {
   expense: "Expense", tax: "Tax", round_off: "Round-off", freight: "Freight", other_charge: "Other charge",
   discount: "Discount", tds: "TDS", retention: "Retention", deposit: "Deposit",
 };
@@ -102,7 +102,7 @@ function ChoiceForm({ choice, ledgersPath, pending, onApprove }: {
 
 /** One part's ledger: the current choice, the ones the session weighed, and what a search finds, of this kind
 (the role the server lists ledgers for: supplier, expense, tax, bank or any). */
-function LedgerPicker({ label, path, kind, value, onChange }: {
+export function LedgerPicker({ label, path, kind, value, onChange }: {
   label: string; path: string; kind: string; value: Named | null; onChange: (ledger: Named | null) => void;
 }) {
   const [query, setQuery] = useState("");

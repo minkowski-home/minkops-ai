@@ -215,3 +215,65 @@ test('a held bill is approved with the ledgers a person chooses, from those its 
   expect(calls).toContainEqual(['ledgers', 'supplier', '']);
   expect(errors).toEqual([]);
 });
+
+test('a missing supplier is created as Tally would hold it, then its bill is entered as the person chose', async ({page, context}) => {
+  const errors = [], decisions = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const base = '/api/tenants/mock-tenant/clients/rehearsal';
+  let held = {id:'b-7', version:2, kind:'bill', status:'held', file:'cabins.pdf', bill:1, supplier:'Cabin Services UAT',
+    number:'CS/26/0001', date:'2026-09-02', total:8850, company:'Test Company',
+    holds:[{code:'supplier_missing', label:'Missing supplier', reason:'The supplier is missing from the company\'s confirmed Tally ledgers.'}],
+    actions:[{action:'supplier', label:'Create this ledger'}, {action:'choose', label:'Choose and approve'},
+      {action:'nothing', label:'Do nothing'}, {action:'retry', label:'Recheck'}]};
+  const detail = {...held, facts:{}, choice:{company:'Test Company', supplier:'Cabin Services UAT',
+    voucher_types:[{guid:'g-purchase', name:'Purchase'}], voucher_type:'g-purchase', party:null,
+    lines:[{role:'expense', side:'debit', amount:7500, ledger:{guid:'g-repairs', name:'Repairs and Maintenance'}, picker:'expense'},
+      {role:'tax', side:'debit', amount:675, ledger:{guid:'g-cgst', name:'Input CGST 9%'}, picker:'tax'},
+      {role:'tax', side:'debit', amount:675, ledger:{guid:'g-sgst', name:'Input SGST 9%'}, picker:'tax'}], items:[], candidates:[]},
+    new_ledger:{form:{name:'Cabin Services UAT', under:'Sundry Creditors', groups:['Sundry Creditors', 'Creditors - Steel'],
+      billwise:null, credit_period:null, mailing:{address:['Plot 12, Auto Nagar'], state:'Andhra Pradesh', country:'India',
+        pincode:'522001'}, gst:{registration_type:'Regular', gstin:'37CABFC2610A1Z5'}},
+      printed:{name:'Cabin Services UAT', gstin:'37CABFC2610A1Z5'}}};
+  await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/, route => route.fulfill({body:'', contentType:'text/css'}));
+  await context.route('**/api/**', async route => {
+    const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
+    let body;
+    if (path === '/api/auth/session') body = {id:'user', name:'QA', memberships:[{slug:'mock-tenant', role:'admin'}], csrf_token:'csrf'};
+    else if (path.endsWith('/workspace')) body = {tenant:{slug:'mock-tenant', name:'QA'}, can_edit:true,
+      clients:[{id:'c-1', slug:'rehearsal', name:'Rehearsal companies'}], employees:[], workflows:[workflow], tasks:[task]};
+    else if (path === '/api/tenants/mock-tenant/tasks/t-1') body = {...task, can_control:true, events:[], run:{id:'r-1', client:'rehearsal'}};
+    else if (path === `${base}/runs/r-1/status`) body = {run:{id:'r-1', task_id:'t-1', workflow_key:'bill-entry', state:'review',
+      control_state:'active'}, items:{done:1}, records:{[held.status]:1}, blockers:[], activity:held.status};
+    else if (path === `${base}/runs/r-1/records`) body = {records:[held], next:null};
+    else if (path === `${base}/records/b-7`) body = detail;
+    else if (path === `${base}/records/b-7/ledgers`) body = {ledgers:[]};
+    else if (path === `${base}/records/b-7/decisions` && method === 'POST') {
+      decisions.push(request.postDataJSON());
+      held = {...held, version:3, status:'writing', holds:undefined, actions:[]};
+      body = {status:'writing', record_id:'b-7', decided_version:2, action:'supplier', replayed:false};
+    } else throw Error(`${method} ${path}`);
+    await route.fulfill({json:body});
+  });
+  await page.goto('http://127.0.0.1:3000/mock-tenant/tasks/t-1');
+  const row = page.getByRole('region', {name:'Review'}).getByRole('listitem').filter({hasText:'Cabin Services UAT'});
+  await row.getByRole('button', {name:'Create this ledger'}).click();
+  const form = row.getByRole('form', {name:'Create this ledger'});
+  await expect(form).toContainText('The bill prints name: Cabin Services UAT · gstin: 37CABFC2610A1Z5.');
+  await expect(form.getByLabel('Name')).toHaveValue('Cabin Services UAT');
+  await expect(form.getByLabel('Under')).toHaveValue('Sundry Creditors');
+  // No supplier of the company's says how balances are kept yet: nothing is created until the person chooses.
+  const create = form.getByRole('button', {name:'Create ledger and approve'});
+  await expect(create).toBeDisabled();
+  await form.getByLabel('Maintain balances bill-by-bill').selectOption('yes');
+  await form.getByLabel('Default credit period (days)').fill('30');
+  await create.click();
+  await expect(page.getByRole('status').filter({hasText:'Approved. Saving it in Tally.'})).toBeVisible();
+  expect(decisions).toEqual([{action:'supplier', version:2, detail:{
+    ledger:{name:'Cabin Services UAT', under:'Sundry Creditors', billwise:true, credit_period:30,
+      mailing:{address:['Plot 12, Auto Nagar'], state:'Andhra Pradesh', country:'India', pincode:'522001'},
+      gst:{registration_type:'Regular', gstin:'37CABFC2610A1Z5'}},
+    voucher_type:'g-purchase', lines:['g-repairs', 'g-cgst', 'g-sgst']}}]);
+  await page.setViewportSize({width:390, height:844});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});

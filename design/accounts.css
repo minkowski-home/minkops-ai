@@ -4,7 +4,7 @@
 .accounts-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
 .accounts-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 300px)); gap: 20px 24px; padding: 16px 0; }
 .accounts-field-grid label { display: grid; gap: 8px; font: var(--type-label); color: var(--text-secondary); }
-.accounts-field-grid input, .accounts-field-grid select { width: 100%; min-height: 36px; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: var(--radius-2); color: inherit; background: var(--surface-raised); }
+.accounts-field-grid input, .accounts-field-grid select, .accounts-field-grid textarea { width: 100%; min-height: 36px; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: var(--radius-2); color: inherit; background: var(--surface-raised); font: inherit; }
 .accounts-field-grid input[type=file] { padding: 6px; font: var(--type-body-sm); }
 .accounts-item { padding: 16px 0; border-bottom: 1px solid var(--border-default); overflow-wrap: anywhere; }
 .accounts-item h4 { margin-top: 0; }
