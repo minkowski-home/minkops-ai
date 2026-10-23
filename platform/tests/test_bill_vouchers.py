@@ -16,7 +16,8 @@ LEDGERS = [
     ("Input SGST 9%", "Duties & Taxes", "No"), ("Input CGST 2.5%", "Duties & Taxes", "No"),
     ("Input SGST 2.5%", "Duties & Taxes", "No"), ("Freight Inward", "Direct Expenses", "No"),
     ("Round Off", "Indirect Expenses", "No"), ("TDS Payable 194C", "Duties & Taxes", "No"),
-    ("Electricity", "Indirect Expenses", "No"),
+    ("Electricity", "Indirect Expenses", "No"), ("Retention Payable", "Current Liabilities", "No"),
+    ("Container Deposit", "Deposits (Asset)", "No"),
 ]
 TYPES = [
     {"NAME": "Purchase", "@_RESERVEDNAME": "Purchase", "GUID": "vt-purchase"},
@@ -367,6 +368,49 @@ class BoundBillTest(unittest.TestCase):
                        proposal(**{"voucher.lines.0.side": "sideways"}), proposal(**{"document.date": "14/10/2026"})):
             with self.subTest(line=record["voucher"]["lines"][0], date=record["document"]["date"]):
                 self.assertIn(held(record)[0], ("source_values_conflict", "required_value_missing"))
+
+
+class PrintedAdjustmentsTest(unittest.TestCase):
+    """What a bill prints as held back, adjusted or refundable is carried by the voucher, or a person decides."""
+
+    def held(self, record):
+        try:
+            check(record)
+        except HoldReason as refusal:
+            return refusal.code, str(refusal), refusal.final
+        raise AssertionError("The proposal passed the gate.")
+
+    def test_retention_held_back_is_its_own_line_on_the_suppliers_side(self):
+        printed = {"document.adjustments": [{"kind": "retention", "amount": 355.00, "evidence": "Retention 355.00"}]}
+        self.assertEqual(self.held(proposal(**printed)), ("classification_uncertain", (
+            "The bill holds back 355.00 as retention from what the supplier is paid. Carry it as a retention line on "
+            "the supplier's side, to the ledger Test keeps it in; if it keeps none, propose classification_uncertain."),
+            False))
+        retained = proposal(**printed)
+        retained["voucher"]["lines"].append(line("retention", "Retention Payable", "credit", 355.00))
+        plan = check(retained).native_plan(REMOTE)
+        # The supplier is owed the total less what is held back; the expense stays at the bill's full value.
+        self.assertEqual({ln["ledger"]: ln["amount_cents"] for ln in plan["lines"] if ln["side"] == "credit"},
+                         {"Acme Cement": 600000, "Retention Payable": 35500})
+        retained["voucher"]["lines"][-1]["side"] = "debit"
+        self.assertIn("on the supplier's side", self.held(retained)[1])
+
+    def test_a_refundable_deposit_is_its_own_line_never_an_expense(self):
+        printed = {"document.adjustments": [{"kind": "deposit", "amount": 60.00, "evidence": "Refundable deposit 60.00"}]}
+        self.assertEqual(self.held(proposal(**printed))[:2], ("classification_uncertain", (
+            "The bill charges a refundable deposit of 60.00, which is not an expense. Carry it as a deposit line to "
+            "the ledger Test keeps deposits in; if it keeps none, propose classification_uncertain.")))
+        deposited = proposal(**printed)
+        deposited["voucher"]["lines"][-1] = line("deposit", "Container Deposit", "debit", 60.00)
+        self.assertTrue(check(deposited))
+
+    def test_an_advance_adjusted_is_settled_in_tally_and_the_bill_waits_for_a_person(self):
+        advanced = check(proposal(**{"document.adjustments": [
+            {"kind": "advance", "amount": 1000.00, "evidence": "Less advance ADV-21 1,000.00"}]}))
+        # The bill is booked at its full value: the advance was paid before, and is matched against it in Tally.
+        self.assertEqual(advanced.native_plan(REMOTE)["lines"][0]["amount_cents"], 635500)
+        self.assertIn("The bill adjusts an advance of 1,000.00 already paid. Minkops books the bill at its full value; "
+                      "match it against that advance in Tally.", advanced.notes)
 
 
 # A GST-registered company as TallyPrime keeps it: GST switched on, a registration as a tax unit, tax ledgers marked

@@ -124,7 +124,7 @@ def proposal(company, n=1, **changes):
         "document": {"kind": "invoice", "number": "SOS/26/0412", "date": "2026-09-01", "total": 188800.0,
                      "supplier_name": "Sunrise Office Systems", "supplier_gstin": SUNRISE, "origin": "domestic",
                      "buyer_gstin": BUYER, "place_of_supply": None, "taxable": 160000.0, "tax": None,
-                     "receipt_register": None},
+                     "receipt_register": None, "adjustments": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "g-purchase",
                     "party": {"ledger_guid": "g-sunrise", "new_supplier": False, "evidence": "GSTIN matches."},
                     "lines": [line("expense", "g-cabins", 160000.0, supply="goods"),

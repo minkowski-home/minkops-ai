@@ -342,7 +342,9 @@ def observed_statement(plan, current):
 KIND_FAMILIES = {"invoice": ("purchase", "journal"), "credit_note": ("debit_note",)}
 BASE_FAMILY = {"purchase": "purchase", "journal": "journal", "debit note": "debit_note"}
 PARTY_SIDE = {"purchase": "credit", "journal": "credit", "debit_note": "debit"}
-LINE_ROLES = {"expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"}
+LINE_ROLES = {"expense", "tax", "round_off", "freight", "other_charge", "discount", "tds", "retention", "deposit"}
+# Held back from what the supplier is paid, on the supplier's side: TDS, and retention or contractual withholding.
+DEDUCTIONS = {"tds", "retention"}
 # Lines that carry the bill's taxable value, as opposed to its tax and adjustments.
 TAXABLE_ROLES = {"expense", "freight", "other_charge"}
 # A printed round-off never exceeds one rupee; anything more is not rounding.
@@ -470,6 +472,39 @@ def _printed_totals(document, lines, raw, items_cents=0):
             raise HoldReason("source_values_conflict", (
                 f"The lines claim {rupees(claimed)} of {what}, but the bill prints {rupees(cents)}. "
                 "Each expense line must carry its taxable value, and each tax its own line."))
+
+
+def _adjustments(document, raw, lines, retained, company):
+    """What the bill prints as held back, refundable or adjusted is carried by the voucher; returns notes for a person.
+
+    Retention or contractual withholding is a retention line on the supplier's side, and a refundable deposit a
+    deposit line, never an expense: a bill printing one the voucher does not carry is refused, so the session books
+    it or names its uncertainty. An advance already paid is matched against the bill in Tally; the bill is booked at
+    its full value, and the note keeps standing approval from writing it unseen.
+    """
+    printed = document.get("adjustments") or []
+    deposits = [ln["amount_cents"] for ln, item in zip(lines, raw, strict=True) if item["role"] == "deposit"]
+    notes = []
+    for adjustment in printed:
+        kind = adjustment.get("kind") if isinstance(adjustment, dict) else None
+        if kind not in ("advance", "retention", "withholding", "deposit"):
+            raise HoldReason("source_values_conflict", "Each printed adjustment is an advance, retention, withholding "
+                                                       "or deposit.")
+        cents = _money(adjustment.get("amount"), f"The printed {kind}")
+        if kind == "advance":
+            notes.append(f"The bill adjusts an advance of {rupees(cents)} already paid. Minkops books the bill at its "
+                         "full value; match it against that advance in Tally.")
+        elif kind in ("retention", "withholding") and cents not in retained:
+            raise HoldReason("classification_uncertain", (
+                f"The bill holds back {rupees(cents)} as {kind} from what the supplier is paid. Carry it as a retention "
+                f"line on the supplier's side, to the ledger {company['name']} keeps it in; if it keeps none, propose "
+                "classification_uncertain."))
+        elif kind == "deposit" and cents not in deposits:
+            raise HoldReason("classification_uncertain", (
+                f"The bill charges a refundable deposit of {rupees(cents)}, which is not an expense. Carry it as a "
+                f"deposit line to the ledger {company['name']} keeps deposits in; if it keeps none, propose "
+                "classification_uncertain."))
+    return notes
 
 
 def _decimal(value, what, places, precision=None):
@@ -705,7 +740,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     raw = voucher.get("lines")
     if not isinstance(raw, list) or not (0 if stock else 1) <= len(raw) <= 39 - (len(stock.ledgers) if stock else 0):
         raise HoldReason("unsupported_structure", "A bill voucher carries 1–39 lines besides the supplier.")
-    lines, identities, taxes, tds, round_offs = [], dict(stock.identities) if stock else {}, [], [], 0
+    lines, identities, taxes, tds, round_offs, retained = [], dict(stock.identities) if stock else {}, [], [], 0, []
     for item in raw:
         if (not isinstance(item, dict) or item.get("role") not in LINE_ROLES or item.get("side") not in ("debit", "credit")
                 or not isinstance(item.get("evidence"), str) or not item["evidence"].strip()):
@@ -740,6 +775,11 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                 raise HoldReason("classification_uncertain",
                                  "A TDS deduction needs its section and rate, and reduces what the supplier is owed.")
             tds.append((rule, cents))
+        if item["role"] == "retention":
+            if item["side"] != PARTY_SIDE[family]:
+                raise HoldReason("classification_uncertain", "A retention line holds back part of what the supplier is "
+                                                             "owed, so it is on the supplier's side.")
+            retained.append(cents)
         if item["role"] == "round_off":
             round_offs += 1
             if cents > ROUND_OFF_CAP_CENTS:
@@ -778,21 +818,23 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                                  f"TDS does not match section {rule['section']} at {rule['rate']}% of the bill's value.")
     if round_offs > 1:
         raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
+    advances = _adjustments(document, raw, lines, retained, company)
     _tax_consistent(taxes)
     _printed_totals(document, lines, raw, items_cents)
     # The supplier's line is computed from the total, so the other lines must reach it exactly: what they
     # charge, less what they take off on the supplier's side. TDS only reduces what the supplier is owed.
     total, side = _money(document["total"], "The bill total"), PARTY_SIDE[family]
     reached = items_cents + sum(ln["amount_cents"] if ln["side"] != side else -ln["amount_cents"]
-                                for ln, item in zip(lines, raw, strict=True) if item["role"] != "tds")
+                                for ln, item in zip(lines, raw, strict=True) if item["role"] not in DEDUCTIONS)
     if reached != total:
         raise HoldReason("source_values_conflict", (
             f"The lines come to {rupees(reached)}, but the bill's printed total is {rupees(total)}. A round-off "
             "the bill prints, of at most one rupee, is its own line; any other difference means the bill's own "
             "figures conflict."))
     returns, notes = _gst(view, masters, company, document, family, raw, lines, taxes, supplier, party_name, stock)
+    notes += advances
     # Tally books the items' value on their purchase ledgers, one line each, ahead of the bill's own lines.
-    native = [_line(party_name, side, total - sum(cents for _, cents in tds)),
+    native = [_line(party_name, side, total - sum(cents for _, cents in tds) - sum(retained)),
               *(_line(ledger, "debit", cents) for ledger, cents in (stock.ledgers.items() if stock else ())), *lines]
     expense = {*(stock.ledgers if stock else ()),
                *(ln["ledger"] for ln, item in zip(lines, raw, strict=True) if item["role"] in TAXABLE_ROLES)}

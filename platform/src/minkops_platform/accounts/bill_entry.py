@@ -693,6 +693,9 @@ EVIDENCE = {"type": "array", "maxItems": 40, "description": "Where the bill prin
             "items": schema({
     "field": choice(*FIELDS), "page": {"type": "integer", "minimum": 1, "maximum": 12},
     "quote": {"type": "string", "minLength": 1, "maxLength": 300}}, ["field", "page", "quote"])}
+ADJUSTMENT = schema({
+    "kind": choice("advance", "retention", "withholding", "deposit"), "amount": MONEY, "evidence": TEXT},
+    ["kind", "amount", "evidence"])
 DOCUMENT = schema({
     "kind": choice("invoice", "credit_note", null=True),
     "number": {"type": ["string", "null"], "maxLength": 100, "description": "The supplier's document number."},
@@ -713,11 +716,16 @@ DOCUMENT = schema({
     "receipt_register": {"description": "A receipt-register stamp (DMR, GRN or MRN) as printed.", **_nullable(schema({
         "label": {"type": "string", "minLength": 1, "maxLength": 20},
         "number": {"type": "string", "minLength": 1, "maxLength": 40},
-        "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}}, ["label", "number", "date"]))}},
+        "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$"}}, ["label", "number", "date"]))},
+    "adjustments": {**_nullable({"type": "array", "maxItems": 10, "items": ADJUSTMENT}), "description": (
+        "What the bill prints as taken off, or held back from, what the supplier is paid: an advance already paid "
+        "and adjusted, retention or contractual withholding, or a refundable deposit it charges. Null when it "
+        "prints none.")}},
     ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "buyer_gstin", "place_of_supply",
-     "taxable", "tax", "receipt_register"])
+     "taxable", "tax", "receipt_register", "adjustments"])
 LINE = schema({
-    "role": choice("expense", "tax", "round_off", "freight", "other_charge", "discount", "tds"),
+    "role": choice("expense", "tax", "round_off", "freight", "other_charge", "discount", "tds", "retention",
+                   "deposit"),
     "ledger": LEDGER, "side": choice("debit", "credit"),
     "amount": MONEY, "cost_centre": _nullable(reference("A cost centre's reference, as cost_centres gives it.")),
     "tax": _nullable(schema({"head": choice("cgst", "sgst", "igst", "cess"), "rate": MONEY, "taxable": MONEY},
