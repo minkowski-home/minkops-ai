@@ -98,10 +98,10 @@ class SecretManager:
         return {}
 
 
-def test_configuration_writes_the_rebuilds_own_secrets_and_leaves_the_parked_builds(monkeypatch, tmp_path):
-    """Production holds the parked build's database secrets, naming the shared instance, and the model key.
-    Configuration writes the rebuild's beside them, for the instance its deployment mounts, and leaves the
-    parked build's as they are for a rollback; every secret the deployment reads then exists."""
+def test_configuration_writes_the_rebuilds_own_secrets_and_rewrites_none_that_exist(monkeypatch, tmp_path):
+    """Production holds the old build's database secrets, naming the shared instance, until the cut-over retires
+    them, and the model key. Configuration writes the rebuild's beside them, for the instance its deployment mounts,
+    and never rewrites a secret that exists; every secret the deployment reads then exists."""
     monkeypatch.syspath_prepend(str(Path(deploy_runtime.__file__).parent))
     import configure_runtime
 
@@ -136,6 +136,8 @@ def test_configuration_writes_the_rebuilds_own_secrets_and_leaves_the_parked_bui
     mounted = {arg.split("=", 1)[1] for c in deployed for arg in c
                if arg.startswith(("--set-cloudsql-instances=", "--add-cloudsql-instances="))}
     assert mounted == {"minkops-ai-prod:us-central1:minkops-books"}
+    # Each service sets its instances, so one deployed before the cut-over drops Myndral's shared instance.
+    assert not any(arg.startswith("--add-cloudsql-instances=") for c in deployed for arg in c)
     read = {pair.split("=", 1)[1].rsplit(":", 1)[0] for c in deployed for arg in c if arg.startswith("--set-secrets=")
             for pair in arg.removeprefix("--set-secrets=").split(",")}
     assert {"minkops-books-database-url", "minkops-openai-key"} <= {name for name in read if "/" not in name} <= set(manager.versions)

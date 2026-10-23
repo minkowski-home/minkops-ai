@@ -8,8 +8,8 @@ from pathlib import Path
 
 PROJECT = "minkops-ai-prod"
 REGION = "us-central1"
-# The rebuild runs on its own instance (provision_database.py --create-instance).
-# The parked pre-rebuild build keeps deploying to the shared one from its tag.
+# The rebuild runs on its own instance (provision_database.py --create-instance); the pre-rebuild build, which
+# used Myndral's shared instance, is retired (docs/rebuild/cutover.md).
 INSTANCE = f"{PROJECT}:{REGION}:minkops-books"
 # The runtime role's connection to it, written by configure_runtime.py.
 DATABASE = "DATABASE_URL=minkops-books-database-url:1"
@@ -73,7 +73,7 @@ def main(image, interest_image):
                     for key in ("host", "port", "user", "password"))
     run("run", "deploy", "minkops-solution-api", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-api@{PROJECT}.iam.gserviceaccount.com",
-        f"--add-cloudsql-instances={INSTANCE}", "--min=0", "--max=1", "--max-instances=1",
+        f"--set-cloudsql-instances={INSTANCE}", "--min=0", "--max=1", "--max-instances=1",
         # Full native discovery is decoded during launch/receipt validation.
         # Bound concurrency while allowing independent companion presence.
         "--concurrency=2", "--timeout=60s", "--no-cpu-boost", "--no-invoker-iam-check",

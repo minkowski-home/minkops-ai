@@ -184,7 +184,13 @@ npm run package:win:dev        # Minkops Dev, for the local stack
 ```
 
 Build on Windows with a Windows-local checkout and Node/npm. WSL symlinks are
-unsuitable for Windows packaging tools. `bundle/` contains compiled runtime,
+unsuitable for Windows packaging tools. From WSL, export this commit's
+`apps/windows-app`, `connectors/desktop`, `platform/desktop-runtime` and `scripts`
+with `git archive` to a Windows folder, and run `scripts/windows_build.ps1 -Kind
+dev|candidate|release` there (with `-Node` naming a portable Node 24 when Windows has
+none). It runs the steps above, fails on any step's exit code, and reports a build
+only when it wrote one installer of this version of at least 50 MB, since npm can
+succeed after packaging failed. `bundle/` contains compiled runtime,
 connectors, assets and minimal application metadata. Electron is external;
 development dependencies are not shipped. Native dependency rebuilding is
 disabled because this bundle has no native Node modules; revise before adding
