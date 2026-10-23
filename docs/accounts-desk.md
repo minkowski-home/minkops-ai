@@ -182,8 +182,13 @@ synthetic companies and bills for that.
 
 ## Scope and verification
 
-- **Sources** hold at most 100 files, 5 MB each and 30 MB in all.
-- **Bill runs** take 1–50 PDF or image files, 40 MB in all.
+- **Sources** hold at most 100 files of 5 MB each. The console uploads a run's files
+  in batches under 25 MB, each request within the 30 MB a request may carry; the
+  final batch makes the whole set current at once, and an upload never finished
+  leaves nothing current (`account_uploads`). A connected folder still refreshes in
+  one request of at most 30 MB.
+- **Bill runs** take 1–50 PDF or image files, whatever their total size: each is
+  read in its own session.
 - **Statement runs** take CSV and XLSX; convert legacy XLS in Excel.
 
 Offline tests replace only the paid session boundary, with scripted sessions that

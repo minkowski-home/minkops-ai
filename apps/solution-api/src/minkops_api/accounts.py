@@ -42,7 +42,10 @@ async def upload_source(
     label: str = Form("Uploaded files"),
     writable: bool = Form(False),
     source_id: Annotated[UUID | None, Form()] = None,
+    upload_id: Annotated[UUID | None, Form()] = None,
+    final: bool = Form(True),
 ):
+    """Upload files as a source; a set larger than one request arrives in batches of one upload (files.py)."""
     require_csrf(request)
     tenant, _ = tenant_access(slug, user, connection)
     try:
@@ -52,7 +55,8 @@ async def upload_source(
     except (ValueError, TypeError) as error:
         raise HTTPException(422, str(error)) from error
     contents = [await upload.read(files.MAX_FILE_BYTES + 1) for upload in uploads]
-    return _call(files.upload_source, connection, tenant, user, names, contents, label, writable, source_id)
+    return _call(files.upload_source, connection, tenant, user, names, contents, label, writable, source_id,
+                 upload_id=upload_id, final=final)
 
 
 @router.get("/files/{file_id}/content")

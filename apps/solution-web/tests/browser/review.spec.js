@@ -277,3 +277,45 @@ test('a missing supplier is created as Tally would hold it, then its bill is ent
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('files larger than one request go up in batches, and the run starts once the last batch completes them', async ({page, context}) => {
+  const uploads = [];
+  let launched = null;
+  const field = (body, name) => body.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)`))?.[1];
+  await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/, route => route.fulfill({body:'', contentType:'text/css'}));
+  await context.route('**/api/**', async route => {
+    const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
+    const base = '/api/tenants/mock-tenant/clients/rehearsal';
+    let body;
+    if (path === '/api/auth/session') body = {id:'user', name:'QA', memberships:[{slug:'mock-tenant', role:'admin'}], csrf_token:'csrf'};
+    else if (path.endsWith('/workspace')) body = {tenant:{slug:'mock-tenant', name:'QA'}, can_edit:true,
+      clients:[{id:'c-1', slug:'rehearsal', name:'Rehearsal companies'}], employees:[], workflows:[workflow], tasks:[task]};
+    else if (path === `${base}/companies`) body = [{id:'co-1', name:'Test Company', guid:'g-test', books_from:'2026-04-01'}];
+    else if (path === '/api/tenants/mock-tenant/accounts/sources') {
+      const form = request.postDataBuffer().toString('latin1');
+      const batch = {paths:JSON.parse(field(form, 'paths')), final:field(form, 'final'), upload:field(form, 'upload_id') ?? null};
+      uploads.push(batch);
+      body = batch.final === 'true' ? {id:'src-1', files:uploads.flatMap(b => b.paths).map((p, n) => ({id:`f-${n}`, path:p}))}
+        : {upload_id:'up-1', staged:uploads.length};
+    } else if (path === `${base}/runs` && method === 'POST') {
+      launched = request.postDataJSON();
+      body = {run:{id:'r-1', task_id:'t-1', workflow_key:'bill-entry', state:'preparing', control_state:'active'},
+        items:{}, records:{}, blockers:[], activity:null};
+    } else if (path === '/api/tenants/mock-tenant/tasks/t-1') body = {...task, can_control:true, events:[], run:{id:'r-1', client:'rehearsal'}};
+    else if (path === `${base}/runs/r-1/status`) body = {run:{id:'r-1', task_id:'t-1', workflow_key:'bill-entry', state:'preparing',
+      control_state:'active'}, items:{}, records:{}, blockers:[], activity:null};
+    else if (path === `${base}/runs/r-1/records`) body = {records:[], next:null};
+    else throw Error(`${method} ${path}`);
+    await route.fulfill({json:body});
+  });
+  await page.goto('http://127.0.0.1:3000/mock-tenant/workflows/w-1');
+  const form = page.locator('form').filter({hasText:'Start a run'});
+  // Three bills of 12 MB: two fit under one request's limit, the third goes in a second batch.
+  const bill = n => ({name:`bill-${n}.pdf`, mimeType:'application/pdf', buffer:Buffer.alloc(12_000_000, 37)});
+  await form.getByLabel('Files').setInputFiles([bill(1), bill(2), bill(3)]);
+  await form.getByRole('button', {name:'Start run'}).click();
+  await expect(page).toHaveURL(/\/mock-tenant\/tasks\/t-1$/);
+  expect(uploads).toEqual([{paths:['bill-1.pdf', 'bill-2.pdf'], final:'false', upload:null},
+    {paths:['bill-3.pdf'], final:'true', upload:'up-1'}]);
+  expect(launched.file_ids).toEqual(['f-0', 'f-1', 'f-2']);
+});

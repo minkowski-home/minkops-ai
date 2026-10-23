@@ -546,8 +546,8 @@ def finish(connection, device, job_id, receipt):
         for file in result["files"]:
             names.append(file["path"])
             contents.append(_bytes(file["content"]))
-            if sum(map(len, contents)) > 30_000_000:
-                raise ServiceError("invalid", "A source refresh is limited to 30 MB.")
+            if sum(map(len, contents)) > files.MAX_REQUEST_BYTES:
+                raise ServiceError("invalid", "A folder refresh is limited to 30 MB.")
         files.upload_source(
             connection,
             {"id": device["tenant_id"]},

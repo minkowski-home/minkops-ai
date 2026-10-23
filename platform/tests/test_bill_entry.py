@@ -387,6 +387,16 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     assert work.get_run(desk["db"], desk["tenant"]["id"], run["id"])["state"] == "review"
 
 
+def test_a_bill_run_takes_fifty_files_whatever_their_total_size(desk):
+    """Each bill's pages are read in its own session, so a run is bounded by its file count and each file's size,
+    not their total: fifty bills of 1 MB start, read by their sizes alone."""
+    padded = B01 + b"%" + b"0" * 1_000_000
+    run = launch(desk, {f"bill-{n:02}.pdf": padded for n in range(50)})
+    assert len(items(desk, run)) == 50
+    with pytest.raises(ServiceError, match="Select between 1 and 50 bill files"):
+        launch(desk, {f"bill-{n:02}.pdf": B01 for n in range(51)})
+
+
 def test_a_date_written_day_first_is_sent_back_to_be_read_again_never_held_as_before_the_books(desk):
     """B01 prints 01-Sep-2026. Read into a year-first date as 0901-01-26, it contradicts the session's own quote;
     with no quote, a year no bill carries is implausible. Each is refused, so the bill is read again, not held."""

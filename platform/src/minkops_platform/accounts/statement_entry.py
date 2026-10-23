@@ -59,7 +59,6 @@ from .vouchers import narration_token, observed_statement, rupees, statement_vou
 CHUNK = 50
 # A proposal and at most two resubmissions, per row and per layout.
 ATTEMPTS = 3
-MAX_BYTES = 30_000_000
 ROW, SHEET = "statement_row", "statement_sheet"
 EXCEPTIONS = ("company_unresolved", "ledger_unresolved", "classification_uncertain", "branch_unresolved",
               "unsupported_structure")
@@ -100,11 +99,10 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
         return previous
     files = files_for(connection, tenant["id"], [*file_ids, *([mapping] if mapping else [])])
     if any(not f["current"] for f in files):
-        raise ServiceError("conflict", "Refresh the changed files first.")
+        raise ServiceError("conflict", "Some of these files were replaced since they were chosen. Choose them again, "
+                                       "then start the run.")
     if any(Path(f["path"]).suffix.lower() not in (".csv", ".xlsx") for f in files):
         raise ServiceError("invalid", "Statements and mappings must be CSV or XLSX. Convert legacy XLS files in Excel.")
-    if sum(len(f["content"]) for f in files) > MAX_BYTES:
-        raise ServiceError("invalid", "Select at most 30 MB of statements.")
     _, devices = desk_tools.prepare(connection, tenant, user, client)
     statements = [f for f in files if str(f["id"]) in file_ids]
     entries = statement_layouts.resolve(connection, tenant["id"], statement_layouts.sheets(statements))

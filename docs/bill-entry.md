@@ -27,8 +27,8 @@ Both use the runs API, under `/api/tenants/{slug}/clients/{client}`:
 
 Stop and pause are task controls (`POST /api/tenants/{slug}/tasks/{task}/control`).
 
-A run takes 1–50 PDF, PNG, JPEG or WebP files, at most 40 MB together, each
-selected once. Its settings are:
+A run takes 1–50 PDF, PNG, JPEG or WebP files of at most 5 MB each, selected once;
+their total does not matter, since each is read in its own session. Its settings are:
 
 - `review_mode`: `all_outputs` (every proposal waits for approval; the tenant
   default) or `only_exceptions` (bills that pass every check and follow the

@@ -36,7 +36,7 @@ from minkops_connectors import einvoice
 from minkops_connectors.documents import pages
 from minkops_platform import desktop, work
 from minkops_platform.errors import ServiceError
-from minkops_platform.files import files_for
+from minkops_platform.files import MAX_FILE_BYTES, described, files_for
 from minkops_platform.lanes import Session
 from minkops_platform.run_controls import control_state, require_active, resolve_request
 from minkops_platform.runtime.tools import Answer, Tool, ToolError
@@ -63,7 +63,6 @@ KIND = "bill"
 # A proposal and at most two resubmissions, per bill.
 ATTEMPTS = 3
 MAX_FILES, MAX_BILLS = 50, 20
-MAX_BYTES = 40_000_000
 SUFFIXES = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
 EXCEPTIONS = ("source_unreadable", "not_a_bill", "multiple_bills_unclear", "required_value_missing",
               "source_values_conflict", "company_unresolved", "supplier_unresolved", "supplier_missing",
@@ -110,13 +109,15 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
                                             work.find_by_request)
     if previous:
         return previous
-    files = files_for(connection, tenant["id"], file_ids)
+    # Checked by their sizes alone: each bill's pages are read in its own session.
+    files = described(connection, tenant["id"], file_ids)
     if any(not f["current"] for f in files):
-        raise ServiceError("conflict", "Refresh the changed files first.")
+        raise ServiceError("conflict", "Some of these files were replaced since they were chosen. Choose them again, "
+                                       "then start the run.")
     if any(Path(f["path"]).suffix.lower() not in SUFFIXES for f in files):
         raise ServiceError("invalid", "Bills must be PDF, PNG, JPEG or WebP files.")
-    if sum(len(f["content"]) for f in files) > MAX_BYTES:
-        raise ServiceError("invalid", "Select at most 40 MB of bills.")
+    if any(f["size"] > MAX_FILE_BYTES for f in files):
+        raise ServiceError("invalid", "Each bill file must be at most 5 MB.")
     companies, devices = desk_tools.prepare(connection, tenant, user, client)
     if config["company_mode"] == "locked" and config.get("locked_company_guid") not in {c["guid"] for c in companies}:
         raise ServiceError("invalid", "Choose one of this client's companies to enter every bill into.")

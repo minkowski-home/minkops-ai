@@ -18,7 +18,7 @@ statement file IDs and an optional `branch_mapping_file_id`:
   before they are routed, and the run then pins one mirror version per company.
 - A repeated request key returns the same run; the same key with other selections
   conflicts.
-- Limits: 30 MB of files, 10,000 rows and 100 columns per sheet. Legacy XLS needs
+- Limits: 5 MB per file, 10,000 rows and 100 columns per sheet. Legacy XLS needs
   conversion in Excel.
 
 ## Layouts
