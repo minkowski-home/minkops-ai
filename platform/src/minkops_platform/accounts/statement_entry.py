@@ -318,12 +318,14 @@ def propose(call, arguments):
                 f"This answer restates the amount {answered['amount']}, but this row's is {shown}: it is meant for "
                 "another row. Answer each row under its own ref.")})
             continue
-        # A payee is named as its row prints it: one the row never prints belongs to another row, or to none.
+        # A payee is named as its row prints it, or left empty: memory learns how a payee's rows are booked by the
+        # name rows print. One the row never prints belongs to another row, or was carried over from one, as a
+        # returned transfer that names no one may be booked to the party it reverses.
         payee = (answered["selection"] or answered["exception"]).get("payee")
         if payee and not _prints(record["facts"], payee):
             rejected.append({"ref": ref, "reason": (
-                f"This row does not print the payee {payee}: name the counterparty as the row prints it, or answer "
-                "the row it belongs to.")})
+                f"This row does not print the payee {payee}: name the counterparty as the row prints it, leave the "
+                "payee empty when the row names none, or answer the row it belongs to.")})
             continue
         submissions = (record["checks"] or {}).get("submissions", 0)
         if not _proposable(record):
