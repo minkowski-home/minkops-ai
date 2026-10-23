@@ -119,7 +119,9 @@ def test_a_disconnected_pcs_companies_leave_the_client_and_the_pc_that_replaces_
     # Disconnected, a PC's companies no longer hold the client's runs waiting on a PC that will never answer.
     desktop.revoke(db, tenant, admin, old["id"])
     assert clients.companies(db, tenant, client) == []
-    with pytest.raises(ServiceError, match="Authorise this client's Tally companies"):
+    # A run says where the books went and what continues them, not to authorise companies that were authorised.
+    with pytest.raises(ServiceError, match=f"{client['name']}'s books were on {old['name']}, which was disconnected. "
+                                           "Connect the PC that holds them now"):
         desk_tools.prepare(db, tenant, admin, client)
     # The books the new PC found are the client's company continued: the same row, now on the new PC.
     assert clients.predecessor(db, found)["id"] == books["id"]
@@ -132,6 +134,36 @@ def test_a_disconnected_pcs_companies_leave_the_client_and_the_pc_that_replaces_
     assert clients.authorise_company(db, tenant, admin, member, found["id"], client["slug"])["id"] == books["id"]
     with pytest.raises(ServiceError, match="already decided"), db.transaction():
         clients.authorise_company(db, tenant, admin, member, found["id"], other["slug"])
+
+
+def test_a_client_without_companies_is_asked_to_authorise_them(db):
+    import factory
+
+    from minkops_platform.accounts import desk_tools
+    tenant = factory.tenant(db)
+    admin = factory.user(db, tenant, role="admin")
+    client = factory.client(db, tenant)
+    with pytest.raises(ServiceError, match="Authorise this client's Tally companies"):
+        desk_tools.prepare(db, tenant, admin, client)
+
+
+def test_the_same_pc_reconnecting_keeps_its_companies_without_a_continuation(db):
+    """Companion 0.11.2 registers one Windows user on one PC as one installation: a reconnect is no replacement."""
+    import factory
+
+    from minkops_platform import desktop
+    from minkops_platform.accounts import desk_tools
+    tenant = factory.tenant(db)
+    admin = factory.user(db, tenant, role="admin")
+    client = factory.client(db, tenant)
+    pc = factory.device(db, tenant, admin)
+    books = factory.company(db, tenant, pc, client)
+    desktop.revoke(db, tenant, admin, pc["id"])
+    assert clients.companies(db, tenant, client) == []
+    again = desktop.register(db, tenant, admin, pc["name"], pc["installation_id"])
+    assert again["id"] == pc["id"]
+    assert [c["id"] for c in clients.companies(db, tenant, client)] == [books["id"]]
+    assert [c["id"] for c in desk_tools.prepare(db, tenant, admin, client)[0]] == [books["id"]]
 
 
 def test_only_the_same_books_of_the_same_client_continue_and_an_unclear_owner_is_never_offered(db):

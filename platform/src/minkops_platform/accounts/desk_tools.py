@@ -35,6 +35,15 @@ def prepare(connection, tenant, user, client):
     """The client's authorised companies, after asking each PC that holds them to refresh its Tally copy."""
     companies = clients.companies(connection, tenant, client)
     if not companies:
+        # Books authorised on a PC that was since disconnected wait for the PC that holds them now to continue them.
+        left = connection.execute(
+            """SELECT d.name FROM companies c JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NOT NULL
+               WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised'
+               ORDER BY d.revoked_at DESC LIMIT 1""", (tenant["id"], client["id"])).fetchone()
+        if left:
+            raise ServiceError("conflict", f"{client['name']}'s books were on {left['name']}, which was disconnected. "
+                                           "Connect the PC that holds them now, then continue them from its "
+                                           "\"New company found\" card in Attention.")
         raise ServiceError("conflict", "Authorise this client's Tally companies before entering its work.")
     wanted = {c["device_id"] for c in companies}
     devices = connection.execute(
