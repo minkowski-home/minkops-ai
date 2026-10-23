@@ -28,6 +28,9 @@ button { cursor: pointer; }
 .console-nav-item b { display: grid; place-items: center; min-width: 18px; height: 18px; margin-left: auto; border-radius: 50%; color: var(--text-inverse); background: color-mix(in srgb, var(--text-inverse) 18%, var(--surface-inverse)); font: var(--type-mono); }
 .console-account { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: auto; padding: 14px 12px; border-top: 1px solid var(--border-inverse); }
 .human-avatar { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border: 1px solid var(--border-inverse); border-radius: 50%; color: var(--text-inverse); background: var(--surface-inverse-deep); font: var(--type-mono); }
+.console-account-link { display: flex; align-items: center; gap: 8px; min-width: 0; color: inherit; text-decoration: none; border-radius: var(--radius-2); }
+.console-account-link:hover strong, .console-account-link.is-active strong { text-decoration: underline; }
+.console-account-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .console-account-copy { display: grid; gap: 2px; min-width: 0; overflow: hidden; }
 .console-account-copy strong, .console-account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console-account-copy strong { color: var(--text-inverse); font: var(--type-label); }
@@ -168,7 +171,7 @@ button { cursor: pointer; }
   .console-shell, .console-shell.is-collapsed { display: block; height: auto; min-height: 100dvh; }
   .console-sidebar { position: sticky; top: 0; z-index: 5; flex-direction: row; align-items: center; border-right: 0; border-bottom: var(--rule); }
   .console-brand-row { width: auto; padding: 0 12px; border: 0; }
-  .console-wordmark span:last-child, .sidebar-collapse, .console-account-copy, .human-avatar { display: none; }
+  .console-wordmark span:last-child, .sidebar-collapse, .console-account-copy { display: none; }
   .console-nav { display: flex; flex: 1; min-width: 0; justify-content: center; gap: 0; padding: 0; }
   .console-nav-item { flex: 1; justify-content: center; min-width: 36px; min-height: 52px; padding: 0 6px; border-radius: 0; }
   .console-nav-item span { display: none; }

@@ -30,13 +30,13 @@ apps → platform → connectors, without recreating the managed harness or
 prebuilding a general workflow engine.
 
 `apps/solution-web` and `apps/solution-api` serve one shared application for
-every tenant. A signed-in user belongs to a tenant as an admin or member.
-Platform admins can manage any tenant; tenant admins manage their own. Other
-members can view saved settings, choose per-run configuration and resolve
-attention items they can access. Saved tenant/employee configuration stays
-admin-only. Work email domains provide a verified discovery
-hint, never automatic access. Invitations and approved join requests establish
-membership, including for personal email addresses.
+every tenant. A signed-in user belongs to one tenant, as an admin or member, and
+joins it only through an invitation's link: there is no public sign-up.
+Platform admins can manage any tenant; tenant admins manage their own, and run
+every workflow. Members run the workflows an admin assigns them: they launch,
+view and resolve only those workflows' work, and choose per-run configuration.
+Saved tenant/employee configuration stays admin-only. See
+[workspace access](workspace-access.md).
 
 Each tenant owns employees, workflows, tasks, and its settings. A workflow can
 reference multiple employees through `workflow_employees`; there is no agent
