@@ -287,6 +287,13 @@ def propose(call, arguments):
         except ToolError as refusal:
             rejected.append({"ref": ref, "reason": str(refusal)})
             continue
+        # In a long chunk an answer can land under a neighbour's ref; the amount it restates shows whose it is.
+        shown = _rupees(record["facts"]["amount_cents"])
+        if answered["amount"] != shown:
+            rejected.append({"ref": ref, "reason": (
+                f"This answer restates the amount {answered['amount']}, but this row's is {shown}: it is meant for "
+                "another row. Answer each row under its own ref.")})
+            continue
         submissions = (record["checks"] or {}).get("submissions", 0)
         if not _proposable(record):
             reason = (hold(record["hold_codes"][0]).reason_for(STATEMENT) if record["status"] == "held"
@@ -553,9 +560,13 @@ SELECTION = schema({
     "rules", "payee", "evidence"])
 EXCEPTION = schema({"code": choice(*EXCEPTIONS), "detail": {"type": "string", "minLength": 1, "maxLength": 1000}},
                    ["code", "detail"])
-ROW_ANSWER = schema({"ref": REF, "selection": nullable(SELECTION, "Where the row is entered; null with an exception."),
-                     "exception": nullable(EXCEPTION, "What remains uncertain; null with a selection.")},
-                    ["ref", "selection", "exception"])
+ROW_ANSWER = schema({
+    "ref": REF,
+    "amount": {"type": "string", "pattern": r"^-?\d+\.\d{2}$", "description": (
+        "The row's amount exactly as listed with its ref, money out negative: it shows the answer is this row's.")},
+    "selection": nullable(SELECTION, "Where the row is entered; null with an exception."),
+    "exception": nullable(EXCEPTION, "What remains uncertain; null with a selection.")},
+    ["ref", "amount", "selection", "exception"])
 COLUMN = {"type": "integer", "minimum": 1, "maximum": 100}
 RULES = {"type": "array", "maxItems": 10, "items": schema({
     "column": {"type": ["integer", "null"], "minimum": 1, "maximum": 100,

@@ -81,26 +81,30 @@ def reading(layout):
     return ("propose_layout", {"layout": layout, "exception": None})
 
 
-def answered(entry):
-    """A row as a chunk's answer gives it: a selection with every field, null where the row has none, or an
-    exception. Scenarios write rows as flat entries naming only what matters to them."""
+def answered(entry, amounts):
+    """A row as a chunk's answer gives it: its amount as shown, and a selection with every field, null where the row
+    has none, or an exception. Scenarios write rows as flat entries naming only what matters to them; one that
+    restates another amount says so."""
+    amount = entry.get("amount", amounts.get(entry["ref"]))
+    entry = {key: value for key, value in entry.items() if key != "amount"}
     if "exception" in entry:
-        return {"ref": entry["ref"], "selection": None, "exception": entry["exception"]}
+        return {"ref": entry["ref"], "amount": amount, "selection": None, "exception": entry["exception"]}
     selection = {"family": None, "cost_centre": None, "lines": None, "pair": None, "bills": None, "rules": [],
                  "payee": None, **{key: value for key, value in entry.items() if key != "ref"}}
     if selection["lines"]:
         selection["lines"] = [{"cost_centre": None, **line} for line in selection["lines"]]
     if selection["bills"]:
         selection["bills"] = [{"name": None, **bill} for bill in selection["bills"]]
-    return {"ref": entry["ref"], "selection": selection, "exception": None}
+    return {"ref": entry["ref"], "amount": amount, "selection": selection, "exception": None}
 
 
 def answering(round_):
     """A scripted round whose rows are written as flat entries, given in the answer's shape."""
     def made(answers, session):
         calls = round_(answers, session) if callable(round_) else round_
-        return [(tool, {"rows": [answered(entry) for entry in arguments["rows"]]} if tool == "propose" else arguments)
-                for tool, arguments in calls]
+        amounts = {row["ref"]: row["amount"] for row in rows_of(session)} if is_chunk(session.content) else {}
+        return [(tool, {"rows": [answered(entry, amounts) for entry in arguments["rows"]]} if tool == "propose"
+                 else arguments) for tool, arguments in calls]
     return made
 
 
@@ -265,6 +269,36 @@ def test_a_statement_run_names_the_books_a_disconnected_pc_held(desk):
     assert (left["identifier"], left["label"], left["task_id"]) == ("Sister Infra", "Books left out of this run",
                                                                    run["task_id"])
     assert left["target"]["reason"].startswith(f"Sister Infra was on {laptop['name']}, which was disconnected")
+
+
+def test_an_answer_that_lands_on_another_row_is_refused_by_the_amount_it_restates(desk):
+    """In a long chunk, a session put one row's booking under its neighbour's ref: a wage advance became a bank
+    charge. Each answer restates its row's amount, so one meant for another row is refused, and the row asked again."""
+    company = desk["company"]["guid"]
+
+    def shifted(answers, session):
+        payment, charges = rows_of(session)[:2]
+        return [("propose", {"rows": [{**booked(payment, company), "ref": charges["ref"], "amount": payment["amount"]}]})]
+
+    def corrected(answers, session):
+        return [("propose", {"rows": [booked(row, company) for row in rows_of(session)[:2]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, shifted, corrected) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    chunk = next(s for s in fake.created if is_chunk(s.content))
+    payment, charges = rows_of(chunk)[:2]
+    # The script answers these two rows only; the chunk's other rows are left for review.
+    first, second = verdicts(chunk)[:2]
+    assert first["rejected"] == [{"ref": charges["ref"], "reason": (
+        f"This answer restates the amount {payment['amount']}, but this row's is {charges['amount']}: it is meant "
+        "for another row. Answer each row under its own ref.")}]
+    assert sorted(second["accepted"]) == sorted([payment["ref"], charges["ref"]])
+    rows = records(desk, run)
+    assert [r["proposal"]["resolved"]["data"]["counter_ledger"] for r in rows[:2]] == ["Acme Steel", "Bank Charges"]
 
 
 def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):

@@ -28,8 +28,10 @@ companies and ledgers there by name.
 ## Facts are fixed
 
 Dates, amounts, balances and references were read through a layout proven
-against the running balances. Never restate or correct them: a proposal chooses
-accounting identities only. A negative amount is money out (Payment), a positive
+against the running balances. Never correct them: a proposal chooses accounting
+identities only. Each row's answer repeats its `ref` and its `amount` exactly as
+listed, which shows the answer is that row's: in a long chunk, an answer under a
+neighbour's ref books one payment as another, and Minkops refuses it. A negative amount is money out (Payment), a positive
 one money in (Receipt). A transfer between the client's own bank or cash
 accounts is a Contra.
 
