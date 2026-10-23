@@ -293,6 +293,24 @@ Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
 
+### Companion 0.11.2
+
+One Windows user on one PC is one PC record. The installation ID is a name-based
+(version 5) UUID of Windows' MachineGuid, the computer name and the account, so
+a reinstall, a wiped or second app profile, or a launch inside another app's
+container registers as the same record, and its companies stay authorised. The
+account keeps users of a shared server apart, and the computer name keeps apart
+clones of one image that kept the MachineGuid; a renamed PC is a new PC, whose
+books are continued once ([Replacing a PC](accounts-desk.md#replacing-a-pc)).
+Where the machine cannot be read, the profile's random ID stands, as before.
+
+A record paired under a profile's random (version 4) ID moves to the machine
+identity once it is connected: `POST /api/desktop/worker/installation`
+`{installation_id}` with the device credential. The server refuses an ID another
+of the owner's records holds (409), a record already bound to a machine (409),
+and an ID that is not version 5 (422), so a profile copied or roamed to a second
+PC never takes the first PC's record, companies and writes with it.
+
 ### Companion 0.11.1
 
 `desktop:status` reports `reconnecting` while the companion reconnects a PC whose

@@ -81,8 +81,11 @@ only admins change it. See [Bill entry](bill-entry.md#memory-and-practice).
 ## Replacing a PC
 
 A client's companies are the ones authorised on connected PCs. When the PC holding
-them is replaced, by a new laptop, a reinstall or a hosted server, the client's
-work moves with its books:
+them is replaced, by a new laptop or a hosted server, the client's work moves with
+its books. Reconnecting the same PC is not a replacement: from companion 0.11.2 a
+Windows user on a PC is always the same PC record, through a reinstall, a lost
+app profile or a disconnect and reconnect, and its companies stay authorised
+([Windows app](windows-app.md#companion-0112)). A replacement takes these steps:
 
 1. Connect Minkops on the new PC with the companies open in Tally. Its first
    refresh finds each one as new, with a "New company found" card. While the old

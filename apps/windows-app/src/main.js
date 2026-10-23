@@ -40,7 +40,7 @@ import { CompanionWorker } from "@minkops/desktop-runtime";
 import { createExecutor, PLAN_VERSION } from "@minkops/desktop-runtime/jobs";
 import electronUpdater from "electron-updater";
 import { startUpdates } from "./updater.js";
-import { openPairing, stillPaired } from "./pairing.js";
+import { openPairing, stillPaired, machineInstallationId } from "./pairing.js";
 import {
   trustedOrigin,
   validateSender,
@@ -229,7 +229,23 @@ function startWorker() {
       }
     },
   });
-  const tick = () =>
+  // A record paired under a profile's random ID moves to this PC's machine identity once (see pairing.js). A server
+  // without the route (404) or a record that belongs elsewhere (409, 422) keeps its ID: nothing is lost, only retried
+  // on the next start. Anything else, such as being offline, is retried on the next tick.
+  let adopting = Boolean(pairing.machine) && state.installation_id !== pairing.machine;
+  const adopt = async () => {
+    adopting = false;
+    try {
+      const answer = await request("/api/desktop/worker/installation", { installation_id: pairing.machine });
+      if (state.device !== identity || answer.installation_id !== pairing.machine) return;
+      state.installation_id = pairing.machine;
+      await persist();
+    } catch (error) {
+      if (![401, 404, 409, 422].includes(error.status)) adopting = true;
+    }
+  };
+  const tick = () => {
+    if (adopting) void adopt();
     void worker
       .tick()
       .catch((error) => {
@@ -243,6 +259,7 @@ function startWorker() {
           void persist();
         }
       });
+  };
   timer = setInterval(tick, 4000);
   tick();
 }
@@ -638,6 +655,7 @@ else {
       pairing = await openPairing({
         directory: app.getPath("userData"),
         origin,
+        machine: await machineInstallationId(),
         cipher: {
           available: () => safeStorage.isEncryptionAvailable(),
           encrypt: (text) => safeStorage.encryptString(text),

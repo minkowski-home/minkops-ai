@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openPairing, stillPaired } from "../src/pairing.js";
+import { openPairing, stillPaired, machineInstallationId } from "../src/pairing.js";
 
 const origin = "http://127.0.0.1:3000";
 const device = {
@@ -140,4 +140,44 @@ test("a lost credential is reissued only for the same owner's live PC record", (
     "a PC disconnected from the web stays disconnected");
   assert.equal(stillPaired({ previous, user, installationId, devices: [{ ...record, installation_id: "other" }] }), false);
   assert.equal(stillPaired({ previous, user, installationId, devices: [] }), false);
+});
+
+test("every profile of one Windows user on one PC derives the same installation ID", async () => {
+  const reg = (guid) => async () => `\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n    MachineGuid    REG_SZ    ${guid}\r\n`;
+  const guid = "6f1d2a4e-0b5c-4c7e-9f00-1234567890ab";
+  const pc = { query: reg(guid), host: "GAUSS-PC-Sikar", account: "GAUSS-PC\\karti" };
+  const id = await machineInstallationId(pc);
+  // Name-based (version 5): the server moves a record to it once, and never between machines.
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(await machineInstallationId({ query: reg(guid.toUpperCase()), host: "gauss-pc-sikar", account: "gauss-pc\\KARTI" }), id);
+  // Each Windows user on a shared server is a PC of its own, and so is another machine.
+  assert.notEqual(await machineInstallationId({ ...pc, account: "GAUSS-PC\\accounts2" }), id);
+  assert.notEqual(await machineInstallationId({ ...pc, query: reg("00000000-0b5c-4c7e-9f00-1234567890ab") }), id);
+  // A clone that was not generalised keeps the MachineGuid; its network name sets it apart.
+  assert.notEqual(await machineInstallationId({ ...pc, host: "TALLY-SERVER-2" }), id);
+  // Unreadable (not Windows, or no registry access): the profile's own ID stands.
+  assert.equal(await machineInstallationId({ ...pc, query: async () => { throw new Error("reg failed"); } }), null);
+  assert.equal(await machineInstallationId({ ...pc, query: async () => "no guid here" }), null);
+});
+
+test("an unpaired profile connects with the machine identity; a paired one keeps its record's ID", async (t) => {
+  const machine = "44444444-4444-5444-8444-444444444444";
+  const fresh = await openPairing({ directory: await profile(t), origin, cipher, machine });
+  assert.equal(fresh.state.installation_id, machine);
+
+  const directory = await profile(t);
+  const paired = await openPairing({ directory, origin, cipher });
+  const own = paired.state.installation_id;
+  paired.state.device = device;
+  await paired.save();
+  // Its server record still has the profile's ID until the companion moves it (POST /api/desktop/worker/installation).
+  assert.equal((await openPairing({ directory, origin, cipher, machine })).state.installation_id, own);
+  // Reconnecting a lost credential must find that record, so it keeps the profile's ID too.
+  await writeFile(join(directory, "companion.bin"), "garbage");
+  assert.equal((await openPairing({ directory, origin, cipher, machine })).state.installation_id, own);
+
+  const unpaired = await profile(t);
+  const once = await openPairing({ directory: unpaired, origin, cipher });
+  await once.save();
+  assert.equal((await openPairing({ directory: unpaired, origin, cipher, machine })).state.installation_id, machine);
 });

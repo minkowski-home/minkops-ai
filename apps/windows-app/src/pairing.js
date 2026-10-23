@@ -8,10 +8,49 @@
  * overwritten, and reconnecting reuses the same installation ID, so the server reissues a credential for the
  * same PC record instead of adding a second, "offline" one. Every write is flushed to disk before it replaces
  * the previous file, so an unexpected shutdown leaves the old or the new version, never a damaged one.
+ *
+ * From 0.11.2 the installation ID is derived from the machine and the Windows user (machineInstallationId), so every
+ * profile of that user on that PC, from a reinstall, a wiped profile or a launch inside another app's container, is
+ * the same PC record: its companies stay authorised, and no continuation is needed. A record paired under a
+ * profile's random ID moves to the machine identity once it is connected (POST /api/desktop/worker/installation).
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { open, readFile, rename } from "node:fs/promises";
+
+const machineGuid = async () =>
+  (await promisify(execFile)("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"],
+    { windowsHide: true, timeout: 5000 })).stdout;
+
+/**
+ * This PC's installation ID for this Windows user, or null where the machine cannot be identified.
+ *
+ * A name-based (version 5) UUID of Windows' MachineGuid, the computer name and the account. The account separates
+ * users on a shared server; the computer name separates clones of one image that kept the MachineGuid, which must
+ * never share a record, since a record's jobs would then reach another Tally copy. A renamed PC is a new PC.
+ */
+export async function machineInstallationId({ query = machineGuid, host, account } = {}) {
+  try {
+    const guid = /MachineGuid\s+REG_SZ\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(await query())?.[1];
+    if (!guid) return null;
+    const name = [
+      "minkops-installation",
+      guid,
+      host ?? hostname(),
+      account ?? `${process.env.USERDOMAIN ?? ""}\\${userInfo().username}`,
+    ];
+    const bytes = createHash("sha1").update(name.join("\0").toLowerCase()).digest().subarray(0, 16);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = bytes.toString("hex");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  } catch {
+    return null;
+  }
+}
 
 async function durableWrite(path, data) {
   const temporary = path + ".tmp";
@@ -38,13 +77,14 @@ async function readOptional(path) {
 const recordOf = (device) => (device ? { id: device.id, tenant: device.tenant, owner_id: device.owner_id } : null);
 
 /**
- * Load this PC's pairing with `origin`. `cipher` is Windows credential storage: {available, encrypt, decrypt}.
+ * Load this PC's pairing with `origin`. `cipher` is Windows credential storage: {available, encrypt, decrypt};
+ * `machine` is machineInstallationId(), or null.
  *
  * The result holds the live `state` (change it, then `save()`), `problem` (why the saved connection could not be
  * read, for diagnostics) and `previous`: the PC record whose credential was lost, to reconnect as. Set
  * `previous` to null, and save, once that record is reconnected, disconnected or no longer this PC's.
  */
-export async function openPairing({ directory, origin, cipher, now = () => new Date() }) {
+export async function openPairing({ directory, origin, cipher, machine = null, now = () => new Date() }) {
   const secretPath = join(directory, "companion.bin");
   const identityPath = join(directory, "installation.json");
   let identity = null;
@@ -75,18 +115,18 @@ export async function openPairing({ directory, origin, cipher, now = () => new D
     }
   }
 
-  const pairing = {
-    state: restored ?? {
-      server_origin: origin,
-      installation_id: identity?.installation_id ?? randomUUID(),
-      device: null,
-      bindings: {},
-      pending: null,
-    },
-    previous: restored || locked ? null : (identity?.device ?? null),
-    problem,
-    save,
+  const previous = restored || locked ? null : (identity?.device ?? null);
+  const state = restored ?? {
+    server_origin: origin,
+    installation_id: identity?.installation_id ?? randomUUID(),
+    device: null,
+    bindings: {},
+    pending: null,
   };
+  // A record this profile is connected as, or reconnects as, keeps the ID the server knows it by until it moves to
+  // the machine identity; an unpaired profile connects as the machine.
+  if (machine && !locked && !state.device && !previous) state.installation_id = machine;
+  const pairing = { state, previous, problem, machine, save };
   let written = identity && JSON.stringify(identity);
   async function writeIdentity() {
     const next = JSON.stringify({
