@@ -66,7 +66,7 @@ def ensure_instance(api, project, instance, region, tier, storage_gb):
     return True
 
 
-def provision(project, instance, state_dir):
+def provision(project, instance, state_dir, port):
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(state_dir, 0o700)
     state_path = state_dir / "database.json"
@@ -86,7 +86,7 @@ def provision(project, instance, state_dir):
         operation = api.request(f"{base}/instances/{instance}/users",
                                 {"name": state["bootstrap"], "password": state["bootstrap_password"]})
         api.wait(f"{base}/operations/{operation['name']}")
-    admin = make_conninfo(host="127.0.0.1", port=5433, dbname="postgres",
+    admin = make_conninfo(host="127.0.0.1", port=port, dbname="postgres",
                          user=state["bootstrap"], password=state["bootstrap_password"])
     with psycopg.connect(admin, autocommit=True) as connection:
         for name, password, limit in (("minkops_owner", None, -1),
@@ -101,7 +101,7 @@ def provision(project, instance, state_dir):
             connection.execute("CREATE DATABASE minkops OWNER minkops_owner")
         connection.execute("REVOKE ALL ON DATABASE minkops FROM PUBLIC")
         connection.execute("GRANT CONNECT ON DATABASE minkops TO minkops_app, minkops_migrate")
-    migration_url = make_conninfo(host="127.0.0.1", port=5433, dbname="minkops",
+    migration_url = make_conninfo(host="127.0.0.1", port=port, dbname="minkops",
                                  user="minkops_migrate", password=state["migration_password"],
                                  options="-c role=minkops_owner")
     migrate(migration_url)
@@ -112,7 +112,7 @@ def provision(project, instance, state_dir):
         connection.execute("GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO minkops_app")
         connection.execute("ALTER DEFAULT PRIVILEGES FOR ROLE minkops_owner IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO minkops_app")
         connection.execute("ALTER DEFAULT PRIVILEGES FOR ROLE minkops_owner IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO minkops_app")
-    runtime_url = make_conninfo(host="127.0.0.1", port=5433, dbname="minkops",
+    runtime_url = make_conninfo(host="127.0.0.1", port=port, dbname="minkops",
                                user="minkops_app", password=state["runtime_password"])
     with psycopg.connect(runtime_url) as connection:
         applied = dict(connection.execute("SELECT version,checksum FROM schema_migrations").fetchall())
@@ -138,6 +138,8 @@ if __name__ == "__main__":
     parser.add_argument("--region", default="us-central1")
     parser.add_argument("--tier", help="Cloud SQL machine tier; required with --create-instance.")
     parser.add_argument("--storage-gb", type=int, default=10)
+    parser.add_argument("--proxy-port", type=int, default=5433,
+                        help="Local port of the Cloud SQL Auth Proxy to the instance (default %(default)s).")
     args = parser.parse_args()
     if args.create_instance:
         if not args.tier:
@@ -145,6 +147,6 @@ if __name__ == "__main__":
         created = ensure_instance(GoogleApi("minkops-ai-prod"), args.sql_project, args.instance, args.region,
                                   args.tier, args.storage_gb)
         print("Dedicated instance created." if created else "Dedicated instance already exists; left unchanged.")
-        print("Start the Cloud SQL Auth Proxy on 127.0.0.1:5433 for it, then run again without --create-instance.")
+        print(f"Start the Cloud SQL Auth Proxy on 127.0.0.1:{args.proxy_port} for it, then run again without --create-instance.")
     else:
-        provision(args.sql_project, args.instance, args.state_dir)
+        provision(args.sql_project, args.instance, args.state_dir, args.proxy_port)
