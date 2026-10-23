@@ -16,6 +16,25 @@ from minkops_api.main import app
 URL = os.getenv("TEST_DATABASE_URL")
 
 
+def signed_in(slug=None):
+    """A client signed in as a new person: a member of the workspace `slug`, or the admin of a new one."""
+    from psycopg.rows import dict_row
+
+    from minkops_platform import identity
+    with psycopg.connect(URL, row_factory=dict_row) as c:
+        person = identity.create_account(c, email=f"{uuid.uuid4().hex}@example.com", name="Other Person",
+                                         password="other test password 123!")
+        tenant = (c.execute("SELECT id FROM tenants WHERE slug=%s", (slug,)) if slug else c.execute(
+            "INSERT INTO tenants(slug,name) VALUES (%s,'Other workspace') RETURNING id",
+            (f"other-{uuid.uuid4().hex[:10]}",))).fetchone()
+        c.execute("INSERT INTO memberships(tenant_id,user_id,role) VALUES (%s,%s,%s)",
+                  (tenant["id"], person["id"], "member" if slug else "admin"))
+        token = identity.start_session(c, person["id"], "test")
+    client = TestClient(app)
+    client.cookies.set("__session", token)
+    return client, {"x-csrf-token": client.get("/api/auth/me").json()["csrf_token"]}
+
+
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
 class DesktopTests(unittest.TestCase):
     def test_authenticated_activity_and_heartbeat_refresh_presence_without_claiming(self):
@@ -232,33 +251,10 @@ class DesktopTests(unittest.TestCase):
     def test_another_account_and_workspace_cannot_operate_my_pc(self):
         self.pair()
         job, _ = self.launch()
-        visitor = TestClient(app)
-        email = f"other-{uuid.uuid4().hex}@example.com"
-        response = visitor.post(
-            "/api/auth/signup",
-            json={
-                "name": "Other",
-                "email": email,
-                "password": "other test password 123!",
-                "organization_name": "Other workspace",
-            },
-        )
-        visitor.post(
-            "/api/auth/verify",
-            json={"token": response.json()["verification_link"].rsplit("/", 1)[1]},
-        )
-        visitor.post(
-            "/api/auth/login", json={"email": email, "password": "other test password 123!"}
-        )
-        other = visitor.get("/api/auth/me").json()
-        other_csrf = {"x-csrf-token": other["csrf_token"]}
+        visitor, _ = signed_in()
         self.assertEqual(visitor.get(self.base + f"/jobs/{job['id']}").status_code, 403)
         # Even membership in my workspace does not delegate my device or grant.
-        with psycopg.connect(URL) as c:
-            c.execute(
-                "INSERT INTO memberships(tenant_id,user_id,role) VALUES ((SELECT id FROM tenants WHERE slug=%s),%s,'member')",
-                (self.slug, other["id"]),
-            )
+        visitor, other_csrf = signed_in(self.slug)
         self.assertEqual(visitor.get(self.base + f"/jobs/{job['id']}").status_code, 404)
         self.assertEqual(
             visitor.delete(

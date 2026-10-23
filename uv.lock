@@ -679,6 +679,7 @@ dependencies = [
     { name = "minkops-connectors" },
     { name = "openai" },
     { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "pwdlib", extra = ["argon2"] },
     { name = "pyyaml" },
 ]
 
@@ -688,6 +689,7 @@ requires-dist = [
     { name = "minkops-connectors", editable = "connectors" },
     { name = "openai", specifier = ">=3.19.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.3" },
+    { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
@@ -703,7 +705,6 @@ dependencies = [
     { name = "minkops-connectors" },
     { name = "minkops-platform" },
     { name = "psycopg", extra = ["binary", "pool"] },
-    { name = "pwdlib", extra = ["argon2"] },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "uvicorn" },
@@ -718,7 +719,6 @@ requires-dist = [
     { name = "minkops-connectors", editable = "connectors" },
     { name = "minkops-platform", editable = "platform" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.3" },
-    { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.0" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", specifier = ">=0.53.0" },

@@ -108,6 +108,36 @@ def test_too_little_history_becomes_one_question_per_company(books):
     assert card["label"] == "Practice question" and card["target"]["options"]
 
 
+def test_a_question_reaches_the_people_who_run_the_workflow_its_answer_changes(books):
+    """Asked per company, a question changes one workflow's entries: it reaches admins, and the members who run that
+    workflow. A member running only statements neither sees nor answers how bills are booked."""
+    from minkops_platform import attention
+    from minkops_platform.errors import ServiceError
+    db, company = books["db"], books["company"]
+    assert set(practice.SERVES) == set(practice.QUESTIONS)
+    _, version = found(books, masters(), [purchase(1)])
+    practice.probe(db, company, version, books["job"])
+    tenant = {"id": company["tenant_id"]}
+
+    def shown(workflows):
+        return {item["target_probe"] for item in (
+            {**row, "target_probe": db.execute("SELECT probe FROM practice_questions WHERE attention_item_id=%s",
+                                               (row["id"],)).fetchone()["probe"]}
+            for row in attention.listing(db, tenant["id"], workflows=workflows) if row["kind"] == "practice")}
+
+    every = shown(None)
+    assert {"receipt_register", "invoice_number_field", "bank_payments"} <= every
+    assert shown(["statement-entry"]) == {"bank_payments"}
+    assert shown(["bill-entry"]) == every - {"bank_payments"}
+    assert shown([]) == set()
+    assert attention.pending_count(db, tenant["id"], workflows=["statement-entry"]) == 1
+    bills = db.execute("""SELECT a.id FROM attention_items a JOIN practice_questions q ON q.attention_item_id=a.id
+                          WHERE q.company_id=%s AND q.probe='invoice_number_field'""", (company["id"],)).fetchone()
+    with pytest.raises(ServiceError) as hidden:
+        attention.decide(db, tenant, books["owner"], bills["id"], "NARRATION", workflows=["statement-entry"])
+    assert hidden.value.kind == "not_found"
+
+
 def test_a_settled_fact_is_a_confirmed_entry_and_a_persons_answer_is_never_overwritten(books):
     db, company = books["db"], books["company"]
     answered = memory.record(db, tenant_id=company["tenant_id"], client_id=company["client_id"],
