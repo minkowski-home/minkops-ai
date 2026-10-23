@@ -1,9 +1,11 @@
-"""Small first-party auth layer: verified email, server sessions, tenant membership."""
+"""Transport for people's accounts: server sessions in a cookie, CSRF, and the links sent by email.
+
+The accounts themselves, and who belongs to which workspace, live in the platform (`identity`, `members`). There is
+no public sign-up: a person joins through an invitation's link (docs/workspace-access.md).
+"""
 
 import atexit
-import hashlib
 import os
-import re
 import secrets
 import smtplib
 from email.message import EmailMessage
@@ -14,13 +16,15 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
-from pwdlib import PasswordHash
 from pydantic import BaseModel, EmailStr, Field
 
 from minkops_connectors.email import send_email
+from minkops_platform import identity, members
+
+from .service import call as _call
 
 router = APIRouter(prefix="/api")
-passwords = PasswordHash.recommended()
+digest = identity.digest
 # Firebase Hosting forwards only this cookie to Cloud Run. Its value remains
 # our opaque PostgreSQL session token; Google does not own user authentication.
 SESSION_COOKIE = "__session"
@@ -72,21 +76,10 @@ def database():
 Db = Annotated[psycopg.Connection, Depends(database, scope="function")]
 
 
-def digest(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
 def session_user(request: Request, connection: Db) -> dict:
-    token = session_token(request)
-    if not token:
+    if not session_token(request):
         raise HTTPException(401, "Sign in required.")
-    row = connection.execute(
-        """SELECT users.id, users.name, users.email, users.is_platform_admin
-           FROM sessions JOIN users ON users.id = sessions.user_id
-           WHERE sessions.token_hash = %s AND sessions.expires_at > now()
-             AND sessions.revoked_at IS NULL AND users.email_verified_at IS NOT NULL""",
-        (digest(token),),
-    ).fetchone()
+    row = identity.session_user(connection, session_token(request))
     if not row:
         raise HTTPException(401, "Session expired. Sign in again.")
     return row
@@ -118,25 +111,10 @@ def tenant_access(slug: str, user: dict, connection: psycopg.Connection, *, edit
     return tenant, member
 
 
-class Signup(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
-    email: EmailStr
-    password: str = Field(min_length=12, max_length=1024)
-    organization_name: str | None = Field(default=None, min_length=2, max_length=120)
+# --- email ----------------------------------------------------------------------------------------------------------
 
-
-class Credentials(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class TokenInput(BaseModel):
-    token: str
-
-
-def verification_link(token: str) -> str:
-    base = os.getenv("PUBLIC_APP_URL", "http://localhost:3000").rstrip("/")
-    return f"{base}/verify/{token}"
+def link(path: str) -> str:
+    return f"{os.getenv('PUBLIC_APP_URL', 'http://localhost:3000').rstrip('/')}{path}"
 
 
 def send_mail(email: str, subject: str, message_text: str) -> None:
@@ -157,82 +135,31 @@ def send_mail(email: str, subject: str, message_text: str) -> None:
         raise HTTPException(503, "Email could not be sent.") from error
 
 
-def send_verification(email: str, link: str) -> None:
-    send_mail(email, "Verify your Minkops account",
-              f"Open this link to verify your email: {link}")
+def dev_link(name: str, url: str) -> dict:
+    """On the local stack, which sends no email, the link travels in the answer instead."""
+    return {name: url} if os.getenv("AUTH_DEV_MODE") == "1" else {}
 
 
-@router.post("/auth/signup", status_code=201)
-def signup(body: Signup, connection: Db):
-    email = str(body.email).strip().lower()
-    if connection.execute("SELECT 1 FROM users WHERE lower(email) = %s", (email,)).fetchone():
-        raise HTTPException(409, "Account already exists.")
-    domain = email.rsplit("@", 1)[1]
-    suggestion = connection.execute(
-        """SELECT tenants.slug, tenants.name FROM tenant_domains
-           JOIN tenants ON tenants.id = tenant_domains.tenant_id
-           WHERE tenant_domains.domain = %s AND verified_at IS NOT NULL""",
-        (domain,),
-    ).fetchone()
-    token = secrets.token_urlsafe(32)
-    link = verification_link(token)
-    send_verification(email, link)
-    user_id = connection.execute(
-        "INSERT INTO users (email, name, password_hash) VALUES (%s, %s, %s) RETURNING id",
-        (email, body.name.strip(), passwords.hash(body.password)),
-    ).fetchone()["id"]
-    connection.execute(
-        "INSERT INTO email_verifications (user_id, token_hash, expires_at) VALUES (%s, %s, now() + interval '24 hours')",
-        (user_id, digest(token)),
-    )
-    if body.organization_name:
-        base = re.sub(r"[^a-z0-9]+", "-", body.organization_name.lower()).strip("-")[:36]
-        slug = f"{base}-{secrets.token_hex(3)}"
-        tenant_id = connection.execute(
-            "INSERT INTO tenants (slug, name) VALUES (%s, %s) RETURNING id",
-            (slug, body.organization_name.strip()),
-        ).fetchone()["id"]
-        connection.execute(
-            "INSERT INTO memberships (tenant_id, user_id, role) VALUES (%s, %s, 'admin')",
-            (tenant_id, user_id),
-        )
-    result = {"message": "Check your email to verify your account.", "suggested_tenant": suggestion}
-    if os.getenv("AUTH_DEV_MODE") == "1":
-        result["verification_link"] = link
-    return result
+# --- signing in -----------------------------------------------------------------------------------------------------
+
+class Credentials(BaseModel):
+    email: EmailStr
+    password: str = Field(max_length=1024)
 
 
-@router.post("/auth/verify")
-def verify(body: TokenInput, connection: Db):
-    row = connection.execute(
-        "SELECT user_id FROM email_verifications WHERE token_hash = %s AND expires_at > now()",
-        (digest(body.token),),
-    ).fetchone()
-    if not row:
-        raise HTTPException(400, "Verification link is invalid or expired.")
-    connection.execute("UPDATE users SET email_verified_at = now() WHERE id = %s", (row["user_id"],))
-    connection.execute("DELETE FROM email_verifications WHERE user_id = %s", (row["user_id"],))
-    return {"message": "Email verified. You can sign in."}
+def start_session(connection, response: Response, request: Request, user_id) -> None:
+    token = identity.start_session(connection, user_id, request.headers.get("user-agent"))
+    secure = os.getenv("COOKIE_SECURE") == "1" or request.url.scheme == "https"
+    response.set_cookie(SESSION_COOKIE, token, httponly=True, secure=secure,
+                        samesite="lax", path="/", max_age=identity.SESSION_DAYS * 86400)
 
 
 @router.post("/auth/login")
 def login(body: Credentials, response: Response, request: Request, connection: Db):
-    user = connection.execute(
-        "SELECT id, password_hash, email_verified_at FROM users WHERE lower(email) = %s",
-        (str(body.email).lower(),),
-    ).fetchone()
-    if not user or not passwords.verify(body.password, user["password_hash"]):
+    user = _call(identity.authenticate, connection, str(body.email), body.password)
+    if not user:
         raise HTTPException(401, "Invalid email or password.")
-    if not user["email_verified_at"]:
-        raise HTTPException(403, "Verify your email before signing in.")
-    token = secrets.token_urlsafe(32)
-    connection.execute(
-        "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (%s, %s, now() + interval '7 days')",
-        (user["id"], digest(token)),
-    )
-    secure = os.getenv("COOKIE_SECURE") == "1" or request.url.scheme == "https"
-    response.set_cookie(SESSION_COOKIE, token, httponly=True, secure=secure,
-                        samesite="lax", path="/", max_age=7 * 86400)
+    start_session(connection, response, request, user["id"])
     return {"message": "Signed in."}
 
 
@@ -279,102 +206,105 @@ def logout(request: Request, response: Response, connection: Db):
     return {"message": "Signed out."}
 
 
-@router.post("/tenants/{slug}/join-requests", status_code=201)
-def request_membership(slug: str, request: Request, user: User, connection: Db):
-    require_csrf(request)
-    tenant = connection.execute("SELECT id FROM tenants WHERE slug = %s", (slug,)).fetchone()
-    if not tenant:
-        raise HTTPException(404, "Workspace not found.")
-    if connection.execute(
-        "SELECT 1 FROM memberships WHERE tenant_id = %s AND user_id = %s",
-        (tenant["id"], user["id"]),
-    ).fetchone():
-        raise HTTPException(409, "Already a member.")
-    connection.execute(
-        """INSERT INTO join_requests (tenant_id, user_id, status)
-           VALUES (%s, %s, 'pending') ON CONFLICT (tenant_id, user_id)
-           DO UPDATE SET status = 'pending', resolved_at = NULL""",
-        (tenant["id"], user["id"]),
-    )
-    return {"message": "Request sent to workspace admins."}
+# --- joining by invitation ------------------------------------------------------------------------------------------
+
+@router.get("/auth/invitations/{token}")
+def invitation(token: str, connection: Db):
+    """What an invitation's link opens: the workspace, the address and role, and whether to sign in or sign up."""
+    return _call(members.invitation, connection, token)
 
 
-@router.get("/tenants/{slug}/join-requests")
-def list_join_requests(slug: str, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection, edit=True)
-    rows = connection.execute(
-        """SELECT join_requests.id, users.name, users.email, join_requests.created_at
-           FROM join_requests JOIN users ON users.id = join_requests.user_id
-           WHERE join_requests.tenant_id = %s AND join_requests.status = 'pending'
-           ORDER BY join_requests.created_at""",
-        (tenant["id"],),
-    ).fetchall()
-    return rows
+class Joining(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    password: str | None = Field(default=None, max_length=1024)
 
 
-@router.post("/tenants/{slug}/join-requests/{request_id}/approve")
-def approve_join_request(slug: str, request_id: str, request: Request,
-                         user: User, connection: Db):
-    require_csrf(request)
-    tenant, _ = tenant_access(slug, user, connection, edit=True)
-    row = connection.execute(
-        """UPDATE join_requests SET status = 'approved', resolved_at = now()
-           WHERE id = %s AND tenant_id = %s AND status = 'pending'
-           RETURNING user_id""",
-        (request_id, tenant["id"]),
-    ).fetchone()
-    if not row:
-        raise HTTPException(404, "Pending request not found.")
-    connection.execute(
-        """INSERT INTO memberships (tenant_id, user_id, role) VALUES (%s, %s, 'member')
-           ON CONFLICT (tenant_id, user_id) DO NOTHING""",
-        (tenant["id"], row["user_id"]),
-    )
-    return {"message": "Membership approved."}
+@router.post("/auth/invitations/{token}/accept")
+def accept(token: str, body: Joining, request: Request, response: Response, connection: Db):
+    """Join the invitation's workspace: signed in, as the invited address; otherwise with a new account, which is
+    signed in at once."""
+    current = identity.session_user(connection, session_token(request))
+    if current:
+        require_csrf(request)
+        joined = _call(members.accept, connection, token, user=current)
+    else:
+        joined = _call(members.accept, connection, token, name=body.name, password=body.password)
+        start_session(connection, response, request, joined["id"])
+    return {"message": "Workspace joined.", "workspace": joined["workspace"]}
 
 
-class InvitationInput(BaseModel):
+# --- passwords ------------------------------------------------------------------------------------------------------
+
+class ResetRequest(BaseModel):
     email: EmailStr
-    role: str = "member"
 
 
-@router.post("/tenants/{slug}/invitations", status_code=201)
-def invite(slug: str, body: InvitationInput, request: Request,
-           user: User, connection: Db):
+@router.post("/auth/password-reset", status_code=202)
+def request_reset(body: ResetRequest, connection: Db):
+    """Email a reset link to the account using this address. The answer is the same whether or not one does."""
+    sent = identity.request_reset(connection, str(body.email))
+    answer = {"message": "If an account uses this email, a link to reset its password is on its way."}
+    if sent:
+        url = link(f"/reset/{sent['token']}")
+        send_mail(sent["user"]["email"], "Reset your Minkops password", (
+            f"Someone asked to reset the password for {sent['user']['email']} on Minkops.\n\n"
+            f"If it was you, open this link within the hour to choose a new password:\n{url}\n\n"
+            "If it was not, ignore this email: your password stays as it is."))
+        answer |= dev_link("reset_link", url)
+    return answer
+
+
+class Reset(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=1024)
+
+
+@router.post("/auth/password-reset/confirm")
+def reset(body: Reset, connection: Db):
+    _call(identity.reset_password, connection, body.token, body.password)
+    return {"message": "Password changed. Sign in with your new password."}
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(max_length=1024)
+    new_password: str = Field(max_length=1024)
+
+
+@router.post("/auth/password")
+def change_password(body: PasswordChange, request: Request, user: User, connection: Db):
     require_csrf(request)
-    tenant, _ = tenant_access(slug, user, connection, edit=True)
-    if body.role not in ("admin", "member"):
-        raise HTTPException(422, "Invalid role.")
-    token = secrets.token_urlsafe(32)
-    link = f"{os.getenv('PUBLIC_APP_URL', 'http://localhost:3000').rstrip('/')}/invite/{token}"
-    send_mail(str(body.email), f"Join {tenant['name']} on Minkops",
-              f"Open this link to join the workspace: {link}")
-    connection.execute(
-        """INSERT INTO invitations (tenant_id, email, role, token_hash, expires_at, invited_by)
-           VALUES (%s, %s, %s, %s, now() + interval '7 days', %s)""",
-        (tenant["id"], str(body.email).lower(), body.role, digest(token), user["id"]),
-    )
-    result = {"message": "Invitation sent."}
-    if os.getenv("AUTH_DEV_MODE") == "1":
-        result["invitation_link"] = link
-    return result
+    _call(identity.change_password, connection, user["id"], session_token(request),
+          current=body.current_password, new=body.new_password)
+    return {"message": "Password changed. Your other sessions are signed out."}
 
 
-@router.post("/auth/accept-invite")
-def accept_invite(body: TokenInput, request: Request, user: User, connection: Db):
+# --- profile and sessions -------------------------------------------------------------------------------------------
+
+class Profile(BaseModel):
+    name: str = Field(max_length=200)
+
+
+@router.patch("/auth/me")
+def rename(body: Profile, request: Request, user: User, connection: Db):
     require_csrf(request)
-    row = connection.execute(
-        """SELECT id, tenant_id, email, role FROM invitations
-           WHERE token_hash = %s AND expires_at > now() AND accepted_at IS NULL
-           FOR UPDATE""",
-        (digest(body.token),),
-    ).fetchone()
-    if not row or row["email"] != user["email"].lower():
-        raise HTTPException(400, "Invitation is invalid or belongs to another account.")
-    connection.execute(
-        """INSERT INTO memberships (tenant_id, user_id, role) VALUES (%s, %s, %s)
-           ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role""",
-        (row["tenant_id"], user["id"], row["role"]),
-    )
-    connection.execute("UPDATE invitations SET accepted_at = now() WHERE id = %s", (row["id"],))
-    return {"message": "Workspace joined."}
+    _call(identity.rename, connection, user["id"], body.name)
+    return session_profile(request, identity.session_user(connection, session_token(request)), connection)
+
+
+@router.get("/auth/sessions")
+def sessions(request: Request, user: User, connection: Db):
+    return identity.sessions(connection, user["id"], session_token(request))
+
+
+@router.delete("/auth/sessions/{session_id}")
+def end_session(session_id: str, request: Request, user: User, connection: Db):
+    require_csrf(request)
+    _call(identity.end_session, connection, user["id"], session_id)
+    return {"message": "Signed out there."}
+
+
+@router.post("/auth/sessions/end-others")
+def end_others(request: Request, user: User, connection: Db):
+    require_csrf(request)
+    ended = identity.end_other_sessions(connection, user["id"], session_token(request))
+    return {"message": f"Signed out of {ended} other session{'s' if ended != 1 else ''}.", "ended": ended}

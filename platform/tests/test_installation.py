@@ -120,27 +120,41 @@ class InstallationDatabaseTests(unittest.TestCase):
         with self.assertRaises(ServiceError):
             install(self.connection, composition, actor_email="installer@example.com")
 
-    def test_an_operator_provisions_a_clients_workspace_for_its_verified_owner_once(self):
+    def test_an_operator_creates_a_clients_workspace_and_invites_its_first_admin(self):
+        """The admin needs no account yet: the operator sends them a sign-up link. Repeating it replaces the link
+        until they join, then changes nothing; nobody else can take the workspace over."""
+        from psycopg.rows import dict_row
+
+        from minkops_platform import identity, members
         from minkops_platform.errors import ServiceError
         from minkops_platform.installation import provision_tenant
 
         composition = load_solution(REPOSITORY_ROOT, "pr-infra")
-        self.connection.execute("""INSERT INTO users(email,name,password_hash) VALUES
-            ('owner@client.example','Owner','unused'), ('other@client.example','Other','unused')""")
-        # The client's administrator signs up and verifies first: an operator never creates their account.
-        with self.assertRaisesRegex(ServiceError, "verify"):
-            provision_tenant(self.connection, composition, name="PR Infra", owner_email="owner@client.example")
-        self.connection.execute("UPDATE users SET email_verified_at=now()")
-        tenant = provision_tenant(self.connection, composition, name="PR Infra", owner_email="OWNER@client.example")
+        tenant, first = provision_tenant(self.connection, composition, name="PR Infra", admin_email="Owner@client.example")
+        again, link = provision_tenant(self.connection, composition, name="PR Infra", admin_email="owner@client.example")
+        self.assertEqual(again, tenant)
+        with self.connection.cursor(row_factory=dict_row) as cursor:
+            with self.assertRaises(ServiceError):
+                members.invitation(cursor, first)
+            self.assertEqual(members.invitation(cursor, link)["role"], "admin")
+            # Before the admin joins, the operator may name another: the latest link is the one that works.
+            _, other = provision_tenant(self.connection, composition, name="PR Infra", admin_email="other@client.example")
+            with self.assertRaises(ServiceError):
+                members.invitation(cursor, link)
+            _, link = provision_tenant(self.connection, composition, name="PR Infra", admin_email="owner@client.example")
+            joined = members.accept(cursor, link, name="Owner", password="a long enough password")
         self.assertEqual(provision_tenant(self.connection, composition, name="PR Infra",
-                                          owner_email="owner@client.example"), tenant)
+                                          admin_email="owner@client.example"), (tenant, None))
         self.assertEqual(self.connection.execute(
             """SELECT t.slug, t.name, u.email, m.role FROM tenants t JOIN memberships m ON m.tenant_id=t.id
                JOIN users u ON u.id=m.user_id WHERE t.id=%s""", (tenant,)).fetchall(),
             [("pr-infra", "PR Infra", "owner@client.example", "admin")])
-        # Someone else cannot take over an existing workspace by provisioning it again.
+        self.assertIsNotNone(identity.authenticate(self.connection.cursor(row_factory=dict_row), joined["email"],
+                                                   "a long enough password"))
         with self.assertRaisesRegex(ServiceError, "another administrator"):
-            provision_tenant(self.connection, composition, name="PR Infra", owner_email="other@client.example")
+            provision_tenant(self.connection, composition, name="PR Infra", admin_email="other@client.example")
+        # The operator installs; an admin may be named to attribute it.
+        self.assertEqual(install(self.connection, composition), ["statement-entry", "bill-entry"])
         self.assertEqual(install(self.connection, composition, actor_email="owner@client.example"),
                          ["statement-entry", "bill-entry"])
 

@@ -179,15 +179,30 @@ def owned_device(connection, tenant_id, user_id, device_id, *, active=True, lock
 
 
 def revoke(connection, tenant, user, device_id):
-    device = owned_device(connection, tenant["id"], user["id"], device_id, active=False, lock=True)
-    connection.execute("UPDATE desktop_devices SET revoked_at=now() WHERE id=%s", (device_id,))
+    _disconnect(connection, owned_device(connection, tenant["id"], user["id"], device_id, active=False, lock=True))
+    return {"message": "PC disconnected."}
+
+
+def disconnect_owner(connection, tenant_id, owner_id):
+    """Disconnect every PC a person connected to this workspace, as each owner's own disconnect does; returns how
+    many. Used when an admin removes the person (members.remove)."""
+    devices = connection.execute(
+        """SELECT * FROM desktop_devices WHERE tenant_id=%s AND owner_id=%s AND revoked_at IS NULL
+           ORDER BY id FOR UPDATE""", (tenant_id, owner_id)).fetchall()
+    for device in devices:
+        _disconnect(connection, device)
+    return len(devices)
+
+
+def _disconnect(connection, device):
+    connection.execute("UPDATE desktop_devices SET revoked_at=now() WHERE id=%s", (device["id"],))
     # Settle the saves it had begun, and offer its companies to the PCs that find their books.
     from .accounts.sync import disconnected
     disconnected(connection, device)
     pending = connection.execute(
         """UPDATE desktop_jobs SET state='failed',error='This PC was disconnected.',updated_at=now()
            WHERE device_id=%s AND state IN ('queued','executing') RETURNING *""",
-        (device_id,),
+        (device["id"],),
     ).fetchall()
     for job in pending:
         _observe(
@@ -197,7 +212,6 @@ def revoke(connection, tenant, user, device_id):
             "This PC was disconnected. Reconnect it to start a new task.",
             0,
         )
-    return {"message": "PC disconnected."}
 
 
 # Crockford base32: references are read aloud, so no I, L, O or U.

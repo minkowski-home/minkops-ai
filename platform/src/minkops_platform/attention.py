@@ -57,21 +57,47 @@ def record(connection, run, event_key, identifier, title, *, kind="manual", targ
     return row
 
 
-def get(connection, tenant_id, item_id, visible=None):
-    """One item; an item of a client outside `visible` is indistinguishable from none."""
+def _scope(visible, workflows):
+    """The condition keeping a person to their items, and its parameters: work of the clients they reach
+    (`visible`), and of the workflows they run (`workflows`, by key). An item of no workflow, such as a found
+    company, reaches everyone, unless it names the workflows it serves, as a practice question does. None reaches
+    every client or workflow."""
+    clients = None if visible is None else list(visible)
+    keys = None if workflows is None else list(workflows)
+    return ("""(t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
+               AND (%s::text[] IS NULL OR w.key = ANY(%s::text[])
+                    OR (t.workflow_id IS NULL AND (NOT a.target ? 'workflows' OR a.target->'workflows' ?| %s::text[])))""",
+            [clients, clients, keys, keys, keys])
+
+
+def get(connection, tenant_id, item_id, visible=None, workflows=None):
+    """One item; an item outside the person's scope (`_scope`) is indistinguishable from none."""
+    condition, parameters = _scope(visible, workflows)
     row = connection.execute(
-        """SELECT a.* FROM attention_items a JOIN tasks t ON t.tenant_id=a.tenant_id AND t.id=a.task_id
-           WHERE a.tenant_id=%s AND a.id=%s AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
-           FOR UPDATE OF a""", (tenant_id, item_id, *(2 * [None if visible is None else list(visible)]))).fetchone()
+        f"""SELECT a.* FROM attention_items a JOIN tasks t ON t.tenant_id=a.tenant_id AND t.id=a.task_id
+            LEFT JOIN workflows w ON w.id=t.workflow_id AND w.tenant_id=a.tenant_id
+            WHERE a.tenant_id=%s AND a.id=%s AND {condition} FOR UPDATE OF a""",
+        (tenant_id, item_id, *parameters)).fetchone()
     if not row:
         raise ServiceError("not_found", "Attention item not found.")
     return row
 
 
-def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest", visible=None):
-    """Items by group and order; `visible` limits client work to reachable clients."""
+def pending_count(connection, tenant_id, visible=None, workflows=None):
+    """How many items await the person, in their scope (`_scope`)."""
+    condition, parameters = _scope(visible, workflows)
+    return connection.execute(
+        f"""SELECT count(*) AS n FROM attention_items a JOIN tasks t ON t.tenant_id=a.tenant_id AND t.id=a.task_id
+            LEFT JOIN workflows w ON w.id=t.workflow_id AND w.tenant_id=a.tenant_id
+            WHERE a.tenant_id=%s AND a.status='pending' AND {condition}""", (tenant_id, *parameters)).fetchone()["n"]
+
+
+def listing(connection, tenant_id, *, status="pending", offset=0, group="workflow", sort="newest", visible=None,
+            workflows=None):
+    """Items by group and order, in the person's scope (`_scope`)."""
     grouping = {"workflow": "workflow", "employee": "employee", "status": "a.status", "client": "client"}[group]
     ordering = "a.identifier" if sort == "name" else "a.updated_at DESC"
+    condition, parameters = _scope(visible, workflows)
     rows = connection.execute(
         f"""SELECT a.id,a.task_id,a.identifier,a.label,a.kind,a.status,a.created_at,a.updated_at,a.done_at,a.target,
         a.done_by,a.authorized_by,w.name AS workflow,c.name AS client,
@@ -81,10 +107,9 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
         FROM attention_items a JOIN tasks t ON t.id=a.task_id AND t.tenant_id=a.tenant_id
         LEFT JOIN workflows w ON w.id=t.workflow_id AND w.tenant_id=a.tenant_id
         LEFT JOIN client_businesses c ON c.id=t.client_id AND c.tenant_id=a.tenant_id
-        WHERE a.tenant_id=%s AND (%s='all' OR a.status=%s)
-          AND (t.client_id IS NULL OR %s::uuid[] IS NULL OR t.client_id = ANY(%s::uuid[]))
+        WHERE a.tenant_id=%s AND (%s='all' OR a.status=%s) AND {condition}
         ORDER BY {grouping},{ordering},a.id LIMIT 200 OFFSET %s""",
-        (tenant_id, status, status, *(2 * [None if visible is None else list(visible)]), offset)
+        (tenant_id, status, status, *parameters, offset)
     ).fetchall()
     for row in rows:
         target = row.pop("target")
@@ -97,8 +122,8 @@ def listing(connection, tenant_id, *, status="pending", offset=0, group="workflo
     return rows
 
 
-def done(connection, tenant_id, user, item_id, visible=None):
-    item = get(connection, tenant_id, item_id, visible)
+def done(connection, tenant_id, user, item_id, visible=None, workflows=None):
+    item = get(connection, tenant_id, item_id, visible, workflows)
     if item["status"] != "done":
         connection.execute("UPDATE attention_items SET status='done',done_by=%s,done_at=now(),updated_at=now() WHERE id=%s",
                            (user["id"], item["id"]))
@@ -106,17 +131,17 @@ def done(connection, tenant_id, user, item_id, visible=None):
     return {"status": "done"}
 
 
-def decide(connection, tenant, user, item_id, action, visible=None):
+def decide(connection, tenant, user, item_id, action, visible=None, workflows=None):
     """Answer a question card once per member; the same answer again returns its receipt."""
     # Serialize exact replays before examining the mutable item.
     connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                        (f"attention-decision:{tenant['id']}:{item_id}",))
-    receipt = decision_receipt(connection, tenant["id"], user["id"], item_id, visible)
+    receipt = decision_receipt(connection, tenant["id"], user["id"], item_id, visible, workflows)
     if receipt:
         if receipt["action"] != action:
             raise ServiceError("conflict", "This item already has a different decision from you.")
         return receipt
-    item = get(connection, tenant["id"], item_id, visible)
+    item = get(connection, tenant["id"], item_id, visible, workflows)
     if item["kind"] not in QUESTIONS or item["status"] != "pending":
         raise ServiceError("conflict", "This item is no longer awaiting a decision.")
     outcome = importlib.import_module(QUESTIONS[item["kind"]]).decide(connection, tenant, user, item, action)
@@ -126,8 +151,8 @@ def decide(connection, tenant, user, item_id, action, visible=None):
         (tenant["id"], item_id, user["id"], action, outcome["status"])).fetchone()
 
 
-def decision_receipt(connection, tenant_id, actor_id, item_id, visible=None):
-    get(connection, tenant_id, item_id, visible)  # Scope even an absent receipt.
+def decision_receipt(connection, tenant_id, actor_id, item_id, visible=None, workflows=None):
+    get(connection, tenant_id, item_id, visible, workflows)  # Scope even an absent receipt.
     return connection.execute("""SELECT item_id,actor_id,action,status,applied_at
         FROM attention_decision_receipts WHERE tenant_id=%s AND actor_id=%s AND item_id=%s""",
         (tenant_id, actor_id, item_id)).fetchone()

@@ -15,6 +15,38 @@ export interface SessionUser {
   csrf_token: string;
 }
 
+/** A workspace's person, as its admins see them. */
+export interface Member {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "member";
+  joined_at: string;
+  /** The workflows a member runs; an admin runs every one. */
+  workflow_ids: string[];
+  /** Their connected PCs, which removing them disconnects. */
+  pcs: number;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: "admin" | "member";
+  created_at: string;
+  expires_at: string;
+  expired: boolean;
+  invited_by: string | null;
+}
+
+/** A browser a person is signed in on. */
+export interface SessionInfo {
+  id: string;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string;
+  current: boolean;
+}
+
 export interface SettingSpec {
   type: "boolean" | "string" | "integer";
   title?: string;

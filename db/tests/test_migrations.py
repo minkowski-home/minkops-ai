@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,6 +21,25 @@ URL = os.environ.get("TEST_DATABASE_URL")
 spec = importlib.util.spec_from_file_location("runner", ROOT / "db/migrate.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+
+
+@contextmanager
+def database_before(version):
+    """A fresh database migrated up to, not including, `version`, for a migration's own upgrade test."""
+    name = "minkops_migration_" + uuid4().hex
+    with psycopg.connect(make_conninfo(URL, dbname="postgres"), autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        try:
+            url = make_conninfo(URL, dbname=name)
+            with psycopg.connect(url) as connection:
+                connection.execute("""CREATE TABLE schema_migrations (version text PRIMARY KEY, checksum text NOT NULL,
+                                      applied_at timestamptz NOT NULL DEFAULT now())""")
+                for earlier, (source, checksum) in runner.sources(runner.MIGRATIONS).items():
+                    if earlier < version:
+                        runner.apply(connection, earlier, source, checksum)
+            yield url
+        finally:
+            admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
 @unittest.skipUnless(URL, "TEST_DATABASE_URL is required")
@@ -285,6 +305,57 @@ class MigrationTests(unittest.TestCase):
             connection.execute("""INSERT INTO native_writes VALUES ('{"kind": "supplier"}', NULL)""")
             with self.assertRaisesRegex(psycopg.errors.RaiseException, "supplier creation is still pending"):
                 connection.execute(upgrade)
+
+    def test_people_belong_to_one_workspace_and_members_keep_the_workflows_they_ran(self):
+        """Migration 0040: a person in two workspaces holds the upgrade. Members keep every workflow they could run,
+        admins need none, and an open practice question names the workflow its answer changes."""
+        upgrade = (ROOT / "db/migrations/0040_people.sql").read_text()
+        with database_before("0040_people") as url, psycopg.connect(url) as c:
+            tenant, other = (c.execute("INSERT INTO tenants(slug,name) VALUES (%s,%s) RETURNING id",
+                                       (f"t-{uuid4().hex[:8]}", "Tenant")).fetchone()[0] for _ in range(2))
+            admin, member = (c.execute("""INSERT INTO users(email,name,password_hash,email_verified_at)
+                                         VALUES (%s,'U','x',now()) RETURNING id""",
+                                       (f"{uuid4().hex}@example.com",)).fetchone()[0] for _ in range(2))
+            c.execute("INSERT INTO memberships(tenant_id,user_id,role) VALUES (%s,%s,'admin'),(%s,%s,'member'),"
+                      "(%s,%s,'member')", (tenant, admin, tenant, member, other, member))
+            c.execute("INSERT INTO employees(tenant_id,key,name) VALUES (%s,'accounts-desk','Desk')", (tenant,))
+            flows = {key: c.execute("INSERT INTO workflows(tenant_id,key,name,description) VALUES (%s,%s,%s,'') "
+                                    "RETURNING id", (tenant, key, key)).fetchone()[0]
+                     for key in ("bill-entry", "statement-entry")}
+            client = c.execute("INSERT INTO client_businesses(tenant_id,slug,name) VALUES (%s,'c','C') RETURNING id",
+                               (tenant,)).fetchone()[0]
+            device = c.execute("""INSERT INTO desktop_devices(tenant_id,owner_id,installation_id,name,token_hash)
+                                  VALUES (%s,%s,%s,'PC',%s) RETURNING id""",
+                               (tenant, admin, uuid4(), uuid4().hex)).fetchone()[0]
+            company = c.execute("""INSERT INTO companies(tenant_id,client_id,device_id,guid,books_from,name,status)
+                                   VALUES (%s,%s,%s,'g','2026-04-01','Co','authorised') RETURNING id""",
+                                (tenant, client, device)).fetchone()[0]
+            task = c.execute("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Sync') RETURNING id", (tenant,)).fetchone()[0]
+            items = {}
+            for probe in ("bank_payments", "discounts"):
+                question = c.execute(
+                    """INSERT INTO practice_questions(tenant_id,client_id,company_id,employee_key,probe,prompt,options)
+                       VALUES (%s,%s,%s,'accounts-desk',%s,'?','[]') RETURNING id""",
+                    (tenant, client, company, probe)).fetchone()[0]
+                items[probe] = c.execute(
+                    """INSERT INTO attention_items(tenant_id,task_id,event_key,identifier,label,kind,target)
+                       VALUES (%s,%s,%s,'Co','Practice question','practice',%s) RETURNING id""",
+                    (tenant, task, f"practice:{question}", f'{{"question_id": "{question}"}}')).fetchone()[0]
+            c.commit()
+            with self.assertRaisesRegex(psycopg.errors.RaiseException, "belongs to several workspaces"):
+                c.execute(upgrade)
+            c.rollback()
+            c.execute("DELETE FROM memberships WHERE tenant_id=%s", (other,))
+            c.execute(upgrade)
+            assigned = c.execute("SELECT user_id, workflow_id FROM workflow_assignments WHERE tenant_id=%s",
+                                 (tenant,)).fetchall()
+            self.assertEqual(sorted(assigned), sorted((member, flow) for flow in flows.values()))
+            routed = dict(c.execute("SELECT id, target->'workflows' FROM attention_items WHERE tenant_id=%s",
+                                    (tenant,)).fetchall())
+            self.assertEqual(routed, {items["bank_payments"]: ["statement-entry"], items["discounts"]: ["bill-entry"]})
+            with self.assertRaises(psycopg.errors.UniqueViolation), c.transaction():
+                c.execute("INSERT INTO memberships(tenant_id,user_id,role) VALUES (%s,%s,'member')", (other, admin))
+
 
 if __name__ == "__main__":
     unittest.main()

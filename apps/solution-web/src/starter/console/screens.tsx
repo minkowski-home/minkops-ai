@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
@@ -300,60 +300,5 @@ export function TaskDetail({ workspace, routeSlug, id }: {
       {error && <p role="alert" className="form-message">Could not refresh <button
         className="button button-ghost" onClick={() => void refresh()}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}
-  </section>;
-}
-
-interface JoinRequest {
-  id: string; name: string; email: string;
-}
-
-export function AccessScreen({ workspace, onSaved }: { workspace: Workspace; onSaved: () => Promise<void> }) {
-  const { user } = useAuth();
-  const [requests, setRequests] = useState<JoinRequest[]>([]);
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState("");
-  const [inviteLink, setInviteLink] = useState("");
-  const tenant = workspace.tenant.slug;
-  useEffect(() => {
-    if (!workspace.can_edit) return;
-    void api<JoinRequest[]>(`/api/tenants/${tenant}/join-requests`).then(setRequests).catch(() => setRequests([]));
-  }, [tenant, workspace.can_edit]);
-  async function approve(id: string) {
-    if (!user) return;
-    try {
-      await api(`/api/tenants/${tenant}/join-requests/${id}/approve`, { method: "POST" }, user.csrf_token);
-      setRequests((current) => current.filter((item) => item.id !== id));
-      setStatus("Access approved.");
-      await onSaved();
-    } catch (caught) { setStatus(caught instanceof Error ? caught.message : "Could not approve."); }
-  }
-  async function invite(event: FormEvent) {
-    event.preventDefault();
-    if (!user) return;
-    try {
-      const result = await api<{ invitation_link?: string }>(`/api/tenants/${tenant}/invitations`, {
-        method: "POST", body: JSON.stringify({ email, role: "member" }),
-      }, user.csrf_token);
-      setStatus("Invitation sent.");
-      setInviteLink(result.invitation_link ?? "");
-      setEmail("");
-    } catch (caught) { setStatus(caught instanceof Error ? caught.message : "Could not invite."); }
-  }
-  return <section className="route-screen"><header className="route-heading"><div>
-    <h2>Workspace access</h2><p>Approve requests or invite a teammate.</p></div></header>
-    <div className="detail-grid"><section className="related-panel"><h3>Pending requests</h3>
-      {requests.length ? requests.map((item) => <div className="related-row" key={item.id}>
-        <span>{item.name}<small>{item.email}</small></span>
-        <button className="button button-ghost" onClick={() => void approve(item.id)}>Approve</button>
-      </div>) : <p className="quiet-state">No requests waiting.</p>}
-    </section>
-      <form className="config-panel" onSubmit={(event) => void invite(event)}><h3>Invite someone</h3>
-        <label className="config-field">Email<input type="email" required value={email}
-          onChange={(event) => setEmail(event.target.value)} /></label>
-        <button className="button button-primary">Send invitation</button>
-        {inviteLink && <p className="form-message">Local invite link: <a href={inviteLink}>{inviteLink}</a></p>}
-      </form>
-    </div>
-    {status && <p role="status" className="form-message">{status}</p>}
   </section>;
 }

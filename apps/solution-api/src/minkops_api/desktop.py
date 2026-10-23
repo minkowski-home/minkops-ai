@@ -10,25 +10,11 @@ from starlette.concurrency import run_in_threadpool
 
 from minkops_platform import desktop
 from minkops_platform.accounts import sync
-from minkops_platform.errors import ServiceError
 
 from .auth import Db, User, database_pool, require_csrf, tenant_access
+from .service import call
 
 router = APIRouter()
-
-
-def call(action, *args, **kwargs):
-    try:
-        return action(*args, **kwargs)
-    except ServiceError as error:
-        status = {
-            "invalid": 422,
-            "not_found": 404,
-            "conflict": 409,
-            "forbidden": 403,
-            "unauthorized": 401,
-        }[error.kind]
-        raise HTTPException(status, str(error)) from error
 
 
 class Registration(BaseModel):

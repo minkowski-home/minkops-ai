@@ -69,6 +69,13 @@ QUESTIONS = {
 }
 
 
+# The workflow whose entries each question's answer changes. Its card reaches the members who run that workflow,
+# and every admin (attention.py); the answer itself serves the whole desk.
+SERVES = {"receipt_notes": "bill-entry", "purchase_orders": "bill-entry", "receipt_register": "bill-entry",
+          "invoice_number_field": "bill-entry", "gst_ledgers": "bill-entry", "discounts": "bill-entry",
+          "bank_payments": "statement-entry"}
+
+
 def _question(probe):
     prompt, options = QUESTIONS[probe]
     return {"prompt": prompt, "options": [{"value": value, "label": label} for value, label, _ in options]}
@@ -274,7 +281,8 @@ def ask(connection, company, job, found):
     task = {"tenant_id": company["tenant_id"], "task_id": job["task_id"]}
     item = attention.record(connection, task, f"practice:{question['id']}", company["name"][:200], "Practice question",
                             kind="practice", target={"question_id": str(question["id"]), "company_id": str(company["id"]),
-                                                     "prompt": question["prompt"], "options": question["options"]})
+                                                     "prompt": question["prompt"], "options": question["options"],
+                                                     "workflows": [SERVES[found.probe]]})
     connection.execute("UPDATE practice_questions SET attention_item_id=%s WHERE id=%s", (item["id"], question["id"]))
     return question
 

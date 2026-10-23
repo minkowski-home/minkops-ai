@@ -38,6 +38,13 @@ def user(connection, tenant_row=None, *, role="member", platform_admin=False):
     return row
 
 
+def assign(connection, tenant_row, user_row, *workflow_rows):
+    """Let a member run these workflows, as an admin assigns them."""
+    for flow in workflow_rows:
+        connection.execute("INSERT INTO workflow_assignments(tenant_id,workflow_id,user_id) VALUES (%s,%s,%s)",
+                           (tenant_row["id"], flow["id"], user_row["id"]))
+
+
 def member(connection, tenant_row, user_row):
     """The membership row tenant_access returns, or None for a platform admin."""
     return connection.execute("SELECT role FROM memberships WHERE tenant_id=%s AND user_id=%s",
