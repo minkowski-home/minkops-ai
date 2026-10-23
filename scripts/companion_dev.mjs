@@ -14,7 +14,7 @@ import { mkdir, open, readFile, writeFile, rename } from "node:fs/promises";
 import { hostname, homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { checkTally, createSupplier, runSync, saveVoucher, tallyTransport } from "../connectors/desktop/src/index.js";
+import { checkTally, createLedger, runSync, saveVoucher, tallyTransport } from "../connectors/desktop/src/index.js";
 import { CompanionWorker } from "../platform/desktop-runtime/src/worker.js";
 import { createExecutor, PLAN_VERSION } from "../platform/desktop-runtime/src/jobs.js";
 
@@ -69,7 +69,7 @@ async function run() {
   };
   const intents = join(ROOT, "intents");
   const execute = createExecutor({
-    connectors: { checkTally, createSupplier, saveVoucher, runSync }, request, pc,
+    connectors: { checkTally, createLedger, saveVoucher, runSync }, request, pc,
     transportFor: () => tallyTransport({ pc }),
     grantFor: () => { throw new Error("Folder grants are not available headless."); },
     // One fsynced file per remote ID: once written, that voucher is never imported again.

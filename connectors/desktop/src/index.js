@@ -105,6 +105,6 @@ export async function inventory(root) {
   return files;
 }
 
-export { createSupplier } from "./tally.js";
+export { createLedger } from "./tally.js";
 export { saveVoucher } from "./voucher.js";
 export { runSync } from "./sync.js";

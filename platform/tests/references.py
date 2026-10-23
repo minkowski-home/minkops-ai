@@ -61,9 +61,9 @@ def _found(value):
 
 
 def cited(value, names, refs, company=None):
-    """`value`, written by GUID, as a session proposes it: each `*_guid` field becomes `*` with its reference,
-    a master's taken in the company the enclosing proposal names. A cost category is left out: it follows from
-    the cost centre."""
+    """`value`, written by GUID, as a session proposes it: each `*_guid` field becomes `*` with its reference, and
+    each `*_guids` list `*s` with theirs (`candidate_guids` becomes `candidates`), a master's taken in the company
+    the enclosing proposal names. A cost category is left out: it follows from the cost centre."""
     if isinstance(value, list):
         return [cited(item, names, refs, company) for item in value]
     if not isinstance(value, dict):
@@ -78,6 +78,8 @@ def cited(value, names, refs, company=None):
             out["company"] = company if item else None
         elif key.endswith("_guid"):
             out[key.removesuffix("_guid")] = None if item is None else refs[(*names[item], company)]
+        elif key.endswith("_guids"):
+            out[key.removesuffix("_guids") + "s"] = [refs[(*names[guid], company)] for guid in item]
         else:
             out[key] = cited(item, names, refs, company)
     return out
@@ -91,6 +93,8 @@ def _masters(value, company=None):
             if key.endswith("_guid") and key not in ("company_guid", "cost_category_guid"):
                 if item is not None:
                     yield company, item
+            elif key.endswith("_guids"):
+                yield from ((company, guid) for guid in item)
             else:
                 yield from _masters(item, company)
     elif isinstance(value, list):

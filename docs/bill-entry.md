@@ -27,8 +27,8 @@ Both use the runs API, under `/api/tenants/{slug}/clients/{client}`:
 
 Stop and pause are task controls (`POST /api/tenants/{slug}/tasks/{task}/control`).
 
-A run takes 1–50 PDF, PNG, JPEG or WebP files, at most 40 MB together, each
-selected once. Its settings are:
+A run takes 1–50 PDF, PNG, JPEG or WebP files of at most 5 MB each, selected once;
+their total does not matter, since each is read in its own session. Its settings are:
 
 - `review_mode`: `all_outputs` (every proposal waits for approval; the tenant
   default) or `only_exceptions` (bills that pass every check and follow the
@@ -121,6 +121,10 @@ and proves it:
   reduces what it is owed as TDS does, and a refundable deposit as its own line,
   never expense. An advance already paid is matched in Tally; the bill is booked
   at its full value with a note, so standing approval leaves it to a person;
+- a service, rent, maintenance or subscription period the bill prints is read as
+  `service_period`. One running past the financial year's end (31 March of the
+  bill's year) is booked at its full value with a note, and a person decides what
+  part of it is prepaid;
 - a supplier that keeps bill-by-bill balances gets the bill recorded under its
   invoice number (a New Ref on the supplier's line). Its credit note holds as
   `unsupported_structure`, because it must name the bill it adjusts: enter it in
@@ -208,15 +212,18 @@ whatever the review mode, when:
   voucher type or expense ledger, or without the stock items they carried). The
   note names what the supplier's last bill was booked to beside this one. One
   approval confirms the booking, which memory then holds as a precedent;
-- it books the supplier the way someone changed in Tally since Minkops saved it,
-  or the way a best guess first did;
+- it books the supplier the way someone changed in Tally since Minkops saved it;
 - its reading changed after a refusal;
-- it is a copy of a bill in another file, or a best guess;
+- it is a copy of a bill in another file;
+- it was proposed again booked as a person chose for another bill of the same
+  supplier in the run (below);
 - the same bill (buyer, supplier, number, date and total as printed) is held in
   another file. Each copy names the other, so the proposed one is not written while
   its copy waits for a reason no one has seen. Two held copies name each other
   too, so the one settled first is never entered again from the other;
-- it adjusts an advance already paid, which a person matches in Tally.
+- it adjusts an advance already paid, which a person matches in Tally;
+- it covers a service past the financial year's end, whose prepaid part a person
+  decides.
 
 The session never learns of these notes, so it cannot rebook a sound bill to
 avoid review.
@@ -227,21 +234,43 @@ offers only Do nothing and Recheck.
 
 | Codes | Actions |
 | --- | --- |
-| `company_unresolved`, `supplier_unresolved`, `not_a_bill`, `multiple_bills_unclear`, `required_value_missing`, `source_values_conflict`, `unsupported_structure`, `date_before_books`, `date_outside_company_period`, `identity_rule_unknown`, `voucher_type_unresolved`, `extraction_failed` | Do nothing, Recheck |
-| `classification_uncertain`, `source_unreadable` | Best guess write, Do nothing, Recheck |
-| `supplier_missing` | Create this ledger, Do nothing, Recheck |
+| `company_unresolved`, `not_a_bill`, `multiple_bills_unclear`, `required_value_missing`, `source_values_conflict`, `source_unreadable`, `unsupported_structure`, `date_before_books`, `date_outside_company_period`, `identity_rule_unknown`, `voucher_type_unresolved`, `extraction_failed` | Do nothing, Recheck |
+| `classification_uncertain`, `supplier_unresolved` | Choose and approve, Do nothing, Recheck |
+| `supplier_missing` | Create this ledger, Choose and approve, Do nothing, Recheck |
 | `company_not_open`, `no_company`, `duplicate_company`, `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response`, `rejected`, `save_waiting`, `save_interrupted`, `save_held` | Retry save, Do nothing |
-| `run_stopped`, `destination_changed` | Do nothing |
+| `destination_changed` | Do nothing, Recheck |
+| `run_stopped` | Do nothing |
 | `practice_question` | Do nothing; the answer in Attention releases it |
 
-Best guess write is offered only when the held bill's complete candidate passes
-the gate, and Create this ledger only when the supplier can be created safely
-(below). Recheck reads the file again in a new attempt of its session, against
-the run's pinned books. Decisions are idempotent per record version: the same
-decision sent twice returns one receipt. Stop is final: unsaved bills hold as
-`run_stopped`, and writes no PC has started are withdrawn. A ledger, voucher type
-or cost allocation that changed in Tally after the run read the books holds as
-`destination_changed`; start a new run for that bill.
+Every proposal also offers Choose and approve, and a held bill offers it when its
+reading is complete, addressed to its company and agrees with what the file
+prints, so only its treatment is in question. The person chooses the voucher type,
+the supplier and each line's ledger (and an item-wise bill's purchase ledgers)
+from a picker that lists the ledgers the session weighed (`candidates`) first,
+then the company's ledgers of that role in the run's books
+(`GET .../records/{id}/ledgers?role=&q=`). The amounts stay as the bill prints
+them. The server rebuilds the proposal with those GUIDs and runs every gate a
+session's proposal meets; a choice a gate refuses answers why and changes
+nothing, and one it accepts is approved and saved. Once that save is verified,
+the run's other bills of the same supplier, held for the same question or
+proposed unlike how the books booked the supplier, are proposed again booked the
+same way, noted "Booked as you chose for …"; one click, Approve all booked this
+way, approves them, and the note keeps standing approval from writing them
+unseen. Create this ledger is offered only when the supplier can be created
+safely (below). Recheck reads the books afresh first: it asks the PC holding the bill's
+company (every company in the run's scope, for a bill with none) to refresh, and
+the file's next session waits for that refresh, which must start after the
+recheck, then pins the copy it published (`runs.repin`, `desk_tools.ready`). A
+ledger created in Tally after the run started is then found. Until then the bill
+names the PC it waits for, so an offline PC keeps it waiting visibly. The run's
+other bills keep their proposals and the books they were checked against; every
+save is verified against Tally as it is. A bill left as is (Do nothing) offers
+Recheck, so "do nothing, fix it in Tally, recheck" works, and so does a save Tally
+refused because a ledger, voucher type or cost allocation changed after the run
+read the books (`destination_changed`). Decisions are idempotent per record
+version: the same decision sent twice returns one receipt. Stop is final: unsaved
+bills hold as `run_stopped`, writes no PC has started are withdrawn, and a
+stopped run offers only Do nothing.
 
 ## Memory and practice
 
@@ -252,13 +281,41 @@ desk employee (`accounts/memory.py`):
 
 - **Bookings.** A verified save a person approved is one way its supplier's bills
   are booked: the voucher type and expense ledgers, by GUID, and whether it was
-  booked item-wise. Approving the same
-  booking again uses its entry; a supplier booked two ways has two. A best guess
-  stays unconfirmed until a person approves a bill booked that way.
+  booked item-wise. Approving the same booking again uses its entry; a supplier
+  booked two ways has two. A treatment a person chose in review is learnt the same
+  way, its evidence of kind `choice` naming them.
 - **Upkeep.** Every sync revalidates the entries. An edit made in Tally to a voucher
   an entry was learnt from, or its deletion, demotes the entry, and the next bill
   booked that way goes to review. An entry whose ledgers are missing from three
   syncs in a row retires. A renamed ledger is still the same booking.
+- **Learning from Tally.** A person who corrects a saved voucher in Tally has shown
+  its treatment: the edit that demotes the old entry also teaches, once per
+  alteration, how the voucher is booked now (evidence `tally_edit`); an amount-only
+  edit changes nothing, and a deleted or cancelled voucher only demotes. A voucher
+  moved to another supplier teaches recognition instead (below). After each sync,
+  the client's bills held for a question, or left as is, that are now in Tally are
+  found there by their document identity, as the write-time check finds them (the
+  supplier by the printed GSTIN when none was matched). Each becomes `duplicate`,
+  noted "Saved in Tally by Minkops from another run" when a run saved and verified
+  that voucher, or else "Entered in Tally by hand". Only an entry made by hand
+  teaches its booking (evidence `tally_entry`), and no voucher teaches the client's
+  memory twice. A bill already in the run's books when it is proposed is
+  `duplicate` at once if entered as proposed (its date, voucher type, ledgers and
+  amounts, cost allocations and bill references), or held as `already_in_tally`
+  (final) naming what differs, such as a bill-by-bill supplier's bill kept on
+  account; the write-time check still guards every save.
+- **Mature memory steers.** A booking memory confirmed at least `memory.STANDING`
+  (2) times binds the supplier's next bills: a proposal booked otherwise, with no
+  rule cited, is refused naming that booking unless the session states in
+  `departure` the handwritten instruction, rule or printed fact that justifies it.
+  With one, the bill is proposed with the reason as a review note and is never
+  written unattended.
+- **Supplier recognition.** A printed supplier name a person matched to a ledger,
+  by choosing it in review or moving a saved voucher to it in Tally, is kept as a
+  `supplier_name` entry, only when the session quoted that name and no printed
+  GSTIN conflicts with the ledger's. `find_ledger` lists that ledger first, marked
+  learnt; a later different choice demotes it. Recognition finds a supplier; it
+  never decides how a bill is booked.
 - **Rules.** Plain-text instructions only people write, scoped to a workflow or
   company, versioned and cited by ID. Sessions read every active rule in scope,
   so a client keeps at most 30 active rules per employee.
@@ -355,24 +412,25 @@ session, and Minkops never starts, closes or restarts Tally. See
 When no ledger is the bill's supplier, the session sets `party.new_supplier` and
 reads the supplier's GST details from the bill: GSTIN, registration type, state
 and state code, place of supply, address and PIN, each with its page and quote.
-The bill holds as Missing supplier. Create this ledger is offered only when:
+The bill holds as Missing supplier. Create this ledger is offered only when the
+session quoted the printed name, no ledger has it, and the bill passes every other
+check once the supplier exists. It opens a form laid out like Tally's ledger
+creation (`accounts/party_ledgers.py`), beside what the bill prints: the name; the
+group, Sundry Creditors or one of its sub-groups; whether balances are kept bill by
+bill, starting as most of the company's suppliers keep them (the `billwise`
+practice), or unchosen when it has none, and a default credit period; the mailing
+details; the GST registration type and GSTIN. Below it is the bill as it will be
+entered with the new supplier: its voucher type and each line's ledger, chosen with
+the picker. The server checks both: a GSTIN's check character and state, a name no
+ledger or group has, the group, the credit period, and every gate the bill must
+pass. A PC whose companion is older than 0.11.5 is asked to update first.
 
-- no ledger already has the printed name or GSTIN;
-- the GSTIN passes its check character, and the printed state and state code
-  match it;
-- the supplier, the company and the place of supply are in one state (a
-  cross-state supplier is created by hand in v1), and a Composition supplier
-  charges no tax;
-- every detail is quoted from the bill, with a six-digit PIN;
-- the company has a Regular GST creditor to model the ledger on;
-- the bill passes every other check once the supplier exists.
-
-A person's decision queues `tally.supplier`. The companion imports the ledger
-only when no ledger has its name, so a retry reads back the one it created. The
-readback must show exactly one creditor under Sundry Creditors carrying every
-approved statutory and mailing value. The bill is then checked again with the
-new supplier and written. Other bills of the same supplier in the run are
-proposed with it too, and wait for review.
+One approval queues `tally.ledger`. The companion imports the ledger only when no
+ledger has its name, so a retry reads back the one it created, and the server
+trusts the readback only when every approved field is there. The bill is then
+entered as the person chose, which teaches its booking and that the printed name
+stands for the new ledger. Other bills of the same supplier in the run are proposed
+with it too, and wait for review.
 
 ## Verification
 

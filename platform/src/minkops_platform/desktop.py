@@ -250,7 +250,7 @@ def public_job(row):
 def _observe(connection, job, state, summary, progress):
     if job["operation"] == "tally.sync" and state in ("completed", "failed"):
         return  # The sync's own finish or failure publishes its outcome.
-    if job["operation"] in ("tally.write", "tally.supplier"):
+    if job["operation"] in ("tally.write", "tally.ledger"):
         return  # The run's records own their lifecycle and progress.
     observe_task(
         connection,
@@ -415,7 +415,7 @@ def claim(connection, device, report=None):
         background(connection, device)
     row = connection.execute(
         """SELECT * FROM desktop_jobs WHERE device_id=%s AND (state='queued' OR
-           (state='executing' AND operation NOT IN ('tally.write','tally.supplier','tally.sync') AND lease_until<now()))
+           (state='executing' AND operation NOT IN ('tally.write','tally.ledger','tally.sync') AND lease_until<now()))
            AND (%s OR operation NOT LIKE 'tally.%%')
            AND EXISTS (SELECT 1 FROM tasks t WHERE t.tenant_id=desktop_jobs.tenant_id AND t.id=desktop_jobs.task_id
                        AND t.control_state='active')
@@ -467,7 +467,7 @@ def plan(connection, device, job_id, claim_token, plan_version=1):
     if job["state"] == "executing" and job["operation"] == "tally.sync":
         from .accounts.sync import plan as sync_plan
         return sync_plan(connection, device, job)
-    if job["state"] == "executing" and job["operation"] in ("tally.write", "tally.supplier"):
+    if job["state"] == "executing" and job["operation"] in ("tally.write", "tally.ledger"):
         from .accounts.writes import plan as write_plan
         return write_plan(connection, device, job, plan_version)
     raise ServiceError("conflict", "This local task is no longer running.")
@@ -546,8 +546,8 @@ def finish(connection, device, job_id, receipt):
         for file in result["files"]:
             names.append(file["path"])
             contents.append(_bytes(file["content"]))
-            if sum(map(len, contents)) > 30_000_000:
-                raise ServiceError("invalid", "A source refresh is limited to 30 MB.")
+            if sum(map(len, contents)) > files.MAX_REQUEST_BYTES:
+                raise ServiceError("invalid", "A folder refresh is limited to 30 MB.")
         files.upload_source(
             connection,
             {"id": device["tenant_id"]},
@@ -560,7 +560,7 @@ def finish(connection, device, job_id, receipt):
         )
         result = {"source_id": str(source["id"]), "file_count": len(contents)}
         summary = f"Folder refreshed. {len(contents)} files ready."
-    elif job["operation"] in ("tally.write", "tally.supplier"):
+    elif job["operation"] in ("tally.write", "tally.ledger"):
         from .accounts import writes
         result = (writes.accept(connection, device, job, result) if result is not None
                   else writes.interrupted(connection, device, job, error))
@@ -583,7 +583,7 @@ def finish(connection, device, job_id, receipt):
            updated_at=now() WHERE id=%s RETURNING *""",
         (state, Jsonb(result), error, fingerprint, job_id),
     ).fetchone()
-    if job["operation"] in ("tally.write", "tally.supplier"):
+    if job["operation"] in ("tally.write", "tally.ledger"):
         from .accounts.writes import dispatch
         dispatch(connection, device["tenant_id"], device["id"])
     summary = (

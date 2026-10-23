@@ -88,9 +88,11 @@ def answered(entry, amounts):
     amount = entry.get("amount", amounts.get(entry["ref"]))
     entry = {key: value for key, value in entry.items() if key != "amount"}
     if "exception" in entry:
-        return {"ref": entry["ref"], "amount": amount, "selection": None, "exception": entry["exception"]}
+        # What the session established besides its doubt; a scenario names only what matters to it.
+        held = {"company": None, "bank_ledger": None, "payee": None, "candidates": [], **entry["exception"]}
+        return {"ref": entry["ref"], "amount": amount, "selection": None, "exception": held}
     selection = {"family": None, "cost_centre": None, "lines": None, "pair": None, "bills": None, "rules": [],
-                 "payee": None, **{key: value for key, value in entry.items() if key != "ref"}}
+                 "payee": None, "departure": None, **{key: value for key, value in entry.items() if key != "ref"}}
     if selection["lines"]:
         selection["lines"] = [{"cost_centre": None, **line} for line in selection["lines"]]
     if selection["bills"]:
@@ -299,6 +301,34 @@ def test_an_answer_that_lands_on_another_row_is_refused_by_the_amount_it_restate
     assert sorted(second["accepted"]) == sorted([payment["ref"], charges["ref"]])
     rows = records(desk, run)
     assert [r["proposal"]["resolved"]["data"]["counter_ledger"] for r in rows[:2]] == ["Acme Steel", "Bank Charges"]
+
+
+def test_an_answer_naming_a_payee_its_row_does_not_print_is_refused(desk):
+    """Found live: a session booked a payment to one supplier as another's, naming as payee a supplier the narration
+    never prints. A payee is named as the row prints it, so the answer is refused and the row asked again."""
+    company = desk["company"]["guid"]
+
+    def misnamed(answers, session):
+        payment = rows_of(session)[0]
+        return [("propose", {"rows": [{**booked(payment, company), "payee": "STEEL MART"}]})]
+
+    def corrected(answers, session):
+        return [("propose", {"rows": [booked(rows_of(session)[0], company)]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, misnamed, corrected) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    chunk = next(s for s in fake.created if is_chunk(s.content))
+    payment = rows_of(chunk)[0]
+    first, second = verdicts(chunk)[:2]
+    assert first["rejected"] == [{"ref": payment["ref"], "reason": (
+        "This row does not print the payee STEEL MART: name the counterparty as the row prints it, or answer the row "
+        "it belongs to.")}]
+    assert second["accepted"] == [payment["ref"]]
+    assert records(desk, run)[0]["proposal"]["selection"]["payee"] == "ACME STEEL"
 
 
 def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
@@ -788,6 +818,26 @@ def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_
     saved = work.get_record(desk["db"], desk["tenant"]["id"], rows[0]["id"])
     assert (saved["status"], saved["current"]["bills"]) == (
         "saved", [{"ledger": "Steel Mart", "name": "SM/102", "type": "Agst Ref", "amount_cents": -200000}])
+    # A recheck pins a newer copy of the books, which holds the saved payment: it settles SM/102 there, and its claim
+    # no longer counts, so no balance is settled twice.
+    import factory
+
+    from minkops_platform.accounts import desk_tools, settlement
+    db, steel = desk["db"], desk["company"]
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    desk_tools.recheck(db, current, desk["operator"]["id"], [steel["id"]])
+    payment = {"GUID": "tally-1", "MASTERID": "71", "ALTERID": "9", "DATE": "20260915", "VOUCHERTYPENAME": "Payment",
+               "PARTYLEDGERNAME": "Steel Mart", "ALLLEDGERENTRIES.LIST": [
+                   {"LEDGERNAME": "Steel Mart", "AMOUNT": "-2000.00", "BILLALLOCATIONS.LIST": {
+                       "NAME": "SM/102", "BILLTYPE": "Agst Ref", "AMOUNT": "-2000.00"}},
+                   {"LEDGERNAME": "ICICI Current A/c", "AMOUNT": "2000.00"}]}
+    factory.books(db, steel, masters(steel), [purchase("v-sm1", "20260801", "SM/101", "1180.00"),
+                                             purchase("v-sm2", "20260815", "SM/102", "5000.00"), payment])
+    refreshed(desk)
+    pinned = desk_tools.ready(db, current)
+    db.commit()
+    # SM/102's 5,000.00: 2,000.00 paid in the books, 3,000.00 claimed by the run's second row; SM/101 by its third.
+    assert settlement.open_bills(db, pinned, {**steel, "version": pinned["pins"][str(steel["id"])]}, "Steel Mart") == []
 
 
 def test_a_payment_the_books_cannot_place_waits_for_one_click_on_its_bills(desk):
@@ -874,19 +924,28 @@ def test_stopping_holds_unsaved_rows_and_withdraws_writes_no_pc_has_started(desk
     assert companion(desk) is None
 
 
-def test_a_rechecked_row_gets_a_fresh_proposal_in_a_new_attempt_of_its_chunk(desk):
-    company = desk["company"]["guid"]
+def test_a_rechecked_row_is_proposed_afresh_once_its_pc_has_read_the_books_again(desk):
+    """No ledger is Acme Steel's when the run reads the books, so its row holds. The person creates the ledger in
+    Tally and rechecks: the row waits until its PC has refreshed, the run pins the new copy, and only that row goes
+    to a new attempt of its chunk, which finds the ledger."""
+    import factory
+    db, company, device = desk["db"], desk["company"], desk["device"]
+    factory.books(db, company, [r for r in masters(company) if r["data"]["GUID"] != "g-acme"])
+    db.commit()
     attempts = []
 
-    def once_unsure(answers, session):
-        rows, first = rows_of(session), not attempts
+    def unsure_until_found(answers, session):
+        rows = rows_of(session)
         attempts.append(len(rows))
+        found = any(ledger["name"] == "Acme Steel" for a in session.answers if a["name"] == "find_ledger"
+                    for result in json.loads(a["text"])["results"] for ledger in result["ledgers"])
         return [("propose", {"rows": [
-            {"ref": row["ref"], "exception": {"code": "ledger_unresolved", "detail": "Which supplier?"}}
-            if first and "ACME" in row["narration"] else booked(row, company)
+            {"ref": row["ref"], "exception": {"code": "ledger_unresolved", "detail": "No ledger is Acme Steel's."}}
+            if not found and ("ACME" in row["narration"] or "RETURN" in row["narration"]) else booked(row, company["guid"])
             for row in rows if "TRANSFER" not in row["narration"]]})]
 
-    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, once_unsure) if is_chunk(content) else Script(layouts))
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_until_found) if is_chunk(content)
+                      else Script(layouts))
     run = launch(desk, {"icici-sep.csv": ICICI})
     learned(desk, run, fake)
     with host(desk, fake):
@@ -894,10 +953,87 @@ def test_a_rechecked_row_gets_a_fresh_proposal_in_a_new_attempt_of_its_chunk(des
     acme = next(r for r in records(desk, run) if "ACME" in r["facts"]["narration"])
     assert acme["hold_codes"] == ["ledger_unresolved"]
     decide(desk, acme, "retry")
+    chunk = next(i for i in items(desk, run) if i["kind"] == "chunk")
+    assert (chunk["state"], chunk["waiting_on"]) == ("waiting", sync.blocker(device["id"]))
+    assert work.get_record(db, desk["tenant"]["id"], acme["id"])["review_reasons"] == [
+        f"Reading this entry again once {device['name']} has refreshed its Tally copy."]
+    fresh = factory.books(db, company, masters(company))
     with host(desk, fake):
-        until(lambda: work.get_record(desk["db"], desk["tenant"]["id"], acme["id"])["status"] == "proposed")
+        refreshed(desk)
+        until(lambda: work.get_record(db, desk["tenant"]["id"], acme["id"])["status"] == "proposed")
+    assert work.get_record(db, desk["tenant"]["id"], acme["id"])["proposal"]["resolved"]["data"]["counter_ledger"] \
+        == "Acme Steel"
+    assert work.get_run(db, desk["tenant"]["id"], run["id"])["pins"][str(company["id"])] == fresh["version"]
     # Only the rechecked row went to the new session; the others kept their proposals.
     assert attempts == [4, 1]
+
+
+ACME = b"""Account Number,000405001234
+Statement period,01/09/2026 to 30/09/2026
+Date,Narration,Ref,Withdrawal,Deposit,Balance
+01/09/2026,NEFT ACME STEEL UTR111,UTR111,1180.00,,98820.00
+02/09/2026,NEFT ACME STEEL UTR222,UTR222,2000.00,,96820.00
+15/09/2026,BANK CHARGES,,118.00,,96702.00
+"""
+
+
+def test_a_chosen_other_side_is_saved_learnt_and_offered_for_the_payees_other_rows_in_one_click(desk):
+    """The session cannot tell Acme Steel from Steel Mart for two of Acme's payments. The person chooses Acme Steel
+    for one, from the ledgers the session weighed; a choice the checks refuse changes nothing. Once saved, the choice
+    is learnt as theirs and the other payment is proposed booked the same way, approved with one click."""
+    from minkops_platform.accounts import memory
+    db, company = desk["db"], desk["company"]["guid"]
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {
+                "code": "ledger_unresolved", "detail": "Acme Steel or Steel Mart?", "company_guid": company,
+                "bank_ledger_guid": "g-icici", "payee": "ACME STEEL", "candidate_guids": ["g-acme", "g-steel"]}}
+            if "ACME" in row["narration"] else booked(row, company) for row in rows_of(session)]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"acme.csv": ACME})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    first, second, charges = records(desk, run)
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    actions = lambda row: [a["action"] for a in statement_entry.HANDLER.summarize(  # noqa: E731
+        current, work.get_record(db, desk["tenant"]["id"], row["id"]))["actions"]]
+    # Its books too new to say how payees are booked, the payee's own ledger may be created too.
+    assert (first["hold_codes"], actions(first), actions(charges)) == (
+        ["ledger_unresolved"], ["choose", "supplier", "nothing", "retry"], ["approve", "choose", "nothing"])
+    choice = statement_entry.HANDLER.detail(db, current, first)["choice"]
+    assert (choice["payee"], choice["bank_ledger"]["name"], [c["name"] for c in choice["candidates"]],
+            [t["name"] for t in choice["voucher_types"]]) == (
+        "ACME STEEL", "ICICI Current A/c", ["Acme Steel", "Steel Mart"], ["Contra", "Payment", "Receipt"])
+    # The other side is any ledger but the row's own bank; the session's candidates come first.
+    assert [(p["name"], p.get("suggested")) for p in statement_entry.HANDLER.ledgers(db, current, first, "any", "")[
+        "ledgers"]] == [("Acme Steel", True), ("Steel Mart", True), ("Bank Charges", None), ("HDFC Current A/c", None)]
+    assert [p["name"] for p in statement_entry.HANDLER.ledgers(db, current, first, "bank", "")["ledgers"]] == [
+        "ICICI Current A/c", "HDFC Current A/c"]
+    # A payment entered as a Receipt is refused, with why, and nothing changes.
+    with pytest.raises(ServiceError, match="active Payment type"):
+        decide(desk, first, "choose", {"bank_ledger": "g-icici", "counter_ledger": "g-acme", "voucher_type": "g-receipt"})
+    db.rollback()
+    assert work.get_record(db, desk["tenant"]["id"], first["id"])["version"] == first["version"]
+    assert decide(desk, first, "choose", {"bank_ledger": "g-icici", "counter_ledger": "g-acme",
+                                          "voucher_type": "g-payment"})["status"] == "writing"
+    companion(desk)
+    assert work.get_record(db, desk["tenant"]["id"], first["id"])["status"] == "saved"
+    [learnt] = memory.entries(db, desk["tenant"]["id"], desk["client"]["id"], company_ids=[desk["company"]["id"]],
+                              kinds=["routing"], subjects=["ACME STEEL"])
+    assert (learnt["value"]["counter_ledger"], learnt["evidence"][-1]["kind"], learnt["evidence"][-1]["actor"]) == (
+        "Acme Steel", "choice", str(desk["operator"]["id"]))
+    second = work.get_record(db, desk["tenant"]["id"], second["id"])
+    assert (second["status"], second["review_reasons"], actions(second)) == (
+        "proposed", [f"Booked as you chose for row {first['facts']['row']} of acme.csv."],
+        ["alike", "approve", "choose", "nothing"])
+    assert decide(desk, second, "alike")["approved"] == 1
+    plan = companion(desk)
+    assert (plan["lines"][1]["ledger"], work.get_record(db, desk["tenant"]["id"], second["id"])["status"]) == (
+        "Acme Steel", "saved")
 
 
 def test_a_mapping_file_is_consulted_through_its_tool_and_never_read_as_transactions(desk):
@@ -957,3 +1093,266 @@ def test_a_refutation_names_the_broken_balance_before_the_summary_it_upsets(desk
     # Row 5's balance is one rupee off, which also upsets the next row and the closing balance.
     assert outcome == {"status": "refuted", "reason": "Row 5: The running balance cannot be verified against the "
                                                       "preceding balance and transaction."}
+
+
+def by_hand(guid, day, counter, rupees, reference, *, kind="Payment", alter="3"):
+    """A bank voucher someone entered in Tally themselves, carrying the bank's reference."""
+    out = kind == "Payment"
+    return {"GUID": guid, "MASTERID": "90", "ALTERID": alter, "DATE": day, "VOUCHERTYPENAME": kind,
+            "REFERENCE": reference, "PARTYLEDGERNAME": counter, "NARRATION": f"Entered by hand {reference}",
+            "ALLLEDGERENTRIES.LIST": [{"LEDGERNAME": counter, "AMOUNT": f"-{rupees}" if out else rupees},
+                                      {"LEDGERNAME": "ICICI Current A/c", "AMOUNT": rupees if out else f"-{rupees}"}]}
+
+
+def routings(desk):
+    desk["db"].commit()
+    return desk["db"].execute("SELECT * FROM memory_entries WHERE company_id=%s AND kind='routing'",
+                              (desk["company"]["id"],)).fetchall()
+
+
+def test_a_row_the_books_already_record_is_a_duplicate_when_proposed_and_teaches_its_routing(desk):
+    """Acme's payment, carrying its UTR, is already in Tally: proposed, it is not entered again, and teaches how
+    Acme's rows are booked. A return of the same amount under another reference is entered as usual."""
+    import factory
+    company = desk["company"]["guid"]
+    factory.books(desk["db"], desk["company"], masters(desk["company"]),
+                  [purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00"),
+                   by_hand("v-acme", "20260901", "Acme Steel", "1180.00", "UTR111222")])
+    desk["db"].commit()
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, routed(company)) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    acme, back = rows["NEFT ACME STEEL UTR111222"], rows["NEFT RETURN UTR111222"]
+    assert (acme["status"], acme["review_reasons"], acme["current"]["guid"]) == (
+        "duplicate", [statement_entry.ALREADY], "v-acme")
+    assert back["status"] == "proposed"
+    [learnt] = routings(desk)
+    assert (learnt["value"], learnt["evidence"][-1]["kind"]) == (
+        {"payee": "ACME STEEL", "counter_ledger": "Acme Steel", "voucher_type": "Payment"}, "tally_entry")
+
+
+def test_held_and_deferred_rows_a_person_entered_in_tally_by_hand_are_reconciled_after_the_next_sync(desk):
+    """Acme's payment holds for its other side, and the return is left as is; the accountant enters both in Tally.
+    After the next sync each is a duplicate of its voucher, found by its reference, amount and bank; the payment
+    teaches how Acme's rows are booked."""
+    import factory
+    company = desk["company"]["guid"]
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {
+                "code": "ledger_unresolved", "detail": "Acme Steel or Steel Mart?", "company_guid": company,
+                "bank_ledger_guid": "g-icici", "payee": "ACME STEEL", "candidate_guids": ["g-acme", "g-steel"]}}
+            if "ACME" in row["narration"] else booked(row, company)
+            for row in rows_of(session) if "TRANSFER" not in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    acme, back = rows["NEFT ACME STEEL UTR111222"], rows["NEFT RETURN UTR111222"]
+    assert (acme["status"], back["status"]) == ("held", "proposed")
+    decide(desk, back, "nothing")
+    version = factory.books(desk["db"], desk["company"], masters(desk["company"]), [
+        purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00"),
+        by_hand("v-acme", "20260901", "Acme Steel", "1180.00", "UTR111222"),
+        by_hand("v-back", "20260915", "Acme Steel", "1180.00", "UTR111222R", kind="Receipt")])
+    statement_entry.entered_by_hand(desk["db"], desk["company"], version["version"])
+    desk["db"].commit()
+    after = {r["facts"]["narration"]: r for r in records(desk, run)}
+    assert [(after[n]["status"], after[n]["review_reasons"], after[n]["current"]["guid"])
+            for n in ("NEFT ACME STEEL UTR111222", "NEFT RETURN UTR111222")] == [
+        ("duplicate", [statement_entry.BY_HAND], "v-acme"), ("duplicate", [statement_entry.BY_HAND], "v-back")]
+    [learnt] = routings(desk)
+    assert learnt["value"]["counter_ledger"] == "Acme Steel"
+
+
+def test_a_held_row_minkops_saved_from_another_run_is_reconciled_without_learning_it_twice(desk):
+    """Acme's payment holds in one run and is approved and saved from another. After the next sync the held copy
+    is a duplicate of that voucher, noted as Minkops's save, and the voucher teaches Acme's routing once."""
+    import factory
+    company = desk["company"]["guid"]
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {
+                "code": "ledger_unresolved", "detail": "Acme Steel or Steel Mart?", "company_guid": company,
+                "bank_ledger_guid": "g-icici", "payee": "ACME STEEL", "candidate_guids": ["g-acme", "g-steel"]}}
+            if "ACME" in row["narration"] else booked(row, company)
+            for row in rows_of(session) if "TRANSFER" not in row["narration"]]})]
+
+    unsure = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                        else Script(layouts))
+    first = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, first, unsure)
+    with host(desk, unsure):
+        until(lambda: all(i["state"] == "done" for i in items(desk, first)))
+    sure = FakeAgents(script_for=lambda m, content: chunk_session(desk, routed(company)) if is_chunk(content)
+                      else Script(layouts))
+    second = launch(desk, {"icici-copy.csv": ICICI})
+    with host(desk, sure):
+        until(lambda: any(i["kind"] == "chunk" for i in items(desk, second)))
+    refreshed(desk)
+    with host(desk, sure):
+        until(lambda: all(i["state"] == "done" for i in items(desk, second)))
+    acme = next(r for r in records(desk, second) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    decide(desk, acme, "approve")
+    companion(desk)
+    assert work.get_record(desk["db"], desk["tenant"]["id"], acme["id"])["status"] == "saved"
+    version = factory.books(desk["db"], desk["company"], masters(desk["company"]), [
+        purchase("v-sm1", "20260801", "SM/101", "1180.00"), purchase("v-sm2", "20260815", "SM/102", "5000.00"),
+        by_hand("tally-1", "20260901", "Acme Steel", "1180.00", "UTR111222")])
+    statement_entry.entered_by_hand(desk["db"], desk["company"], version["version"])
+    desk["db"].commit()
+    held = next(r for r in records(desk, first) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    assert (held["status"], held["review_reasons"], held["current"]["guid"]) == (
+        "duplicate", [statement_entry.SAVED_ELSEWHERE], "tally-1")
+    assert [(r["uses"], [e["kind"] for e in r["evidence"]]) for r in routings(desk)] == [(1, ["outcome"])]
+
+
+def test_a_payees_own_ledger_is_created_in_tallys_terms_only_where_the_company_gives_payees_ledgers(desk):
+    """No ledger is Acme Steel's. Where the books cannot say how payees are booked, the row offers Create this
+    ledger, under a group a party may go under: refused under any other group or as the wrong voucher type, then
+    created, read back, and the row entered with it. A company that books payees to one ledger split by cost centre
+    is offered no such ledger."""
+    import factory
+
+    from minkops_platform import desktop
+    from minkops_platform.accounts import memory
+    db, company = desk["db"], desk["company"]
+    factory.books(db, company, [r for r in masters(company) if r["data"]["GUID"] != "g-acme"])
+    db.commit()
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {"code": "ledger_unresolved", "detail": "No ledger is Acme Steel's.",
+                                              "company_guid": company["guid"], "bank_ledger_guid": "g-icici",
+                                              "payee": "ACME STEEL"}}
+            if "ACME" in row["narration"] else booked(row, company["guid"])
+            for row in rows_of(session) if "ACME" in row["narration"] or "CHARGES" in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    acme = next(r for r in records(desk, run) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    assert [a["action"] for a in statement_entry.HANDLER.summarize(current, acme)["actions"]] == [
+        "choose", "supplier", "nothing", "retry"]
+    form = statement_entry.HANDLER.detail(db, current, acme)["new_ledger"]["form"]
+    assert (form["name"], form["under"], form["groups"]) == (
+        "ACME STEEL", None, ["Sundry Creditors", "Sundry Debtors", "Loans & Advances (Asset)", "Current Liabilities"])
+    approved = {**form, "name": "Acme Steel", "under": "Sundry Creditors", "billwise": False,
+                "gst": {"registration_type": "Unregistered"}}
+    for ledger, voucher_type, why in ((approved, "g-receipt", "Money out is entered as a Payment"),
+                                      ({**approved, "under": "Bank Accounts"}, "g-payment", "Choose a group a party")):
+        with pytest.raises(ServiceError, match=why):
+            decide(desk, acme, "supplier", {"ledger": ledger, "voucher_type": voucher_type})
+        db.rollback()
+    assert decide(desk, acme, "supplier", {"ledger": approved, "voucher_type": "g-payment"})["status"] == "writing"
+    device = db.execute("SELECT * FROM desktop_devices WHERE id=%s", (desk["device"]["id"],)).fetchone()
+    job = desktop.claim(db, device, desktop.companion_report("0.11.5", "Rehearsal PC", "console"))
+    plan = desktop.plan(db, device, job["id"], job["claim_token"], 8)
+    assert (job["operation"], plan["ledger"]["under"], plan["ledger"]["gst"]) == ("tally.ledger", "Sundry Creditors",
+                                                                                  None)
+    desktop.finish(db, device, job["id"], {"claim_token": job["claim_token"], "result": {
+        "company_guid": company["guid"], "ledger": {"@_NAME": "Acme Steel", "GUID": "g-acme-new",
+                                                    "PARENT": "Sundry Creditors", "ALTERID": "11", "ISBILLWISEON": "No"}}})
+    db.commit()
+    saved = companion(desk)
+    assert [line["ledger"] for line in saved["lines"]] == ["ICICI Current A/c", "Acme Steel"]
+    assert work.get_record(db, desk["tenant"]["id"], acme["id"])["status"] == "saved"
+    [learnt] = memory.entries(db, desk["tenant"]["id"], desk["client"]["id"], company_ids=[company["id"]],
+                              kinds=["routing"])
+    assert (learnt["value"]["counter_ledger"], learnt["evidence"][-1]["kind"]) == ("Acme Steel", "choice")
+    # Where payees are booked to one ledger split by cost centre, a payee gets no ledger of its own.
+    memory.record(db, tenant_id=company["tenant_id"], client_id=company["client_id"], company_id=company["id"],
+                  kind="practice", subject="bank_payments", status="confirmed", evidence={"kind": "probe"},
+                  value={"style": "one_ledger_cost_centres", "ledger": "Wages", "ledger_guid": "g-charges"})
+    db.commit()
+    again = launch(desk, {"icici-oct.csv": ICICI.replace(b"/09/2026", b"/10/2026")})
+    with host(desk, fake):
+        refreshed(desk)
+        until(lambda: all(i["state"] == "done" for i in items(desk, again)))
+    held = next(r for r in records(desk, again) if "ACME" in r["facts"]["narration"])
+    assert [a["action"] for a in statement_entry.HANDLER.summarize(current, held)["actions"]] == [
+        "choose", "nothing", "retry"]
+
+
+def test_the_banks_own_vouchers_naming_the_payee_are_precedent_for_standing_approval(desk):
+    """Acme's earlier payments, booked in Tally to Acme Steel, give its row two precedents, so standing approval
+    writes it. A voucher naming Acme but booked to another ledger counts nothing, nor do vouchers for a payee named in
+    fewer than four characters."""
+    import factory
+    company = desk["company"]
+    history = [by_hand(f"v-old-{n}", f"2026080{n}", "Acme Steel", "500.00", f"UTR90000{n}") for n in (1, 2)]
+    history += [by_hand("v-steel", "20260803", "Steel Mart", "700.00", "UTR900003"),
+                *(by_hand(f"v-bnk-{n}", f"2026081{n}", "Bank Charges", "59.00", f"CHG{n}") for n in (1, 2))]
+    for voucher in history:
+        voucher["NARRATION"] = "BNK SVC CHG" if voucher["GUID"].startswith("v-bnk") else "NEFT ACME STEEL PAYMENT"
+    factory.books(desk["db"], company, masters(company), [purchase("v-sm1", "20260801", "SM/101", "1180.00"),
+                                                          purchase("v-sm2", "20260815", "SM/102", "5000.00"), *history])
+    desk["db"].commit()
+
+    def payees(answers, session):
+        return [("propose", {"rows": [{**booked(row, company["guid"]), **({"payee": "BNK"} if "CHARGES" in row["narration"]
+                                                                       else {})}
+                                      for row in rows_of(session) if "ACME" in row["narration"] or "CHARGES" in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, payees) if is_chunk(content) else Script(layouts))
+    # The charges row prints its payee as BNK, as the bank's earlier vouchers do.
+    statement = ICICI.replace(b"01/09/2026,BANK CHARGES,", b"01/09/2026,BNK SVC CHARGES,")
+    run = launch(desk, {"icici-sep.csv": statement}, review_mode="only_exceptions")
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    acme, charges = rows["NEFT ACME STEEL UTR111222"], rows["BNK SVC CHARGES"]
+    assert (acme["checks"]["precedents"], acme["status"]) == (2, "writing")
+    assert (charges["checks"]["precedents"], charges["status"]) == (0, "proposed")
+
+
+def test_a_row_departing_from_its_payees_confirmed_routing_needs_a_stated_reason_and_then_waits_for_a_person(desk):
+    """Acme's rows were booked twice to Acme Steel, as memory confirmed. Booked to Steel Mart without a reason, the row
+    is refused, naming that routing; with a reason, it is proposed with the reason as a note, never written unseen."""
+    from minkops_platform.accounts import memory
+    company = desk["company"]
+    for _ in range(2):
+        memory.record(desk["db"], tenant_id=company["tenant_id"], client_id=company["client_id"], company_id=company["id"],
+                      kind="routing", subject="acme steel:usual", status="confirmed", use=True,
+                      value={"payee": "ACME STEEL", "counter_ledger": "Acme Steel", "voucher_type": "Payment"},
+                      guids=["g-acme", "g-payment"], evidence={"kind": "outcome", "voucher": "v-earlier"})
+    desk["db"].commit()
+
+    tries = []
+
+    def to_steel_mart_first(answers, session):
+        tries.append(1)
+        reason = {"departure": "The narration says the payment was for Steel Mart's invoice."} if len(tries) > 1 else {}
+        return [("propose", {"rows": [{**booked(row, company["guid"]), "counter_ledger_guid": "g-steel", **reason}
+                                      for row in rows_of(session) if "ACME" in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, to_steel_mart_first, to_steel_mart_first)
+                      if is_chunk(content) else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI}, review_mode="only_exceptions")
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    chunk = next(s for s in fake.created if is_chunk(s.content))
+    refused = verdicts(chunk)[0]["rejected"][0]["reason"]
+    assert refused == ("ACME STEEL's rows were booked 2 times to Acme Steel as Payment, which Minkops confirmed. Book "
+                       "this one that way, or state in departure the instruction, rule or printed fact that justifies "
+                       "another way.")
+    acme = next(r for r in records(desk, run) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    assert (acme["status"], acme["review_reasons"]) == ("proposed", [
+        "Departs from how ACME STEEL's rows were booked (Acme Steel): The narration says the payment was for Steel "
+        "Mart's invoice."])

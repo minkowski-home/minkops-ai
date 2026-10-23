@@ -55,9 +55,13 @@ every workflow shares, driven by what the handler reports and the server offers:
   person to check;
 - one button per offered decision, such as Approve, Do nothing, Recheck, or each
   of a statement row's settlement choices, sent with the record's version;
+- Choose and approve, which opens the entry as it will be written with a ledger
+  picker for each of its parts, and Create this ledger, which opens the new party
+  ledger laid out as Tally's ledger creation with the entry to be made with it;
+  Approve all booked this way approves the run's entries proposed again as a person
+  chose for another;
 - its details: the proposed entry and items, the bills it settles, a verified
-  e-invoice, evidence quotes, the rules it follows, a new supplier, and what Tally
-  holds now.
+  e-invoice, evidence quotes, the rules it follows, and what Tally holds now.
 
 Save ready entries approves every proposal that needs no review. The list is read
 again whenever the run's activity changes, 100 records a page. Scripts and other
@@ -68,10 +72,14 @@ integrations make the same calls: the runs API in [Bill entry](bill-entry.md#lau
 Each client business keeps a memory per employee (`accounts/memory.py`), shared by
 the employee's workflows and looked up only when a session needs it:
 
-- **Learnt entries.** Verified saves a person approved teach how a supplier's bills
-  and a payee's bank rows are booked, and the sync's probes, or a person's one-click
-  answer, settle how each company keeps its books. Every sync revalidates them: an
-  edit made in Tally demotes an entry, and one whose ledgers are gone retires.
+- **Learnt entries.** Verified saves a person approved, or whose treatment they
+  chose, teach how a supplier's bills and a payee's bank rows are booked; so do a
+  person's corrections in Tally and work they entered there by hand. The sync's
+  probes, or a person's one-click answer, settle how each company keeps its books,
+  and the supplier names people matched to ledgers are kept for finding them again.
+  Every sync revalidates them: an edit made in Tally demotes an entry, and one whose
+  ledgers are gone retires. A treatment confirmed twice binds the next proposals
+  unless they state why they depart from it.
 - **Rules.** Plain-text instructions only people write, scoped to a workflow or a
   company, versioned, and cited by the proposals that follow them. A solution can
   seed the rules its client agreed at installation, once.
@@ -182,8 +190,13 @@ synthetic companies and bills for that.
 
 ## Scope and verification
 
-- **Sources** hold at most 100 files, 5 MB each and 30 MB in all.
-- **Bill runs** take 1–50 PDF or image files, 40 MB in all.
+- **Sources** hold at most 100 files of 5 MB each. The console uploads a run's files
+  in batches under 25 MB, each request within the 30 MB a request may carry; the
+  final batch makes the whole set current at once, and an upload never finished
+  leaves nothing current (`account_uploads`). A connected folder still refreshes in
+  one request of at most 30 MB.
+- **Bill runs** take 1–50 PDF or image files, whatever their total size: each is
+  read in its own session.
 - **Statement runs** take CSV and XLSX; convert legacy XLS in Excel.
 
 Offline tests replace only the paid session boundary, with scripted sessions that

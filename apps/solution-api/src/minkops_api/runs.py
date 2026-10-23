@@ -91,6 +91,16 @@ def record(slug: str, client: str, record_id: UUID, user: User, connection: Db):
     return _call(work.handler_for, run).detail(connection, run, row)
 
 
+@router.get("/records/{record_id}/ledgers")
+def ledgers(slug: str, client: str, record_id: UUID, user: User, connection: Db,
+            role: str = Query(pattern=r"^[a-z]{1,20}$"), q: str = Query(default="", max_length=100)):
+    """The ledgers a reviewer may choose for one part of a record (`role`), from the books its run read."""
+    tenant, _, found = scoped(connection, slug, client, user)
+    row = _call(work.get_record, connection, tenant["id"], record_id)
+    run = run_of(connection, tenant, found, row["run_id"])
+    return _call(work.handler_for(run).ledgers, connection, run, row, role, q)
+
+
 @router.post("/records/{record_id}/decisions")
 def decide(slug: str, client: str, record_id: UUID, body: Decision, request: Request, user: User, connection: Db):
     require_csrf(request)

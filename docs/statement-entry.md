@@ -18,7 +18,7 @@ statement file IDs and an optional `branch_mapping_file_id`:
   before they are routed, and the run then pins one mirror version per company.
 - A repeated request key returns the same run; the same key with other selections
   conflicts.
-- Limits: 30 MB of files, 10,000 rows and 100 columns per sheet. Legacy XLS needs
+- Limits: 5 MB per file, 10,000 rows and 100 columns per sheet. Legacy XLS needs
   conversion in Excel.
 
 ## Layouts
@@ -76,11 +76,26 @@ own session with the lookup tools:
 | `practice` | How a company keeps its books, such as how it books bank payments |
 
 A row names its payee as the narration prints it, and cites the IDs of the rules it
-follows; the server checks each citation and keeps the text the row followed. A
+follows; the server checks each citation and keeps the text the row followed. An
+answer naming a payee its row does not print (every word of it among the words of
+the row's narration, reference or routing hint) is refused, as is one restating
+another row's amount: it was meant for another row, and the row is asked again. A
 verified row a person approved becomes a routing in the client's memory: the counter
 ledger and voucher type for its payee. A lookup by a payee's name also finds a
 routing learnt under a name that contains it, or that it contains, and an edit made
-in Tally to the saved voucher demotes it (see [Bill entry](bill-entry.md#memory-and-practice)).
+in Tally to the saved voucher demotes it and teaches the routing it shows now (see
+[Bill entry](bill-entry.md#memory-and-practice)). A row the run's books already
+record, posting its amount to its bank within three days under its reference or
+UTR, is `duplicate` when proposed. Standing approval weighs a row's precedents as
+bills do: the larger of memory's confirmed uses and the bank ledger's vouchers of
+the last 400 days posting to the same counter ledger as the same voucher type,
+whose narration names the payee (at least four characters). A routing confirmed
+at least twice binds the payee's next rows: a row booked otherwise, with no rule
+cited, needs a stated `departure`, and is then proposed with it as a review note. After each sync, held or left-as-is rows now in
+Tally are found the same way and become `duplicate`, noted "Saved in Tally by Minkops
+from another run" when a run saved and verified that voucher, or else "Entered in
+Tally by hand". Only an entry made by hand teaches its payee's routing, and no
+voucher teaches twice.
 
 As in [Bill entry](bill-entry.md#reading-a-file), the session meets companies and
 masters only as short references its input and lookups gave it (`C1`, `L12`), and a
@@ -168,8 +183,23 @@ each settlement choice as its own button. The runs API serves:
 - a small status DTO;
 - pages of record summaries;
 - each record's detail;
-- idempotent decisions per record version: `approve`, `nothing` (Do nothing),
-  `retry` (Recheck the row in a new attempt of its chunk), `retry_save`, and
+- the ledgers a reviewer may choose for a row's bank or other side
+  (`GET .../records/{id}/ledgers?role=&q=`), the session's candidates first, never
+  the row's own bank as its other side;
+- idempotent decisions per record version: `approve`, `choose` (Choose and
+  approve: the person's bank ledger, other side and voucher type, checked as a
+  session's proposal is, then approved and saved; a refusal changes nothing),
+  `alike` (approve every row of the run proposed again as a person chose for
+  another row of that payee), `supplier` (Create this ledger, for a row held as
+  other side unclear: a ledger for the payee as the narration prints it, under a
+  group the company already uses for bank counterparties, most used first, within
+  Sundry Creditors, Sundry Debtors, Loans & Advances (Asset), Current Liabilities
+  and their sub-groups; offered only where the company books payees to their own
+  ledgers, or its books are too new to say. Where it books them to one ledger split
+  by cost centre, that ledger is chosen instead), `nothing` (Do nothing),
+  `retry` (Recheck: the row's PC reads the books afresh, then the row is proposed
+  again in a new attempt of its chunk against that copy; a row left as is offers it
+  too), `retry_save`, and
   `settle` with the chosen allocation;
 - `POST .../runs/{run}/approve`, which approves every ready row that needs no review.
 
@@ -189,7 +219,8 @@ An approved row becomes a durable `native_writes` intent before anything is sent
   open, possible existing voucher, uncertain import) holds the row. Retry save sends
   the same plan, which the companion either finds already in Tally or refuses to
   import twice. A ledger, voucher type or cost allocation that changed in Tally after
-  the run read the books holds as `destination_changed`: start a new run for it.
+  the run read the books holds as `destination_changed`: Recheck reads the books
+  again and proposes the row afresh.
 - **Interrupted saves.** A write whose PC stopped before confirming it holds as
   `save_interrupted` once that PC polls again; it is never re-sent automatically.
 

@@ -18,7 +18,7 @@ master; a reference no lookup issued names none.
 
 import json
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from minkops_platform import attention, clients
 from minkops_platform.errors import ServiceError
@@ -86,19 +86,25 @@ def note_unavailable(connection, run):
                             actor=run["actor_id"])
 
 
-def refreshing(connection, client_id, *, since=None):
-    """The blocker of a refresh still running for one of the client's PCs, or None."""
+def refreshing(connection, client_id, *, since=None, companies=None):
+    """The blocker of a refresh still running for one of the client's PCs, or for the PCs holding these companies,
+    or None."""
     pending = connection.execute(
         """SELECT j.device_id FROM desktop_jobs j JOIN companies c ON c.device_id=j.device_id
            JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NULL
            WHERE c.client_id=%s AND c.status='authorised' AND j.operation='tally.sync'
                AND j.state IN ('queued','executing') AND (%s::timestamptz IS NULL OR j.created_at <= %s)
-           ORDER BY j.device_id LIMIT 1""", (client_id, since, since)).fetchone()
+               AND (%s::uuid[] IS NULL OR c.id = ANY(%s::uuid[]))
+           ORDER BY j.device_id LIMIT 1""", (client_id, since, since, companies, companies)).fetchone()
     return sync.blocker(pending["device_id"]) if pending else None
 
 
 def ready(connection, run):
-    """Pin the client's mirrors once every PC it uses has refreshed; until then, wait on the next one."""
+    """Pin the client's mirrors once every PC it uses has refreshed; until then, wait on the next one.
+
+    A company a recheck asked to read again (`runs.repin`) is pinned to its newly published copy once its PC has no
+    refresh left to finish, and leaves the list; until then the item waits on that PC.
+    """
     blocker = refreshing(connection, run["client_id"], since=run["created_at"])
     if blocker:
         raise Wait(blocker)
@@ -116,7 +122,50 @@ def ready(connection, run):
             raise Wait(sync.blocker(device["device_id"]))
         run = connection.execute("UPDATE runs SET pins=%s,updated_at=now() WHERE id=%s RETURNING *",
                                  (json.dumps(pins), run["id"])).fetchone()
+    if run["repin"]:
+        blocker = refreshing(connection, run["client_id"], companies=run["repin"])
+        if blocker:
+            raise Wait(blocker)
+        # A company with no newer copy on the PC it is on now keeps its pin.
+        fresh = mirror.pins(connection, run["repin"])
+        run = connection.execute("UPDATE runs SET pins=pins || %s::jsonb, repin='{}', updated_at=now() WHERE id=%s "
+                                 "RETURNING *", (json.dumps(fresh), run["id"])).fetchone()
     return run
+
+
+def recheck(connection, run, actor_id, company_ids):
+    """A person's Recheck: the PCs holding these companies read their books afresh, and the run's next session pins
+    the copies they publish (`ready`), so a ledger created in Tally after the run read the books is found.
+
+    Proposals already made keep their plans, and the pins they were checked against stay until then; every save is
+    verified against Tally as it is. Returns the blocker the rechecked item waits on and the names of the PCs it
+    waits for.
+    """
+    rows = connection.execute(
+        """SELECT c.id AS company_id, d.* FROM companies c JOIN desktop_devices d ON d.tenant_id=c.tenant_id
+               AND d.id=c.device_id
+           WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised' AND c.id = ANY(%s::uuid[])
+           ORDER BY d.id, c.id""", (run["tenant_id"], run["client_id"], list(company_ids))).fetchall()
+    if not rows:
+        raise ServiceError("conflict", "These books are no longer authorised for this client, so they cannot be read "
+                                       "again. Start a new run.")
+    devices = list({row["id"]: row for row in rows}.values())
+    gone = [d["name"] for d in devices if d["revoked_at"] or d["expires_at"] <= datetime.now(UTC)]
+    if gone:
+        raise ServiceError("conflict", f"{gone[0]} holds these books and is no longer connected. Continue them on the "
+                                       "PC that holds them now, then start a new run.")
+    for device in devices:
+        sync.queue(connection, device, actor_id, reason="recheck", fresh=True)
+    connection.execute("UPDATE runs SET repin=ARRAY(SELECT DISTINCT unnest(repin || %s::uuid[])), updated_at=now() "
+                       "WHERE id=%s", ([row["company_id"] for row in rows], run["id"]))
+    return sync.blocker(devices[0]["id"]), [device["name"] for device in devices]
+
+
+def waiting_note(noun, pcs):
+    """What a rechecked record says while its PCs refresh: an offline PC keeps it waiting, and is named."""
+    one = len(pcs) == 1
+    return (f"Reading this {noun} again once {' and '.join(pcs)} {'has' if one else 'have'} refreshed "
+            f"{'its' if one else 'their'} Tally copy.")
 
 
 def bundle(connection, run):
@@ -384,6 +433,52 @@ class Desk:
         }.items() if value is not None}
 
 
+# Where each role's ledgers sit in Tally's group tree, by its reserved group names; `any` is every ledger.
+ROLE_GROUPS = {
+    "supplier": ("Sundry Creditors", "Sundry Debtors"),
+    "expense": mirror.EXPENSE_GROUPS,
+    "tax": ("Duties & Taxes",),
+    "bank": ("Bank Accounts",),
+}
+ROLES = (*ROLE_GROUPS, "any")
+# Ledgers a picker lists at once: what the session weighed first, then what the search finds.
+CHOICES = 20
+
+
+def ledger_choices(connection, run, company_id, role, query="", *, first=(), exclude=()):
+    """The ledgers a person may choose for a role in one company of the run's books, as its pinned copy holds them.
+
+    `first` (the session's candidates, then the record's current choice) lead, marked `suggested`; then every ledger
+    of the role, by name. A query keeps only the ledgers it matches, suggested ones still first. `exclude` names
+    GUIDs never offered, such as a bank row's own bank. At most CHOICES; never another client's company, nor one
+    this run did not read.
+    """
+    if role not in ROLES:
+        raise ServiceError("invalid", f"Choose a role among {', '.join(ROLES)}.")
+    desk = Desk(connection, run)
+    company = next((part for parts in desk.parts.values() for part in parts if str(part["id"]) == str(company_id)),
+                   None)
+    if company is None:
+        raise ServiceError("not_found", "This entry's company is not one of its run's books.")
+    version = company["version"]
+    groups = {row["name_key"]: row["parent"] for row in mirror.masters(connection, company["id"], version,
+                                                                      types=["GROUP"])}
+    fits = lambda row: row["guid"] not in exclude and (  # noqa: E731
+        role == "any" or mirror.under(row["parent"], ROLE_GROUPS[role], groups))
+    wanted = list(dict.fromkeys(guid for guid in first if guid))
+    by_guid = {row["guid"]: row for row in mirror.ledger_list(connection, company["id"], version, guids=wanted)}
+    found = (mirror.search_masters(connection, company["id"], version, ["LEDGER"], query, limit=200) if query.strip()
+             else mirror.ledger_list(connection, company["id"], version))
+    matched = {row["guid"] for row in found} if query.strip() else set(by_guid)
+    suggested = [by_guid[guid] for guid in wanted if guid in by_guid and guid in matched and fits(by_guid[guid])]
+    seen = {row["guid"] for row in suggested}
+    listed = [*suggested, *(row for row in found if row["guid"] not in seen and fits(row))][:CHOICES]
+    return {"company": company["name"], "role": role, "ledgers": [{key: value for key, value in {
+        "guid": row["guid"], "name": row["name"], "group": desk.path(connection, company, row["parent"]),
+        "gstin": row["gstin"], "suggested": row["guid"] in seen or None}.items() if value is not None}
+        for row in listed]}
+
+
 def entries(data):
     """A voucher's ledger lines as {ledger, debit|credit} in rupees."""
     return [{"ledger": ledger, ("debit" if cents < 0 else "credit"): f"{abs(cents) / 100:.2f}"}
@@ -434,18 +529,33 @@ def _ledgers(call, company, subjects):
 
 
 def find_ledger(call, arguments):
-    """Without a company, every company in scope is searched: which one owns this bank account or supplier."""
+    """Without a company, every company in scope is searched: which one owns this bank account or supplier.
+
+    A supplier name a person matched to a ledger before (memory.recognise) lists that ledger first, marked learnt.
+    """
     desk, connection = call.state, call.connection
     scope = [desk.company_of(connection, arguments["company"])] if arguments.get("company") else list(desk.companies.values())
-    found = [(subject, company, row) for subject in arguments["subjects"] for company in scope
-             for row in mirror.search_masters(connection, company["id"], company["version"], ["LEDGER"], subject)]
+    learnt = {}
+    for entry in memory.entries(connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=desk.part_ids(),
+                                kinds=["supplier_name"], subjects=arguments["subjects"], statuses=("confirmed",)):
+        learnt.setdefault((entry["subject"], entry["company_id"]), entry["guids"][0])
+    found = []
+    for subject in arguments["subjects"]:
+        for company in scope:
+            known = {learnt.get((memory.payee_key(subject), part)) for part in desk.part_ids(company)} - {None}
+            first = mirror.masters(connection, company["id"], company["version"], types=["LEDGER"],
+                                   guids=sorted(known)) if known else []
+            rows = mirror.search_masters(connection, company["id"], company["version"], ["LEDGER"], subject)
+            found += [(subject, company, {**row, "learnt": True}) for row in first]
+            found += [(subject, company, row) for row in rows if row["guid"] not in known]
     refs = {company["guid"]: desk.issue(connection, "ledger", company["guid"],
                                         [row["guid"] for _, owner, row in found if owner["guid"] == company["guid"]])
             for company in scope}
     named = {} if arguments.get("company") else desk.issue(connection, "company", None, [c["guid"] for c in scope])
     return {"results": [{"subject": subject, "ledgers": [
         {**desk.ledger(connection, company, row, refs[company["guid"]][row["guid"]]),
-         **({"company": company["name"], "company_ref": named[company["guid"]]} if named else {})}
+         **({"company": company["name"], "company_ref": named[company["guid"]]} if named else {}),
+         **({"learnt": True} if row.get("learnt") else {})}
         for asked, company, row in found if asked == subject]} for subject in arguments["subjects"]]}
 
 
@@ -569,7 +679,8 @@ TOOLS = {tool.name: tool for tool in (
     Tool("find_ledger", "Ledgers matching each subject: a name or alias (every word must appear, whatever punctuation "
          "separates them; a number as a whole word), a GSTIN, or a bank "
          "account number; a masked number matches by its last digits. Give a company to search only it; without one, "
-         "every company is searched and each ledger names its company.",
+         "every company is searched and each ledger names its company. A ledger marked `learnt` is the one a person "
+         "matched this supplier name to before.",
          schema({"company": COMPANY, "subjects": SUBJECTS}, ["subjects"]), find_ledger),
     Tool("voucher_types", "A company's active voucher types of the given families.",
          schema({"company": COMPANY, "families": {"type": "array", "minItems": 1, "uniqueItems": True,
@@ -595,7 +706,7 @@ TOOLS = {tool.name: tool for tool in (
     Tool("memory", "What Minkops learnt about these subjects in a company, from saves a person approved: how a "
          "supplier's bills were booked (subject: the supplier ledger's reference), how a payee's bank rows were booked "
          "(subject: the payee's name), and how the company keeps its books (subject: a practice name). A demoted "
-         "entry was changed in Tally since it was learnt; an unconfirmed one was a best guess.",
+         "entry was changed in Tally since it was learnt.",
          schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {
              "type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["booking", "routing", "practice"]}}},
              ["company", "subjects"]), remembered),

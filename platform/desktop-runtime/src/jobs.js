@@ -7,8 +7,9 @@
  * outcome goes back as a receipt.
  */
 const PAGE_RETRIES = [1000, 3000, 10000, 30000];
-/** The voucher plan protocol this runtime executes; the companion tells the server, which sends no newer plan. */
-export const PLAN_VERSION = 7;
+/** The plan protocol this runtime executes: vouchers to 7, party ledgers at 8. The companion tells the server,
+ * which sends no newer plan. */
+export const PLAN_VERSION = 8;
 
 /** Send one sync page, retrying only transport failures with the same sequence. */
 export async function uploadWithRetry(send, page, { wait = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
@@ -49,7 +50,11 @@ export function createExecutor({ connectors, request, pc, grantFor, durableInten
       return connectors.runSync(await plan(job), { request: tallyRequest, upload, pc });
     }
     if (job.operation === "files.refresh") return { files: await connectors.inventory(grantFor(job.input.source_id).root) };
-    if (job.operation === "tally.supplier") return connectors.createSupplier(await plan(job), { request: tallyRequest });
+    if (job.operation === "tally.ledger") {
+      const ledger = await plan(job);
+      if (ledger.protocol > planVersion) throw new Error("Unsupported ledger plan.");
+      return connectors.createLedger(ledger, { request: tallyRequest });
+    }
     if (job.operation === "tally.write") {
       const voucher = await plan(job);
       if (voucher.format_version > planVersion) throw new Error("Unsupported voucher plan.");

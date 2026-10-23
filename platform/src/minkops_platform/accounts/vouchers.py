@@ -301,10 +301,12 @@ def _stated(plan, current):
         raise ValueError("Tally's readback does not show the GST details Minkops wrote for this bill.")
 
 
-def correction_reason(plan, current):
-    """How the voucher Tally already has for this bill differs from the approved plan, for the person reviewing it.
+def differences(plan, current):
+    """How a voucher Tally holds for this bill differs from the approved plan, as clauses a person reads; none when it
+    records the bill as planned: its date and voucher type, every ledger and amount, and, those being equal, its cost
+    allocations and bill references.
 
-    `current` is a receipt's observed voucher that observed_bill has accepted.
+    `current` is an observed voucher: a receipt's that observed_bill has accepted, or a stored one (mirror.observed).
     """
     theirs = Counter((line["ledger"], line["amount_cents"]) for line in current["lines"])
     ours = Counter((line["ledger"], _signed(line)) for line in plan["lines"])
@@ -318,6 +320,8 @@ def correction_reason(plan, current):
     clauses = []
     if current["date"] != plan["header"]["date"].replace("-", ""):
         clauses.append(f"is dated {current['date'][:4]}-{current['date'][4:6]}-{current['date'][6:]}")
+    if normalized(current["voucher_type"]) != normalized(plan["voucher_type"]["NAME"]):
+        clauses.append(f"is a {current['voucher_type']}, not a {plan['voucher_type']['NAME']}")
     if there and here:
         clauses.append(f"posts to {', '.join(there)} instead of {', '.join(here)}")
     elif there or here:
@@ -331,9 +335,22 @@ def correction_reason(plan, current):
                        + (f", with other amounts for {', '.join(changed)}" if changed else ""))
     elif changed:
         clauses.append(f"has other amounts for {', '.join(changed)}")
-    if not clauses and sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != (
-            _allocations(plan)):
+    if clauses:
+        return clauses
+    if sorted(current["allocations"], key=lambda a: (a["ledger"], a["amount_cents"])) != _allocations(plan):
         clauses.append("has other cost allocations")
+    kept, planned = _bills(current.get("bills") or []), _planned_bills(plan)
+    if kept != planned:
+        named = lambda bills: ", ".join(f"{b['type']} {b['name']}" if b["name"] else b["type"] for b in bills)  # noqa: E731
+        clauses.append(f"carries the bill reference {named(kept)} instead of {named(planned)}" if kept and planned
+                       else f"carries the bill reference {named(kept)}" if kept
+                       else f"carries no bill reference instead of {named(planned)}")
+    return clauses
+
+
+def correction_reason(plan, current):
+    """How the voucher Tally already has for this bill differs from the approved plan, for the person reviewing it."""
+    clauses = differences(plan, current)
     found = (f"Tally's voucher for {plan['duplicate']['number']} {'; '.join(clauses)}." if clauses
              else "Tally already has this bill with other amounts or ledgers.")
     return f"{found} Review it there; Minkops did not add a second voucher."
@@ -613,6 +630,28 @@ def _adjustments(document, raw, lines, retained, company):
     return notes
 
 
+def _service(document):
+    """A service the bill covers past the financial year's end is booked at its full value; returns the note that keeps
+    standing approval from writing it unseen, so a person decides what part of it is prepaid. India's financial year
+    ends on 31 March, and the bill's date says which year it falls in."""
+    period = document.get("service_period")
+    if not period:
+        return []
+    try:
+        start, end = date.fromisoformat(period["from"]), date.fromisoformat(period["to"])
+    except (KeyError, TypeError, ValueError):
+        raise HoldReason("source_values_conflict", "The printed service period needs its first and last days, "
+                                                   "year first as YYYY-MM-DD.") from None
+    if end < start:
+        raise HoldReason("source_values_conflict", "The printed service period ends before it begins.")
+    issued = date.fromisoformat(document["date"])
+    year_end = date(issued.year + (issued.month > 3), 3, 31)
+    if end <= year_end:
+        return []
+    return [f"The bill covers service from {start.isoformat()} to {end.isoformat()}, past the financial year's end on "
+            f"{year_end.isoformat()}. Minkops books it at its full value; decide in Tally what part of it is prepaid."]
+
+
 def _decimal(value, what, places, precision=None):
     """A positive printed number with at most `places` decimals, exactly; `precision` says why more cannot be kept."""
     if type(value) not in (int, float):
@@ -866,6 +905,12 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
             if stock and name in stock.identities:
                 raise HoldReason("classification_uncertain", f"{name} is on more than one line: give it one line with the "
                                                              "sum of the bill's amounts it carries.")
+            if item["role"] in TAXABLE_ROLES and gst.is_duty(ledger):
+                # Tally's returns read a duty ledger as tax: a taxable value posted to one is claimed as input tax.
+                what = item["role"].replace("_", " ")
+                raise HoldReason("classification_uncertain", f"{name} is a GST duty ledger: it carries the bill's tax, "
+                                                             f"never its {what}. Book the {what} to the ledger the "
+                                                             "company uses for it.")
             identities.setdefault(name, masters.identity(ledger))
             allocation = None
             if item.get("cost_centre_guid") or item.get("cost_category_guid"):
@@ -936,7 +981,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
         raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
     _repeated(lines, raw)
     _split(document, lines)
-    advances = _adjustments(document, raw, lines, retained, company)
+    advances = _adjustments(document, raw, lines, retained, company) + _service(document)
     _tax_consistent(taxes)
     _printed_totals(document, lines, raw, items_cents)
     # The supplier's line is computed from the total, so the other lines must reach it exactly: what they

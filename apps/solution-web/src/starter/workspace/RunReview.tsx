@@ -4,6 +4,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { reads } from "../readCache";
 import { useRead } from "../useRead";
+import { ChooseAndApprove } from "./ChooseAndApprove";
+import { CreateLedger } from "./CreateLedger";
 import { OUTCOME, RECORD_STATUS, recordCounts, recordLine, rupees, settled, settles, type BillReference,
   type RecordAction, type RecordPage, type RecordSummary, type RunStatus } from "./review";
 
@@ -18,7 +20,6 @@ interface RecordDetails extends RecordSummary {
   evidence?: { field: string; page: number; quote: string }[] | string | null;
   rules?: { id: string; version: number; text: string }[] | null;
   current?: { voucher_type?: string; date?: string; master_id?: string } | null;
-  new_supplier?: Record<string, unknown>;
   exception?: { code: string; detail: string } | null;
 }
 
@@ -125,6 +126,8 @@ function RecordRow({ record, pending, open, onToggle, detailPath, scope, onDecid
   onDecide: (choice: RecordAction) => void;
 }) {
   const line = recordLine(record);
+  // Choose and approve, and Create this ledger, open their forms; the decision is sent from there.
+  const [form, setForm] = useState<"choose" | "supplier" | "">("");
   return <li className={`review-row review-row--${record.status}`}>
     <div className="review-row__main">
       <div className="review-row__heading">
@@ -139,12 +142,23 @@ function RecordRow({ record, pending, open, onToggle, detailPath, scope, onDecid
     <div className="review-row__actions">
       {record.actions?.map((choice) => {
         const key = actionKey(record, choice);
+        if (choice.action === "choose" || choice.action === "supplier") {
+          const action = choice.action;
+          return <button key={key} disabled={Boolean(pending)} aria-expanded={form === action} className="button button-ghost"
+            onClick={() => setForm(form === action ? "" : action)}>{choice.label}</button>;
+        }
         return <button key={key} disabled={Boolean(pending)} onClick={() => onDecide(choice)}
           className={choice.action === "approve" ? "button button-primary" : "button button-ghost"}>
           {pending === key && <Spinner />}{pending === key ? "Confirming…" : choice.label}</button>;
       })}
       <button className="button button-ghost" aria-expanded={open} onClick={onToggle}>{open ? "Hide details" : "Details"}</button>
     </div>
+    {form === "choose" && record.actions?.some((choice) => choice.action === "choose") && <ChooseAndApprove scope={scope}
+      recordPath={detailPath} pending={pending.startsWith(`${record.id}:choose:`)}
+      onApprove={(detail) => onDecide({ action: "choose", label: "Choose and approve", detail })} />}
+    {form === "supplier" && record.actions?.some((choice) => choice.action === "supplier") && <CreateLedger scope={scope}
+      recordPath={detailPath} pending={pending.startsWith(`${record.id}:supplier:`)}
+      onCreate={(detail) => onDecide({ action: "supplier", label: "Create this ledger", detail })} />}
     {open && <RecordDetail path={detailPath} scope={scope} />}
   </li>;
 }
@@ -173,8 +187,6 @@ function RecordDetail({ path, scope }: { path: string; scope: string }) {
       <li key={n}>{item.field.replace(/_/g, " ")}: “{item.quote}” (page {item.page})</li>)}</ul>}
     {data.exception && <p className="review-evidence">{data.exception.detail}</p>}
     {data.rules?.map((rule) => <p key={rule.id} className="review-note">Follows the rule “{rule.text}” (version {rule.version}).</p>)}
-    {data.new_supplier && <p>New supplier: {Object.entries(data.new_supplier).filter(([, value]) => value)
-      .map(([key, value]) => `${key.replace(/_/g, " ")} ${Array.isArray(value) ? value.join(", ") : value}`).join(" · ")}</p>}
     {data.current && <p>In Tally: {[data.current.voucher_type, data.current.date, data.current.master_id
       && `voucher ${data.current.master_id}`].filter(Boolean).join(" · ")}.</p>}
   </div>;

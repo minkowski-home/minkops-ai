@@ -34,7 +34,7 @@ def owns_task(connection, tenant_id, task_id, actor_id):
     """Whether this actor started everything in the task; a write a reviewer approved is not ownership."""
     owners = connection.execute("""SELECT actor_id FROM runs WHERE tenant_id=%s AND task_id=%s
         UNION SELECT actor_id FROM desktop_jobs WHERE tenant_id=%s AND task_id=%s
-            AND operation NOT IN ('tally.write','tally.supplier')""",
+            AND operation NOT IN ('tally.write','tally.ledger')""",
         (tenant_id, task_id, tenant_id, task_id)).fetchall()
     return bool(owners) and all(str(row["actor_id"]) == str(actor_id) for row in owners)
 

@@ -7,7 +7,25 @@ import { useRead } from "../useRead";
 import type { RunStatus } from "./review";
 
 interface Company { id: string; name: string; guid: string; books_from: string }
-interface Uploaded { files: { id: string; path: string }[] }
+/** A batch's answer: the upload it was added to, or once complete, the source and its files. */
+interface Uploaded { upload_id?: string; files?: { id: string; path: string }[] }
+
+// Each request stays under the server's limit for one upload request; the final batch makes the set current at once.
+const BATCH_BYTES = 25_000_000;
+
+function batches(files: File[]): File[][] {
+  const out: File[][] = [];
+  let size = 0;
+  for (const file of files) {
+    if (!out.length || size + file.size > BATCH_BYTES) {
+      out.push([]);
+      size = 0;
+    }
+    out[out.length - 1].push(file);
+    size += file.size;
+  }
+  return out;
+}
 
 const REVIEW: Record<string, string> = { all_outputs: "Approve every entry", only_exceptions: "Only exceptions" };
 
@@ -25,6 +43,7 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
   const defaults = (workflow.config_values ?? {}) as { company_mode?: string; locked_company_guid?: string | null };
   const [company, setCompany] = useState(defaults.company_mode === "locked" ? defaults.locked_company_guid ?? "" : "");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
   const [message, setMessage] = useState("");
   // One request key per launch: a retry after a lost response returns the same run instead of a second one.
   const request = useRef<string>("");
@@ -49,14 +68,22 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
     setBusy(true);
     setMessage("");
     try {
-      const form = new FormData();
-      const uploads = mapping ? [...files, mapping] : files;
-      form.append("paths", JSON.stringify(uploads.map((file) => file.name)));
-      form.append("label", `${workflow.name} files`);
-      uploads.forEach((file) => form.append("files", file));
-      const source = await api<Uploaded>(`/api/tenants/${encodeURIComponent(tenant)}/accounts/sources`,
-        { method: "POST", body: form }, user.csrf_token);
-      const byPath = new Map(source.files.map((file) => [file.path, file.id]));
+      const parts = batches(mapping ? [...files, mapping] : files);
+      let upload = "", source: Uploaded = {};
+      for (const [n, part] of parts.entries()) {
+        if (parts.length > 1) setProgress(`Uploading ${n + 1} of ${parts.length}…`);
+        const form = new FormData();
+        form.append("paths", JSON.stringify(part.map((file) => file.name)));
+        form.append("label", `${workflow.name} files`);
+        form.append("final", String(n === parts.length - 1));
+        if (upload) form.append("upload_id", upload);
+        part.forEach((file) => form.append("files", file));
+        source = await api<Uploaded>(`/api/tenants/${encodeURIComponent(tenant)}/accounts/sources`,
+          { method: "POST", body: form }, user.csrf_token);
+        upload = source.upload_id ?? upload;
+      }
+      setProgress("");
+      const byPath = new Map((source.files ?? []).map((file) => [file.path, file.id]));
       const config: Record<string, unknown> = {
         ...(review ? { review_mode: review } : {}),
         // Always the company mode the form shows, so a tenant default never overrides what the person chose.
@@ -75,6 +102,7 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
       setMessage(caught instanceof Error ? caught.message : "Could not start the run.");
     } finally {
       setBusy(false);
+      setProgress("");
     }
   }
 
@@ -101,7 +129,7 @@ export function LaunchRun({ workspace, workflow, routeSlug }: { workspace: Works
           .map((item) => <option key={item.guid} value={item.guid}>{item.name}</option>)}
       </select></label>}
     </div>
-    <button className="button button-primary" disabled={busy || !files.length || Boolean(settings.company_mode && listing)}>{busy && <Spinner />}{busy ? "Starting…" : "Start run"}</button>
+    <button className="button button-primary" disabled={busy || !files.length || Boolean(settings.company_mode && listing)}>{busy && <Spinner />}{busy ? progress || "Starting…" : "Start run"}</button>
     {message && <p role="alert" className="form-message">{message}</p>}
   </form>;
 }

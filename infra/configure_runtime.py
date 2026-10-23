@@ -1,9 +1,8 @@
 """Install scoped runtime identities/secrets without displaying secret payloads.
 
-The runtime's database secrets are named for the instance they open. The parked
-pre-rebuild build's (minkops-database-url, minkops-migration-url) keep naming the
-shared instance, so a rollback to it still connects; a secret that exists is never
-rewritten, so a new database always gets new secrets.
+The runtime's database secrets are named for the instance they open
+(minkops-books-database-url, minkops-books-migration-url). A secret that exists is
+never rewritten, so a new database always gets new secrets.
 """
 
 import argparse

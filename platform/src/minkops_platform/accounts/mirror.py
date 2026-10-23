@@ -501,6 +501,34 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
          "limit": limit}).fetchall()
 
 
+# Where a bill's expense heads sit, by Tally's reserved group names: its purchases, expenses and assets.
+EXPENSE_GROUPS = ("Purchase Accounts", "Direct Expenses", "Indirect Expenses", "Fixed Assets", "Misc. Expenses (ASSET)")
+
+
+def under(parent, wanted, groups):
+    """Is this parent group, or any group above it, one of `wanted` (Tally's group names)?
+
+    `groups` maps each group's normalized name to its parent's name, as the GROUP masters record it.
+    """
+    wanted = {group.casefold() for group in wanted}
+    for _ in range(50):
+        if not parent:
+            return False
+        if parent.casefold() in wanted:
+            return True
+        parent = groups.get(normalized(parent))
+    return False
+
+
+def ledger_list(connection, company_id, version, *, guids=None, limit=5000):
+    """A company's ledgers at a version, light: GUID, name, parent group and GSTIN, by name; or these GUIDs'."""
+    return connection.execute(
+        f"""SELECT guid, name, parent, gstin FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE}
+                AND type='LEDGER' AND (%(guids)s::text[] IS NULL OR guid = ANY(%(guids)s))
+            ORDER BY name_key, guid LIMIT %(limit)s""",
+        {"c": company_id, "v": version, "guids": guids, "limit": limit}).fetchall()
+
+
 def named(connection, company_id, version, kind, subjects):
     """Masters of one type whose GUID, or whose name ignoring case and spacing, is one of these subjects."""
     return connection.execute(
@@ -516,6 +544,70 @@ def ledger_history(connection, company_id, version, ledgers, *, limit=10):
         f"""SELECT * FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE} AND ledgers && %(ledgers)s::text[]
                 AND NOT cancelled AND NOT optional ORDER BY date DESC, guid LIMIT %(limit)s""",
         {"c": company_id, "v": version, "ledgers": list(ledgers), "limit": limit}).fetchall()
+
+
+def _token(haystack, needle):
+    """A document number as a whole token of a text: "INV-17" never matches "INV-170"."""
+    number = normalized(needle)
+    return bool(number) and re.search(rf"(?<![a-z0-9]){re.escape(number)}(?![a-z0-9])", normalized(haystack)) is not None
+
+
+def documents(connection, company_id, version, *, party, number, fields, date_from, date_to):
+    """A party's vouchers carrying a document number where the company records it, in a window, as the companion's
+    duplicate check finds them: REFERENCE or VOUCHERNUMBER equal to it, or a whole token of the NARRATION.
+    Cancelled and optional vouchers enter nothing, so they are left out."""
+    rows = connection.execute(
+        f"""SELECT * FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE} AND party_key=%(party)s
+                AND date BETWEEN %(from)s AND %(to)s AND NOT cancelled AND NOT optional ORDER BY date, guid""",
+        {"c": company_id, "v": version, "party": normalized(party), "from": date_from, "to": date_to}).fetchall()
+    key = normalized(number)
+    return [row for row in rows if any(
+        _token(row["narration"], number) if field == "NARRATION"
+        else normalized(row["reference" if field == "REFERENCE" else "number"]) == key for field in fields)]
+
+
+def bank_entries(connection, company_id, version, *, bank, cents, reference, date_from, date_to):
+    """Vouchers posting `cents` (signed as Tally signs it) to a bank ledger in a window whose reference or narration
+    carries this reference or UTR: how a bank row entered by hand is found in the books."""
+    needle = re.sub(r"\s", "", reference).upper()
+    rows = connection.execute(
+        f"""SELECT * FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE} AND date BETWEEN %(from)s AND %(to)s
+                AND NOT cancelled AND NOT optional AND %(bank)s = ANY(ledgers)
+                AND (position(%(needle)s IN upper(regexp_replace(reference, '[[:space:]]', '', 'g'))) > 0
+                     OR position(%(needle)s IN upper(regexp_replace(narration, '[[:space:]]', '', 'g'))) > 0)
+            ORDER BY date, guid LIMIT 20""",
+        {"c": company_id, "v": version, "from": date_from, "to": date_to, "bank": bank, "needle": needle}).fetchall()
+    return [row for row in rows if (bank, cents) in ledger_lines(row["data"])]
+
+
+def bank_precedents(connection, company_id, version, *, bank, counter, voucher_type, payee, date_from, date_to):
+    """How many vouchers in a window post to a bank ledger and this counter ledger, as this voucher type, with a
+    narration naming the payee (`payee` normalized, as memory keys it): the books' own precedent for a bank row."""
+    return connection.execute(
+        f"""SELECT count(*) AS n FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE}
+                AND date BETWEEN %(from)s AND %(to)s AND NOT cancelled AND NOT optional AND voucher_type=%(type)s
+                AND %(bank)s = ANY(ledgers) AND %(counter)s = ANY(ledgers)
+                AND position(%(payee)s IN regexp_replace(lower(narration), '[[:space:]]+', ' ', 'g')) > 0""",
+        {"c": company_id, "v": version, "from": date_from, "to": date_to, "type": voucher_type, "bank": bank,
+         "counter": counter, "payee": payee}).fetchone()["n"]
+
+
+def observed(row):
+    """A stored voucher as a person reads it on a record (`current`): its identity, and its ledger lines, cost
+    allocations and bill references signed as Tally signs them, as a Tally readback reports them."""
+    return {"guid": row["guid"], "master_id": str(row["master_id"] or ""), "date": row["date"].strftime("%Y%m%d"),
+            "voucher_type": row["voucher_type"], "number": row["number"], "reference": row["reference"],
+            "party_ledger": row["party_ledger"], "alter_id": row["alter_id"],
+            "lines": [{"ledger": ledger, "amount_cents": cents} for ledger, cents in ledger_lines(row["data"])],
+            "allocations": [{"ledger": text(entry.get("LEDGERNAME")), "category": text(category.get("CATEGORY")),
+                             "centre": text(centre.get("NAME")), "amount_cents": _cents(centre.get("AMOUNT"))}
+                            for entry in _entries(row["data"])
+                            for category in _list(entry.get("CATEGORYALLOCATIONS.LIST")) if isinstance(category, dict)
+                            for centre in _list(category.get("COSTCENTREALLOCATIONS.LIST")) if isinstance(centre, dict)],
+            "bills": [{"ledger": text(entry.get("LEDGERNAME")), "name": text(bill.get("NAME")) or None,
+                       "type": text(bill.get("BILLTYPE")), "amount_cents": _cents(bill.get("AMOUNT"))}
+                      for entry in _entries(row["data"])
+                      for bill in _list(entry.get("BILLALLOCATIONS.LIST")) if isinstance(bill, dict)]}
 
 
 def vouchers_mentioning(connection, company_id, version, needle, date_from, date_to, *, limit=10):

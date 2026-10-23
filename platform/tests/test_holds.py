@@ -12,10 +12,11 @@ BILL, STATEMENT, BOTH = {"bill"}, {"statement"}, {"bill", "statement"}
 GOLDEN = {
     ("nothing", "retry"): (BILL, [
         "not_a_bill", "multiple_bills_unclear", "required_value_missing", "source_values_conflict",
-        "supplier_unresolved", "date_before_books", "identity_rule_unknown", "date_outside_company_period",
-        "voucher_type_unresolved", "extraction_failed"]),
-    ("guess", "nothing", "retry"): (BILL, ["source_unreadable"]),
-    ("supplier", "nothing", "retry"): (BILL, ["supplier_missing"]),
+        "source_unreadable", "date_before_books", "identity_rule_unknown", "date_outside_company_period",
+        "voucher_type_unresolved", "extraction_failed", "already_in_tally"]),
+    # Only the treatment is in question: a person may choose it and approve.
+    ("choose", "nothing", "retry"): (BILL, ["supplier_unresolved"]),
+    ("supplier", "choose", "nothing", "retry"): (BILL, ["supplier_missing"]),
     ("retry_save", "nothing"): (BOTH, [
         "company_not_open", "no_company", "duplicate_company", "not_running", "port_closed", "busy", "too_many",
         "invalid_response", "rejected", "save_waiting", "save_interrupted", "save_held"]),
@@ -27,16 +28,18 @@ GOLDEN = {
 # Codes a bill and a statement row share.
 SHARED = {
     "company_unresolved": ("nothing", "retry"), "unsupported_structure": ("nothing", "retry"),
-    "classification_uncertain": ("guess", "nothing", "retry"),
-    # Stop is final, and a run's books stay as it read them: neither can be rechecked or retried.
-    "run_stopped": ("nothing",), "destination_changed": ("nothing",),
+    "classification_uncertain": ("choose", "nothing", "retry"),
+    # Stop is final: it can be neither rechecked nor retried.
+    "run_stopped": ("nothing",),
+    # Tally changed since the run read the books: a recheck reads them again as they are now.
+    "destination_changed": ("nothing", "retry"),
 }
 # A bill waiting on its company's practice is released by the answer, not by a recheck.
 BILL_ONLY = {"practice_question": ("nothing",)}
 STATEMENT_ONLY = {
     "statement_layout_unknown": ("nothing", "retry"), "statement_layout_changed": ("nothing", "retry"),
-    "statement_transfer_unpaired": ("nothing", "retry"), "statement_interpretation": ("guess", "nothing", "retry"),
-    "ledger_unresolved": ("guess", "nothing", "retry"), "branch_unresolved": ("guess", "nothing", "retry"),
+    "statement_transfer_unpaired": ("nothing", "retry"), "statement_interpretation": ("choose", "nothing", "retry"),
+    "ledger_unresolved": ("choose", "supplier", "nothing", "retry"), "branch_unresolved": ("choose", "nothing", "retry"),
     "statement_save_waiting": ("retry_save", "nothing"), "statement_save_held": ("retry_save", "nothing"),
     # Settled by a person's choice among the allocations the open bills leave.
     "bill_unresolved": ("settle", "nothing", "retry"),
@@ -56,7 +59,7 @@ class HoldMatrixTest(unittest.TestCase):
         for hold in holds.HOLDS.values():
             self.assertTrue(set(hold.actions) <= set(holds.ACTIONS), hold.code)
             self.assertIn("nothing", hold.actions, "Do nothing is always available")
-        self.assertEqual(set(holds.ACTIONS), {"nothing", "retry", "guess", "supplier", "retry_save", "settle"})
+        self.assertEqual(set(holds.ACTIONS), {"nothing", "retry", "choose", "supplier", "retry_save", "settle"})
 
     def test_an_unknown_code_fails_closed_to_actions_that_cannot_write(self):
         self.assertEqual(holds.hold("never_heard_of_it").actions, ("nothing", "retry"))
@@ -64,7 +67,7 @@ class HoldMatrixTest(unittest.TestCase):
         self.assertEqual(holds.actions([]), ("nothing", "retry"))  # A hold with no code fails closed too.
 
     def test_several_codes_keep_only_the_actions_every_code_allows(self):
-        self.assertEqual(holds.actions(["supplier_missing", "classification_uncertain"]), ("nothing", "retry"))
+        self.assertEqual(holds.actions(["supplier_missing", "classification_uncertain"]), ("choose", "nothing", "retry"))
         self.assertEqual(holds.actions(["classification_uncertain", "date_before_books"]), ("nothing", "retry"))
         self.assertEqual(holds.actions(["busy", "rejected"]), ("retry_save", "nothing"))
 

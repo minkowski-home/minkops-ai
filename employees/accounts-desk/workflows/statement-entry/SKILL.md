@@ -56,7 +56,10 @@ code its narration cites.
    its ID in `rules`. `practice` says how the company books bank payments.
    Name the counterparty in `payee` exactly as the narration prints it, codes
    included: `memory`, asked with that name, shows how rows with that payee were
-   booked when a person approved them.
+   booked when a person approved them. A routing memory confirmed at least twice
+   is how this payee's rows are booked: book another way only for a rule you
+   cite or a fact the row prints, and state it in `departure`; a person then
+   reviews the row.
 3. **Voucher type.** An active Payment, Receipt or Contra type of that company
    (`voucher_types`).
 4. **Cost allocation**, optionally: the cost centre `cost_centres` finds, on a
@@ -110,7 +113,10 @@ A bank row never opens a bill (New Ref): purchases and sales do.
 
 When the company, bank, counter ledger or classification remains genuinely
 uncertain, answer the row with an `exception` instead of a `selection`, and
-explain the competing evidence plainly. The codes are:
+explain the competing evidence plainly. Give with it what you did establish (the
+company, the bank ledger and the `payee`), and list in `candidates`, by
+reference and most likely first, the ledgers you weighed for the other side: a
+person chooses the row's treatment from them and approves it. The codes are:
 
 - `company_unresolved`;
 - `ledger_unresolved`;

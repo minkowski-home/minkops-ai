@@ -5,7 +5,7 @@ const FAILURES = {
   "tally.probe": "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again.",
   "tally.sync": "Tally could not be read on this PC. Keep Tally open with the company loaded; Minkops reads it again shortly.",
   "tally.write": "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing.",
-  "tally.supplier": "Tally could not create this supplier. Check the company, then use Create this ledger again; an existing ledger is read back, never created twice.",
+  "tally.ledger": "Tally could not create this ledger. Check the company, then use Create this ledger again; an existing ledger is read back, never created twice.",
 };
 
 export class CompanionWorker {

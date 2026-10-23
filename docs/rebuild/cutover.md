@@ -1,62 +1,43 @@
 # Cut-over
 
 The rebuilt accounts desk goes live on its own Cloud SQL instance, `minkops-books`,
-with fresh workspaces. The old build is parked: its commit, images and installer are
-kept, so it can be deployed again against the shared instance and the data it has
-now. Nothing here has run yet. It waits for the owner's go-ahead, and two things
-come first: the manual testing list in the [rebuild plan](README.md#progress) passes
-on the local build, and the owner agrees a retention and deletion policy for the
-mirrored books ([risks](README.md#risks)).
+with fresh workspaces, and the old build is retired for good. The owner decided on
+23 October 2026 not to park the old build: one final logical backup of its database
+is kept off-site, owner-only, and its database, roles, secrets, images and installer
+are removed. Myndral's shared instance, and everything else Myndral uses (its
+databases, users, SMTP secrets and their access), stay untouched.
 
 Commands run from the repository root as the authenticated owner (see
 [operator deployment](../../infra/README.md#operator-deployment)). `DIR` is a new
 private directory for the new instance's credentials, such as
-`~/.local/state/minkops-books`. The parked build's own state stays where it is.
+`~/.local/state/minkops-books`. `ARCHIVE` is the owner-only folder outside git for
+the old build's final backup, `~/minkops-private/retired-build`.
 
-## 1. Park the old build
+## 1. Record what production runs
 
-1. Record the images production runs. Each is tagged with its reviewed commit:
+For the record only, nothing is kept for a rollback: the images each service runs,
+its latest revision, and each Hosting site's live release.
 
-   ```bash
-   gcloud run services describe minkops-solution-api --project=minkops-ai-prod --region=us-central1 --format='value(spec.template.spec.containers[0].image)'
-   ```
-
-   ```bash
-   gcloud run services describe minkops-interest-api --project=minkops-ai-prod --region=us-central1 --format='value(spec.template.spec.containers[0].image)'
-   ```
-
-2. Tag the runtime image's commit as the parked build, and push the tag:
-
-   ```bash
-   git tag archive/YYYY-MM-DD/accounts-desk-before-rebuild <commit>
-   ```
-
-   ```bash
-   git push origin archive/YYYY-MM-DD/accounts-desk-before-rebuild
-   ```
-
-3. Apply the retention policy with `infra/configure_retention.py`. It keeps every
-   image tagged `parked-…`, so tag both images:
-
-   ```bash
-   gcloud artifacts docker tags add <image> <image without its tag>:parked-YYYY-MM-DD
-   ```
-
-4. Download the installer minkops.com serves. Check its size and SHA-256 against
-   `apps/corporate-website/frontend/src/content/windows-release.json` at the tag,
-   and keep it.
-5. Record each Hosting site's live release.
+```bash
+gcloud run services list --project=minkops-ai-prod --region=us-central1 --format='table(metadata.name,status.latestReadyRevisionName,spec.template.spec.containers[0].image)'
+```
 
 ## 2. Provision the rebuild's database
 
-1. Record the instance tier as a cost decision against the
-   [envelope](../../infra/README.md#production), then create the instance once:
+1. Read the tier of Myndral's instance, the owner's chosen tier (about US$15 a
+   month), and record it against the [envelope](../../infra/README.md#production):
+
+   ```bash
+   gcloud sql instances describe myndral-db --project=myndral-prod --format='value(settings.tier)'
+   ```
+
+2. Create the instance once with that tier:
 
    ```bash
    PYTHONPATH=. uv run --all-packages python infra/provision_database.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR --create-instance --tier <tier>
    ```
 
-2. Start the Cloud SQL Auth Proxy on `127.0.0.1:5433` for
+3. Start the Cloud SQL Auth Proxy on `127.0.0.1:5433` for
    `minkops-ai-prod:us-central1:minkops-books`. Create the roles, the database, every
    migration and the runtime grants, then prove a restore:
 
@@ -68,10 +49,9 @@ private directory for the new instance's credentials, such as
    uv run --all-packages python infra/verify_database_restore.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR
    ```
 
-3. Configure the runtime. This grants Cloud SQL access in `minkops-ai-prod`. It
-   creates the `minkops-books-database-url` and `minkops-books-migration-url`
-   secrets beside the parked build's own, which it leaves unchanged, and keeps the
-   model key's secret:
+4. Configure the runtime. This grants Cloud SQL access in `minkops-ai-prod`, creates
+   the `minkops-books-database-url` and `minkops-books-migration-url` secrets, and
+   keeps the model key's secret:
 
    ```bash
    uv run --all-packages python infra/configure_runtime.py --state-dir DIR
@@ -79,9 +59,10 @@ private directory for the new instance's credentials, such as
 
 ## 3. Deploy the rebuilt app
 
-1. Build and push the images at the rebuild's reviewed commit. Then deploy the API,
-   the twelve-lane worker and the recovery service on the new instance, and check
-   Ready, traffic and Job success:
+1. Build and push the images at the reviewed commit on `main`. Deploy the API, the
+   twelve-lane worker and the recovery service on the new instance, and check Ready,
+   traffic and Job success. Every service sets its Cloud SQL instances, so none keeps
+   Myndral's instance attached:
 
    ```bash
    uv run --all-packages python infra/deploy_runtime.py --image <image> --interest-image <interest-image>
@@ -93,8 +74,10 @@ private directory for the new instance's credentials, such as
    uv run --all-packages python infra/deploy_hosting.py console
    ```
 
-3. Package companion 0.11.0 signed and record it in `windows-release.json` (see
-   [Windows app](../windows-app.md#build-and-run)). Build the corporate site, then
+3. Package companion 0.11.5 as an unsigned release candidate on Windows
+   (`scripts/windows_build.ps1 -Kind candidate`; see
+   [Windows app](../windows-app.md#build-and-run)) and record it in
+   `windows-release.json` with `"unsigned": true`. Build the corporate site, then
    publish both:
 
    ```bash
@@ -102,10 +85,35 @@ private directory for the new instance's credentials, such as
    ```
 
    Installed companions update themselves. The rebuilt server needs 0.11.0 on every
-   PC. It neither reads nor writes a PC's Tally until that PC updates, and Check
-   Tally connection asks for the update.
+   PC and 0.11.5 to create ledgers; it neither reads nor writes a PC's Tally until
+   that PC updates, and Check Tally connection asks for the update.
 
-## 4. Fresh workspaces
+## 4. Retire the old build
+
+Only after the new deployment serves, so the old database no longer changes:
+
+1. Keep one final logical backup. Start a Cloud SQL Auth Proxy on `127.0.0.1:5435`
+   for `myndral-prod:us-central1:myndral-db`, and dump the `minkops` database with
+   PostgreSQL 16's `pg_dump` as the old migration role, whose connection the
+   `minkops-migration-url` secret holds (read it into the environment, never print
+   it). Write the dump to `ARCHIVE` (mode 700), and check it lists with `pg_restore -l`
+   before going on.
+2. Remove the old database and its roles from Myndral's instance, and nothing else:
+
+   ```bash
+   gcloud sql databases delete minkops --instance=myndral-db --project=myndral-prod
+   ```
+
+   Then drop the `minkops_app`, `minkops_migrate` and `minkops_owner` roles there,
+   checking first that they own nothing else.
+3. Delete the old build's database secrets, `minkops-database-url` and
+   `minkops-migration-url`, in `minkops-ai-prod`.
+4. Remove the Minkops service accounts' `roles/cloudsql.client` in `myndral-prod`.
+   Keep their per-secret access to Myndral's SMTP secrets, which the new build
+   still sends mail with.
+5. Delete the Cloud Run revisions that ran the old build, and its images.
+
+## 5. Fresh workspaces
 
 For PR Infra, and each later client:
 
@@ -131,7 +139,7 @@ For PR Infra, and each later client:
    its "New company found" card for the PR Infra client business. The first sync
    reads the current and previous financial years.
 
-## 5. Where PR Infra's statements resume
+## 6. Where PR Infra's statements resume
 
 Each bank ledger resumes the day after the latest voucher the old build entered on
 it, which the mirror shows after the first sync. An overlap is never written twice,
@@ -139,36 +147,17 @@ but it costs review. A row whose bank already has a voucher of the same date and
 amount holds as Possible existing entry, for a check in Tally. A transfer already
 entered covers its other leg.
 
-## 6. Verify
+## 7. Verify
 
-- Connected PCs shows each PC ready, on 0.11.0, with its Tally port, and Check Tally
+- Connected PCs shows each PC ready, on 0.11.5, with its Tally port, and Check Tally
   connection lists only that PC's companies.
 - A bill run and a statement run on PR Infra's own files reach review; one approved
   entry of each is saved and verified in Tally.
 - Attention groups items by client, and Memory lists the client's agreed rule.
 
-## 7. Roll back
+## 8. Roll back
 
-The parked build runs on the shared instance with its own data, which the rebuild
-never touched. Never point the rebuilt app at that database; its migrations refuse a
-database that holds the old build's work.
-
-1. Restore the corporate site's recorded release first, so the parked installer and
-   its update feed are served again.
-2. Check out the tag, run `uv sync --frozen --all-packages`, and redeploy with the
-   parked images. The tag's own `deploy_runtime.py` targets the shared instance and
-   the parked build's secrets, and it redeploys the worker Job, which has no revision
-   to route back to:
-
-   ```bash
-   uv run --all-packages python infra/deploy_runtime.py --image <parked image> --interest-image <parked interest image>
-   ```
-
-3. Restore the console's recorded release while Hosting still retains it (two per
-   site). After that, build the console from the tag and deploy it.
-4. Reinstall the kept installer on each PC. The rebuilt companion cannot run the
-   parked build's jobs, and an installed companion never downgrades itself.
-
-Entries the rebuilt app saved stay in Tally; check them there before the parked
-build enters the same period. Keep the parked build's secrets and its access to the
-shared instance until the owner retires it.
+There is no older build to return to. A bad release of the rebuild is rolled back
+to its own previous Cloud Run revision and Hosting release; never reverse a database
+migration to recover an application revision. Entries the rebuilt app saved stay in
+Tally.

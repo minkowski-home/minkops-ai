@@ -30,7 +30,7 @@ import {
   tallyTransport,
   tallyProcesses,
   readTallyIni,
-  createSupplier,
+  createLedger,
   tallyCrashEvents,
   saveVoucher,
   runSync,
@@ -166,7 +166,7 @@ function startWorker() {
     request,
     heartbeat: async () => learnPort(await request("/api/desktop/worker/heartbeat", {})),
     execute: createExecutor({
-      connectors: { checkTally, inventory, createSupplier, saveVoucher, runSync },
+      connectors: { checkTally, inventory, createLedger, saveVoucher, runSync },
       request, pc: pcName(),
       grantFor: (sourceId) => binding(identity.tenant, sourceId, { id: identity.owner_id }),
       recordDiagnostic: (job, record) => jobDiagnostics.set(job.id, record),

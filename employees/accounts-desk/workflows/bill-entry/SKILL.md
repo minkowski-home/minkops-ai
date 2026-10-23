@@ -80,6 +80,11 @@ has a text layer, the total and any round-off must be figures it prints.
 - **Cost split.** Give in `cost_split` how the bill divides its cost between
   sites, projects or departments: each part with its amount or its percentage
   as printed. A project the bill merely names is no split.
+- **Service period.** Give in `service_period` the period a bill's service,
+  rent, maintenance or subscription covers when it prints one. Book the bill at
+  its full value, as the supplier's bills are booked: Minkops notes a period
+  that runs past the financial year's end, and a person decides what part of it
+  is prepaid.
 
 ## The buyer: which company
 
@@ -104,7 +109,9 @@ The supplier is identified by what the bill prints about it: its name, GSTIN,
 address, or an alias the printed text actually matches.
 
 - **Searching.** Use `find_ledger`, by GSTIN first and then by the name and its
-  variants.
+  variants. A ledger marked `learnt` is the one a person matched this printed
+  name to before: prefer it, unless the GSTIN the bill prints is another
+  ledger's.
 - **Ambiguity.** When that identity fits two or more supplier ledgers equally,
   the bill is `supplier_unresolved`. The purchase, the expense ledger or history
   never choose between suppliers, because a wrong creditor misstates payables.
@@ -125,7 +132,10 @@ Propose the voucher this client's own practice records for the document.
   not say yet, post the tax to the ledgers the supplier's earlier bills used, and a
   printed discount to a discount line; Minkops asks the client once. Tally's
   masters and Minkops's checks bind all of them. A demoted memory entry was
-  changed in Tally since, so prefer what the books show now.
+  changed in Tally since, so prefer what the books show now. A booking memory
+  confirmed at least twice is how this supplier's bills are booked: book another
+  way only for a handwritten instruction, a rule you cite, or a fact the bill
+  prints, and state it in `departure`; a person then reviews the bill.
 - **Treatment.** Look at how this supplier's bills and similar purchases were
   booked before (`party_history`):
   - which voucher type (`voucher_types`) records them;
@@ -240,8 +250,11 @@ When something remains genuinely uncertain, propose the bill with an
 - `classification_uncertain`, `unsupported_structure`.
 
 Keep every value and identity you did establish in the proposal, because a
-person can write a held bill's complete best candidate as a best guess. Never
-invent an amount, date or identity to complete a proposal.
+person can choose a held bill's treatment and approve it: list in `candidates`,
+by reference and most likely first, the ledgers you weighed for what is
+uncertain (the supplier ledgers for `supplier_unresolved`, the expense ledgers
+for `classification_uncertain`), so the person sees them first. Never invent an
+amount, date or identity to complete a proposal.
 
 ## Working well
 

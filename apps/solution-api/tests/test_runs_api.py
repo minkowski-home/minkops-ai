@@ -36,6 +36,9 @@ class Handler:
         work.refresh(connection, run["tenant_id"], run["id"])
         return {"status": "deferred", "version": record["version"]}
 
+    def ledgers(self, connection, run, record, role, query):
+        return {"role": role, "query": query, "record": str(record["id"])}
+
 
 HANDLER = Handler()
 
@@ -82,6 +85,19 @@ class RunsApiTests(unittest.TestCase):
         self.assertEqual({t["id"] for t in workspace["tasks"]}, {str(self.runs[self.granted["slug"]][0]["task_id"])})
         run, _ = self.runs[self.other["slug"]]
         self.assertEqual(client.get(self.base(self.other["slug"]) + f"/runs/{run['id']}/status").status_code, 403)
+
+    def test_a_records_ledger_picker_is_reached_only_under_its_own_client(self):
+        client, _ = self.login(self.member)
+        _, granted = self.runs[self.granted["slug"]]
+        _, other = self.runs[self.other["slug"]]
+        picker = f"{self.base(self.granted['slug'])}/records/{granted['id']}/ledgers"
+        self.assertEqual(client.get(picker, params={"role": "expense", "q": "cab"}).json(),
+                         {"role": "expense", "query": "cab", "record": str(granted["id"])})
+        self.assertEqual(client.get(picker, params={"role": "Expense!"}).status_code, 422)
+        # Another client's record is not found, whether asked for under that client or under this one.
+        for slug in (self.granted["slug"], self.other["slug"]):
+            response = client.get(f"{self.base(slug)}/records/{other['id']}/ledgers", params={"role": "any"})
+            self.assertIn(response.status_code, (403, 404), response.text)
 
     def test_a_run_is_reachable_only_under_its_own_client(self):
         client, _ = self.login(self.admin)

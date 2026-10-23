@@ -73,22 +73,27 @@ test("a run's write saves its stored plan behind the durable local fence", async
   assert.deepEqual([result, fenced], [{ outcome: "saved", current: { guid: "g-1" } }, [true]]);
 });
 
-test("an approved supplier is created by the fixed master operation, never through a voucher import", async () => {
-  const plan = { kind: "supplier", company: "Rehearsal Infra", company_guid: "c-1", vendor: "Cabin Services", gst_supplier: null };
+test("an approved ledger is created by the fixed master operation, never through a voucher import", async () => {
+  const plan = { kind: "ledger", protocol: 8, company: "Rehearsal Infra", company_guid: "c-1", ledger: { name: "Cabin Services" } };
   const calls = [];
   const request = async (path) => {
     assert.match(path, /\/jobs\/job-1\/plan\?claim_token=claim-1/);
     return plan;
   };
-  const createSupplier = async (given, options) => {
+  const createLedger = async (given, options) => {
     calls.push([given, options]);
-    return { company_guid: "c-1", ledgers: [] };
+    return { company_guid: "c-1", ledger: { GUID: "g-new" } };
   };
-  const saveVoucher = async () => { throw new Error("A supplier write must not import a voucher."); };
-  const result = await executor({ request, connectors: { createSupplier, saveVoucher } })(
-    job("tally.supplier", { write_id: "w-2" }));
-  assert.deepEqual(result, { company_guid: "c-1", ledgers: [] });
+  const saveVoucher = async () => { throw new Error("A ledger write must not import a voucher."); };
+  const current = createExecutor({ connectors: { createLedger, saveVoucher }, request, pc: "TEST-PC", planVersion: 8,
+    transportFor: () => "tally-transport", grantFor: () => ({}), durableIntent: () => async () => true });
+  const result = await current(job("tally.ledger", { write_id: "w-2" }));
+  assert.deepEqual(result, { company_guid: "c-1", ledger: { GUID: "g-new" } });
   assert.deepEqual(calls, [[plan, { request: "tally-transport" }]]);
+  // A companion that writes an older protocol refuses the plan before Tally is touched.
+  await assert.rejects(executor({ request, connectors: { createLedger, saveVoucher } })(
+    job("tally.ledger", { write_id: "w-3" })), /Unsupported ledger plan/);
+  assert.equal(calls.length, 1);
 });
 
 test("a failed connection check leaves a diagnostic for the receipt", async () => {

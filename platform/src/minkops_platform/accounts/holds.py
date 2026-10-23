@@ -4,8 +4,9 @@ A hold is a typed reason a bill or statement row cannot be saved as proposed,
 raised by the model's coded exceptions, a server check or the native writer.
 The server owns this matrix: renderers display it and decision paths enforce
 it. The actions are a ceiling. Record-specific gates may remove one (Create
-this ledger needs evidenced supplier details), never add one. A code outside
-the list keeps only the actions that cannot write.
+this ledger needs evidenced supplier details; Choose and approve needs a
+complete reading, so only the treatment is in question), never add one. A code
+outside the list keeps only the actions that cannot write.
 """
 
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 ACTIONS = {
     "nothing": "Do nothing",
     "retry": "Recheck",
-    "guess": "Best guess write",
+    "choose": "Choose and approve",
     "supplier": "Create this ledger",
     "retry_save": "Retry save",
     "settle": "Settle",
@@ -51,7 +52,8 @@ def _holds(scopes, actions, entries):
     return [Hold(code, kind, label, reason, actions, frozenset(scopes)) for code, kind, label, reason in entries]
 
 
-_INTERPRETATION = ("guess", "nothing", "retry")
+# Holds about a record's treatment: a person may choose its ledgers and voucher type, and approve.
+_INTERPRETATION = ("choose", "nothing", "retry")
 _DESTINATION = ("retry_save", "nothing")
 _CATALOG = [
     *_holds((BILL, STATEMENT), NON_WRITING, [
@@ -59,12 +61,15 @@ _CATALOG = [
         ("unsupported_structure", EXCEPTION, "Manual entry needed",
          "This bill requires accounting entries outside the supported save format."),
     ]),
-    # Neither recheck nor retry can clear these: Stop is final, and a run's books stay as it read them.
+    # Stop is final: neither recheck nor retry clears it.
     *_holds((BILL, STATEMENT), ("nothing",), [
         ("run_stopped", LIFECYCLE, "Run stopped", "The run was stopped before this bill was saved."),
+    ]),
+    # A recheck reads the books again as they are now (desk_tools.recheck).
+    *_holds((BILL, STATEMENT), NON_WRITING, [
         ("destination_changed", NATIVE, "Tally changed",
-         "A ledger, voucher type or cost allocation changed in Tally after this run read the books. Start a new run "
-         "to enter this bill."),
+         "A ledger, voucher type or cost allocation changed in Tally after this run read the books. Recheck to read "
+         "this bill again against the books as they are now."),
     ]),
     *_holds((BILL,), NON_WRITING, [
         ("not_a_bill", EXCEPTION, "Not a bill", "This source does not contain a bill that can be entered."),
@@ -73,8 +78,7 @@ _CATALOG = [
         ("required_value_missing", EXCEPTION, "Missing bill value",
          "A required bill value could not be confirmed from the source."),
         ("source_values_conflict", EXCEPTION, "Bill values conflict", "The source contains conflicting bill values."),
-        ("supplier_unresolved", EXCEPTION, "Supplier unclear",
-         "The supplier could not be matched to exactly one Tally ledger."),
+        ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
         ("date_before_books", EXCEPTION, "Before books begin",
          "The bill date is before the company's books beginning date."),
         ("identity_rule_unknown", EXCEPTION, "Foreign supplier",
@@ -84,15 +88,19 @@ _CATALOG = [
         ("voucher_type_unresolved", EXCEPTION, "Voucher type needed",
          "A supported voucher type must be selected for this company."),
         ("extraction_failed", EXCEPTION, "Recheck bill", "The bill could not be processed and needs an explicit recheck."),
+        ("already_in_tally", EXCEPTION, "Already in Tally",
+         "Tally already has this bill, booked otherwise. Check it there; Minkops will not add another."),
     ]),
     *_holds((BILL, STATEMENT), _INTERPRETATION, [
         ("classification_uncertain", EXCEPTION, "Ledger unclear",
          "The appropriate accounting ledger could not be confirmed."),
     ]),
     *_holds((BILL,), _INTERPRETATION, [
-        ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
+        ("supplier_unresolved", EXCEPTION, "Supplier unclear",
+         "The supplier could not be matched to exactly one Tally ledger."),
     ]),
-    *_holds((BILL,), ("supplier", "nothing", "retry"), [
+    # A missing supplier is created, or found under another name among the company's ledgers.
+    *_holds((BILL,), ("supplier", "choose", "nothing", "retry"), [
         ("supplier_missing", EXCEPTION, "Missing supplier",
          "The supplier is missing from the company's confirmed Tally ledgers."),
     ]),
@@ -151,10 +159,14 @@ _CATALOG = [
     ]),
     *_holds((STATEMENT,), _INTERPRETATION, [
         ("statement_interpretation", EXCEPTION, "Ledger unclear", "The ledger for this transaction could not be confirmed."),
-        ("ledger_unresolved", EXCEPTION, "Other side unclear",
-         "The other side of this transaction could not be matched to exactly one Tally ledger."),
         ("branch_unresolved", EXCEPTION, "Routing label unclear",
          "The client's routing label on this row could not be interpreted."),
+    ]),
+    # The other side is chosen among the company's ledgers, or, where it books such parties to their own ledgers,
+    # created for the payee.
+    *_holds((STATEMENT,), ("choose", "supplier", "nothing", "retry"), [
+        ("ledger_unresolved", EXCEPTION, "Other side unclear",
+         "The other side of this transaction could not be matched to exactly one Tally ledger."),
     ]),
     # A person chooses which open bills a payment settles, from the allocations the books leave open.
     *_holds((STATEMENT,), ("settle", "nothing", "retry"), [

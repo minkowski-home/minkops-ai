@@ -254,6 +254,37 @@ class MigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(psycopg.errors.RaiseException, "parked build's work"):
                 connection.execute(retirement)
 
+    def test_supplier_jobs_become_ledger_jobs_and_a_pending_supplier_creation_holds_the_upgrade(self):
+        """Migration 0037 renames the supplier jobs a database already holds, and waits for any pending creation."""
+        upgrade = (ROOT / "db/migrations/0037_ledger_writes.sql").read_text()
+        # The older constraint, not validated against jobs other tests left in this database.
+        older = """ALTER TABLE desktop_jobs DROP CONSTRAINT desktop_jobs_operation_check;
+            ALTER TABLE desktop_jobs ADD CONSTRAINT desktop_jobs_operation_check CHECK (operation = ANY (ARRAY[
+            'tally.probe','files.refresh','tally.sync','tally.write','tally.supplier'])) NOT VALID"""
+        with psycopg.connect(URL) as connection, connection.transaction(force_rollback=True):
+            tenant = connection.execute("INSERT INTO tenants(slug,name) VALUES (%s,'Ledgers') RETURNING id",
+                                        ("ledgers-" + uuid4().hex,)).fetchone()[0]
+            user = connection.execute("INSERT INTO users(email,name,password_hash) VALUES (%s,'U','x') RETURNING id",
+                                      (uuid4().hex + "@example.com",)).fetchone()[0]
+            device = connection.execute(
+                """INSERT INTO desktop_devices(tenant_id,owner_id,installation_id,name,token_hash)
+                   VALUES (%s,%s,%s,'PC',%s) RETURNING id""", (tenant, user, uuid4(), uuid4().hex)).fetchone()[0]
+            task = connection.execute("INSERT INTO tasks(tenant_id,title) VALUES (%s,'Create') RETURNING id",
+                                      (tenant,)).fetchone()[0]
+            connection.execute(older)
+            connection.execute(
+                """INSERT INTO desktop_jobs(tenant_id,device_id,actor_id,task_id,operation,input,state,request_key,request_hash)
+                   VALUES (%s,%s,%s,%s,'tally.supplier','{}','completed',%s,'h')""", (tenant, device, user, task, uuid4()))
+            connection.execute(upgrade)
+            self.assertEqual(connection.execute("SELECT operation FROM desktop_jobs WHERE tenant_id=%s",
+                                                (tenant,)).fetchone()[0], "tally.ledger")
+            with self.assertRaises(psycopg.errors.CheckViolation), connection.transaction():
+                connection.execute("UPDATE desktop_jobs SET operation='tally.supplier' WHERE tenant_id=%s", (tenant,))
+            # A supplier creation still pending (a temporary table shadows the real one) holds the upgrade.
+            connection.execute("CREATE TEMP TABLE native_writes (plan jsonb, finished_at timestamptz) ON COMMIT DROP")
+            connection.execute("""INSERT INTO native_writes VALUES ('{"kind": "supplier"}', NULL)""")
+            with self.assertRaisesRegex(psycopg.errors.RaiseException, "supplier creation is still pending"):
+                connection.execute(upgrade)
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,15 +59,19 @@ def found(books, records, vouchers):
 
 
 def test_settled_practices_are_read_from_the_books(books):
-    suppliers = [{"type": "LEDGER", "data": {"@_NAME": f"Payee {n}", "GUID": f"l-{n}", "PARENT": "Sundry Creditors",
+    # Ten suppliers, and two staff whose advances are paid from the bank too.
+    suppliers = [{"type": "LEDGER", "data": {"@_NAME": f"Payee {n}", "GUID": f"l-{n}",
+                                             "PARENT": "Sundry Creditors" if n < 10 else "Staff Advances",
                                              "ISBILLWISEON": "Yes" if n < 3 else "No"}} for n in range(12)]
     vouchers = [purchase(n, narration=f"DMR No. {4000 + n} goods received", reference=f"INV-{n}") for n in range(12)]
     vouchers += [payment(n, f"Payee {n}") for n in range(12)]
     findings, _ = found(books, masters(*suppliers), vouchers)
     assert findings["receipt_register"].value == {"recorded_in": "narration"}
     assert findings["invoice_number_field"].value == {"fields": ["REFERENCE"]}
-    assert findings["bank_payments"].value == {"style": "party_ledgers"}
-    assert findings["billwise"].value == {"in_use": True, "share": 0.25}
+    # Payees have ledgers of their own; a new one is offered under the groups theirs sit under, most used first.
+    assert findings["bank_payments"].value == {"style": "party_ledgers", "groups": [
+        {"group": "Sundry Creditors", "share": 0.83}, {"group": "Staff Advances", "share": 0.17}]}
+    assert findings["billwise"].value == {"in_use": True, "share": 0.3}
     assert findings["receipt_notes"].value == findings["purchase_orders"].value == {"in_use": False}
     # One order in the books says the company tracks them.
     order = {"type": "VOUCHERTYPE", "data": {"@_NAME": "Purchase Order", "@_RESERVEDNAME": "Purchase Order",

@@ -71,9 +71,11 @@ connection headroom; it is not a speed fix. Create it once with
 `provision_database.py --create-instance --tier <tier>`: the tier is the
 operator's recorded cost decision, and this instance replaces Minkops' half of
 the shared SQL allocation below, so revise the envelope before creating it.
-Until the cut-over, production runs the parked pre-rebuild build on the shared
+Until the cut-over, production runs the pre-rebuild build on Myndral's shared
 instance `myndral-prod:us-central1:myndral-db`, through the `minkops-database-url`
-secret; it still deploys there from its tag.
+secret. The cut-over retires it for good: one final logical backup is kept
+off-site, and its database, roles and secrets leave that instance, whose other
+contents stay Myndral's.
 
 Database roles: runtime `minkops_app` (16 connections, no DDL), `minkops_owner`
 (NOLOGIN, owns the schema) and `minkops_migrate` (migrations only). Test a restore
@@ -103,8 +105,7 @@ limit or purchase more capacity when it would breach this envelope. See
 [Google spend-cap limitations](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
 and [Cloud SQL pricing](https://cloud.google.com/sql/pricing).
 `artifact-cleanup.json` deletes builds older than 30 days and keeps
-the three newest versions, and every image tagged `parked-…`: a parked build's
-rollback. Hosting retains two releases per site and logs are kept for 30 days.
+the three newest versions, the rollback for a bad release. Hosting retains two releases per site and logs are kept for 30 days.
 
 ### Operator deployment
 
