@@ -547,6 +547,7 @@ def _propose_one(connection, desk, record, bill, count):
             _printed(desk, bill)
             registered = _registered(connection, desk, bill, company, count)
         bound = check(bill, desk.view(connection, company), company, until=desk.until(company))
+        departs = _departing(connection, desk, company, bill, bound, cited)
     except HoldReason as refusal:
         facts = facts or _facts(record, document, company)
         if refusal.code in FINAL or refusal.final or submissions >= ATTEMPTS:
@@ -565,7 +566,7 @@ def _propose_one(connection, desk, record, bill, count):
         return _found_in_tally(connection, desk, record, bill, company, bound, entered, facts=facts,
                                checks=checks, review=review, rules=cited, count=count)
     note, precedents = _precedent(connection, desk, company, bound)
-    review += [*bound.notes, *([note] if note else [])]
+    review += [*bound.notes, *([note] if note else []), *([departs] if departs else [])]
     checks = {**checks, "precedents": precedents}
     waits = _waits(connection, company, bill, bound)
     if waits:
@@ -753,6 +754,36 @@ def _precedent(connection, desk, company, bound):
     return _departure(connection, desk, company, bound, history), 0
 
 
+DEPARTS = "Departs from how"
+
+
+def _departing(connection, desk, company, bill, bound, cited):
+    """Why a bill may not be booked otherwise than its supplier's mature booking, or None.
+
+    A supplier's bills booked one way at least memory.STANDING times, as memory confirmed, are booked that way unless
+    the session cites a rule, or states in `departure` the handwritten instruction or printed fact that justifies
+    another way. Without one the proposal is refused, naming the learnt booking; with one, the review note it returns
+    keeps the bill from standing approval.
+    """
+    if bound.party not in bound.identities or cited:
+        return None
+    mature = [row for row in memory.entries(
+        connection, desk.run["tenant_id"], desk.run["client_id"], company_ids=desk.part_ids(company), kinds=["booking"],
+        subjects=[bound.identities[bound.party]["GUID"]], statuses=("confirmed",)) if row["uses"] >= memory.STANDING]
+    booking = bound.booking
+    if not mature or any(row["value"]["voucher_type"] == booking["voucher_type"]["NAME"]
+                         and set(booking["ledgers"]) <= set(row["value"]["ledgers"])
+                         and bool(row["value"].get("items")) == booking["items"] for row in mature):
+        return None
+    usual = max(mature, key=lambda row: row["uses"])["value"]
+    if not bill.get("departure"):
+        raise HoldReason("classification_uncertain", (
+            f"{bound.party}'s bills were booked {max(row['uses'] for row in mature)} times as {usual['voucher_type']} to "
+            f"{', '.join(usual['ledgers'])}, which Minkops confirmed. Book this one that way, or state in departure the "
+            "handwritten instruction, rule or printed fact that justifies another way."))
+    return f"{DEPARTS} {bound.party}'s bills were booked ({', '.join(usual['ledgers'])}): {bill['departure']}"[:300]
+
+
 def _standing(record):
     """Whether standing approval may write this proposal without a person: nothing to review, booked so before."""
     return (record["status"] == "proposed" and not record["review_reasons"]
@@ -904,8 +935,11 @@ BILL_SCHEMA = schema({
             "the expense ledgers for classification_uncertain. A person chooses among them; empty if none fits.")}},
         ["code", "detail", "candidates"])),
     "rules": {"type": "array", "maxItems": 10, "items": {"type": "string", "minLength": 36, "maxLength": 36}},
+    "departure": {"type": ["string", "null"], "minLength": 1, "maxLength": 500, "description": (
+        "Only when this bill departs from how memory confirmed the supplier's bills are booked: the handwritten "
+        "instruction, rule or printed fact that justifies it. Null otherwise.")},
 }, ["bill", "document", "company", "company_evidence", "voucher", "supplier_details", "evidence", "exception",
-    "rules"])
+    "rules", "departure"])
 # A session's final answer: the file's bills, each checked against its company once answered. A bill answered again
 # replaces its earlier proposal; one rejected, or not yet answered, goes back to the session.
 PROPOSAL = Answer(
@@ -1532,7 +1566,8 @@ def _alike(connection, run, chosen):
         theirs = (other["proposal"] or {}).get("bill") or {}
         waiting = (other["status"] == "held" and held is not None and other["hold_codes"] == [held]
                    and "choose" in ((other["checks"] or {}).get("offers") or []))
-        departed = other["status"] == "proposed" and any(r.startswith(UNPRECEDENTED) for r in other["review_reasons"])
+        departed = other["status"] == "proposed" and any(r.startswith((UNPRECEDENTED, DEPARTS))
+                                                         for r in other["review_reasons"])
         rebooked = _booked_as(theirs, bill) if (waiting or departed) and _same_supplier(theirs, bill) else None
         if rebooked is None:
             continue

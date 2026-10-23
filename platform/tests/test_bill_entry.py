@@ -137,7 +137,7 @@ def proposal(company, n=1, **changes):
                               line("tax", "g-cgst", 14400.0, tax={"head": "cgst", "rate": 9, "taxable": 160000.0}),
                               line("tax", "g-sgst", 14400.0, tax={"head": "sgst", "rate": 9, "taxable": 160000.0})],
                     "items": None},
-        "supplier_details": None, "exception": None, "rules": [],
+        "supplier_details": None, "exception": None, "rules": [], "departure": None,
         "evidence": [{"field": "supplier_name", "page": 1, "quote": "Sunrise Office Systems"},
                      {"field": "total", "page": 1, "quote": "Invoice total 188,800.00"}]}
     for path, value in changes.items():
@@ -768,7 +768,7 @@ def test_exceptions_hold_with_their_reasons_and_a_chosen_treatment_must_still_pa
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
     unaddressed = {"bill": 1, "document": None, "company_guid": None, "company_evidence": None, "voucher": None,
-                   "supplier_details": None, "rules": [],
+                   "supplier_details": None, "rules": [], "departure": None,
                    "evidence": [{"field": "buyer", "page": 1, "quote": "Billed to: Unknown"}],
                    "exception": exception("The buyer is none of the client's companies.", code="company_unresolved")}
     # The model writes its detail by reference; the reviewer reads names.
@@ -1654,3 +1654,43 @@ def test_a_supplier_moved_in_tally_teaches_what_the_printed_name_stands_for_only
     [found] = answers(lookup.created[0], "find_ledger")
     assert [(found_["name"], found_.get("learnt")) for found_ in found["results"][0]["ledgers"]] == [
         ("Sunrise Systems", True), ("Sunrise Office Systems", None)]
+
+
+def test_a_bill_departing_from_its_suppliers_mature_booking_needs_a_stated_reason_unless_a_rule_says_so(desk):
+    """Sunrise's bills were booked twice to Office Cabins, as memory confirmed. A bill booked to Repairs without a
+    reason is refused, naming that booking; with a handwritten reason it is proposed with the reason as a note. A
+    cited rule needs no reason, and a booking confirmed only once does not bind yet."""
+    from minkops_platform.accounts import memory
+    db, names, guid, company = desk["db"], names_of(desk["company"]), desk["company"]["guid"], desk["company"]
+    for _ in range(2):
+        entry = memory.record(db, tenant_id=company["tenant_id"], client_id=company["client_id"],
+                              company_id=company["id"], kind="booking", subject="g-sunrise:cabins", status="confirmed",
+                              use=True, guids=["g-sunrise", "g-purchase", "g-cabins"],
+                              value={"supplier": "Sunrise Office Systems", "voucher_type": "Purchase",
+                                     "ledgers": ["Office Cabins"]}, evidence={"kind": "outcome", "voucher": "v-prior"})
+    rule = memory.write_instruction(db, desk["tenant"], desk["operator"], factory.member(db, desk["tenant"], desk["operator"]),
+                                    desk["client"]["slug"], text="Sunrise's repairs go to Repairs and Maintenance.",
+                                    workflow_key="bill-entry")
+    db.commit()
+    noted = {**repairs(guid, "SOS/26/0501"), "departure": "Handwritten on the bill: book to repairs."}
+    cited = {**repairs(guid, "SOS/26/0502"), "rules": [str(rule["id"])]}
+    fake = by_file(**{"a.pdf": [*proposing(names, repairs(guid, "SOS/26/0501")), reproposing(names, noted)],
+                      "b.pdf": proposing(names, cited)})
+    run = launch(desk, {"a.pdf": repairs_pdf("SOS/26/0501"), "b.pdf": repairs_pdf("SOS/26/0502")})
+    read(desk, fake, run)
+    session = next(s for s in fake.created if header(s)["file"] == "a.pdf")
+    assert answers(session, "propose")[0]["bills"][0]["reason"] == (
+        "Sunrise Office Systems's bills were booked 2 times as Purchase to Office Cabins, which Minkops confirmed. Book "
+        "this one that way, or state in departure the handwritten instruction, rule or printed fact that justifies "
+        "another way.")
+    departed, ruled = records(desk, run)
+    assert (departed["status"], departed["review_reasons"][-1]) == (
+        "proposed", "Departs from how Sunrise Office Systems's bills were booked (Office Cabins): Handwritten on the "
+                    "bill: book to repairs.")
+    assert ruled["status"] == "proposed" and not any(r.startswith("Departs") for r in ruled["review_reasons"])
+    # Confirmed only once, the booking does not bind yet: Repairs is proposed with no reason asked.
+    db.execute("UPDATE memory_entries SET uses=1 WHERE id=%s", (entry["id"],))
+    db.commit()
+    later = launch(desk, {"c.pdf": repairs_pdf("SOS/26/0503")})
+    read(desk, by_file(**{"c.pdf": proposing(names, repairs(guid, "SOS/26/0503"))}), later)
+    assert records(desk, later)[0]["status"] == "proposed"

@@ -83,7 +83,12 @@ routing learnt under a name that contains it, or that it contains, and an edit m
 in Tally to the saved voucher demotes it and teaches the routing it shows now (see
 [Bill entry](bill-entry.md#memory-and-practice)). A row the run's books already
 record, posting its amount to its bank within three days under its reference or
-UTR, is `duplicate` when proposed. After each sync, held or left-as-is rows a person
+UTR, is `duplicate` when proposed. Standing approval weighs a row's precedents as
+bills do: the larger of memory's confirmed uses and the bank ledger's vouchers of
+the last 400 days posting to the same counter ledger as the same voucher type,
+whose narration names the payee (at least four characters). A routing confirmed
+at least twice binds the payee's next rows: a row booked otherwise, with no rule
+cited, needs a stated `departure`, and is then proposed with it as a review note. After each sync, held or left-as-is rows a person
 has since entered in Tally by hand are found the same way, become `duplicate` noted
 "Entered in Tally by hand", and teach their payee's routing.
 

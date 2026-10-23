@@ -295,6 +295,12 @@ desk employee (`accounts/memory.py`):
   is proposed is `duplicate` at once if entered as proposed, or held as
   `already_in_tally` (final) naming what differs; the write-time check still guards
   every save.
+- **Mature memory steers.** A booking memory confirmed at least `memory.STANDING`
+  (2) times binds the supplier's next bills: a proposal booked otherwise, with no
+  rule cited, is refused naming that booking unless the session states in
+  `departure` the handwritten instruction, rule or printed fact that justifies it.
+  With one, the bill is proposed with the reason as a review note and is never
+  written unattended.
 - **Supplier recognition.** A printed supplier name a person matched to a ledger,
   by choosing it in review or moving a saved voucher to it in Tally, is kept as a
   `supplier_name` entry, only when the session quoted that name and no printed

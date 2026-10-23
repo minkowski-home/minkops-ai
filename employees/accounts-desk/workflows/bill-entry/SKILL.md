@@ -127,7 +127,10 @@ Propose the voucher this client's own practice records for the document.
   not say yet, post the tax to the ledgers the supplier's earlier bills used, and a
   printed discount to a discount line; Minkops asks the client once. Tally's
   masters and Minkops's checks bind all of them. A demoted memory entry was
-  changed in Tally since, so prefer what the books show now.
+  changed in Tally since, so prefer what the books show now. A booking memory
+  confirmed at least twice is how this supplier's bills are booked: book another
+  way only for a handwritten instruction, a rule you cite, or a fact the bill
+  prints, and state it in `departure`; a person then reviews the bill.
 - **Treatment.** Look at how this supplier's bills and similar purchases were
   booked before (`party_history`):
   - which voucher type (`voucher_types`) records them;

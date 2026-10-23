@@ -92,7 +92,7 @@ def answered(entry, amounts):
         held = {"company": None, "bank_ledger": None, "payee": None, "candidates": [], **entry["exception"]}
         return {"ref": entry["ref"], "amount": amount, "selection": None, "exception": held}
     selection = {"family": None, "cost_centre": None, "lines": None, "pair": None, "bills": None, "rules": [],
-                 "payee": None, **{key: value for key, value in entry.items() if key != "ref"}}
+                 "payee": None, "departure": None, **{key: value for key, value in entry.items() if key != "ref"}}
     if selection["lines"]:
         selection["lines"] = [{"cost_centre": None, **line} for line in selection["lines"]]
     if selection["bills"]:
@@ -1215,3 +1215,71 @@ def test_a_payees_own_ledger_is_created_in_tallys_terms_only_where_the_company_g
     held = next(r for r in records(desk, again) if "ACME" in r["facts"]["narration"])
     assert [a["action"] for a in statement_entry.HANDLER.summarize(current, held)["actions"]] == [
         "choose", "nothing", "retry"]
+
+
+def test_the_banks_own_vouchers_naming_the_payee_are_precedent_for_standing_approval(desk):
+    """Acme's earlier payments, booked in Tally to Acme Steel, give its row two precedents, so standing approval
+    writes it. A voucher naming Acme but booked to another ledger counts nothing, nor do vouchers for a payee named in
+    fewer than four characters."""
+    import factory
+    company = desk["company"]
+    history = [by_hand(f"v-old-{n}", f"2026080{n}", "Acme Steel", "500.00", f"UTR90000{n}") for n in (1, 2)]
+    history += [by_hand("v-steel", "20260803", "Steel Mart", "700.00", "UTR900003"),
+                *(by_hand(f"v-bnk-{n}", f"2026081{n}", "Bank Charges", "59.00", f"CHG{n}") for n in (1, 2))]
+    for voucher in history:
+        voucher["NARRATION"] = "BNK SVC CHG" if voucher["GUID"].startswith("v-bnk") else "NEFT ACME STEEL PAYMENT"
+    factory.books(desk["db"], company, masters(company), [purchase("v-sm1", "20260801", "SM/101", "1180.00"),
+                                                          purchase("v-sm2", "20260815", "SM/102", "5000.00"), *history])
+    desk["db"].commit()
+
+    def payees(answers, session):
+        return [("propose", {"rows": [{**booked(row, company["guid"]), **({"payee": "BNK"} if "CHARGES" in row["narration"]
+                                                                       else {})}
+                                      for row in rows_of(session) if "ACME" in row["narration"] or "CHARGES" in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, payees) if is_chunk(content) else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI}, review_mode="only_exceptions")
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    rows = {r["facts"]["narration"]: r for r in records(desk, run)}
+    acme, charges = rows["NEFT ACME STEEL UTR111222"], rows["BANK CHARGES"]
+    assert (acme["checks"]["precedents"], acme["status"]) == (2, "writing")
+    assert (charges["checks"]["precedents"], charges["status"]) == (0, "proposed")
+
+
+def test_a_row_departing_from_its_payees_confirmed_routing_needs_a_stated_reason_and_then_waits_for_a_person(desk):
+    """Acme's rows were booked twice to Acme Steel, as memory confirmed. Booked to Steel Mart without a reason, the row
+    is refused, naming that routing; with a reason, it is proposed with the reason as a note, never written unseen."""
+    from minkops_platform.accounts import memory
+    company = desk["company"]
+    for _ in range(2):
+        memory.record(desk["db"], tenant_id=company["tenant_id"], client_id=company["client_id"], company_id=company["id"],
+                      kind="routing", subject="acme steel:usual", status="confirmed", use=True,
+                      value={"payee": "ACME STEEL", "counter_ledger": "Acme Steel", "voucher_type": "Payment"},
+                      guids=["g-acme", "g-payment"], evidence={"kind": "outcome", "voucher": "v-earlier"})
+    desk["db"].commit()
+
+    tries = []
+
+    def to_steel_mart_first(answers, session):
+        tries.append(1)
+        reason = {"departure": "The narration says the payment was for Steel Mart's invoice."} if len(tries) > 1 else {}
+        return [("propose", {"rows": [{**booked(row, company["guid"]), "counter_ledger_guid": "g-steel", **reason}
+                                      for row in rows_of(session) if "ACME" in row["narration"]]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, to_steel_mart_first, to_steel_mart_first)
+                      if is_chunk(content) else Script(layouts))
+    run = launch(desk, {"icici-sep.csv": ICICI}, review_mode="only_exceptions")
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    chunk = next(s for s in fake.created if is_chunk(s.content))
+    refused = verdicts(chunk)[0]["rejected"][0]["reason"]
+    assert refused == ("ACME STEEL's rows were booked 2 times to Acme Steel as Payment, which Minkops confirmed. Book "
+                       "this one that way, or state in departure the instruction, rule or printed fact that justifies "
+                       "another way.")
+    acme = next(r for r in records(desk, run) if r["facts"]["narration"] == "NEFT ACME STEEL UTR111222")
+    assert (acme["status"], acme["review_reasons"]) == ("proposed", [
+        "Departs from how ACME STEEL's rows were booked (Acme Steel): The narration says the payment was for Steel "
+        "Mart's invoice."])

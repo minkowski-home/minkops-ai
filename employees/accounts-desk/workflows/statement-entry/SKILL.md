@@ -56,7 +56,10 @@ code its narration cites.
    its ID in `rules`. `practice` says how the company books bank payments.
    Name the counterparty in `payee` exactly as the narration prints it, codes
    included: `memory`, asked with that name, shows how rows with that payee were
-   booked when a person approved them.
+   booked when a person approved them. A routing memory confirmed at least twice
+   is how this payee's rows are booked: book another way only for a rule you
+   cite or a fact the row prints, and state it in `departure`; a person then
+   reviews the row.
 3. **Voucher type.** An active Payment, Receipt or Contra type of that company
    (`voucher_types`).
 4. **Cost allocation**, optionally: the cost centre `cost_centres` finds, on a

@@ -580,6 +580,18 @@ def bank_entries(connection, company_id, version, *, bank, cents, reference, dat
     return [row for row in rows if (bank, cents) in ledger_lines(row["data"])]
 
 
+def bank_precedents(connection, company_id, version, *, bank, counter, voucher_type, payee, date_from, date_to):
+    """How many vouchers in a window post to a bank ledger and this counter ledger, as this voucher type, with a
+    narration naming the payee (`payee` normalized, as memory keys it): the books' own precedent for a bank row."""
+    return connection.execute(
+        f"""SELECT count(*) AS n FROM mirror_vouchers WHERE company_id=%(c)s AND {_VISIBLE}
+                AND date BETWEEN %(from)s AND %(to)s AND NOT cancelled AND NOT optional AND voucher_type=%(type)s
+                AND %(bank)s = ANY(ledgers) AND %(counter)s = ANY(ledgers)
+                AND position(%(payee)s IN regexp_replace(lower(narration), '[[:space:]]+', ' ', 'g')) > 0""",
+        {"c": company_id, "v": version, "from": date_from, "to": date_to, "type": voucher_type, "bank": bank,
+         "counter": counter, "payee": payee}).fetchone()["n"]
+
+
 def observed(row):
     """A stored voucher as a person reads it on a record (`current`): its identity, and its ledger lines signed as
     Tally signs them, as a Tally readback reports them."""

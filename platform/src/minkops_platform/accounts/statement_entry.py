@@ -339,6 +339,7 @@ def propose(call, arguments):
             company, selection = _selection(connection, state, entry)
             cited = state.cite(connection, entry.get("rules") or [])
             resolved = validated_plan(record["facts"], [state.view(connection, company)], selection)
+            departs = _departing(connection, state, company, entry, resolved, cited)
             proposal = {"selection": selection, "resolved": resolved, **({"rules": cited} if cited else {})}
             try:
                 proposal["resolved"] = _settled(connection, state, company, record, resolved, entry.get("bills"))
@@ -379,7 +380,7 @@ def propose(call, arguments):
             accepted.append(ref)
             continue
         work.update_record(connection, record, status="proposed", company_id=company["id"], hold_codes=[],
-                           review_reasons=[], proposal=proposal,
+                           review_reasons=[departs] if departs else [], proposal=proposal,
                            checks={"submissions": submissions + 1,
                                    "precedents": _precedents(connection, state, company, entry, resolved)})
         accepted.append(ref)
@@ -466,16 +467,56 @@ def _weighed(connection, state, exception):
     }.items() if value not in (None, [])}
 
 
+# How far back the bank's own vouchers count as precedent for a row.
+HISTORY_DAYS = 400
+
+
+def _routings(connection, state, company, payee):
+    """The confirmed routings learnt for a payee in a company."""
+    return memory.entries(connection, state.run["tenant_id"], state.run["client_id"], company_ids=state.part_ids(company),
+                          kinds=["routing"], subjects=[payee], statuses=("confirmed",))
+
+
 def _precedents(connection, state, company, entry, resolved):
-    """How many approved saves booked this payee's rows to this counter ledger and voucher type, as the client's
-    memory learnt them: what standing approval weighs before writing a row without a person."""
-    if not entry.get("payee"):
+    """How many times the client booked this payee's rows to this counter ledger and voucher type: in its own Tally
+    books (the bank ledger's vouchers of the last HISTORY_DAYS whose narration names the payee), or as memory learnt
+    them from approved saves; the larger, as for bills. What standing approval weighs before writing a row unseen."""
+    payee = entry.get("payee")
+    if not payee:
         return 0
-    return sum(row["uses"] for row in memory.entries(
-        connection, state.run["tenant_id"], state.run["client_id"], company_ids=state.part_ids(company),
-        kinds=["routing"], subjects=[entry["payee"]], statuses=("confirmed",))
-        if row["value"]["counter_ledger"] == resolved["data"]["counter_ledger"]
-        and row["value"]["voucher_type"] == resolved["voucher_type"]["NAME"])
+    learnt = sum(row["uses"] for row in _routings(connection, state, company, payee)
+                 if row["value"]["counter_ledger"] == resolved["data"]["counter_ledger"]
+                 and row["value"]["voucher_type"] == resolved["voucher_type"]["NAME"])
+    key, today = memory.payee_key(payee), statement_layouts.today_for(state.run)
+    books = mirror.bank_precedents(
+        connection, company["id"], company["version"], bank=resolved["data"]["bank_ledger"],
+        counter=resolved["data"]["counter_ledger"], voucher_type=resolved["voucher_type"]["NAME"], payee=key,
+        date_from=today - timedelta(days=HISTORY_DAYS), date_to=today) if len(key) >= 4 else 0
+    return max(books, learnt)
+
+
+DEPARTS = "Departs from how"
+
+
+def _departing(connection, state, company, entry, resolved, cited):
+    """Why a row may not be booked otherwise than its payee's mature routing, or None.
+
+    A payee booked one way at least memory.STANDING times, as memory confirmed, is booked that way unless the session
+    cites a rule, or states in `departure` the instruction or fact that justifies another way. Returns a refusal, or
+    with a departure stated, the review note that keeps the row from standing approval.
+    """
+    payee = entry.get("payee")
+    mature = [row for row in _routings(connection, state, company, payee) if row["uses"] >= memory.STANDING] \
+        if payee else []
+    if not mature or cited or any(row["value"]["counter_ledger"] == resolved["data"]["counter_ledger"]
+                                  and row["value"]["voucher_type"] == resolved["voucher_type"]["NAME"] for row in mature):
+        return None
+    usual = max(mature, key=lambda row: row["uses"])
+    if not entry.get("departure"):
+        raise ValueError(f"{payee}'s rows were booked {usual['uses']} times to {usual['value']['counter_ledger']} as "
+                         f"{usual['value']['voucher_type']}, which Minkops confirmed. Book this one that way, or state in "
+                         "departure the instruction, rule or printed fact that justifies another way.")
+    return f"{DEPARTS} {payee}'s rows were booked ({usual['value']['counter_ledger']}): {entry['departure']}"[:300]
 
 
 def _selection(connection, state, entry):
@@ -688,9 +729,12 @@ SELECTION = schema({
     "rules": {"type": "array", "maxItems": 10, "items": REF, "description": "The client's rules this row follows."},
     "payee": {"type": ["string", "null"], "minLength": 1, "maxLength": 200,
               "description": "The counterparty the narration names, as printed, without references or amounts."},
+    "departure": {"type": ["string", "null"], "minLength": 1, "maxLength": 500, "description": (
+        "Only when this row departs from how memory confirmed the payee's rows are booked: the instruction, rule or "
+        "printed fact that justifies it. Null otherwise.")},
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
 }, ["company", "bank_ledger", "counter_ledger", "voucher_type", "family", "cost_centre", "lines", "pair", "bills",
-    "rules", "payee", "evidence"])
+    "rules", "payee", "departure", "evidence"])
 EXCEPTION = schema({
     "code": choice(*EXCEPTIONS), "detail": {"type": "string", "minLength": 1, "maxLength": 1000},
     "company": {"anyOf": [{"type": "null"}, COMPANY], "description": "The company, when you established it."},
@@ -1392,20 +1436,22 @@ def written(connection, run, record, write, receipt):
 
 
 def _alike(connection, run, chosen):
-    """After a treatment a person chose is saved, the run's other rows with that payee that wait on the same question
-    are proposed again booked the same way, each to its own statement's bank. Each is noted, so standing approval
-    never writes it unseen; one click approves them all. A row whose bills need a person's choice stays held."""
+    """After a treatment a person chose is saved, the run's other rows with that payee that wait on the same question,
+    or were proposed departing from how its rows were booked, are proposed again booked the same way, each to its own
+    statement's bank. Each is noted, so standing approval never writes it unseen; one click approves them all. A row
+    whose bills need a person's choice stays as it was."""
     proposal = chosen["proposal"]
     selection, held = proposal["selection"], proposal["chosen"]["held"]
     payee = memory.payee_key(selection.get("payee") or "")
-    if held is None or len(payee) < 4:
+    if len(payee) < 4:
         return
     desk, company = _company(connection, run, chosen)
     note = f"Booked as you chose for row {chosen['facts'].get('row')} of {chosen['facts'].get('file')}."
     for other in connection.execute(
-            """SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND id<>%s AND company_id=%s AND status='held'
-                   AND hold_codes=%s ORDER BY id FOR UPDATE""",
-            (run["id"], ROW, chosen["id"], chosen["company_id"], [held])).fetchall():
+            """SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND id<>%s AND company_id=%s
+                   AND ((status='held' AND hold_codes=%s) OR (status='proposed' AND review_reasons[1] LIKE %s))
+               ORDER BY id FOR UPDATE""",
+            (run["id"], ROW, chosen["id"], chosen["company_id"], [held] if held else [], f"{DEPARTS}%")).fetchall():
         established = _established(connection, other)
         theirs = memory.payee_key(established["payee"] or "")
         if len(theirs) < 4 or not (payee in theirs or theirs in payee):
