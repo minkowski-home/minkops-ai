@@ -5,6 +5,8 @@
  * (Roaming), which roaming profiles and AppData folder redirection carry to every PC the user signs in to, where a
  * roamed credential would claim this PC's Tally jobs and write to another Tally copy. So the state lives under
  * %LOCALAPPDATA%, which stays on the PC. Chromium's session and cache, which are the user's, stay in userData.
+ *
+ * Profile containers (FSLogix, user profile disks) carry Local too; pairing.js refuses a state saved on another PC.
  */
 import { homedir } from "node:os";
 import { basename, join } from "node:path";

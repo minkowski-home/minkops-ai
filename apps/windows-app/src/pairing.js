@@ -13,6 +13,10 @@
  * profile of that user on that PC, from a reinstall, a wiped profile or a launch inside another app's container, is
  * the same PC record: its companies stay authorised, and no continuation is needed. A record paired under a
  * profile's random ID moves to the machine identity once it is connected (POST /api/desktop/worker/installation).
+ *
+ * From 0.11.3 both files record the machine they were saved on, and a state saved on another PC is never used: its
+ * credential would claim that PC's Tally jobs and write to this PC's Tally. The files live outside the roaming
+ * profile (machine-state.js), but a profile container, a restored backup or a copied folder can still carry them.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -65,6 +69,11 @@ async function readOptional(path) {
 /** The PC record a credential belongs to, without the credential. */
 const recordOf = (device) => (device ? { id: device.id, tenant: device.tenant, owner_id: device.owner_id } : null);
 
+/** The machine a saved file was made on, or null: recorded from 0.11.3, and implied before it by an installation ID
+ * derived from the machine (version 5; a profile's own IDs are random, version 4). */
+const savedOn = (saved) =>
+  saved?.machine ?? (/^[0-9a-f]{8}-[0-9a-f]{4}-5/i.test(saved?.installation_id ?? "") ? saved.installation_id : null);
+
 /**
  * Load this PC's pairing with `origin`. `cipher` is Windows credential storage: {available, encrypt, decrypt};
  * `machine` is machineInstallationId(), or null.
@@ -76,33 +85,50 @@ const recordOf = (device) => (device ? { id: device.id, tenant: device.tenant, o
 export async function openPairing({ directory, origin, cipher, machine = null, now = () => new Date() }) {
   const secretPath = join(directory, "companion.bin");
   const identityPath = join(directory, "installation.json");
-  let identity = null;
+  // Where this PC cannot be identified, nothing can be told apart, and a saved file is taken as this PC's.
+  const elsewhere = (saved) => Boolean(machine && savedOn(saved) && savedOn(saved) !== machine);
+  let found = null;
   try {
     const parsed = JSON.parse((await readOptional(identityPath))?.toString() ?? "null");
     // Credentials and grants belong to one server: another deployment's identity is never reused.
-    if (parsed?.server_origin === origin) identity = parsed;
+    if (parsed?.server_origin === origin) found = parsed;
   } catch {
     /* A damaged identity file is rebuilt from the credential, or anew. */
   }
+  // A record belongs to one PC: another PC's identity is never reconnected from here.
+  let identity = elsewhere(found) ? null : found;
 
   let restored = null;
   let problem = null;
+  /** Kept for support, and out of the way so that no later save overwrites it. */
+  const setAside = (reason) =>
+    rename(secretPath, `${secretPath}.${reason}-${now().toISOString().slice(0, 19).replace(/:/g, "-")}Z`);
   const encrypted = await readOptional(secretPath);
   // Storage that is unavailable for now leaves the saved file intact: nothing is lost, so nothing is recovered.
   const locked = Boolean(encrypted) && !cipher.available();
   if (locked) {
     problem = "Windows credential storage is unavailable.";
   } else if (encrypted) {
+    let parsed;
     try {
-      const parsed = JSON.parse(cipher.decrypt(encrypted));
-      if (parsed?.server_origin === origin) restored = parsed;
+      parsed = JSON.parse(cipher.decrypt(encrypted));
     } catch {
       problem = "This PC's saved connection could not be read.";
-      // Kept for support, and out of the way so that no later save overwrites it.
-      const stamp = now().toISOString().slice(0, 19).replace(/:/g, "-") + "Z";
-      await rename(secretPath, `${secretPath}.unreadable-${stamp}`);
+      await setAside("unreadable");
+    }
+    // A credential saved before 0.11.3 recorded no machine; the identity beside it records one from the first start.
+    if (parsed?.server_origin === origin && elsewhere({ machine: savedOn(parsed) ?? savedOn(found) })) {
+      problem = "This PC's saved connection was made on another PC.";
+      await setAside("other-pc");
+      // The identity beside it came with it: reconnecting its record from here would take that PC's record over.
+      identity = null;
+    } else if (parsed?.server_origin === origin) {
+      restored = parsed;
     }
   }
+  // Saves record the machine they are made on, or, where this start cannot read it, the one recorded before.
+  const savedMachine = machine ?? savedOn(restored) ?? savedOn(identity);
+  if (restored) delete restored.machine;
 
   const previous = restored || locked ? null : (identity?.device ?? null);
   const state = restored ?? {
@@ -121,6 +147,7 @@ export async function openPairing({ directory, origin, cipher, machine = null, n
     const next = JSON.stringify({
       server_origin: origin,
       installation_id: pairing.state.installation_id,
+      machine: savedMachine,
       device: recordOf(pairing.state.device) ?? pairing.previous,
     });
     if (next === written) return;
@@ -134,7 +161,7 @@ export async function openPairing({ directory, origin, cipher, machine = null, n
       .catch(() => {})
       .then(async () => {
         if (!cipher.available()) throw new Error("Windows credential storage is unavailable.");
-        await durableWrite(secretPath, cipher.encrypt(JSON.stringify(pairing.state)));
+        await durableWrite(secretPath, cipher.encrypt(JSON.stringify({ ...pairing.state, machine: savedMachine })));
         await writeIdentity();
       });
     return persistence;

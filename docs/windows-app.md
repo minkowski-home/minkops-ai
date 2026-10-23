@@ -317,6 +317,19 @@ the roaming profile is never picked up. A file that cannot be read stops the sta
 ("Minkops could not start") and is retried on the next one: a save fence left
 behind could let a voucher be imported twice.
 
+Both state files record the machine installation ID they were saved on (before
+0.11.3, a version 5 installation ID implies it). A saved connection made on
+another PC, carried by a profile container (FSLogix, user profile disks), a
+restored backup or a copied folder, is renamed `companion.bin.other-pc-<time>`,
+never used and never reconnected from here; diagnostics report it as
+`restore_problem`, and Connected PCs offers to connect this PC as itself. A PC
+renamed, or its Windows account renamed, is another PC in this sense, as it is to
+the server, and is connected again. Where this PC cannot be identified, a saved
+connection is taken as its own. One case cannot be told apart: a connection paired
+before 0.11.2 under a random ID, not connected by 0.11.2 since, that two PCs move
+from one roaming profile before either has removed it. The server still never
+moves a record bound to one machine to another.
+
 Going back to 0.11.2 or earlier finds no state in `%APPDATA%`; the PC is connected
 again and, by its machine identity, rotates its own record's credential. Server
 contracts are unchanged.
