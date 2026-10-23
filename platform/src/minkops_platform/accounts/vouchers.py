@@ -613,6 +613,28 @@ def _adjustments(document, raw, lines, retained, company):
     return notes
 
 
+def _service(document):
+    """A service the bill covers past the financial year's end is booked at its full value; returns the note that keeps
+    standing approval from writing it unseen, so a person decides what part of it is prepaid. India's financial year
+    ends on 31 March, and the bill's date says which year it falls in."""
+    period = document.get("service_period")
+    if not period:
+        return []
+    try:
+        start, end = date.fromisoformat(period["from"]), date.fromisoformat(period["to"])
+    except (KeyError, TypeError, ValueError):
+        raise HoldReason("source_values_conflict", "The printed service period needs its first and last days, "
+                                                   "year first as YYYY-MM-DD.") from None
+    if end < start:
+        raise HoldReason("source_values_conflict", "The printed service period ends before it begins.")
+    issued = date.fromisoformat(document["date"])
+    year_end = date(issued.year + (issued.month > 3), 3, 31)
+    if end <= year_end:
+        return []
+    return [f"The bill covers service from {start.isoformat()} to {end.isoformat()}, past the financial year's end on "
+            f"{year_end.isoformat()}. Minkops books it at its full value; decide in Tally what part of it is prepaid."]
+
+
 def _decimal(value, what, places, precision=None):
     """A positive printed number with at most `places` decimals, exactly; `precision` says why more cannot be kept."""
     if type(value) not in (int, float):
@@ -942,7 +964,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
         raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
     _repeated(lines, raw)
     _split(document, lines)
-    advances = _adjustments(document, raw, lines, retained, company)
+    advances = _adjustments(document, raw, lines, retained, company) + _service(document)
     _tax_consistent(taxes)
     _printed_totals(document, lines, raw, items_cents)
     # The supplier's line is computed from the total, so the other lines must reach it exactly: what they

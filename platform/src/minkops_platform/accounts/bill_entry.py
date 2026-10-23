@@ -834,6 +834,7 @@ TEXT = {"type": "string", "minLength": 1, "maxLength": 1000}
 LEDGER = reference("A ledger's reference, as find_ledger gives it.")
 MONEY = {"type": "number", "exclusiveMinimum": 0}
 PRINTED = {"type": ["number", "null"], "exclusiveMinimum": 0}
+DAY = {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$"}
 FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "place_of_supply", "taxable", "tax",
           "round_off", "note", "receipt_register", "other")
 EVIDENCE = {"type": "array", "maxItems": 40, "description": "Where the bill prints each document value you read.",
@@ -874,9 +875,13 @@ DOCUMENT = schema({
         "prints none.")},
     "cost_split": {**_nullable({"type": "array", "maxItems": 20, "items": SPLIT_PART}), "description": (
         "How the bill divides its cost between sites, projects or departments: each part with its amount or its "
-        "percentage as printed, never both. Null when it prints no split; a project the bill merely names is none.")}},
+        "percentage as printed, never both. Null when it prints no split; a project the bill merely names is none.")},
+    "service_period": {**_nullable(schema({"from": DAY, "to": DAY, "evidence": TEXT}, ["from", "to", "evidence"])),
+                       "description": (
+        "The period the bill's service, rent, maintenance or subscription covers, as printed: its first and last "
+        "days, year first. Null when it prints none.")}},
     ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "buyer_gstin", "place_of_supply",
-     "taxable", "tax", "receipt_register", "adjustments", "cost_split"])
+     "taxable", "tax", "receipt_register", "adjustments", "cost_split", "service_period"])
 LINE = schema({
     "role": choice("expense", "tax", "round_off", "freight", "other_charge", "discount", "tds", "retention",
                    "deposit"),

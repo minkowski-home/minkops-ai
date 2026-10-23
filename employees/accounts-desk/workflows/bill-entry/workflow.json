@@ -1,6 +1,6 @@
 {
   "key": "bill-entry",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "name": "Bill entry",
   "description": "Read PDF and image bills, route each to the client's company, and save reviewed, verified Purchase, Journal and Debit Note vouchers.",
   "owner": "accounts-desk",

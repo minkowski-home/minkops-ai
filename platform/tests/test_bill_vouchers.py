@@ -414,6 +414,31 @@ class PrintedAdjustmentsTest(unittest.TestCase):
                       "match it against that advance in Tally.", advanced.notes)
 
 
+class ServicePeriodTest(unittest.TestCase):
+    """A service the bill covers past the financial year's end is booked in full, and a person decides the prepaid
+    part: the note keeps standing approval from writing it unseen."""
+
+    def test_service_past_the_financial_years_end_waits_for_a_person(self):
+        annual = check(proposal(**{"document.service_period": {
+            "from": "2026-10-01", "to": "2027-09-30", "evidence": "AMC period 01-Oct-2026 to 30-Sep-2027"}}))
+        self.assertEqual(annual.native_plan(REMOTE)["lines"][0]["amount_cents"], 635500)
+        self.assertIn("The bill covers service from 2026-10-01 to 2027-09-30, past the financial year's end on "
+                      "2027-03-31. Minkops books it at its full value; decide in Tally what part of it is prepaid.",
+                      annual.notes)
+
+    def test_service_within_the_year_or_none_printed_adds_nothing(self):
+        for period in (None, {"from": "2026-10-01", "to": "2027-03-31", "evidence": "Hire Oct 2026 to Mar 2027"}):
+            with self.subTest(period=period):
+                self.assertEqual(check(proposal(**{"document.service_period": period})).notes, [])
+
+    def test_a_period_that_runs_backwards_or_is_not_a_date_is_refused(self):
+        for period in ({"from": "2026-10-01", "to": "2026-09-30", "evidence": "x"},
+                       {"from": "01/10/2026", "to": "2027-09-30", "evidence": "x"}):
+            with self.subTest(period=period), self.assertRaises(HoldReason) as refused:
+                check(proposal(**{"document.service_period": period}))
+            self.assertEqual(refused.exception.code, "source_values_conflict")
+
+
 # A GST-registered company as TallyPrime keeps it: GST switched on, a registration as a tax unit, tax ledgers marked
 # as GST duties with their heads and rates, and a supplier whose ledger holds its registration and mailing state.
 BUYER, ACME = "27ABCDE1234F1Z5", "27AAACA1234A1Z5"
