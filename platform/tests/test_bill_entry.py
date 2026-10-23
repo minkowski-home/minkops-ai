@@ -603,6 +603,20 @@ def test_a_bill_held_in_two_files_names_its_copy_in_each(desk):
                                         "This bill is also in a-sunrise.pdf, held there too; it is entered once."]
 
 
+def test_a_bill_held_for_its_own_exception_also_shows_what_the_checks_find_in_its_voucher(desk):
+    """A person resolving the session's question sees every other problem with the proposed voucher at once."""
+    names = names_of(desk["company"])
+    company = desk["company"]["guid"]
+    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"},
+                      **{"voucher.lines.1.ledger_guid": "g-sgst"})
+    run = launch(desk, {"a-sunrise.pdf": B01})
+    read(desk, by_file(**{"a-sunrise.pdf": proposing(names, unsure)}), run)
+    [held] = records(desk, run)
+    assert (held["status"], held["hold_codes"]) == ("held", ["classification_uncertain"])
+    assert held["review_reasons"][0] == "Asset or repairs?"
+    assert held["review_reasons"][1].startswith("Checking the proposed voucher: Input SGST 9% ")
+
+
 def test_a_bill_in_several_files_is_written_once_and_different_printed_versions_all_hold(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]

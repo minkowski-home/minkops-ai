@@ -546,8 +546,11 @@ class GstReturnsTest(unittest.TestCase):
         # Tally marks a GST duty ledger with its head and rate.
         swapped = gst_proposal(**{"voucher.lines.2.ledger_guid": guid("Input SGST 9%"),
                                   "voucher.lines.3.ledger_guid": guid("Input CGST 9%")})
+        # Both swapped lines are named at once.
         self.assertEqual(gst_held(swapped), ("classification_uncertain", "Input SGST 9% is a SGST/UTGST ledger in Tally, so "
-                                             "it cannot carry CGST at 9%. Choose the CGST ledger."))
+                                             "it cannot carry CGST at 9%. Choose the CGST ledger. Input CGST 9% is a CGST "
+                                             "ledger in Tally, so it cannot carry SGST at 9%. Choose the SGST "
+                                             "ledger."))
         rated = gst_proposal(**{"voucher.lines.4.ledger_guid": guid("Input CGST 9%"), "voucher.lines.2.ledger_guid": guid("Input CGST 2.5%")})
         self.assertIn("Input CGST 2.5% is set to 2.5% in Tally, but the bill charges CGST at 9%", gst_held(rated)[1])
         # A ledger Tally does not mark is read by what its name claims; a central or state ledger may name the combined rate.
@@ -673,3 +676,16 @@ def test_one_ledger_at_two_gst_rates_is_two_lines():
     assert plan["format_version"] == 7
     assert sorted((ln["amount_cents"], ln["gst"]["rates"]["igst"]) for ln in plan["lines"] if ln["ledger"] == "Purchase 18%") == [
         (150000, "5"), (400000, "18")]
+
+
+def test_every_faulty_line_is_named_at_once():
+    """Refused one line at a time, a session corrects one per attempt and is held before it sees the rest."""
+    faulty = proposal()
+    faulty["voucher"]["lines"][1]["cost_centre_guid"], faulty["voucher"]["lines"][1]["cost_category_guid"] = (
+        "cc-site-4", "cat-sites")
+    faulty["voucher"]["lines"][2]["ledger_guid"] = guid("Input SGST 9%")
+    with pytest.raises(HoldReason) as refused:
+        check(faulty)
+    assert refused.value.code == "classification_uncertain"
+    assert "Purchase 5% must enable cost centres in Tally before allocating it." in str(refused.value)
+    assert "Input SGST 9%" in str(refused.value).split("allocating it.")[1]

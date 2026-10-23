@@ -800,71 +800,80 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     if not isinstance(raw, list) or not (0 if stock else 1) <= len(raw) <= 39 - (len(stock.ledgers) if stock else 0):
         raise HoldReason("unsupported_structure", "A bill voucher carries 1–39 lines besides the supplier.")
     lines, identities, taxes, tds, round_offs, retained = [], dict(stock.identities) if stock else {}, [], [], 0, []
+    # Every line is checked, and every faulty one named at once: refused one at a time, a session corrects one per
+    # attempt and is held before it sees the rest.
+    faults = []
     for item in raw:
-        if (not isinstance(item, dict) or item.get("role") not in LINE_ROLES or item.get("side") not in ("debit", "credit")
-                or not isinstance(item.get("evidence"), str) or not item["evidence"].strip()):
-            raise HoldReason("source_values_conflict", "Each voucher line needs a known role, a side and bill evidence.")
-        cents = _money(item.get("amount"), "Each line amount")
-        ledger = masters.one("LEDGER", item.get("ledger_guid"), "classification_uncertain",
-                             "Each line must select one ledger of the routed company.")
-        name = masters.name(ledger)
-        if name == party_name:
-            raise HoldReason("classification_uncertain", f"{name} is the supplier's ledger: Minkops writes its line "
-                                                         "from the bill's total.")
-        if stock and name in stock.identities:
-            raise HoldReason("classification_uncertain", f"{name} is on more than one line: give it one line with the "
-                                                         "sum of the bill's amounts it carries.")
-        identities.setdefault(name, masters.identity(ledger))
-        allocation = None
-        if item.get("cost_centre_guid") or item.get("cost_category_guid"):
-            centre = masters.one("COSTCENTRE", item.get("cost_centre_guid"), "classification_uncertain",
-                                 "Select one cost centre.")
-            category = masters.one("COSTCATEGORY", item.get("cost_category_guid"), "classification_uncertain",
-                                   "Select one cost category.")
-            if masters.scalar(centre, "CATEGORY").casefold() != masters.name(category).casefold():
-                raise HoldReason("classification_uncertain", "The cost centre does not belong to the selected cost category.")
-            if masters.scalar(ledger, "ISCOSTCENTRESON").casefold() != "yes":
-                raise HoldReason("classification_uncertain", f"{name} must enable cost centres in Tally before allocating it.")
-            allocation = {"category": masters.name(category), "category_guid": masters.scalar(category, "GUID"),
-                          "centre": masters.name(centre), "centre_guid": masters.scalar(centre, "GUID")}
-        if item["role"] == "tds":
-            rule = item.get("tds")
-            if (item["side"] != PARTY_SIDE[family] or not isinstance(rule, dict) or not isinstance(rule.get("section"), str)
-                    or type(rule.get("rate")) not in (int, float) or not 0 < rule["rate"] <= 30):
-                raise HoldReason("classification_uncertain",
-                                 "A TDS deduction needs its section and rate, and reduces what the supplier is owed.")
-            tds.append((rule, cents))
-        if item["role"] == "retention":
-            if item["side"] != PARTY_SIDE[family]:
-                raise HoldReason("classification_uncertain", "A retention line holds back part of what the supplier is "
-                                                             "owed, so it is on the supplier's side.")
-            retained.append(cents)
-        if item["role"] == "round_off":
-            round_offs += 1
-            if cents > ROUND_OFF_CAP_CENTS:
-                raise HoldReason("source_values_conflict", "A round-off above one rupee is not a rounding difference.")
-        if item["role"] == "tax":
-            tax = item.get("tax")
-            if (not isinstance(tax, dict) or tax.get("head") not in ("cgst", "sgst", "igst", "cess")
-                    or type(tax.get("rate")) not in (int, float) or not 0 < tax["rate"] <= 100):
-                raise HoldReason("source_values_conflict", "Each tax line needs its tax head and printed rate.")
-            taxes.append({"head": tax["head"], "rate": Decimal(str(tax["rate"])), "amount_cents": cents,
-                          "taxable_cents": _money(tax.get("taxable"), "The taxable value")})
-            problem = gst.tax_ledger_problem(ledger, tax["head"], taxes[-1]["rate"])
-            if problem:
-                raise HoldReason("classification_uncertain", problem)
-            # A company whose purchases post GST to its duty ledgers, which Tally's returns read, uses one where
-            # the books have it for this head and rate.
-            duty = None if gst.is_duty(ledger) or practices.get("gst_ledgers", {}).get("use") != "gst_duty" else \
-                gst.duty_ledger(masters.all("LEDGER"), tax["head"], taxes[-1]["rate"])
-            if duty:
-                raise HoldReason("classification_uncertain", (
-                    f"{company['name']} posts GST to the ledgers Tally sets up as GST duties: use {duty} for "
-                    f"{gst.HEAD_NAMES[tax['head']]} at {taxes[-1]['rate'].normalize():f}%."))
-        if item["role"] == "discount" and practices.get("discounts", {}).get("booked") == "net":
-            raise HoldReason("classification_uncertain", f"{company['name']} books a printed discount net: book each "
-                                                         "line at its discounted value, with no discount line.")
-        lines.append(_line(name, item["side"], cents, allocation))
+        try:
+            if (not isinstance(item, dict) or item.get("role") not in LINE_ROLES or item.get("side") not in ("debit", "credit")
+                    or not isinstance(item.get("evidence"), str) or not item["evidence"].strip()):
+                raise HoldReason("source_values_conflict", "Each voucher line needs a known role, a side and bill evidence.")
+            cents = _money(item.get("amount"), "Each line amount")
+            ledger = masters.one("LEDGER", item.get("ledger_guid"), "classification_uncertain",
+                                 "Each line must select one ledger of the routed company.")
+            name = masters.name(ledger)
+            if name == party_name:
+                raise HoldReason("classification_uncertain", f"{name} is the supplier's ledger: Minkops writes its line "
+                                                             "from the bill's total.")
+            if stock and name in stock.identities:
+                raise HoldReason("classification_uncertain", f"{name} is on more than one line: give it one line with the "
+                                                             "sum of the bill's amounts it carries.")
+            identities.setdefault(name, masters.identity(ledger))
+            allocation = None
+            if item.get("cost_centre_guid") or item.get("cost_category_guid"):
+                centre = masters.one("COSTCENTRE", item.get("cost_centre_guid"), "classification_uncertain",
+                                     "Select one cost centre.")
+                category = masters.one("COSTCATEGORY", item.get("cost_category_guid"), "classification_uncertain",
+                                       "Select one cost category.")
+                if masters.scalar(centre, "CATEGORY").casefold() != masters.name(category).casefold():
+                    raise HoldReason("classification_uncertain", "The cost centre does not belong to the selected cost category.")
+                if masters.scalar(ledger, "ISCOSTCENTRESON").casefold() != "yes":
+                    raise HoldReason("classification_uncertain", f"{name} must enable cost centres in Tally before allocating it.")
+                allocation = {"category": masters.name(category), "category_guid": masters.scalar(category, "GUID"),
+                              "centre": masters.name(centre), "centre_guid": masters.scalar(centre, "GUID")}
+            if item["role"] == "tds":
+                rule = item.get("tds")
+                if (item["side"] != PARTY_SIDE[family] or not isinstance(rule, dict) or not isinstance(rule.get("section"), str)
+                        or type(rule.get("rate")) not in (int, float) or not 0 < rule["rate"] <= 30):
+                    raise HoldReason("classification_uncertain",
+                                     "A TDS deduction needs its section and rate, and reduces what the supplier is owed.")
+                tds.append((rule, cents))
+            if item["role"] == "retention":
+                if item["side"] != PARTY_SIDE[family]:
+                    raise HoldReason("classification_uncertain", "A retention line holds back part of what the supplier is "
+                                                                 "owed, so it is on the supplier's side.")
+                retained.append(cents)
+            if item["role"] == "round_off":
+                round_offs += 1
+                if cents > ROUND_OFF_CAP_CENTS:
+                    raise HoldReason("source_values_conflict", "A round-off above one rupee is not a rounding difference.")
+            if item["role"] == "tax":
+                tax = item.get("tax")
+                if (not isinstance(tax, dict) or tax.get("head") not in ("cgst", "sgst", "igst", "cess")
+                        or type(tax.get("rate")) not in (int, float) or not 0 < tax["rate"] <= 100):
+                    raise HoldReason("source_values_conflict", "Each tax line needs its tax head and printed rate.")
+                taxes.append({"head": tax["head"], "rate": Decimal(str(tax["rate"])), "amount_cents": cents,
+                              "taxable_cents": _money(tax.get("taxable"), "The taxable value")})
+                problem = gst.tax_ledger_problem(ledger, tax["head"], taxes[-1]["rate"])
+                if problem:
+                    raise HoldReason("classification_uncertain", problem)
+                # A company whose purchases post GST to its duty ledgers, which Tally's returns read, uses one where
+                # the books have it for this head and rate.
+                duty = None if gst.is_duty(ledger) or practices.get("gst_ledgers", {}).get("use") != "gst_duty" else \
+                    gst.duty_ledger(masters.all("LEDGER"), tax["head"], taxes[-1]["rate"])
+                if duty:
+                    raise HoldReason("classification_uncertain", (
+                        f"{company['name']} posts GST to the ledgers Tally sets up as GST duties: use {duty} for "
+                        f"{gst.HEAD_NAMES[tax['head']]} at {taxes[-1]['rate'].normalize():f}%."))
+            if item["role"] == "discount" and practices.get("discounts", {}).get("booked") == "net":
+                raise HoldReason("classification_uncertain", f"{company['name']} books a printed discount net: book each "
+                                                             "line at its discounted value, with no discount line.")
+            lines.append(_line(name, item["side"], cents, allocation))
+        except HoldReason as fault:
+            faults.append(fault)
+    if faults:
+        raise HoldReason(faults[0].code, " ".join(dict.fromkeys(str(f) for f in faults)),
+                         final=any(f.final for f in faults))
     items_cents = stock.cents if stock else 0
     if tds:
         # Deducted on the contract value, the expense lines and items, never on GST.

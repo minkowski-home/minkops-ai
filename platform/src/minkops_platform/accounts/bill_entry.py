@@ -507,7 +507,8 @@ def _propose_one(connection, desk, record, bill, count):
         cited = desk.cite(connection, bill["rules"])
         if bill["exception"]:
             return _hold(connection, desk, record, bill, company, bill["exception"]["code"],
-                         bill["exception"]["detail"], facts=facts, checks=checks, review=review, rules=cited)
+                         bill["exception"]["detail"], facts=facts, checks=checks, rules=cited,
+                         review=[*review, *_besides(connection, desk, bill, company)])
         if company is None:
             raise HoldReason("company_unresolved", "Choose the buyer among the client's companies with find_company, "
                                                    "or propose the exception company_unresolved.")
@@ -580,6 +581,23 @@ def _waits(connection, company, bill, bound):
 def _proposal(bill, bound, **extra):
     return {"bill": bill, "preview": bound.preview(), "identity": bound.identity,
             "destination_key": bound.destination_key, **extra}
+
+
+def _besides(connection, desk, bill, company):
+    """What the checks find in a voucher proposed with an exception, for the person who resolves the exception.
+
+    Held for its own question, the bill never reaches the checks; told only that, a person answers it and meets the
+    next problem on the recheck. Only a question about how to book the bill is checked this way: when the reading or
+    the supplier is in doubt, so is every check built on it.
+    """
+    if (company is None or bill["exception"]["code"] not in ("classification_uncertain", "unsupported_structure")
+            or not bill.get("document") or not (bill.get("voucher") or {}).get("lines")):
+        return []
+    try:
+        check(bill, desk.view(connection, company), company, until=desk.until(company))
+    except HoldReason as fault:
+        return [f"Checking the proposed voucher: {desk.spelled(connection, str(fault))}"[:300]]
+    return []
 
 
 def _hold(connection, desk, record, bill, company, code, reason, *, facts, checks, review, rules=()):
