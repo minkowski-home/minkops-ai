@@ -837,7 +837,7 @@ def _finalize(connection, run, *, settling):
         for record in rest:
             work.update_record(connection, record, proposal={**record["proposal"], "repeat_of": str(first["id"])},
                                review_reasons=[f"This bill is also in {first['facts']['file']}; it is entered once."])
-    _link_held_copies(connection, run, ready)
+    _link_copies(connection, run, ready)
     if (run["config"].get("review_mode") == "only_exceptions"
             and control_state(connection, run["tenant_id"], run["task_id"]) == "active"):
         for record in ready:
@@ -854,31 +854,39 @@ def _copy_key(record):
     return key[0], mirror.normalized(key[1]), mirror.normalized(key[2]), key[3], key[4]
 
 
-def _link_held_copies(connection, run, ready):
-    """A bill proposed in one file and held in another: each names the other, so the proposed copy waits for a person.
+def _link_copies(connection, run, ready):
+    """One bill in several files, not all written once together: each copy names the others.
 
-    Only proposed copies are grouped to be written once; a held copy has no reading to group by. Standing approval
-    writes only a bill with no review note, so the note keeps the proposed copy from being written while its copy
-    is held for a reason a person has not seen.
+    Proposed copies of one reading are grouped to be written once above. A held copy has no reading to group by, so
+    it and its copies in other files name each other. A proposed copy then waits for a person, since standing
+    approval writes only a bill with no review note; and of two held copies, the one a person settles first is
+    never entered again from the other.
     """
-    proposed = {}
-    for record in ready:
-        if record["status"] == "proposed" and (key := _copy_key(record)):
-            proposed.setdefault(key, record)
-    if not proposed:
-        return
-    for held in connection.execute("SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND status='held' "
-                                   "ORDER BY id FOR UPDATE", (run["id"], KIND)).fetchall():
-        copy = proposed.get(_copy_key(held))
-        if copy is None or copy["item_id"] == held["item_id"]:
-            continue
-        why = (held["review_reasons"] or [hold(held["hold_codes"][0]).reason])[0]
-        there = f"This bill is also in {held['facts']['file']}, held there: {why}"[:300]
-        here = f"This bill is also in {copy['facts']['file']}, where it is proposed; it is entered once."
-        if there not in copy["review_reasons"]:
-            work.update_record(connection, copy, review_reasons=[*copy["review_reasons"], there])
-        if here not in held["review_reasons"]:
-            work.update_record(connection, held, review_reasons=[*held["review_reasons"], here])
+    held = connection.execute("SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND status='held' "
+                              "ORDER BY id FOR UPDATE", (run["id"], KIND)).fetchall()
+    settled = {r["id"] for r in held}
+    copies = {}
+    for record in [*(r for r in ready if r["status"] == "proposed" and r["id"] not in settled), *held]:
+        if key := _copy_key(record):
+            copies.setdefault(key, []).append(record)
+    notes = {}
+    for group in copies.values():
+        proposed = next((r for r in group if r["status"] == "proposed"), None)
+        for record in (r for r in group if r["status"] == "held"):
+            others = [r for r in group if r["item_id"] != record["item_id"]]
+            if proposed is not None and proposed["item_id"] != record["item_id"]:
+                why = (record["review_reasons"] or [hold(record["hold_codes"][0]).reason])[0]
+                notes.setdefault(proposed["id"], (proposed, []))[1].append(
+                    f"This bill is also in {record['facts']['file']}, held there: {why}"[:300])
+                notes.setdefault(record["id"], (record, []))[1].append(
+                    f"This bill is also in {proposed['facts']['file']}, where it is proposed; it is entered once.")
+            for other in (r for r in others if r["status"] == "held"):
+                notes.setdefault(record["id"], (record, []))[1].append(
+                    f"This bill is also in {other['facts']['file']}, held there too; it is entered once.")
+    for record, added in notes.values():
+        fresh = [note for note in dict.fromkeys(added) if note not in record["review_reasons"]]
+        if fresh:
+            work.update_record(connection, record, review_reasons=[*record["review_reasons"], *fresh])
 
 
 # --- review and decisions ---------------------------------------------------------------

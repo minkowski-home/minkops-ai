@@ -586,6 +586,23 @@ def test_a_bill_held_in_one_file_and_proposed_in_another_names_its_copy_and_wait
                                       "This bill is also in a-sunrise.pdf, where it is proposed; it is entered once."]
 
 
+def test_a_bill_held_in_two_files_names_its_copy_in_each(desk):
+    """Both copies held, as a scanned duplicate often is: each still says where the other is, so neither is entered
+    on its own after a person settles the first."""
+    names = names_of(desk["company"])
+    company = desk["company"]["guid"]
+    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
+    fake = by_file(**{"a-sunrise.pdf": proposing(names, unsure), "b-sunrise-scan.pdf": proposing(names, unsure)})
+    run = launch(desk, {"a-sunrise.pdf": B01, "b-sunrise-scan.pdf": B01})
+    read(desk, fake, run)
+    first, second = records(desk, run)
+    assert (first["status"], second["status"]) == ("held", "held")
+    assert first["review_reasons"] == ["Asset or repairs?",
+                                       "This bill is also in b-sunrise-scan.pdf, held there too; it is entered once."]
+    assert second["review_reasons"] == ["Asset or repairs?",
+                                        "This bill is also in a-sunrise.pdf, held there too; it is entered once."]
+
+
 def test_a_bill_in_several_files_is_written_once_and_different_printed_versions_all_hold(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
