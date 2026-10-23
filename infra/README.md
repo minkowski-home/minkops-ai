@@ -121,15 +121,20 @@ are no service-account keys. Use `uv sync --frozen --all-packages`, Node 24 with
    `--create-instance` creates roles, the database, migrations and runtime grants
    (initial setup), and `verify_database_restore.py` with the same three flags
    proves a restore. DIR is a private directory holding the instance's credentials.
+   Both commands reach the proxy on 127.0.0.1 at `--proxy-port` (5433 by default).
+   The restore check runs PostgreSQL 16's `pg_dump` and `pg_restore` from
+   `--pg-bindir`, or else from `PATH`, and refuses any other major version.
    `provision_database.py` applies `db/migrations`, so it runs with the repository
    root on `PYTHONPATH`. The [cut-over](../docs/rebuild/cutover.md) gives each
    command in full.
 3. `configure_runtime.py --state-dir DIR` sets named Secret Manager versions and
    scoped IAM. Rotate a secret by adding a version and updating every deployment's
    reference to it.
-4. Build and push images tagged with a reviewed commit, record the previous
-   revision, then run `deploy_runtime.py --image ... --interest-image ...`. Check
-   Ready, traffic and Job success rather than only gcloud's exit status.
+4. Build images with local Docker, as above, and push them tagged with a reviewed
+   commit: Cloud Build's default service account here cannot read its source
+   bucket, an IAM change that waits on the owner. Record the previous revision,
+   then run `deploy_runtime.py --image ... --interest-image ...`. Check Ready,
+   traffic and Job success rather than only gcloud's exit status.
 5. Build the corporate site with `VITE_INTEREST_API_URL=/api/interest` and the
    console, then `deploy_hosting.py corporate --installer PATH` (it verifies the
    installer's checked-in size and SHA before releasing it with the site) and
