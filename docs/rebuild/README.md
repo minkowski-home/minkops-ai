@@ -15,7 +15,7 @@ on from another machine. The evidence behind each decision is in
   - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
 - **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
-- **[Demo readiness and learning loops](demo-readiness.md) is built and accepted live** (23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, and batched uploads ([progress](#progress)).
+- **[Demo readiness and learning loops](demo-readiness.md) is built and regression-checked live** (23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, and batched uploads ([progress](#progress)). The checks ran on a synthetic pack and books built for it; accuracy on a client's own books is unproven until PR Infra's bills and statements run against them.
 - **Next: the cut-over** by [cutover.md](cutover.md), once the account flows land: sign-up, profile and password reset, email verification, and members' access.
 
 ## Continue on Windows
@@ -406,7 +406,7 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 - **Uploads in batches.** A run's files upload in batches of up to 25 MB, and a run is bounded by its file count (50 bills), so the 50-bill pack starts (migration 0038).
 - **Build.** `scripts/windows_build.ps1` builds the Windows installer from the repository, and fails unless it wrote exactly one new installer of plausible size.
 
-Versions: Bill entry 1.10.0, Statement entry 1.6.0, companion 0.11.5 (plan protocol 8). 360 platform tests, 91 API, 130 companion and Windows app, 24 web unit and 18 browser; lint and ruff clean. Live acceptance, and what it found and fixed, is in the [evidence](evidence.md#demo-readiness-accepted-live-23-october-2026).
+Versions: Bill entry 1.11.0, Statement entry 1.6.0, companion 0.11.5 (plan protocol 8). 356 platform tests, 91 API, 130 companion and Windows app, 24 web unit and 18 browser; lint and ruff clean. The live regression checks, their limits, and what they found and fixed, are in the [evidence](evidence.md#demo-readiness-regression-checked-live-23-october-2026).
 
 **Carried into later slices:**
 

@@ -6,9 +6,9 @@ produced it: each workstream says what is wrong now (with file references), what
 to build, which tests prove it, and how it is accepted live. Deployment follows
 it, by the [cut-over runbook](cutover.md), only when the owner asks.
 
-- **Status:** built and accepted live on `accounts-desk/demo-readiness`, 23
-  October 2026: see [progress](README.md#progress) and the
-  [evidence](evidence.md#demo-readiness-accepted-live-23-october-2026). The rest
+- **Status:** built and regression-checked live on `accounts-desk/demo-readiness`,
+  23 October 2026, on the synthetic pack: see [progress](README.md#progress) and the
+  [evidence](evidence.md#demo-readiness-regression-checked-live-23-october-2026). The rest
   of this page is the plan as agreed.
 - **Branch:** everything on `accounts-desk/demo-test`, this plan included, was
   merged into `staging` on 23 October 2026. Execute the plan on a new branch from
