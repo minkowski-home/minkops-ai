@@ -35,6 +35,7 @@ class AttentionApiTests(unittest.TestCase):
             db.execute("INSERT INTO client_access(tenant_id,client_id,user_id) VALUES (%s,%s,%s)",
                        (self.tenant["id"], granted["id"], self.member["id"]))
             flow = factory.workflow(db, self.tenant, key="statement-entry")
+            factory.assign(db, self.tenant, self.member, flow)
             self.items = {}
             for client in (granted, other):
                 run = factory.run(db, self.tenant, client, flow, self.admin, [work.ItemSpec("chunk", {"file_id": "a"})],
