@@ -64,6 +64,17 @@ def test_a_bank_payees_form_offers_only_the_groups_its_books_use_for_such_partie
     assert fresh["under"] is None and "Capital Account" not in fresh["groups"]
 
 
+def test_no_party_goes_under_duties_and_taxes_though_current_liabilities_holds_it():
+    taxed = view()
+    taxed["masters"]["records"] += [group("Duties & Taxes", "Current Liabilities"), group("GST Payable", "Duties & Taxes"),
+                                    group("Provisions", "Current Liabilities")]
+    offered = party_ledgers.groups(taxed, "counterparty")
+    assert "Provisions" in offered and not {"Duties & Taxes", "GST Payable"} & set(offered)
+    for under in ("Duties & Taxes", "GST Payable"):
+        with pytest.raises(ValueError, match="Choose a group a party ledger may go under"):
+            party_ledgers.plan(taxed, COMPANY, submitted(name="Ramesh Kumar", under=under, gst=None), kind="counterparty")
+
+
 @pytest.mark.parametrize(("changes", "why"), [
     ({"name": "Steel Mart"}, "Steel Mart is already a ledger or group in Test"),
     ({"name": "creditors - steel"}, "is already a ledger or group"),

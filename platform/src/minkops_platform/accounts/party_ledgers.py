@@ -22,6 +22,8 @@ COMPANION = (0, 11, 5)
 # side is never put under bank, tax, capital, stock or expense groups.
 GROUPS = {"supplier": ("Sundry Creditors",),
           "counterparty": ("Sundry Creditors", "Sundry Debtors", "Loans & Advances (Asset)", "Current Liabilities")}
+# Reserved groups that sit inside those but hold no parties: tax ledgers go under Duties & Taxes.
+NEVER = ("Duties & Taxes",)
 REGISTRATIONS = ("Regular", "Composition", "Unregistered")
 # Tally's dated master fields, which newer releases export; a company whose ledgers carry none uses the older ones.
 DATED = {"LEDMAILINGDETAILS.LIST", "LEDGSTREGDETAILS.LIST"}
@@ -34,8 +36,8 @@ def groups(view, kind, used=()):
     parents = {mirror.text(r["data"].get("@_NAME")) or mirror.text(r["data"].get("NAME")): mirror.text(r["data"].get("PARENT"))
                for r in view["masters"]["records"] if r["type"] == "GROUP"}
     tree = {mirror.normalized(name): parent for name, parent in parents.items()}
-    under = [name for name in sorted(parents) if name not in GROUPS[kind]
-             and mirror.under(parents[name], GROUPS[kind], tree)]
+    under = [name for name in sorted(parents) if name not in GROUPS[kind] and name not in NEVER
+             and mirror.under(parents[name], GROUPS[kind], tree) and not mirror.under(parents[name], NEVER, tree)]
     allowed = [*GROUPS[kind], *under]
     return list(dict.fromkeys([*(group for group in used if group in allowed), *allowed]))
 
