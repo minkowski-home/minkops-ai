@@ -21,9 +21,10 @@ not print is refused, and a reading that changes after a refusal goes to review.
 """
 
 import base64
+import contextlib
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
 from pathlib import Path
@@ -242,6 +243,61 @@ def _iso(value):
 
 
 READ = ("number", "date", "total", "supplier_name", "supplier_gstin", "taxable", "tax")
+MONTHS = {name: number for number, name in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+NUMERIC_DATE = re.compile(r"(?<![\d/.-])(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?![\d/.-])")
+NAMED_DATE = re.compile(r"(?<!\d)(\d{1,2})(?:st|nd|rd|th)?[-/. ]*([A-Za-z]{3})[a-z]*\.?[-/., ]*(\d{4}|\d{2})(?!\d)")
+MONTH_FIRST = re.compile(r"\b([A-Za-z]{3})[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})(?!\d)")
+ISO_DATE = re.compile(r"(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)")
+# No bill this desk reads is dated before this, or more than a year after its run.
+EARLIEST_BILL = date(2000, 1, 1)
+
+
+def printed_dates(text):
+    """Every date a printed text can mean, as YYYY-MM-DD: a numeric one both day first and month first."""
+    found = set()
+
+    def add(year, month, day):
+        year = int(year) + (2000 if len(year) == 2 else 0)
+        with contextlib.suppress(ValueError):  # a day past its month's end is no date
+            found.add(date(year, int(month), int(day)).isoformat())
+    for day, month, year in NUMERIC_DATE.findall(text):
+        add(year, month, day)
+        add(year, day, month)
+    for day, name, year in NAMED_DATE.findall(text):
+        if name.lower() in MONTHS:
+            add(year, MONTHS[name.lower()], day)
+    for name, day, year in MONTH_FIRST.findall(text):
+        if name.lower() in MONTHS:
+            add(year, MONTHS[name.lower()], day)
+    for year, month, day in ISO_DATE.findall(text):
+        add(year, month, day)
+    return found
+
+
+def _dated(run, bill):
+    """The date a session wrote must be one the bill prints, and one a bill could carry.
+
+    Bills print dates day first (01-Oct-2026). Written into a year-first field, one can come out as 0110-01-01: a
+    real date, but not the bill's. Refused rather than held, the bill is read again; only a date that agrees with
+    what the session quoted reaches the checks a person must resolve, such as one before the books begin.
+    """
+    value = (bill.get("document") or {}).get("date")
+    if value is None:
+        return
+    issued = _iso(value)
+    if issued is None:
+        raise HoldReason("source_values_conflict", f"{value} is not a date. Write the date year first, as YYYY-MM-DD: a "
+                                                   "bill printing 01-Oct-2026 is dated 2026-10-01.")
+    quotes = [e["quote"] for e in bill.get("evidence") or [] if e.get("field") == "date" and printed_dates(e["quote"])]
+    printed = set().union(*map(printed_dates, quotes))
+    if printed and issued not in printed:
+        raise HoldReason("source_values_conflict", (
+            f"The bill prints its date as \u201c{quotes[0]}\u201d, which is {' or '.join(sorted(printed))}, not {value}. "
+            "Write the date year first, as YYYY-MM-DD."))
+    if not EARLIEST_BILL <= date.fromisoformat(issued) <= run["created_at"].date() + timedelta(days=366):
+        raise HoldReason("source_values_conflict", f"{value} is not a plausible bill date. Read the date the bill prints "
+                                                   "again, and write it year first, as YYYY-MM-DD.")
 
 
 def _changed(first, now):
@@ -444,6 +500,7 @@ def _propose_one(connection, desk, record, bill, count):
     company = facts = None
     locked = run["config"].get("locked_company_guid") if run["config"]["company_mode"] == "locked" else None
     try:
+        _dated(run, bill)
         bill = _cited(connection, desk, bill)
         company = _company(desk, bill)
         facts = _facts(record, document, company)
@@ -639,7 +696,9 @@ EVIDENCE = {"type": "array", "maxItems": 40, "description": "Where the bill prin
 DOCUMENT = schema({
     "kind": choice("invoice", "credit_note", null=True),
     "number": {"type": ["string", "null"], "maxLength": 100, "description": "The supplier's document number."},
-    "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": "The issue date."},
+    "date": {"type": ["string", "null"], "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": (
+        "The issue date, year first as YYYY-MM-DD. Bills print dates day first: 01-Oct-2026 or 01/10/2026 is "
+        "2026-10-01. Quote where the bill prints it in evidence.")},
     "total": {**PRINTED, "description": "The gross amount payable for this document, as printed."},
     "supplier_name": {"type": ["string", "null"], "maxLength": 200},
     "supplier_gstin": {"type": ["string", "null"], "maxLength": 20},

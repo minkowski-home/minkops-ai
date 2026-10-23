@@ -381,6 +381,43 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
     assert work.get_run(desk["db"], desk["tenant"]["id"], run["id"])["state"] == "review"
 
 
+def test_a_date_written_day_first_is_sent_back_to_be_read_again_never_held_as_before_the_books(desk):
+    """B01 prints 01-Sep-2026. Read into a year-first date as 0901-01-26, it contradicts the session's own quote;
+    with no quote, a year no bill carries is implausible. Each is refused, so the bill is read again, not held."""
+    company, names = desk["company"]["guid"], names_of(desk["company"])
+    quoted = [{"field": "date", "page": 1, "quote": "Invoice No.: SOS/26/0412 Date: 01-Sep-2026"}]
+    scrambled = proposal(company, **{"document.date": "0901-01-26"})
+    scrambled["evidence"] += quoted
+    distant = proposal(company, **{"document.date": "3126-09-01"})
+    fake = by_file(**{"sunrise-0412.pdf": [*proposing(names, scrambled), reproposing(names, distant),
+                                           reproposing(names, proposal(company))]})
+    run = launch(desk, {"sunrise-0412.pdf": B01})
+    read(desk, fake, run)
+    [session] = fake.created
+    first, second, third = answers(session, "propose")
+    assert first["bills"][0] == {"bill": 1, "status": "rejected", "reason": (
+        "The bill prints its date as \u201cInvoice No.: SOS/26/0412 Date: 01-Sep-2026\u201d, which is 2026-09-01, "
+        "not 0901-01-26. Write the date year first, as YYYY-MM-DD.")}
+    assert second["bills"][0] == {"bill": 1, "status": "rejected", "reason": (
+        "3126-09-01 is not a plausible bill date. Read the date the bill prints again, and write it year first, "
+        "as YYYY-MM-DD.")}
+    assert third["bills"][0]["status"] == "accepted"
+    [bill] = records(desk, run)
+    assert (bill["status"], bill["facts"]["date"]) == ("proposed", "2026-09-01")
+    assert bill["review_reasons"] == ["The bill was read differently after a refusal: date 0901-01-26 became 2026-09-01."]
+
+
+def test_printed_dates_are_read_day_first_and_month_first_where_the_print_allows_both():
+    assert bill_entry.printed_dates("Invoice date 31-Aug-2026") == {"2026-08-31"}
+    assert bill_entry.printed_dates("DATE : 02.10.26 / Due 01/11/2026") == {"2026-10-02", "2026-02-10", "2026-11-01",
+                                                                                  "2026-01-11"}
+    assert bill_entry.printed_dates("Oct 1, 2026") == {"2026-10-01"}
+    assert bill_entry.printed_dates("RA No. 011 / 02-Oct-2026") == {"2026-10-02"}
+    assert bill_entry.printed_dates("2026-09-01") == {"2026-09-01"}
+    # A day past the month's end, or a bare number, is no date.
+    assert bill_entry.printed_dates("31/09/2026 and FX26/011") == set()
+
+
 def test_a_bill_cites_only_masters_its_session_was_given(desk):
     """Tally numbers masters in sequence, so a guessed GUID can name another real ledger: a session cites only the
     references its own lookups gave it."""
