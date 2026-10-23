@@ -117,24 +117,29 @@ Only after the new deployment serves, so the old database no longer changes:
 
 For PR Infra, and each later client:
 
-1. The client's administrator creates an account at app.minkops.com, leaving
-   **New workspace name** blank, and verifies their email.
-2. Through the proxy, as the runtime role:
+1. Through the proxy, as the runtime role, with the console's address for the
+   sign-up link:
 
    ```bash
-   export DATABASE_URL="$(python3 -c 'import json, sys; print("postgresql://minkops_app:{runtime_password}@127.0.0.1:5433/minkops".format(**json.load(open(sys.argv[1]))))' DIR/database.json)"
+   export DATABASE_URL="$(python3 -c 'import json, sys; print("postgresql://minkops_app:{runtime_password}@127.0.0.1:5433/minkops".format(**json.load(open(sys.argv[1]))))' DIR/database.json)" PUBLIC_APP_URL=https://app.minkops.com
    ```
 
-   Create the workspace with the administrator as its admin, and install its
-   composition: the client business, the Accounts desk with both workflows, and the
-   rule the client agreed. Run it with `--dry-run` first, which rolls back:
+   Create the workspace, install its composition (the client business, the
+   Accounts desk with both workflows, and the rule the client agreed) and invite
+   the client's administrator as its first admin. They need no account yet. Run it
+   with `--dry-run` first, which rolls back:
 
    ```bash
    uv run --all-packages python -m minkops_api.install_workflows pr-infra --actor-email <administrator> --create-tenant "PR Infra"
    ```
 
-3. The administrator invites members under Access. Each PC installs Minkops, connects,
-   and sets its Tally port under Connected PCs; a shared server follows
+2. The command prints the administrator's sign-up link once; it works once, for
+   seven days. Send it to them. Running the command again before they join replaces
+   the link; once they have joined, it changes nothing.
+3. The administrator opens the link, chooses a name and password, and invites the
+   others under Access, as admins or members, assigning each member the workflows
+   they run ([Workspace access](../workspace-access.md)). Each PC installs Minkops,
+   connects, and sets its Tally port under Connected PCs; a shared server follows
    [Hosted Tally](../hosted-tally.md). The administrator authorises each company from
    its "New company found" card for the PR Infra client business. The first sync
    reads the current and previous financial years.

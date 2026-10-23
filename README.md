@@ -17,6 +17,8 @@ its actor. Refresh completes items only from verified external resolution or
 an edit after Minkops' write. Viewing an unchanged record cannot prove review.
 Parallelize independent AI steps with bounded concurrency; preserve authorization,
 ordered writes, idempotency and recovery. See [attention and decisions](docs/attention.md).
+A person belongs to one workspace, joined by invitation, and admins assign members
+the workflows they run. See [workspace access](docs/workspace-access.md).
 
 Minkops offers AI Employees that carry out practical business workflows in a
 customer's existing tools and processes.

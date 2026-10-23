@@ -8,7 +8,6 @@ never read it, so no change here stops work under way. A workspace always keeps 
 
 import secrets
 
-from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
 from . import clients, desktop, identity
@@ -134,14 +133,11 @@ def accept(connection, token, *, user=None, name=None, password=None):
                            {"sign_in": True})
     else:
         person = identity.create_account(connection, email=row["email"], name=name, password=password)
-    if _belongs(connection, person["email"]):
+    # One workspace per person: a membership taken meanwhile, here or anywhere, leaves this one unmade.
+    if connection.execute("""INSERT INTO memberships(tenant_id,user_id,role) VALUES (%s,%s,%s)
+                             ON CONFLICT DO NOTHING RETURNING user_id""",
+                          (row["tenant_id"], person["id"], row["role"])).fetchone() is None:
         raise ServiceError("conflict", f"{person['email']} already belongs to a workspace; a person belongs to one.")
-    try:
-        with connection.transaction():
-            connection.execute("INSERT INTO memberships(tenant_id,user_id,role) VALUES (%s,%s,%s)",
-                               (row["tenant_id"], person["id"], row["role"]))
-    except UniqueViolation:
-        raise ServiceError("conflict", f"{person['email']} already belongs to a workspace; a person belongs to one.") from None
     connection.execute("UPDATE invitations SET accepted_at=now() WHERE id=%s", (row["id"],))
     _audit(connection, row["tenant_id"], "member.joined", person["id"], person, role=row["role"])
     return {**person, "workspace": row["slug"]}

@@ -268,49 +268,53 @@ def register_employee(connection, tenant_id, definition):
         ).fetchone()[0]
 
 
-def provision_tenant(connection, installation: Installation, *, name: str, owner_email: str):
-    """Create a composition's workspace for its first administrator, who signed up and verified themselves.
+def provision_tenant(connection, installation: Installation, *, name: str, admin_email: str):
+    """Create a composition's workspace, and invite its first admin by a sign-up link the operator sends them.
 
-    An operator's decision: the workspace takes the composition's slug, which self-service sign-up never
-    gives. Repeating it for the same administrator returns the same workspace; anyone else is refused.
+    An operator's decision: the workspace takes the composition's slug, which no one else can give it. Until an admin
+    joins, repeating it names the first admin afresh, and only the latest link works; once they have joined, it
+    changes nothing, and anyone else is refused. Returns the workspace's id and the link's token, or None for the
+    token once the admin has joined.
     """
+    from . import members
+
     with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
-        owner = cursor.execute("SELECT id, email_verified_at FROM users WHERE lower(email)=lower(%s)",
-                               (owner_email,)).fetchone()
-        if not owner or not owner["email_verified_at"]:
-            raise ServiceError("forbidden", "The owner must sign up and verify their email first.")
-        created = cursor.execute("INSERT INTO tenants(slug, name) VALUES (%s, %s) ON CONFLICT (slug) DO NOTHING "
-                                 "RETURNING id", (installation.tenant_slug, name)).fetchone()
-        if created:
-            cursor.execute("INSERT INTO memberships(tenant_id, user_id, role) VALUES (%s, %s, 'admin')",
-                           (created["id"], owner["id"]))
-            return created["id"]
-        tenant = cursor.execute(
-            """SELECT t.id, m.role FROM tenants t LEFT JOIN memberships m ON m.tenant_id=t.id AND m.user_id=%s
-               WHERE t.slug=%s""", (owner["id"], installation.tenant_slug)).fetchone()
-        if tenant["role"] != "admin":
+        tenant = cursor.execute("INSERT INTO tenants(slug, name) VALUES (%s, %s) ON CONFLICT (slug) DO NOTHING "
+                                "RETURNING id, slug, name", (installation.tenant_slug, name)).fetchone() or \
+            cursor.execute("SELECT id, slug, name FROM tenants WHERE slug=%s", (installation.tenant_slug,)).fetchone()
+        admins = [row["email"].lower() for row in cursor.execute(
+            """SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id
+               WHERE m.tenant_id=%s AND m.role='admin'""", (tenant["id"],))]
+        if admin_email.strip().lower() in admins:
+            return tenant["id"], None
+        if admins:
             raise ServiceError("conflict", "This workspace exists and belongs to another administrator.")
-        return tenant["id"]
+        cursor.execute("DELETE FROM invitations WHERE tenant_id=%s AND accepted_at IS NULL AND lower(email) <> lower(%s)",
+                       (tenant["id"], admin_email.strip()))
+        return tenant["id"], members.invite(cursor, tenant, None, admin_email, "admin")["token"]
 
 
-def install(connection, installation: Installation, *, actor_email: str):
-    """Authorize installation, then apply the entire composition in one transaction."""
+def install(connection, installation: Installation, *, actor_email: str | None = None):
+    """Apply the entire composition in one transaction. The operator installs, holding the database itself; an
+    `actor_email` attributes it to the workspace's admin, or a platform admin, and anyone else is refused."""
     with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
         tenant = cursor.execute(
             "SELECT * FROM tenants WHERE slug=%s FOR UPDATE", (installation.tenant_slug,)
         ).fetchone()
         if not tenant:
             raise ServiceError("not_found", "Create the tenant through normal provisioning first.")
-        actor = cursor.execute(
-            """SELECT u.id,u.is_platform_admin,m.role FROM users u
-            LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=%s
-            WHERE lower(u.email)=lower(%s) AND u.email_verified_at IS NOT NULL""",
-            (tenant["id"], actor_email),
-        ).fetchone()
-        if not actor or not (actor["is_platform_admin"] or actor["role"] == "admin"):
-            raise ServiceError(
-                "forbidden", "Installation requires a verified tenant or platform administrator."
-            )
+        actor = {"id": None}
+        if actor_email is not None:
+            actor = cursor.execute(
+                """SELECT u.id,u.is_platform_admin,m.role FROM users u
+                LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=%s
+                WHERE lower(u.email)=lower(%s) AND u.email_verified_at IS NOT NULL""",
+                (tenant["id"], actor_email),
+            ).fetchone()
+            if not actor or not (actor["is_platform_admin"] or actor["role"] == "admin"):
+                raise ServiceError(
+                    "forbidden", "Installation requires a verified tenant or platform administrator."
+                )
         for employee in installation.employees:
             register_employee(connection, tenant["id"], employee)
         installed = []
@@ -340,7 +344,7 @@ def install(connection, installation: Installation, *, actor_email: str):
                     workflow_id,
                     Jsonb(
                         {
-                            "actor_id": str(actor["id"]),
+                            "actor_id": str(actor["id"]) if actor["id"] else None,
                             "key": key,
                             "definition_version": definition.metadata["version"],
                         }
