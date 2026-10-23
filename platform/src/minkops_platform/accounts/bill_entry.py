@@ -758,8 +758,9 @@ VOUCHER = schema({
         "evidence": TEXT},
                     ["ledger", "new_supplier", "evidence"]),
     "lines": {"type": "array", "maxItems": 39, "items": LINE, "description": (
-        "One line per ledger other than the supplier's: a ledger carrying several of the bill's lines gets their "
-        "sum.")},
+        "The voucher's lines besides the supplier's. A ledger carrying several of the bill's lines gets their sum, "
+        "except that it takes one line for each cost centre the bill allocates it to, and for each GST rate it is "
+        "taxed at.")},
     "items": {**_nullable({"type": "array", "maxItems": 40, "items": ITEM}), "description": (
         "For a purchase the client books item-wise: each item line of the bill, in the stock item's own unit. "
         "Items carry the taxable value their lines print, so they are not expense lines too. Otherwise null.")}},

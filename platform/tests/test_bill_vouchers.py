@@ -58,6 +58,7 @@ def view(key="company"):
     masters += [{"type": "VOUCHERTYPE", "data": dict(t)} for t in TYPES]
     masters += [{"type": "COSTCATEGORY", "data": {"NAME": "Sites", "GUID": "cat-sites"}},
                 {"type": "COSTCENTRE", "data": {"NAME": "Site 4", "GUID": "cc-site-4", "CATEGORY": "Sites"}},
+                {"type": "COSTCENTRE", "data": {"NAME": "Site 9", "GUID": "cc-site-9", "CATEGORY": "Sites"}},
                 {"type": "COSTCENTRE", "data": {"NAME": "Head Office", "GUID": "cc-ho",
                                                 "CATEGORY": "Primary Cost Category"}}]
     return {"company": "Test", "company_guid": key, "identity": {"NAME": "Test", "GUID": key},
@@ -630,9 +631,45 @@ def test_a_ledger_on_several_lines_is_refused_with_how_to_book_it():
         vouchers.check(split, view(), COMPANY)
     assert (refused.value.code, str(refused.value)) == (
         "classification_uncertain", "Purchase 18% is on more than one line: give it one line with the sum of the "
-                                    "bill's amounts it carries.")
+                                    "bill's amounts it carries, or one line for each cost centre or GST rate the bill "
+                                    "splits it by.")
     supplier = proposal()
     supplier["voucher"]["lines"][0]["ledger_guid"] = guid("Acme Cement")
     with pytest.raises(HoldReason) as refused:
         vouchers.check(supplier, view(), COMPANY)
     assert str(refused.value) == "Acme Cement is the supplier's ledger: Minkops writes its line from the bill's total."
+
+
+def test_a_ledger_split_across_cost_centres_is_one_line_carrying_each_share():
+    """B11: 60% to one project, 40% to another, on one cost-centre ledger. Protocol 7 writes it; nothing else needs 7."""
+    plain = check(proposal()).native_plan(REMOTE)
+    assert plain["format_version"] == 6 and not any(ln.get("allocations") for ln in plain["lines"])
+    split = proposal()
+    split["voucher"]["lines"][0:1] = [
+        line("expense", "Purchase 18%", "debit", 2400.00, centre=("cc-site-4", "cat-sites")),
+        line("expense", "Purchase 18%", "debit", 1600.00, centre=("cc-site-9", "cat-sites"))]
+    plan = check(split).native_plan(REMOTE)
+    assert plan["format_version"] == 7
+    [carried] = [ln for ln in plan["lines"] if ln["ledger"] == "Purchase 18%"]
+    assert (carried["amount_cents"], carried["allocation"]) == (400000, None)
+    assert carried["allocations"] == [
+        {"category": "Sites", "category_guid": "cat-sites", "centre": "Site 4", "centre_guid": "cc-site-4", "amount_cents": 240000},
+        {"category": "Sites", "category_guid": "cat-sites", "centre": "Site 9", "centre_guid": "cc-site-9", "amount_cents": 160000}]
+    # The readback must show each centre's share, in Tally's sign.
+    assert [(a["centre"], a["amount_cents"]) for a in vouchers._allocations(plan)] == [("Site 4", -240000), ("Site 9", -160000)]
+    # A share without its centre, or one centre twice, is not a split: the lines are summed instead.
+    for centres in ((("cc-site-4", "cat-sites"), None), (("cc-site-4", "cat-sites"), ("cc-site-4", "cat-sites"))):
+        unclear = proposal()
+        unclear["voucher"]["lines"][0:1] = [line("expense", "Purchase 18%", "debit", 2400.00, centre=centres[0]),
+                                            line("expense", "Purchase 18%", "debit", 1600.00, centre=centres[1])]
+        with pytest.raises(HoldReason, match="Purchase 18% is on more than one line"):
+            check(unclear)
+
+
+def test_one_ledger_at_two_gst_rates_is_two_lines():
+    """B03: one purchase ledger carries goods at 5% and 18%; each rate is its own line for Tally's returns."""
+    rated = gst_proposal(**{"voucher.lines.1.ledger_guid": guid("Purchase 18%")})
+    plan = gst_check(rated).native_plan(REMOTE)
+    assert plan["format_version"] == 7
+    assert sorted((ln["amount_cents"], ln["gst"]["rates"]["igst"]) for ln in plan["lines"] if ln["ledger"] == "Purchase 18%") == [
+        (150000, "5"), (400000, "18")]

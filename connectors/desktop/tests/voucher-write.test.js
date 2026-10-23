@@ -63,7 +63,8 @@ const observed = (plan, overrides = {}) => ({
   narration: plan.header.tag ? `[Minkops ${plan.header.tag}:${plan.remote_id}] ${plan.header.narration}` : plan.header.narration,
   tag: plan.header.tag ? plan.remote_id : null, unsupported: false, fingerprint: 'v5:existing',
   entries: plan.lines.map(l => ({ledger: l.ledger, amount_cents: signed(l)})).sort((a, b) => a.ledger.localeCompare(b.ledger) || a.amount_cents - b.amount_cents),
-  allocations: plan.lines.filter(l => l.allocation).map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})),
+  allocations: plan.lines.flatMap(l => (l.allocations ?? (l.allocation ? [{...l.allocation, amount_cents: l.amount_cents}] : []))
+    .map(a => ({ledger: l.ledger, category: a.category, centre: a.centre, amount_cents: l.side === 'credit' ? a.amount_cents : -a.amount_cents}))),
   bills: plan.lines.flatMap(l => (l.bills ?? []).map(b => ({ledger: l.ledger, name: b.name ?? null, type: b.type,
     amount_cents: l.side === 'credit' ? b.amount_cents : -b.amount_cents}))),
   inventory: (plan.inventory ?? []).map(e => ({item: e.item, unit: e.unit, quantity: e.quantity, rate: e.rate,
@@ -124,6 +125,54 @@ test('a GST purchase states what Tally\'s returns need, and its receipt carries 
   const named = harness([[], [observed(several)]]);
   await saveVoucher(several, named.options);
   assert.ok(named.imports[0].includes('<GSTREGISTRATION>Andhra Pradesh Registration</GSTREGISTRATION><CMPGSTIN>37ABCPR1234Q1ZB</CMPGSTIN>'));
+});
+
+// Protocol 7: one ledger split across cost centres, and one ledger taxed at two rates on two lines.
+const office = {category: 'Sites', category_guid: 'cat', centre: 'Head Office', centre_guid: 'cc-ho'};
+const split = {
+  ...gstPurchase, format_version: 7,
+  lines: [
+    {ledger: 'Supplier A', side: 'credit', amount_cents: 118040, allocation: null},
+    {ledger: 'Purchase 18%', side: 'debit', amount_cents: 60000, allocation: null,
+      allocations: [{...site, amount_cents: 36000}, {...office, amount_cents: 24000}],
+      gst: {taxability: 'Taxable', supply: 'Goods', rates: {cgst: '9', sgst: '9', igst: '18', cess: '0'}}},
+    {ledger: 'Purchase 18%', side: 'debit', amount_cents: 40000, allocation: null,
+      gst: {taxability: 'Taxable', supply: 'Goods', rates: {cgst: '2.5', sgst: '2.5', igst: '5', cess: '0'}}},
+    {ledger: 'Input CGST', side: 'debit', amount_cents: 9000, allocation: null},
+    {ledger: 'Input SGST', side: 'debit', amount_cents: 9000, allocation: null},
+    {ledger: 'Round Off', side: 'debit', amount_cents: 40, allocation: null},
+  ],
+};
+
+test('protocol 7 writes one ledger across cost centres, and one ledger at two rates, and reads them back exactly', async () => {
+  const io = harness([[], [observed(split)]], {references: snapshot({centres: [{NAME: 'Site 4', GUID: 'cc'}, {NAME: 'Head Office', GUID: 'cc-ho'}]})});
+  const result = await saveVoucher(split, io.options);
+  assert.equal(result.outcome, 'saved');
+  const [allocated, second] = [...io.imports[0].matchAll(/<ALLLEDGERENTRIES\.LIST><LEDGERNAME>Purchase 18%<\/LEDGERNAME>.*?<\/ALLLEDGERENTRIES\.LIST>/g)].map(m => m[0]);
+  // One category, both its centres, each with its own share of the line.
+  assert.ok(allocated.includes('<AMOUNT>-600.00</AMOUNT>'));
+  assert.ok(allocated.includes('<CATEGORYALLOCATIONS.LIST><CATEGORY>Sites</CATEGORY><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>'
+    + '<COSTCENTREALLOCATIONS.LIST><NAME>Site 4</NAME><AMOUNT>-360.00</AMOUNT></COSTCENTREALLOCATIONS.LIST>'
+    + '<COSTCENTREALLOCATIONS.LIST><NAME>Head Office</NAME><AMOUNT>-240.00</AMOUNT></COSTCENTREALLOCATIONS.LIST></CATEGORYALLOCATIONS.LIST>'));
+  assert.ok(second.includes('<AMOUNT>-400.00</AMOUNT>') && second.includes('<GSTRATE>5</GSTRATE>') && !second.includes('CATEGORYALLOCATIONS'));
+  // A readback whose centres differ from the plan is not the approved voucher.
+  const moved = observed(split, {allocations: observed(split).allocations.map(a => a.centre === 'Head Office' ? {...a, centre: 'Site 9'} : a)});
+  const other = harness([[], [moved], [moved]], {references: snapshot({centres: [{NAME: 'Site 4', GUID: 'cc'}, {NAME: 'Head Office', GUID: 'cc-ho'}]})});
+  assert.notEqual((await saveVoucher(split, other.options)).outcome, 'saved');
+});
+
+test('only protocol 7 repeats a ledger or splits a line across cost centres, and its shares add up to the line', () => {
+  assert.doesNotThrow(() => validatePlan(split));
+  assert.throws(() => validatePlan({...split, format_version: 6}), /repeated ledger|allocations/);
+  const lines = structuredClone(split.lines);
+  lines[1].allocations[1].amount_cents = 23999;
+  assert.throws(() => validatePlan({...split, lines}), /allocations/);
+  const both = structuredClone(split.lines);
+  both[1].allocation = site;
+  assert.throws(() => validatePlan({...split, lines: both}), /allocations/);
+  // The supplier's line is never repeated, whatever the protocol.
+  const twice = [...structuredClone(split.lines), {ledger: 'Supplier A', side: 'credit', amount_cents: 1, allocation: null}];
+  assert.throws(() => validatePlan({...split, lines: twice}));
 });
 
 test('plans are validated before any native call', async () => {

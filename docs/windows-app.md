@@ -5,7 +5,7 @@ app, reusing verified email/password accounts, memberships, workflows, reviews
 and task history. The native host adds folder selection and a tray companion;
 one workspace/account is connected per running installation.
 
-This revision builds companion 0.11.3 (plan protocol 6; see its contracts below);
+This revision builds companion 0.11.4 (plan protocol 7; see its contracts below);
 the last release recorded in `windows-release.json` is 0.9.1. The server refuses
 Tally work from companions older than 0.11.0. The companion works only with the companies open
 in the user's own Tally, reports typed session states, sends diagnostics and
@@ -301,6 +301,24 @@ the connected PC kept its record and credential and ran a Tally check. A fresh
 Windows 10/11 device matrix, a screen-reader audit, a release signed with the
 organization's certificate and a shared server with two users have not been
 verified.
+
+### Companion 0.11.4: plan protocol 7
+
+Protocol 7 is protocol 6 plus two shapes of a ledger line, each stated only by a
+plan that needs it; every other plan stays protocol 6, so a 0.11.0–0.11.3
+companion keeps writing it, and the server sends a protocol 7 plan only to a
+companion that reports protocol 7:
+
+- **A line split across cost centres.** `allocations` replaces `allocation`:
+  two to twenty distinct centres, each with its category and its share in
+  `amount_cents`, the shares adding up to the line. It is written as each
+  category once with every centre's share, and read back share by share.
+- **A ledger on several lines.** A ledger may repeat on lines at different GST
+  rates or supply, never the supplier's. The readback compares lines as a
+  multiset, so each line's amount must come back as written.
+
+A voucher in Tally with several centres on a line is no longer reported as
+unsupported: it is compared like any other.
 
 ### Companion 0.11.3
 

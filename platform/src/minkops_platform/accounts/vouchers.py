@@ -20,7 +20,9 @@ from .mirror import text
 from .voucher_types import base_types
 
 # Plan protocol 6 adds a line's bill references to protocol 5; a companion that executes 6 executes 5.
-FORMAT = 6
+# The newest plan protocol this server writes. A plan states the lowest it needs (plan_format), so a companion that
+# writes protocol 6 keeps writing every voucher that needs nothing newer.
+FORMAT = 7
 NARRATION_TAG = "statement"
 
 
@@ -78,6 +80,19 @@ def _line(ledger, side, cents, allocation=None):
     return {"ledger": ledger, "side": side, "amount_cents": cents, "allocation": allocation}
 
 
+def plan_format(lines):
+    """Protocol 7 for a line split across cost centres or a ledger on several lines; 6 for everything else."""
+    repeated = len({ln["ledger"] for ln in lines}) < len(lines)
+    return 7 if repeated or any(ln.get("allocations") for ln in lines) else 6
+
+
+def line_allocations(line):
+    """A plan line's cost allocations, each with its share of the line."""
+    if line.get("allocations"):
+        return line["allocations"]
+    return [{**line["allocation"], "amount_cents": line["amount_cents"]}] if line.get("allocation") else []
+
+
 def _signed(line):
     return line["amount_cents"] if line["side"] == "credit" else -line["amount_cents"]
 
@@ -106,7 +121,8 @@ def statement_voucher(resolved, *, remote_id, identity, distinct=(), counterpart
         issued = date.fromisoformat(data["date"])
         window = {"from": (issued - timedelta(days=3)).isoformat(), "to": (issued + timedelta(days=3)).isoformat()}
     return {
-        "format_version": FORMAT, "family": resolved.get("family") or ("payment" if amount < 0 else "receipt"),
+        "format_version": plan_format([_line(data["bank_ledger"], bank_side, abs(amount)), *counters]),
+        "family": resolved.get("family") or ("payment" if amount < 0 else "receipt"),
         "fence": "strict",
         "operation": "append", "company": resolved["company"], "company_guid": resolved["company_guid"],
         "port": resolved.get("port") or 9000, "remote_id": remote_id,
@@ -180,8 +196,10 @@ def _lines(plan):
 
 
 def _allocations(plan):
-    return sorted(({"ledger": ln["ledger"], "category": ln["allocation"]["category"], "centre": ln["allocation"]["centre"],
-                    "amount_cents": _signed(ln)} for ln in plan["lines"] if ln["allocation"]),
+    """Every cost centre's share of the plan's lines, signed as Tally reports it."""
+    return sorted(({"ledger": ln["ledger"], "category": a["category"], "centre": a["centre"],
+                    "amount_cents": a["amount_cents"] if ln["side"] == "credit" else -a["amount_cents"]}
+                   for ln in plan["lines"] for a in line_allocations(ln)),
                   key=lambda a: (a["ledger"], a["amount_cents"]))
 
 
@@ -474,6 +492,46 @@ def _printed_totals(document, lines, raw, items_cents=0):
                 "Each expense line must carry its taxable value, and each tax its own line."))
 
 
+def _split_key(line, item):
+    """What sets a ledger's lines apart in Tally: side, GST rate and supply, and a tax line's head and rate."""
+    tax = item.get("tax") or {}
+    return line["ledger"], line["side"], item.get("gst_rate"), item.get("supply"), tax.get("head"), tax.get("rate")
+
+
+def _repeated(lines, raw):
+    """A ledger may carry several lines: one per GST rate it is taxed at, or per cost centre the bill allocates it to.
+
+    Lines nothing sets apart are one amount split for no reason Tally keeps, so the session adds them up.
+    """
+    groups = {}
+    for ln, item in zip(lines, raw, strict=True):
+        groups.setdefault(_split_key(ln, item), []).append(ln)
+    for key, group in groups.items():
+        centres = [ln["allocation"]["centre"] for ln in group if ln["allocation"]]
+        if len(group) > 1 and (len(centres) < len(group) or len(set(centres)) < len(centres)):
+            raise HoldReason("classification_uncertain", (
+                f"{key[0]} is on more than one line: give it one line with the sum of the bill's amounts it carries, "
+                "or one line for each cost centre or GST rate the bill splits it by."))
+
+
+def _merged(lines, raw):
+    """The voucher's own lines: a ledger's lines that differ only by cost centre are one line carrying each share."""
+    merged, at = [], {}
+    for ln, item in zip(lines, raw, strict=True):
+        key = _split_key(ln, item)
+        if ln["allocation"] and key in at:
+            carrier = merged[at[key]]
+            if not carrier.get("allocations"):
+                carrier["allocations"] = [{**carrier["allocation"], "amount_cents": carrier["amount_cents"]}]
+                carrier["allocation"] = None
+            carrier["allocations"].append({**ln["allocation"], "amount_cents": ln["amount_cents"]})
+            carrier["amount_cents"] += ln["amount_cents"]
+        else:
+            at[key] = len(merged)
+            merged.append(dict(ln))
+    return merged
+
+
 def _adjustments(document, raw, lines, retained, company):
     """What the bill prints as held back, refundable or adjusted is carried by the voucher; returns notes for a person.
 
@@ -628,16 +686,17 @@ class Bill:
     def native_plan(self, remote_id, *, number_fields=("REFERENCE",), note=None):
         """The approved voucher; `note` adds what the company's practice records in the narration."""
         label = "credit note" if self.kind == "credit_note" else "bill"
+        lines = [{**self.lines[0], "bills": [{"name": self.number, "type": "New Ref",
+                                              "amount_cents": self.lines[0]["amount_cents"]}]},
+                 *self.lines[1:]] if self.billwise else self.lines
         return {
-            "format_version": FORMAT, "family": self.family, "operation": "append",
+            "format_version": plan_format(lines), "family": self.family, "operation": "append",
             "company": self.company["name"], "company_guid": self.company["guid"],
             "port": self.company.get("tally_port") or 9000, "remote_id": remote_id, "voucher_type": self.voucher_type,
             "header": {"date": self.date, "reference": self.number, "party_ledger": self.party,
                        "narration": f"Minkops reviewed {label} {self.number}" + (f"; {note}" if note else ""),
                        "tag": None},
-            "lines": [{**self.lines[0], "bills": [{"name": self.number, "type": "New Ref",
-                                                    "amount_cents": self.lines[0]["amount_cents"]}]},
-                      *self.lines[1:]] if self.billwise else self.lines,
+            "lines": lines,
             "references": {"company_guid": self.company["guid"], "ledgers": self.identities,
                            **({"stock_items": self.stock.items, "godowns": self.stock.godowns} if self.stock else {})},
             **({"inventory": self.stock.entries} if self.stock else {}),
@@ -752,10 +811,10 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
         if name == party_name:
             raise HoldReason("classification_uncertain", f"{name} is the supplier's ledger: Minkops writes its line "
                                                          "from the bill's total.")
-        if name in identities:
+        if stock and name in stock.identities:
             raise HoldReason("classification_uncertain", f"{name} is on more than one line: give it one line with the "
                                                          "sum of the bill's amounts it carries.")
-        identities[name] = masters.identity(ledger)
+        identities.setdefault(name, masters.identity(ledger))
         allocation = None
         if item.get("cost_centre_guid") or item.get("cost_category_guid"):
             centre = masters.one("COSTCENTRE", item.get("cost_centre_guid"), "classification_uncertain",
@@ -818,6 +877,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
                                  f"TDS does not match section {rule['section']} at {rule['rate']}% of the bill's value.")
     if round_offs > 1:
         raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
+    _repeated(lines, raw)
     advances = _adjustments(document, raw, lines, retained, company)
     _tax_consistent(taxes)
     _printed_totals(document, lines, raw, items_cents)
@@ -835,7 +895,8 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     notes += advances
     # Tally books the items' value on their purchase ledgers, one line each, ahead of the bill's own lines.
     native = [_line(party_name, side, total - sum(cents for _, cents in tds) - sum(retained)),
-              *(_line(ledger, "debit", cents) for ledger, cents in (stock.ledgers.items() if stock else ())), *lines]
+              *(_line(ledger, "debit", cents) for ledger, cents in (stock.ledgers.items() if stock else ())),
+              *_merged(lines, raw)]
     expense = {*(stock.ledgers if stock else ()),
                *(ln["ledger"] for ln, item in zip(lines, raw, strict=True) if item["role"] in TAXABLE_ROLES)}
     voucher_type_ref = {"NAME": masters.name(voucher_type), "GUID": masters.scalar(voucher_type, "GUID")}

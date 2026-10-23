@@ -100,7 +100,10 @@ and proves it:
 - the bill's printed taxable and tax totals bind the lines that claim them, so a
   tax-inclusive amount column cannot drop the input tax;
 - a printed round-off of at most a rupee is its own line, never folded into the purchase;
-- cost centres belong to their category, on a ledger that enables them;
+- cost centres belong to their category, on a ledger that enables them. A ledger
+  the bill splits across centres is one line carrying each centre's share, and a
+  ledger taxed at several GST rates is one line per rate (plan protocol 7, which
+  only such a bill needs); lines nothing sets apart are summed;
 - TDS follows its section and rate, on the expense value only;
 - the date falls within the company's books. A bill before they begin, or after
   a year-split sibling takes over, holds at once;

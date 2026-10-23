@@ -7,9 +7,10 @@
  * Protocol 6 adds a line's bill references (New Ref, Agst Ref, Advance, On
  * Account) and a purchase's inventory: each item's quantity, rate and amount,
  * its godowns, and the purchase ledger line that carries its value. Such a
- * purchase is written in Tally's invoice view. Batches, order or receipt-note
- * tracking and multi-centre allocations are outside this contract: the server
- * holds them as named limitations before a plan exists. */
+ * purchase is written in Tally's invoice view. Protocol 7 adds a line split
+ * across cost centres, each with its share, and a ledger repeated on lines at
+ * different GST rates. Batches and order or receipt-note tracking are outside
+ * this contract: the server holds them as named limitations before a plan exists. */
 import {createHash} from 'node:crypto';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
 import {readTallyReferences} from './tally-references.js';
@@ -48,6 +49,8 @@ const isoDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !
 const safeText = (v, max = 200) => typeof v === 'string' && v.trim() !== '' && v.length <= max && !/[\x00-\x1f]/.test(v);
 /** Tally's native sign: credits are positive, debits negative. */
 const signed = line => line.side === 'credit' ? line.amount_cents : -line.amount_cents;
+/** A line's cost allocations, each with its share: protocol 7 states several; earlier ones give the whole line one. */
+const lineAllocations = line => line.allocations ?? (line.allocation ? [{...line.allocation, amount_cents: line.amount_cents}] : []);
 const byLedger = (a, b) => a.ledger.localeCompare(b.ledger) || a.amount_cents - b.amount_cents;
 const byBill = (a, b) => byLedger(a, b) || a.type.localeCompare(b.type) || String(a.name ?? '').localeCompare(String(b.name ?? ''));
 /** A line's bill references as Tally signs them, comparable with a readback. */
@@ -168,7 +171,7 @@ export function voucherFamilies(records) {
 /** Structural checks only; business rules are the server's. Throws before any native call. */
 export function validatePlan(plan) {
   const fail = reason => { throw new Error(`Unsupported voucher plan: ${reason}.`); };
-  if (![5, 6].includes(plan?.format_version)) fail('format');
+  if (![5, 6, 7].includes(plan?.format_version)) fail('format');
   if (!Object.hasOwn(FAMILIES, plan.family)) fail('family');
   if (!['append', 'update'].includes(plan.operation)) fail('operation');
   if (!safeText(plan.company) || !safeText(plan.company_guid) || !Number.isInteger(plan.port) || plan.port < 1 || plan.port > 65535) fail('company');
@@ -195,6 +198,18 @@ export function validatePlan(plan) {
   for (const line of lines) {
     if (!safeText(line?.ledger) || !['debit', 'credit'].includes(line.side) || !Number.isSafeInteger(line.amount_cents) || line.amount_cents <= 0) fail('line');
     if (line.allocation != null && !['category', 'category_guid', 'centre', 'centre_guid'].every(k => safeText(line.allocation[k]))) fail('allocation');
+    if (line.allocations != null) {
+      // Protocol 7 only: one line's value split across distinct cost centres, whose shares add up to the line.
+      if (plan.format_version < 7 || line.allocation != null || !Array.isArray(line.allocations)
+          || line.allocations.length < 2 || line.allocations.length > 20) fail('allocations');
+      let shared = 0;
+      for (const a of line.allocations) {
+        if (!['category', 'category_guid', 'centre', 'centre_guid'].every(k => safeText(a?.[k]))
+            || !Number.isSafeInteger(a.amount_cents) || a.amount_cents <= 0) fail('allocations');
+        shared += a.amount_cents;
+      }
+      if (shared !== line.amount_cents || new Set(line.allocations.map(a => a.centre)).size !== line.allocations.length) fail('allocations');
+    }
     // A taxed purchase line states its rates in the voucher: Tally reads none from masters for an import.
     if (line.gst != null && (plan.gst == null || plan.family !== 'purchase' || line.gst.taxability !== 'Taxable'
         || !['Goods', 'Services'].includes(line.gst.supply) || GST_HEADS.some(([k]) => !GST_RATE.test(line.gst.rates?.[k] ?? '')))) fail('line gst');
@@ -212,7 +227,10 @@ export function validatePlan(plan) {
     if (line.side === 'debit') debit += line.amount_cents; else credit += line.amount_cents;
   }
   if (!Number.isSafeInteger(debit) || debit !== credit) fail('unbalanced');
-  if (new Set(lines.map(l => l.ledger)).size !== lines.length) fail('repeated ledger');
+  // Protocol 7 repeats a ledger on lines at different GST rates; the supplier's line is never repeated.
+  const names = lines.map(l => l.ledger);
+  if (new Set(names).size !== names.length
+      && (plan.format_version < 7 || names.filter(name => name === header.party_ledger).length > 1)) fail('repeated ledger');
   if (plan.references?.company_guid !== plan.company_guid || lines.some(l => !safeText(plan.references.ledgers?.[l.ledger]?.GUID))) fail('references');
   if (plan.inventory != null) {
     // Protocol 6 only: inward stock on a new Purchase; each item ledger line carries exactly its items' value.
@@ -223,7 +241,7 @@ export function validatePlan(plan) {
       if (!safeText(entry?.item) || !safeText(entry.unit, 50) || !positive(entry.quantity) || !positive(entry.rate) || entry.side !== 'debit'
           || !Number.isSafeInteger(entry.amount_cents) || entry.amount_cents <= 0 || !safeText(plan.references.stock_items?.[entry.item]?.GUID)) fail('item');
       const line = lines.find(l => l.ledger === entry.ledger);
-      if (!line || line.side !== 'debit' || line.allocation || line.bills || line.ledger === header.party_ledger) fail('item ledger');
+      if (!line || line.side !== 'debit' || lineAllocations(line).length || line.bills || line.ledger === header.party_ledger) fail('item ledger');
       if (!Array.isArray(entry.godowns) || !entry.godowns.length || entry.godowns.length > 10) fail('godowns');
       let cents = 0, quantity = 0n;
       for (const godown of entry.godowns) {
@@ -297,8 +315,6 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
       const centres = list(entry['CATEGORYALLOCATIONS.LIST']).flatMap(category =>
         list(category['COSTCENTREALLOCATIONS.LIST']).filter(populated).map(centre => ({
           ledger: scalar(entry.LEDGERNAME), category: scalar(category.CATEGORY), centre: scalar(centre.NAME), amount_cents: nativeCents(centre.AMOUNT)})));
-      // One centre per line is the contract; anything richer cannot be preserved or compared.
-      if (centres.length > 1) unsupported = true;
       allocations.push(...centres);
     }
     return {
@@ -318,7 +334,7 @@ export async function readVouchers({company, port = 9000, window}, {request = fe
 /** Pinned company, ledgers, voucher type and allocation masters must still be
  * exactly the discovered ones. Returns null when anything moved. */
 async function recheck(plan, {request, readReferences}) {
-  const allocations = plan.lines.filter(l => l.allocation).map(l => l.allocation), stock = plan.inventory ?? [];
+  const allocations = plan.lines.flatMap(lineAllocations), stock = plan.inventory ?? [];
   const categories = ['company', 'ledgers', 'voucher_types', ...(allocations.length ? ['cost_centres', 'cost_categories'] : []),
     ...(stock.length ? ['stock_items', 'godowns'] : [])];
   const snapshot = await readReferences({company: plan.company, port: plan.port, categories}, {request});
@@ -332,7 +348,7 @@ async function recheck(plan, {request, readReferences}) {
   for (const line of plan.lines) {
     const found = records('ledgers').filter(r => nameOf(r) === line.ledger), pinned = plan.references.ledgers[line.ledger];
     if (found.length !== 1 || ['GUID', 'PARENT', 'ALTERID'].some(k => pinned[k] != null && !same(k, found[0][k], pinned[k]))) return null;
-    if (line.allocation && norm(found[0].ISCOSTCENTRESON) !== 'yes') return null;
+    if (lineAllocations(line).length && norm(found[0].ISCOSTCENTRESON) !== 'yes') return null;
   }
   for (const allocation of allocations)
     for (const [category, name, guid] of [['cost_centres', 'centre', 'centre_guid'], ['cost_categories', 'category', 'category_guid']]) {
@@ -359,8 +375,8 @@ async function recheck(plan, {request, readReferences}) {
 /** The approved lines, allocations, bill references, items and date; the voucher type only when given. */
 function equal(current, plan, typeName) {
   const lines = plan.lines.map(l => ({ledger: l.ledger, amount_cents: signed(l)})).sort(byLedger);
-  const allocations = plan.lines.filter(l => l.allocation)
-    .map(l => ({ledger: l.ledger, category: l.allocation.category, centre: l.allocation.centre, amount_cents: signed(l)})).sort(byLedger);
+  const allocations = plan.lines.flatMap(l => lineAllocations(l).map(a => ({ledger: l.ledger, category: a.category, centre: a.centre,
+    amount_cents: l.side === 'credit' ? a.amount_cents : -a.amount_cents}))).sort(byLedger);
   return current.date === compact(plan.header.date) && hash(current.entries) === hash(lines) && hash(current.allocations) === hash(allocations)
     && hash(current.bills ?? []) === hash(plan.lines.flatMap(lineBills).sort(byBill))
     && hash(current.inventory ?? []) === hash(planItems(plan))
@@ -447,8 +463,10 @@ function importBody(plan, typeName, current) {
   const entryTag = invoice ? 'LEDGERENTRIES.LIST' : 'ALLLEDGERENTRIES.LIST', view = invoice ? 'Invoice Voucher View' : 'Accounting Voucher View';
   const money = cents => (cents / 100).toFixed(2);
   const lines = plan.lines.filter(line => !carriers.has(line.ledger)).map(line => {
-    const amount = signed(line), deemed = amount < 0 ? 'Yes' : 'No', a = line.allocation;
-    const allocation = a ? `<CATEGORYALLOCATIONS.LIST><CATEGORY>${xml(a.category)}</CATEGORY><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE><COSTCENTREALLOCATIONS.LIST><NAME>${xml(a.centre)}</NAME><AMOUNT>${money(amount)}</AMOUNT></COSTCENTREALLOCATIONS.LIST></CATEGORYALLOCATIONS.LIST>` : '';
+    const amount = signed(line), deemed = amount < 0 ? 'Yes' : 'No', shares = lineAllocations(line), sign = Math.sign(amount);
+    // Each category once, with every centre's share of the line in Tally's sign.
+    const allocation = [...new Set(shares.map(a => a.category))].map(category => `<CATEGORYALLOCATIONS.LIST><CATEGORY>${xml(category)}</CATEGORY><ISDEEMEDPOSITIVE>${deemed}</ISDEEMEDPOSITIVE>${
+      shares.filter(a => a.category === category).map(a => `<COSTCENTREALLOCATIONS.LIST><NAME>${xml(a.centre)}</NAME><AMOUNT>${money(sign * a.amount_cents)}</AMOUNT></COSTCENTREALLOCATIONS.LIST>`).join('')}</CATEGORYALLOCATIONS.LIST>`).join('');
     const bills = lineBills(line).map(b => `<BILLALLOCATIONS.LIST>${b.name != null ? `<NAME>${xml(b.name)}</NAME>` : ''}<BILLTYPE>${xml(b.type)}</BILLTYPE><AMOUNT>${money(b.amount_cents)}</AMOUNT></BILLALLOCATIONS.LIST>`).join('');
     const rates = line.gst ? [...GST_HEADS.map(([k, head]) => [head, line.gst.rates[k]]), ['State Cess', '0']] : [];
     const gst = line.gst ? `<GSTOVRDNTAXABILITY>${xml(line.gst.taxability)}</GSTOVRDNTAXABILITY><GSTOVRDNTYPEOFSUPPLY>${xml(line.gst.supply)}</GSTOVRDNTYPEOFSUPPLY><GSTRATEINFERAPPLICABILITY>Specify in Voucher</GSTRATEINFERAPPLICABILITY>${rates.map(([head, rate]) => `<RATEDETAILS.LIST><GSTRATEDUTYHEAD>${head}</GSTRATEDUTYHEAD><GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE><GSTRATE>${xml(rate)}</GSTRATE></RATEDETAILS.LIST>`).join('')}` : '';
