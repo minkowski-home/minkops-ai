@@ -763,6 +763,9 @@ def test_a_new_supplier_is_created_in_tallys_terms_only_on_approval_and_its_bill
                                                       "Input SGST 9%"]
     assert plan["references"]["ledgers"]["Cabin Services UAT"] == {"GUID": "g-new", "PARENT": "Sundry Creditors",
                                                                    "ALTERID": "7"}
+    # The new supplier keeps balances bill by bill, as approved and read back: the bill opens a New Ref, which Tally
+    # requires of every bill posted to such a ledger.
+    assert plan["lines"][0]["bills"] == [{"name": "CS/26/0001", "type": "New Ref", "amount_cents": 885000}]
     assert record(desk, first)["status"] == "saved"
     second = record(desk, second)
     assert (second["status"], second["review_reasons"]) == ("proposed", [bill_entry.UNPRECEDENTED])

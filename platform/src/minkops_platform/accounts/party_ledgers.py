@@ -161,8 +161,9 @@ def _period(value):
 
 
 def verified(plan, receipt):
-    """The created ledger's identity from the companion's readback, or why it cannot be trusted: (master, None) or
-    (None, problem). Every field the plan wrote must read back as written."""
+    """The created ledger as Tally holds it, from the companion's readback, or why it cannot be trusted: (master, None)
+    or (None, problem). Every field the plan wrote must read back as written. The whole master is kept, not only its
+    identity: the entry made with it is checked against its bill-by-bill setting and GST registration."""
     if receipt.get("outcome") == "attention":
         return None, str(receipt.get("message") or "") or "The ledger could not be created and verified in Tally."
     if receipt.get("company_guid") != plan["company_guid"]:
@@ -194,5 +195,4 @@ def verified(plan, receipt):
     if differs:
         return None, (f"The ledger {ledger['name']} in Tally differs from what was approved: {', '.join(differs)}. "
                       "Review it there.")
-    return {"@_NAME": scalar(master.get("@_NAME") or master.get("NAME")),
-            **{key: scalar(master.get(key)) for key in ("GUID", "PARENT", "ALTERID")}}, None
+    return {**mirror.compact(master), "@_NAME": scalar(master.get("@_NAME") or master.get("NAME"))}, None

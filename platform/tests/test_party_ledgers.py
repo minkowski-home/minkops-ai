@@ -116,8 +116,10 @@ def readback(plan, **changes):
 
 def test_only_a_readback_showing_every_approved_field_is_trusted():
     plan = party_ledgers.plan(view(), COMPANY, submitted(), kind="supplier")
-    assert party_ledgers.verified(plan, readback(plan)) == ({"@_NAME": "Cabin Services", "GUID": "new-guid",
-                                                            "PARENT": "Sundry Creditors", "ALTERID": "9"}, None)
+    # Trusted, the ledger is kept as Tally holds it, so the bill entered with it sees its bill-by-bill balances and GST.
+    master, problem = party_ledgers.verified(plan, readback(plan))
+    assert (problem, master["GUID"], master["ISBILLWISEON"], master["LEDGSTREGDETAILS.LIST"]["GSTIN"]) == (
+        None, "new-guid", "Yes", NEW)
     master, problem = party_ledgers.verified(plan, readback(plan, PARENT="Creditors - Steel", BILLCREDITPERIOD="45 Days",
                                                             ISBILLWISEON="No"))
     assert (master, problem) == (None, "The ledger Cabin Services in Tally differs from what was approved: it is under "
