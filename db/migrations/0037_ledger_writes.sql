@@ -10,8 +10,8 @@ BEGIN
         RAISE EXCEPTION 'A supplier creation is still pending. Let it finish, or stop its run, before upgrading.';
     END IF;
 END $$;
-UPDATE desktop_jobs SET operation='tally.ledger' WHERE operation='tally.supplier';
 ALTER TABLE desktop_jobs DROP CONSTRAINT desktop_jobs_operation_check;
+UPDATE desktop_jobs SET operation='tally.ledger' WHERE operation='tally.supplier';
 ALTER TABLE desktop_jobs ADD CONSTRAINT desktop_jobs_operation_check CHECK (operation = ANY (ARRAY[
     'tally.probe', 'files.refresh', 'accounts.save', 'tally.save', 'sources.discover', 'tally.references',
     'attention.refresh', 'attention.supplier', 'tally.statement', 'tally.sync', 'tally.write', 'tally.ledger']));
