@@ -57,6 +57,7 @@ from .vouchers import (
     invoice_window,
     narration_token,
     observed_bill,
+    particulars,
     rupees,
 )
 
@@ -668,13 +669,16 @@ def _recorded(connection, company, *, party, number, kind, issued):
 
 
 def _found_in_tally(connection, desk, record, bill, company, bound, entered, *, facts, checks, review, rules, count):
-    """A bill the books already hold when it is proposed: entered exactly as proposed, it is `duplicate` at once and
-    teaches how it is booked; booked otherwise, it holds for a person, naming what differs. The write-time check
-    still guards every save."""
+    """A bill the books already hold when it is proposed: booked as proposed (its date, voucher type, ledgers and
+    amounts), it is `duplicate` at once and teaches how it is booked, its note naming any cost allocation or bill
+    reference Tally keeps otherwise; booked otherwise, it holds for a person, naming what differs. The write-time
+    check still guards every save."""
     current = mirror.observed(entered[0])
     plan = bound.native_plan("", number_fields=_number_fields(connection, company))
     if len(entered) == 1 and not differences(plan, current):
-        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[ALREADY],
+        kept = particulars(plan, current)
+        note = f"{ALREADY.removesuffix('.')}, except that Tally's voucher {'; '.join(kept)}." if kept else ALREADY
+        work.update_record(connection, record, status="duplicate", hold_codes=[], review_reasons=[note],
                            facts=facts, company_id=company["id"], checks=checks, current=current,
                            proposal=_proposal(bill, bound, **({"rules": list(rules)} if rules else {})))
         _learn_entered(connection, company, entered[0])
@@ -831,7 +835,6 @@ TEXT = {"type": "string", "minLength": 1, "maxLength": 1000}
 LEDGER = reference("A ledger's reference, as find_ledger gives it.")
 MONEY = {"type": "number", "exclusiveMinimum": 0}
 PRINTED = {"type": ["number", "null"], "exclusiveMinimum": 0}
-DAY = {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$"}
 FIELDS = ("number", "date", "total", "supplier_name", "supplier_gstin", "buyer", "place_of_supply", "taxable", "tax",
           "round_off", "note", "receipt_register", "other")
 EVIDENCE = {"type": "array", "maxItems": 40, "description": "Where the bill prints each document value you read.",
@@ -872,13 +875,9 @@ DOCUMENT = schema({
         "prints none.")},
     "cost_split": {**_nullable({"type": "array", "maxItems": 20, "items": SPLIT_PART}), "description": (
         "How the bill divides its cost between sites, projects or departments: each part with its amount or its "
-        "percentage as printed, never both. Null when it prints no split; a project the bill merely names is none.")},
-    "service_period": {**_nullable(schema({"from": DAY, "to": DAY, "evidence": TEXT}, ["from", "to", "evidence"])),
-                       "description": (
-        "The period the bill's service, rent, maintenance or subscription covers, as printed: its first and last "
-        "days, year first. Null when it prints none.")}},
+        "percentage as printed, never both. Null when it prints no split; a project the bill merely names is none.")}},
     ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "buyer_gstin", "place_of_supply",
-     "taxable", "tax", "receipt_register", "adjustments", "cost_split", "service_period"])
+     "taxable", "tax", "receipt_register", "adjustments", "cost_split"])
 LINE = schema({
     "role": choice("expense", "tax", "round_off", "freight", "other_charge", "discount", "tds", "retention",
                    "deposit"),

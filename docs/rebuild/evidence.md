@@ -589,11 +589,29 @@ after the other.
 Restoring an older backup on the new PC, and a bill saved through Minkops Dev after the move, need a person at
 Windows. Both are on the manual testing list.
 
-## Demo readiness, accepted live (23 October 2026)
+## Demo readiness, regression-checked live (23 October 2026)
 
 Workstream 10 of the [plan](demo-readiness.md) ran on the local stack: the API, a worker with 12 lanes, the console,
 Minkops Dev 0.11.5 on Windows, TallyPrime in Educational mode and `gpt-6-luna` at medium effort. Runs used
 `all_outputs` unless noted, and were scored as the plan's appendix says, the answer keys read only after each run.
+
+These are regression checks. They show the pipeline works end to end, holds what it should and writes only what it
+may, on books built for the pack. They do not show accuracy on a client's books:
+
+- The pack's key was aligned with the rehearsal companies' supplier history, so a bill booked to the key's ledger
+  mostly shows that Minkops follows clean, consistent history.
+- The same pack ran on the same companies all session. Memory and Tally hold its earlier saves and choices, which
+  feed later runs: B02's chosen head drove B32, B36, B40 and B44, and earlier saves count as precedent for standing
+  approval.
+- One Tally release ran, TallyPrime Edit Log 1.1.7.2 in Educational mode, which saves only vouchers dated the 1st,
+  2nd or 31st; the pack's bills are dated for it. Ledger creation and its read-back ran only in the dated shape
+  that release writes.
+- The only real document was one client statement, whose payees the books lack: it shows safety, not accuracy. No
+  client's bills ran.
+- The 50-file run cap predates the plan, and the pack was sized to it.
+
+Accuracy stays unproven until PR Infra's own bills and statements run against books that hold their payees. Until
+then its workflows review everything ([cut-over](cutover.md#5-fresh-workspaces)).
 
 - **Bills: 50 in 7 min 17 s** (target 10 min), upload included, in two batches (Bill entry 1.9.0). Every printed
   date, total, company and number matched the key, except B17, a proforma held as not a bill as the key wants.
@@ -601,16 +619,16 @@ Minkops Dev 0.11.5 on Windows, TallyPrime in Educational mode and `gpt-6-luna` a
   of B31 (naming it), B47's overstated total, B48's unregistered new supplier (offering Create this ledger), B49's
   buyer GSTIN and B50's date before the books begin. B02, B03, B09 and B11, entered earlier, were found in Tally.
 - **Unattended exposure.** 15 bill proposals had no review note and at least two precedents; each was on the
-  key's ledger. One, B22, an annual maintenance contract running past 31 March, is one the key leaves to a person:
-  fixed below.
+  key's ledger. One, B22, an annual maintenance contract running past 31 March, followed its supplier's four
+  earlier bookings, as the books say; the key would leave it to a person.
 - **Statements: S01 and S02 in one run**, 2,180 rows in 20 min 51 s, sharing the lanes with two other runs
   (Statement entry 1.6.0). No date or amount differed from the key, no answer landed on another row, no transfer
   held, and the nine R K Supplies rows held, none booked to another creditor (the earlier run booked five to MKQA
   GST Supplies). Of the 1,417 rows the key resolves, 1,408 were booked to its ledger, 8 held and 1 booked to
-  another supplier (fixed below). Of the 763 rows the key sends to review, 600 held. The other 163 were booked:
-  81 bank charges split into the fee and the tax their narrations itemise, 73 payments to the supplier a short
-  narration names, and 9 single cases, among them a part payment, a refund and a returned transfer, each booked to
-  the party it names or reverses. Under standing approval 183 rows would be written unattended: 182 on the key's
+  another supplier (below). Of the 763 rows the key sends to review, 600 held. The other 163 were booked: 81 bank
+  charges split into the fee and the tax their narrations itemise, 73 payments to the supplier a short narration
+  names, and 9 single cases, among them a part payment, a refund and a returned transfer, each booked to the
+  party it names or reverses. Under standing approval 183 rows would be written unattended: 182 on the key's
   ledger, and one intercompany advance booked as five earlier ones were, which the key leaves to a person.
 - **A client's real statement** (1,232 rows, kept outside git): 16 min 27 s with the lanes shared. 1,217 held as
   other side unclear, because the synthetic books lack its payees; 12 were proposed and 3 found already in Tally,
@@ -635,7 +653,8 @@ Minkops Dev 0.11.5 on Windows, TallyPrime in Educational mode and `gpt-6-luna` a
   precedents and no note were written unattended (B06, B18, B19, B24, B25, B27, B30). Each read back from Tally as
   approved, on the key's ledger. B25, a supplier's debit note for a price increase, was entered as a Purchase,
   which raises what is owed; a note for such bills is still [not in this plan](demo-readiness.md#not-in-this-plan).
-  B20's adjusted advance, B22's service past the year end, B08's copy and three new bookings waited for a person.
+  B20's adjusted advance, B08's copy and three new bookings waited for a person, as did B22 under a service-period
+  note since reverted (below).
 
 **Usage.**
 
@@ -651,21 +670,26 @@ Minkops Dev 0.11.5 on Windows, TallyPrime in Educational mode and `gpt-6-luna` a
   account, and the companion, finding a voucher other than the approved one, held the save as uncertain; nothing
   was imported twice. The whole master is now kept as Tally holds it (`79e5f07`).
 - **"Booked as proposed" when it was not.** Found in Tally later, B09 was called booked as proposed though Tally
-  kept it on account. A bill already in Tally is now a duplicate only when its date, voucher type, ledgers and
-  amounts, cost allocations and bill references all match; otherwise it holds naming the difference (`22058a4`).
+  kept it on account. A bill Tally books as proposed is still a duplicate, but its note now names the bill
+  reference or cost allocation Tally keeps instead (`22058a4`, `8533deb`).
 - **Minkops's own saves taught twice.** Held copies, in older runs, of bills saved from other runs were noted
   "Entered in Tally by hand" and taught their bookings again, inflating the precedent standing approval counts.
   They are now noted as Minkops's own saves, and no voucher teaches twice (`8647256`, migration 0039).
-- **An annual service written unattended.** B22's maintenance contract runs to the next October. In four earlier
-  runs the session held it; in this one it proposed it with no note. A bill now reads the period it prints, and
-  one past 31 March is booked in full with a note for a person (`6d4b0ec`, Bill entry 1.10.0).
 - **A payee the row never printed.** In S01, a payment naming QA18 Cement Depot was booked to QA18 Coastal
   Equipment Hire, its answer naming that supplier as payee. An answer naming a payee its row does not print is
-  now refused, as one restating another row's amount is (`efd24e0`).
+  now refused, as one restating another row's amount is (`efd24e0`). Measured on stored answers from runs made
+  before it, the check would refuse none of the 1,184 payees named on the client's real statement, and 2 of 2,882
+  on the synthetic ones. One of those was a returned transfer that names no one, so the refusal says the payee
+  may be left empty (`11fb38c`).
 - **A tax group offered for a payee.** The form for a payee's new ledger listed Duties & Taxes, a sub-group of
   Current Liabilities. Tax groups are no longer offered (`db4a987`).
 - **A test that depended on others.** The migration test for ledger jobs validated an old constraint against jobs
   other tests had left in the shared database (`018d4de`).
+- **Reverted after review: a note for service past the year end.** B22 was proposed with no note in one run of
+  five, so a note was added for any bill whose service ran past 31 March (`6d4b0ec`, Bill entry 1.10.0). It came
+  from one bill whose booking the books supported. It turned the key's view into fixed policy that nothing
+  cleared, and assumed the company's year end rather than reading it. It was reverted (`da62cd1`, Bill entry
+  1.11.0). A client who wants such bills reviewed says so in a rule.
 - **On the local stack only:** the standing-approval run waited 23 minutes after code changed under a running
   worker, which then imported a new module against an old one. Each lane left its items for a successor, as it
   must during a deployment, and a restart resumed the run. A deployed image never changes under its worker.

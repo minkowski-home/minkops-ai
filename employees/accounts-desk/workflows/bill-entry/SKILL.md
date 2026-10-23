@@ -80,11 +80,6 @@ has a text layer, the total and any round-off must be figures it prints.
 - **Cost split.** Give in `cost_split` how the bill divides its cost between
   sites, projects or departments: each part with its amount or its percentage
   as printed. A project the bill merely names is no split.
-- **Service period.** Give in `service_period` the period a bill's service,
-  rent, maintenance or subscription covers when it prints one. Book the bill at
-  its full value, as the supplier's bills are booked: Minkops notes a period
-  that runs past the financial year's end, and a person decides what part of it
-  is prepaid.
 
 ## The buyer: which company
 

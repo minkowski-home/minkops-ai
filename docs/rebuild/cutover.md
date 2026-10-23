@@ -138,6 +138,11 @@ For PR Infra, and each later client:
    [Hosted Tally](../hosted-tally.md). The administrator authorises each company from
    its "New company found" card for the PR Infra client business. The first sync
    reads the current and previous financial years.
+4. Both workflows start on Review everything (`all_outputs`). Keep them there until
+   a month of the client's own bills and statements has been run and scored against
+   its books: the checks so far ran on a synthetic pack and books built for it
+   ([evidence](evidence.md#demo-readiness-regression-checked-live-23-october-2026)).
+   Standing approval (`only_exceptions`) waits for that measurement.
 
 ## 6. Where PR Infra's statements resume
 

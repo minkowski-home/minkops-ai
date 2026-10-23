@@ -305,15 +305,20 @@ def test_an_answer_that_lands_on_another_row_is_refused_by_the_amount_it_restate
 
 def test_an_answer_naming_a_payee_its_row_does_not_print_is_refused(desk):
     """Found live: a session booked a payment to one supplier as another's, naming as payee a supplier the narration
-    never prints. A payee is named as the row prints it, so the answer is refused and the row asked again."""
+    never prints; on a returned transfer naming no one, it named the payee of the payment returned. A payee is named
+    as the row prints it, or left empty, so each answer is refused and the row asked again; the return is still
+    booked to the party it reverses."""
     company = desk["company"]["guid"]
 
     def misnamed(answers, session):
-        payment = rows_of(session)[0]
-        return [("propose", {"rows": [{**booked(payment, company), "payee": "STEEL MART"}]})]
+        rows = {row["narration"]: row for row in rows_of(session)}
+        return [("propose", {"rows": [{**booked(rows["NEFT ACME STEEL UTR111222"], company), "payee": "STEEL MART"},
+                                      {**booked(rows["NEFT RETURN UTR111222"], company), "payee": "ACME STEEL"}]})]
 
     def corrected(answers, session):
-        return [("propose", {"rows": [booked(rows_of(session)[0], company)]})]
+        rows = {row["narration"]: row for row in rows_of(session)}
+        return [("propose", {"rows": [booked(rows[n], company) for n in ("NEFT ACME STEEL UTR111222",
+                                                                          "NEFT RETURN UTR111222")]})]
 
     fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, misnamed, corrected) if is_chunk(content)
                       else Script(layouts))
@@ -322,13 +327,17 @@ def test_an_answer_naming_a_payee_its_row_does_not_print_is_refused(desk):
     with host(desk, fake):
         until(lambda: all(i["state"] == "done" for i in items(desk, run)))
     chunk = next(s for s in fake.created if is_chunk(s.content))
-    payment = rows_of(chunk)[0]
+    rows = {row["narration"]: row["ref"] for row in rows_of(chunk)}
     first, second = verdicts(chunk)[:2]
-    assert first["rejected"] == [{"ref": payment["ref"], "reason": (
-        "This row does not print the payee STEEL MART: name the counterparty as the row prints it, or answer the row "
-        "it belongs to.")}]
-    assert second["accepted"] == [payment["ref"]]
-    assert records(desk, run)[0]["proposal"]["selection"]["payee"] == "ACME STEEL"
+    assert first["rejected"] == [{"ref": rows[narration], "reason": (
+        f"This row does not print the payee {payee}: name the counterparty as the row prints it, leave the payee "
+        "empty when the row names none, or answer the row it belongs to.")}
+        for narration, payee in (("NEFT ACME STEEL UTR111222", "STEEL MART"), ("NEFT RETURN UTR111222", "ACME STEEL"))]
+    assert sorted(second["accepted"]) == sorted(rows[n] for n in ("NEFT ACME STEEL UTR111222", "NEFT RETURN UTR111222"))
+    proposed = {r["facts"]["narration"]: r["proposal"] for r in records(desk, run)}
+    assert proposed["NEFT ACME STEEL UTR111222"]["selection"]["payee"] == "ACME STEEL"
+    assert (proposed["NEFT RETURN UTR111222"]["selection"]["payee"],
+            proposed["NEFT RETURN UTR111222"]["resolved"]["data"]["counter_ledger"]) == (None, "Acme Steel")
 
 
 def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):

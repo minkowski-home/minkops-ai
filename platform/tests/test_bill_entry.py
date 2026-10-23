@@ -130,7 +130,7 @@ def proposal(company, n=1, **changes):
                      "supplier_name": "Sunrise Office Systems", "supplier_gstin": SUNRISE, "origin": "domestic",
                      "buyer_gstin": BUYER, "place_of_supply": None, "taxable": 160000.0, "tax": None,
                      "receipt_register": None, "adjustments": None,
-                     "cost_split": None, "service_period": None},
+                     "cost_split": None},
         "voucher": {"family": "purchase", "voucher_type_guid": "g-purchase",
                     "party": {"ledger_guid": "g-sunrise", "new_supplier": False, "evidence": "GSTIN matches."},
                     "lines": [line("expense", "g-cabins", 160000.0, supply="goods"),
@@ -1563,25 +1563,6 @@ def test_standing_approval_writes_only_bills_booked_as_before_and_stop_holds_the
         "cancelled")
 
 
-def test_standing_approval_leaves_a_service_past_the_years_end_for_a_person(desk):
-    """Booked as the supplier's bills always are, a bill whose service runs past 31 March still waits for a person,
-    who decides what part of it is prepaid."""
-    names = names_of(desk["company"])
-    again = {**PRIOR, "GUID": "v-prior-2", "MASTERID": "6", "ALTERID": "4", "DATE": "20260801", "REFERENCE": "SOS/26/0008"}
-    factory.books(desk["db"], desk["company"], masters(desk["company"]), [PRIOR, again])
-    desk["db"].commit()
-    annual = proposal(desk["company"]["guid"])
-    annual["document"]["service_period"] = {"from": "2026-09-01", "to": "2027-08-31",
-                                            "evidence": "Maintenance period 01-09-2026 to 31-08-2027"}
-    run = launch(desk, {"annual.pdf": B01}, review_mode="only_exceptions")
-    read(desk, by_file(**{"annual.pdf": proposing(names, annual)}), run)
-    [bill] = records(desk, run)
-    assert (bill["status"], bill["checks"]["precedents"], bill["review_reasons"]) == ("proposed", 2, [
-        "The bill covers service from 2026-09-01 to 2027-08-31, past the financial year's end on 2027-03-31. "
-        "Minkops books it at its full value; decide in Tally what part of it is prepaid."])
-    assert companion(desk) is None
-
-
 def entered(number="SOS/26/0412", day="20260901", expense="Office Cabins", party="Sunrise Office Systems", guid="v-hand",
             alter="12", taxable="160000.00", tax="14400.00"):
     """A bill as someone entered it in Tally themselves: Sunrise's purchase, its number in the reference."""
@@ -1625,7 +1606,8 @@ def test_a_bill_already_in_tally_when_proposed_is_a_duplicate_or_held_naming_wha
     assert held["review_reasons"][0] == ("Tally's voucher for SOS/26/0412 posts to Repairs and Maintenance instead "
                                          "of Office Cabins. Review it there; Minkops did not add a second voucher.")
     assert db.execute("SELECT count(*) AS n FROM native_writes WHERE run_id=%s", (again["id"],)).fetchone()["n"] == 0
-    # Sunrise keeps its bills bill by bill, and the bill was entered on account: the reference is not the bill's.
+    # Sunrise keeps its bills bill by bill, and the accountant entered the bill on account. It is in Tally, booked as
+    # proposed: a duplicate, whose note says which reference Tally keeps it under rather than claiming the plan's.
     billwise = [{**m, "data": {**m["data"], "ISBILLWISEON": "Yes"}} if m["data"]["GUID"] == "g-sunrise" else m
                 for m in masters(desk["company"])]
     on_account = entered()
@@ -1635,9 +1617,9 @@ def test_a_bill_already_in_tally_when_proposed_is_a_duplicate_or_held_naming_wha
     third = launch(desk, {"sunrise-third.pdf": B01})
     read(desk, by_file(**{"sunrise-third.pdf": proposing(names, proposal(guid))}), third)
     [kept] = records(desk, third)
-    assert (kept["status"], kept["review_reasons"][0]) == ("held", (
-        "Tally's voucher for SOS/26/0412 carries the bill reference On Account instead of New Ref SOS/26/0412. "
-        "Review it there; Minkops did not add a second voucher."))
+    assert (kept["status"], kept["review_reasons"]) == ("duplicate", [
+        "Already in Tally, booked as proposed, except that Tally's voucher carries the bill reference On Account "
+        "instead of New Ref SOS/26/0412."])
 
 
 def test_held_and_deferred_bills_a_person_entered_in_tally_by_hand_are_reconciled_after_the_next_sync(desk):
