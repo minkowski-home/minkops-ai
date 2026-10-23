@@ -1,0 +1,19 @@
+Minkops 0.11.5 — Windows release candidate — 23 October 2026
+
+Windows 10/11 x64. Unsigned installer: Windows may show a publisher warning, and
+its updates do not check a publisher. Default service: https://app.minkops.com
+
+The companion connects a PC's TallyPrime to the Accounts desk:
+- It mirrors, read-only, the companies a workspace admin authorises, and keeps
+  them refreshed.
+- It enters the bills and bank rows a person approves (plan protocols up to 8),
+  reads every save back before it counts, and never imports one save twice.
+- It creates the party ledgers a person approves, in Tally's own terms, and reads
+  each back before it is used.
+
+Installed companions update themselves. The service needs 0.11.0 or later on
+every PC, and 0.11.5 to create ledgers.
+
+Verified: automated service, console and companion suites; live entry, ledger
+creation and read-back on TallyPrime Edit Log 1.1.7.2 in Educational mode.
+Pending: a signed release, and Windows 10 testing.

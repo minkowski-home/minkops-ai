@@ -31,7 +31,8 @@ const DEV = {
 };
 
 /** The build environment, the publisher the installer must be signed by (null for a release candidate or the
- * dev channel), and how the build differs from the release's own configuration. */
+ * dev channel), and how the build differs from the release's own configuration: exactly what electron-builder is
+ * given, over the package.json "build" it reads itself. */
 export function packaging({ argv, env }) {
   if (argv.includes("--unsigned") || argv.includes("--dev")) {
     const unsigned = { ...env, CSC_IDENTITY_AUTO_DISCOVERY: "false" };
@@ -72,10 +73,11 @@ async function main() {
   for (const name of Object.keys(process.env)) if (!(name in env)) delete process.env[name];
   Object.assign(process.env, env);
   const { build, Platform, Arch } = await import("electron-builder");
-  // The release's own configuration (package.json "build"), with the dev channel's differences laid over it.
-  const { build: release, version } = JSON.parse(await readFile("package.json", "utf8"));
-  await build({ targets: Platform.WINDOWS.createTarget(["nsis"], Arch.x64),
-    config: { ...release, ...config, win: { ...release.win, ...config.win }, nsis: { ...release.nsis, ...config.nsis } } });
+  // electron-builder reads the release's own configuration (package.json "build") and lays `config`, this build's
+  // differences, over it. Passed the release's configuration again, it would merge the publish list into its own
+  // first entry and refuse it (tests/package.test.js).
+  await build({ targets: Platform.WINDOWS.createTarget(["nsis"], Arch.x64), config });
+  const { version } = JSON.parse(await readFile("package.json", "utf8"));
   const installer = resolve("release", `Minkops${config === DEV ? "-Dev" : ""}-Setup-${version}.exe`);
   if (config === DEV) {
     console.log(`${installer} is Minkops Dev: unsigned, for the local stack at http://127.0.0.1:3000, with no updates.`);

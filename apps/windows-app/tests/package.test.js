@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { packaging, verdict } from "../scripts/package.js";
+
+const require = createRequire(import.meta.url);
+const { getConfig, validateConfiguration } = require("app-builder-lib/out/util/config/config.js");
+const APP = fileURLToPath(new URL("..", import.meta.url));
+const quiet = { add() {}, isEnabled: false };
 
 const signing = {
   WIN_CSC_LINK: "C:\\keys\\release.pfx", WIN_CSC_KEY_PASSWORD: "secret",
@@ -51,4 +59,18 @@ test("a signed installer passes only when Windows trusts its signature and updat
     /signed by Someone Else, not Example Publisher, Ltd\./);
   assert.match(verdict({ status: "Valid", subject }, "provider: generic\n", "Example Publisher, Ltd."),
     /updates would not check their publisher/);
+});
+
+test("electron-builder accepts the configuration each kind of build gives it, and only a release or candidate updates", async () => {
+  for (const [argv, env, feed] of [[[], signing, true], [["--unsigned"], {}, true], [["--dev"], {}, false]]) {
+    // electron-builder reads package.json's "build" itself and lays the build's own changes over it.
+    const effective = await getConfig(APP, null, structuredClone(packaging({ argv, env }).config));
+    await validateConfiguration(effective, quiet);
+    assert.deepEqual(effective.publish ?? null,
+      feed ? [{ provider: "generic", url: "https://minkops.com/downloads/" }] : null, argv.join(" "));
+  }
+  // Passed the release's own configuration again, it would merge the publish list into its first entry: refused.
+  const { build } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  await assert.rejects(validateConfiguration(await getConfig(APP, null, structuredClone(build)), quiet),
+    /configuration\.publish/);
 });
