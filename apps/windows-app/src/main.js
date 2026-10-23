@@ -14,13 +14,10 @@ import {
 } from "electron";
 import { hostname, release } from "node:os";
 import { join, basename } from "node:path";
-import { existsSync } from "node:fs";
 import {
   readFile,
   writeFile,
-  rename,
   realpath,
-  unlink,
   mkdir,
   readdir,
   stat,
@@ -29,52 +26,48 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import {
   inventory,
-  replaceApproved,
   checkTally,
-  inspectExcel,
-  excelSchemaBytes,
-  readTallyReferences,
-  discoverClientContext,
-  saveDiscoveryPackage,
   tallyTransport,
   tallyProcesses,
   readTallyIni,
-  inspectTallyAttention,
+  createLedger,
   tallyCrashEvents,
-  saveTallyBill,
   saveVoucher,
-  saveCatalogSnapshot,
+  runSync,
+  sharedSession,
 } from "@minkops/desktop-connectors";
-import { collectSources, reportDiscoveryProgress } from "../../../platform/desktop-runtime/src/discovery.js";
 import { CompanionWorker } from "@minkops/desktop-runtime";
+import { createExecutor, PLAN_VERSION } from "@minkops/desktop-runtime/jobs";
 import electronUpdater from "electron-updater";
 import { startUpdates } from "./updater.js";
+import { openPairing, stillPaired, machineInstallationId } from "./pairing.js";
+import { machineStateDirectory } from "./machine-state.js";
 import {
   trustedOrigin,
   validateSender,
   validateFolderReconnect,
 } from "./policy.js";
 
-const localDemo = process.argv.includes("--local-demo");
+// The dev channel (npm run package:win:dev) is its own app beside the production companion: built to talk to the
+// local stack only, in its own profile, and never to update itself. The build fixes it; no flag can repoint it.
+const dev = __MINKOPS_DEV__;
 const origin = trustedOrigin(
-  process.env.MINKOPS_APP_URL ||
-    (localDemo ? "http://127.0.0.1:3018" : "https://app.minkops.com"),
-  !app.isPackaged || localDemo,
+  dev ? "http://127.0.0.1:3000" : process.env.MINKOPS_APP_URL || "https://app.minkops.com",
+  !app.isPackaged || dev,
 );
-if (localDemo)
-  app.setPath("userData", join(app.getPath("appData"), "Minkops Local Demo"));
+if (dev) app.setPath("userData", join(app.getPath("appData"), "Minkops Dev"));
 let window;
 let tray;
 let quitting = false;
 let worker;
 let timer;
-let state = {
-  server_origin: origin,
-  installation_id: randomUUID(),
-  device: null,
-  bindings: {},
-  pending: null,
-};
+let recovery;
+// This PC's machine-bound state, outside the roaming profile (see machine-state.js), resolved once the app is ready.
+let machineState;
+// This PC's pairing (see pairing.js) and its live state, loaded once the app is ready.
+let pairing;
+let state;
+let connecting = Promise.resolve();
 const pendingGrants = new Map();
 let update = null;
 let updates = null;
@@ -83,30 +76,21 @@ let updates = null;
 const jobDiagnostics = new Map();
 const recentJobs = [];
 const pcName = () => hostname().slice(0, 80);
-const remoteSession = () => /^RDP-/i.test(process.env.SESSIONNAME ?? "");
-let persistence = Promise.resolve();
+// The port this PC's Tally serves on, as the server last told it: on a shared
+// server each Windows user's Tally has its own, so diagnostics check this one.
+let tallyPort = 9000;
+const learnPort = (answer) => {
+  if (Number.isInteger(answer?.tally_port) && answer.tally_port >= 1 && answer.tally_port <= 65535)
+    tallyPort = answer.tally_port;
+  return answer;
+};
 const uuid = (value) =>
   typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const slug = (value) =>
   typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,79}$/.test(value);
 
-function statePath() {
-  return join(app.getPath("userData"), "companion.bin");
-}
-async function persist() {
-  persistence = persistence
-    .catch(() => {})
-    .then(async () => {
-      if (!safeStorage.isEncryptionAvailable())
-        throw new Error("Windows credential storage is unavailable.");
-      const encrypted = safeStorage.encryptString(JSON.stringify(state));
-      const temporary = statePath() + ".tmp";
-      await writeFile(temporary, encrypted, { mode: 0o600 });
-      await rename(temporary, statePath());
-    });
-  return persistence;
-}
+const persist = () => pairing.save();
 
 async function cloud(path, options = {}) {
   if (!path.startsWith("/api/")) throw new Error("Invalid cloud operation.");
@@ -155,16 +139,18 @@ function startWorker() {
     const response = await fetch(origin + path, {
       method: body === undefined ? "GET" : "POST",
       redirect: "error",
-      signal: AbortSignal.timeout(45000),
+      // A folder refresh receipt carries its files and can take longer to upload
+      // than a control request. Keep its durable retry, with presence reported independently.
+      signal: AbortSignal.timeout(path.endsWith("/finish") ? 120000 : 45000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${identity.credential}`,
         // Plan 5 adds the shared N-line voucher writer for every family.
-        "X-Minkops-Plan-Version": "5",
+        "X-Minkops-Plan-Version": String(PLAN_VERSION),
         // Each poll tells the console which PC and companion run the work.
         "X-Minkops-Companion-Version": app.getVersion(),
         "X-Minkops-Host": pcName().replace(/[^\x20-\x7e]/g, "?"),
-        "X-Minkops-Session": remoteSession() ? "remote" : "console",
+        "X-Minkops-Session": sharedSession() ? "remote" : "console",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -178,173 +164,54 @@ function startWorker() {
   };
   worker = new CompanionWorker({
     request,
-    execute: async (job) => {
-      if (state.device !== identity) throw new Error("PC connection changed.");
-      // Minkops never starts, closes or restarts Tally; failures become typed
-      // states naming this PC, and each one leaves a local diagnostic record.
-      const pc = pcName();
-      const tallyRequest = tallyTransport({
-        pc,
-        diagnose: async (diagnostic) => {
-          const root = join(app.getPath("userData"), "tally-diagnostics");
-          await mkdir(root, { recursive: true });
-          const record = {
-            ...diagnostic,
-            job_id: job.id,
-            collected_at: new Date().toISOString(),
-            windows_events: await tallyCrashEvents(),
-          };
-          await writeFile(
-            join(root, `${job.id}.json`),
-            JSON.stringify(record, null, 2),
-            { mode: 0o600 },
-          );
-          jobDiagnostics.set(job.id, {
-            ...diagnostic,
-            windows_events: (record.windows_events ?? []).slice(0, 3).map((event) => ({
-              ...event,
-              Message: String(event.Message ?? "").slice(0, 500),
-            })),
-          });
-        },
-      });
-      if (
-        job.operation === "tally.probe" &&
-        !Object.keys(job.input || {}).length
-      ) {
-        // Check connection uses the same read-only check as discovery and saves.
-        try {
-          const ready = await checkTally({ pc });
-          return { available: true, companies: ready.companies.map((c) => c.company) };
-        } catch (error) {
-          jobDiagnostics.set(job.id, {
-            state: error.tallyState ?? "error", cause: error.detail?.cause,
-            running: error.detail?.running, error: String(error.message).slice(0, 300),
-          });
-          throw error;
-        }
-      }
-      const grantFor = (sourceId) =>
-        binding(identity.tenant, sourceId, { id: identity.owner_id });
-      if (job.operation === "sources.discover") {
-        const plan = await request(
-          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
-        );
-        const result = await collectSources(plan, {
-          folderFor: (id) => grantFor(id).root,
-          inventory,
-          inspectExcel,
-          excelSchemaBytes,
-          discoverClientContext: (config, options) =>
-            discoverClientContext(config, { ...options, request: tallyRequest, pc }),
-          onProgress: async (source_key, status, category = null, progress = null) => {
-            try {
-              await reportDiscoveryProgress(() => request(`/api/desktop/worker/jobs/${job.id}/progress`, {
-                claim_token: job.claim_token,
-                source_key,
-                status,
-                category,
-                ...(progress ? { progress } : {}),
-              }));
-            } catch (error) {
-              if (error.code === "TASK_STOPPED" || [401, 404, 409].includes(error.status)) throw error;
-            }
+    heartbeat: async () => learnPort(await request("/api/desktop/worker/heartbeat", {})),
+    execute: createExecutor({
+      connectors: { checkTally, inventory, createLedger, saveVoucher, runSync },
+      request, pc: pcName(),
+      grantFor: (sourceId) => binding(identity.tenant, sourceId, { id: identity.owner_id }),
+      recordDiagnostic: (job, record) => jobDiagnostics.set(job.id, record),
+      transportFor: (job) => {
+        learnPort(job);
+        return tallyTransport({
+          pc: pcName(),
+          diagnose: async (diagnostic) => {
+            const root = join(machineState, "tally-diagnostics");
+            await mkdir(root, { recursive: true });
+            const record = {
+              ...diagnostic,
+              job_id: job.id,
+              collected_at: new Date().toISOString(),
+              windows_events: await tallyCrashEvents(),
+            };
+            await writeFile(join(root, `${job.id}.json`), JSON.stringify(record, null, 2), { mode: 0o600 });
+            jobDiagnostics.set(job.id, {
+              ...diagnostic,
+              windows_events: (record.windows_events ?? []).slice(0, 3).map((event) => ({
+                ...event,
+                Message: String(event.Message ?? "").slice(0, 500),
+              })),
+            });
           },
         });
-        await saveDiscoveryPackage(
-          join(
-            app.getPath("userData"),
-            "discovery",
-            identity.tenant,
-            "collected",
-          ),
-          {
-            format_version: "2",
-            run_id: job.input.discovery_run_id,
-            device_id: identity.id,
-            sources: result.sources,
-            partial: result.sources.some(
-              (s) => s.status !== "ready" || s.snapshot?.partial,
-            ),
-            context_notes: [],
-          },
-        );
-        return result;
-      }
-      if (job.operation === "files.refresh")
-        return { files: await inventory(grantFor(job.input.source_id).root) };
-      if (job.operation === "attention.refresh" || job.operation === "attention.supplier") {
-        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
-        if (plan.tool === "excel") {
-          const files = await inventory(grantFor(plan.source_id).root);
-          const file = files.find(f => f.path === plan.path);
-          if (!file) throw new Error("Original workbook unavailable.");
-          return {content: file.content};
-        }
-        return inspectTallyAttention(plan, {request: tallyRequest, createSupplier: job.operation === "attention.supplier"});
-      }
-      if (job.operation === "tally.references") {
-        const plan = await request(
-          `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
-        );
-        return readTallyReferences(plan, { request: tallyRequest });
-      }
+      },
       // An encrypted, fsynced intent per remote ID: once written, no later
-      // attempt may import that voucher again. Upgraded statement plans keep
-      // their remote ID, so this directory must stay the one they used.
-      const durableIntent = async intent => {
+      // attempt may import that voucher again. Statement plans keep their
+      // remote ID across retries, so this directory must stay the one they used:
+      // an earlier release's moves with the rest of the machine-bound state.
+      durableIntent: (job) => async (intent) => {
         if (state.device !== identity || !safeStorage.isEncryptionAvailable()) throw new Error("PC connection changed.");
-        const directory = join(app.getPath("userData"), "statement-manifests");
-        await mkdir(directory, {recursive: true});
+        const directory = join(machineState, "statement-manifests");
+        await mkdir(directory, { recursive: true });
         let handle;
         try { handle = await open(join(directory, `${intent.remote_id}.bin`), "wx", 0o600); }
         catch (error) { if (error.code === "EEXIST") return false; throw error; }
         try {
-          await handle.writeFile(safeStorage.encryptString(JSON.stringify({job_id:job.id,attempted_at:new Date().toISOString(),plan:intent})));
+          await handle.writeFile(safeStorage.encryptString(JSON.stringify({ job_id: job.id, attempted_at: new Date().toISOString(), plan: intent })));
           await handle.sync();
         } finally { await handle.close(); }
         return state.device === identity;
-      };
-      if (job.operation === "tally.statement" || job.operation === "tally.save") {
-        const plan = await request(`/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`);
-        // Protocol 5: one writer for every voucher family.
-        if (plan.format_version === 5)
-          return saveVoucher(plan, {request: tallyRequest, beforeImport: durableIntent, pc,
-            diagnose: (record) => jobDiagnostics.set(job.id, record)});
-        // Servers upgrade every statement plan for protocol 5 or refuse it.
-        if (job.operation === "tally.statement") throw new Error("Unsupported statement plan.");
-        return saveTallyBill(plan, {
-          request: tallyRequest,
-          pc,
-          diagnose: (record) => jobDiagnostics.set(job.id, record),
-        });
-      }
-      if (job.operation !== "accounts.save")
-        throw new Error("Unsupported local operation.");
-      const spec = await request(
-        `/api/desktop/worker/jobs/${job.id}/plan?claim_token=${job.claim_token}`,
-      );
-      const grant = grantFor(spec.source_id);
-      const backups = join(app.getPath("userData"), "backups");
-      await mkdir(backups, { recursive: true });
-      const saved = await replaceApproved(
-        grant.root,
-        spec,
-        Buffer.from(spec.content, "base64"),
-        async (bytes) => {
-          if (state.device !== identity || !safeStorage.isEncryptionAvailable())
-            throw new Error("PC connection changed.");
-          await writeFile(
-            join(backups, `${job.id}.bin`),
-            safeStorage.encryptString(bytes.toString("base64")),
-            { mode: 0o600 },
-          );
-          if (state.device !== identity)
-            throw new Error("PC connection changed.");
-        },
-      );
-      return { content: saved.toString("base64") };
-    },
+      },
+    }),
     diagnosticFor: (job, receipt) => {
       recentJobs.unshift({
         id: job.id,
@@ -365,70 +232,125 @@ function startWorker() {
         await persist();
       }
     },
-    acknowledge: async (jobId) => {
-      await unlink(
-        join(app.getPath("userData"), "backups", `${jobId}.bin`),
-      ).catch(() => {});
-    },
   });
-  state.discovery_archived ??= {};
-  const tick = () =>
+  // A record paired under a profile's random ID moves to this PC's machine identity once (see pairing.js). A server
+  // without the route (404) or a record that belongs elsewhere (409, 422) keeps its ID: nothing is lost, only retried
+  // on the next start. Anything else, such as being offline, is retried on the next tick.
+  let adopting = Boolean(pairing.machine) && state.installation_id !== pairing.machine;
+  const adopt = async () => {
+    adopting = false;
+    try {
+      const answer = await request("/api/desktop/worker/installation", { installation_id: pairing.machine });
+      if (state.device !== identity || answer.installation_id !== pairing.machine) return;
+      state.installation_id = pairing.machine;
+      await persist();
+    } catch (error) {
+      if (![401, 404, 409, 422].includes(error.status)) adopting = true;
+    }
+  };
+  const tick = () => {
+    if (adopting) void adopt();
     void worker
       .tick()
-      .then(async () => {
-        if (state.device !== identity) return;
-        try {
-          const after = state.discovery_archived[identity.id];
-          const catalog = await request(
-            "/api/desktop/discovery/package" +
-              (after ? `?after_id=${after}` : ""),
-          );
-          if (catalog) {
-            await saveDiscoveryPackage(
-              join(
-                app.getPath("userData"),
-                "discovery",
-                identity.tenant,
-                "confirmed",
-              ),
-              catalog,
-            );
-            state.discovery_archived[identity.id] = catalog.run_id;
-            await persist();
-          }
-          state.discovery_archive_error = null;
-        } catch (error) {
-          state.discovery_archive_error =
-            "The local discovery copy could not be refreshed. Keep Minkops open to retry.";
-          throw error;
-        }
-      })
       .catch((error) => {
         // No tokens, documents, paths or raw protocol responses in console logs.
+        // The server refused this credential: the PC was disconnected or expired, so it is not reconnected by itself.
         if (error.status === 401 && state.device === identity) {
           state.device = null;
           state.pending = null;
+          pairing.previous = null;
           clearInterval(timer);
           void persist();
         }
       });
+  };
   timer = setInterval(tick, 4000);
   tick();
+}
+
+/** Register this PC for `tenant` as `user`, then start its worker. The same installation ID always maps to the
+ * same PC record, whose credential this rotates. Serialized: of two registrations at once, one would be left
+ * holding a rotated-out credential. */
+function connect(tenant, user) {
+  connecting = connecting
+    .catch(() => {})
+    .then(async () => {
+      const device = await (
+        await cloud(`/api/tenants/${tenant}/desktop/devices`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-csrf-token": user.csrf_token,
+          },
+          body: JSON.stringify({
+            name: hostname().slice(0, 80),
+            installation_id: state.installation_id,
+          }),
+        })
+      ).json();
+      clearInterval(timer);
+      clearInterval(recovery);
+      state.device = {
+        id: device.id,
+        tenant,
+        owner_id: user.id,
+        credential: device.credential,
+      };
+      state.pending = null;
+      pairing.previous = null;
+      await persist();
+      startWorker();
+      return { id: device.id };
+    });
+  return connecting;
+}
+
+/** When this PC's saved credential could not be read, reconnect it as the same PC record once its owner is signed
+ * in here, unless that record was disconnected meanwhile. Signed out, or signed in as someone else, it waits. */
+function startRecovery() {
+  clearInterval(recovery);
+  if (state.device || !pairing.previous) return;
+  let trying = false;
+  const attempt = async () => {
+    const previous = pairing.previous;
+    if (state.device || !previous) return clearInterval(recovery);
+    if (trying) return;
+    trying = true;
+    try {
+      const user = await profile(previous.tenant);
+      if (user.id !== previous.owner_id) return;
+      const devices = await (await cloud(`/api/tenants/${previous.tenant}/desktop/devices`)).json();
+      if (state.device || pairing.previous !== previous) return;
+      if (stillPaired({ previous, user, installationId: state.installation_id, devices }))
+        await connect(previous.tenant, user);
+      else {
+        pairing.previous = null;
+        await persist();
+      }
+      clearInterval(recovery);
+    } finally {
+      trying = false;
+    }
+  };
+  recovery = setInterval(() => void attempt().catch(() => {}), 10000);
+  void attempt().catch(() => {});
 }
 
 /** A technical summary for support: versions, this PC, the Tally session and
  * recent outcomes. Never bill data, file contents, XML or credentials. */
 async function collectDiagnostics() {
   const pc = pcName();
+  // Ask for this PC's current Tally port first; offline, the last one known stands.
+  await worker?.heartbeat().catch(() => null);
   const processes = await tallyProcesses().catch(() => null);
   let session;
   try {
-    const ready = await checkTally({ pc, retries: 0 });
+    const ready = await checkTally({ pc, port: tallyPort, retries: 0 });
     session = { state: "ready", companies: ready.companies, warnings: ready.warnings.map((w) => w.state) };
   } catch (error) {
     session = { state: error.tallyState ?? "error", message: String(error.message).slice(0, 300), cause: error.detail?.cause };
   }
-  const folder = join(app.getPath("userData"), "tally-diagnostics");
+  const folder = join(machineState, "tally-diagnostics");
   const records = [];
   try {
     const files = await Promise.all(
@@ -443,9 +365,16 @@ async function collectDiagnostics() {
   }
   return {
     collected_at: new Date().toISOString(),
-    companion: { version: app.getVersion(), plan_version: 5, connected: Boolean(state.device) },
-    windows: { hostname: pc, release: release(), remote_session: remoteSession() },
+    companion: {
+      version: app.getVersion(),
+      plan_version: PLAN_VERSION,
+      connected: Boolean(state.device),
+      reconnecting: Boolean(pairing.previous),
+      restore_problem: pairing.problem,
+    },
+    windows: { hostname: pc, release: release(), remote_session: sharedSession() },
     tally: {
+      port: tallyPort,
       session,
       processes: processes?.map(({ product, version, session: windowsSession }) => ({ product, version, session: windowsSession })) ?? null,
       settings: await readTallyIni(processes?.[0]?.exe),
@@ -498,36 +427,13 @@ function handle(channel, operation) {
 }
 
 function setupBridge() {
-  handle("desktop:save-catalog", async ({ tenant, discoveryId }) => {
-    await profile(tenant);
-    if (!uuid(discoveryId)) throw new Error("Choose a valid source catalog.");
-    const catalog = await (
-      await cloud(
-        `/api/tenants/${tenant}/discovery/runs/${discoveryId}/catalog.json`,
-      )
-    ).json();
-    if (!catalog || !Array.isArray(catalog.sources))
-      throw new Error("Source catalog is unavailable.");
-    const selected = await dialog.showSaveDialog(window, {
-      title: "Save source catalog",
-      defaultPath: join(
-        app.getPath("documents"),
-        `minkops-sources-${discoveryId}.json`,
-      ),
-      filters: [{ name: "JSON source catalog", extensions: ["json"] }],
-    });
-    if (selected.canceled || !selected.filePath) return false;
-    await saveCatalogSnapshot(selected.filePath, catalog);
-    return true;
-  });
   handle("desktop:send-diagnostics", () => sendDiagnostics());
   handle("desktop:check-updates", () => updates?.check());
   handle("desktop:install-update", () => updates?.requestInstall() ?? false);
   handle("desktop:tally-diagnostics", async () => {
-    await shell.openPath(join(app.getPath("userData"), "tally-diagnostics"));
+    await shell.openPath(join(machineState, "tally-diagnostics"));
   });
   handle("desktop:status", async () => ({
-    discovery_archive_error: state.discovery_archive_error ?? null,
     version: app.getVersion(),
     update,
     name: hostname(),
@@ -538,39 +444,17 @@ function setupBridge() {
           owner_id: state.device.owner_id,
         }
       : null,
+    // Companion 0.11.1+: reconnecting this PC by itself after its saved credential could not be read.
+    reconnecting: !state.device && Boolean(pairing.previous),
   }));
-  handle("desktop:connect", async (tenant) => {
-    const user = await profile(tenant);
-    const device = await (
-      await cloud(`/api/tenants/${tenant}/desktop/devices`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-csrf-token": user.csrf_token,
-        },
-        body: JSON.stringify({
-          name: hostname().slice(0, 80),
-          installation_id: state.installation_id,
-        }),
-      })
-    ).json();
-    clearInterval(timer);
-    state.device = {
-      id: device.id,
-      tenant,
-      owner_id: user.id,
-      credential: device.credential,
-    };
-    state.pending = null;
-    await persist();
-    startWorker();
-    return { id: device.id };
-  });
+  handle("desktop:connect", async (tenant) => connect(tenant, await profile(tenant)));
   handle("desktop:disconnect", async () => {
     clearInterval(timer);
+    clearInterval(recovery);
     const device = state.device;
     state.device = null;
     state.pending = null;
+    pairing.previous = null;
     pendingGrants.clear();
     await persist();
     if (device) {
@@ -591,7 +475,7 @@ function setupBridge() {
   });
   handle(
     "desktop:pick-folder",
-    async ({ tenant, sourceId, schemaOnly = false }) => {
+    async ({ tenant, sourceId }) => {
       const user = await profile(tenant);
       if (state.device?.tenant !== tenant || state.device?.owner_id !== user.id)
         throw new Error(
@@ -611,23 +495,7 @@ function setupBridge() {
           user.id,
         );
       }
-      let files = await inventory(root);
-      if (schemaOnly === true) {
-        files = await Promise.all(
-          files
-            .filter((f) => /\.xlsx$/i.test(f.path))
-            .map(async (file) => ({
-              path: file.path,
-              content: (
-                await excelSchemaBytes(Buffer.from(file.content, "base64"))
-              ).toString("base64"),
-            })),
-        );
-        if (!files.length)
-          throw new Error(
-            "Choose a folder containing supported Excel workbooks.",
-          );
-      }
+      const files = await inventory(root);
       const grantId = randomUUID();
       pendingGrants.set(grantId, {
         root,
@@ -788,22 +656,23 @@ else {
     .whenReady()
     .then(async () => {
       app.setAppUserModelId("com.minkops.desktop");
-      if (existsSync(statePath()) && safeStorage.isEncryptionAvailable()) {
-        try {
-          const restored = JSON.parse(
-            safeStorage.decryptString(await readFile(statePath())),
-          );
-          // Credentials and grants belong to one server. Changing deployments
-          // requires explicit pairing; never send a prior server's token away.
-          if (restored.server_origin === origin) state = restored;
-          // Releases before 0.7.0 remembered how to restart Tally. Minkops no
-          // longer controls Tally, so that local state is discarded.
-          delete state.tally_startup;
-          delete state.tally_company_numbers;
-        } catch {
-          /* Damaged local credentials require explicit reconnection. */
-        }
-      }
+      // Before anything reads or writes it: an earlier release's state moves out of the roaming profile here.
+      machineState = await machineStateDirectory({ userData: app.getPath("userData") });
+      pairing = await openPairing({
+        directory: machineState,
+        origin,
+        machine: await machineInstallationId(),
+        cipher: {
+          available: () => safeStorage.isEncryptionAvailable(),
+          encrypt: (text) => safeStorage.encryptString(text),
+          decrypt: (data) => safeStorage.decryptString(data),
+        },
+      });
+      state = pairing.state;
+      // Releases before 0.7.0 remembered how to restart Tally. Minkops no
+      // longer controls Tally, so that local state is discarded.
+      delete state.tally_startup;
+      delete state.tally_company_numbers;
       session.defaultSession.setPermissionRequestHandler(
         (_contents, _permission, callback) => callback(false),
       );
@@ -813,7 +682,7 @@ else {
         join(app.getAppPath(), "assets/tray.png"),
       );
       tray = new Tray(image);
-      tray.setToolTip("Minkops");
+      tray.setToolTip(dev ? "Minkops Dev" : "Minkops");
       tray.setContextMenu(
         Menu.buildFromTemplate([
           { label: "Open Minkops", click: openConsole },
@@ -831,9 +700,10 @@ else {
       );
       tray.on("double-click", openConsole);
       startWorker();
+      startRecovery();
       updates = startUpdates({
         updater: electronUpdater.autoUpdater,
-        isPackaged: app.isPackaged && !localDemo,
+        isPackaged: app.isPackaged && !dev,
         // Never restart over a claimed job, an unsent receipt or an active user.
         isIdle: () => !worker?.busy && !state.pending && !window?.isFocused(),
         canRestart: () => !worker?.busy && !state.pending,

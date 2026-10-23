@@ -1,17 +1,13 @@
 {
   "key": "statement-entry",
-  "version": "0.4.0",
+  "version": "1.6.0",
   "name": "Statement entry",
-  "description": "Interpret statement transactions using Source Discovery and enter reviewed, verified Payment and Receipt vouchers.",
+  "description": "Read CSV/XLSX bank statements, route each row to the client's Tally ledgers, and save reviewed, verified Payment, Receipt and Contra vouchers.",
   "owner": "accounts-desk",
-  "handler": "accounts.statement",
-  "presentation": "accounts-statement",
-  "capabilities": [
-    "files.snapshot"
-  ],
+  "handler": "desk.statement",
+  "presentation": "desk-review",
   "tenant_config_schema": "tenant-config.schema.json",
   "run_config_schema": "run-config.schema.json",
-  "output_schema": "output.schema.json",
   "instructions": "SKILL.md",
   "tenant_defaults": {
     "review_mode": "all_outputs"
@@ -19,21 +15,11 @@
   "run_defaults": {
     "branch_mapping_file_id": null
   },
-  "agent_output_schema": "agent-output.schema.json",
-  "execution": {
-    "environment": "openai_hosted",
+  "sessions": {
     "model": "gpt-6-luna",
-    "python_packages": [
-      "openpyxl"
-    ],
-    "instructions": "execution-instructions.md",
-    "resources": [],
-    "result_path": "/workspace/outputs/result.json"
-  },
-  "stages": {
-    "layout": {
-      "instructions": "stages/layout.md",
-      "agent_output_schema": "stages/layout.schema.json"
+    "reasoning_effort": "medium",
+    "stages": {
+      "layout": "stages/layout.md"
     }
   }
 }

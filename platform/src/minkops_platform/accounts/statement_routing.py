@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from minkops_connectors.statement import normalized
 
-from .client_context import books_beginning, master_lookup
 from .supplier_gst import scalar
 from .voucher_types import base_types
 
@@ -17,41 +16,23 @@ def one(values, message):
     return values[0]
 
 
-def destination_choices(company):
-    """Small launch metadata; never send full native masters to the renderer."""
-    records=master_lookup(company)['records']
-    groups={normalized(name(r['data'])):scalar(r['data'].get('PARENT')) for r in records if r['type']=='GROUP'}
-    def bank(master):
-        parent=scalar(master.get('PARENT'))
-        for _ in range(50):
-            if normalized(parent)=='bank accounts':return True
-            parent=groups.get(normalized(parent))
-            if not parent:return False
-        return False
-    types=[r['data'] for r in records if r['type']=='VOUCHERTYPE']
-    bases=base_types(types)
-    return {'banks':[{'name':name(r['data']),'guid':scalar(r['data'].get('GUID'))} for r in records if r['type']=='LEDGER' and bank(r['data'])],
-        'voucher_types':[{'name':name(m),'guid':scalar(m.get('GUID')),'base':normalized(bases.get(name(m).casefold()))}
-            for m in types if normalized(bases.get(name(m).casefold())) in ('payment','receipt') and scalar(m.get('ISACTIVE')).casefold()!='no']}
-
-
 def validated_plan(row, companies, selection):
-    """Financial facts come from the immutable source, identities from discovery.
+    """Financial facts come from the immutable source, identities from the company's pinned books.
 
     The skill chooses company, bank, counter ledger and optional cost allocation.
     These checks only constrain that proposal to the supported native contract.
+    `companies` are views of the run's pinned mirror (desk_tools.Desk.view).
     """
     company=one([c for c in companies if c['company_guid']==selection.get('company_guid')],
-        'The interpretation must identify one discovered company.')
-    records=master_lookup(company)['records']
+        'The interpretation must identify one of the client\'s companies.')
+    records=company['masters']['records']
     def selected(kind, field):
         guid=selection.get(field)
         return one([r['data'] for r in records if r['type']==kind and guid and scalar(r['data'].get('GUID'))==guid],
-            f'The interpretation must select one discovered {kind.lower()} identity for {field}.')
+            f'The interpretation must select one {kind.lower()} of the company for {field}.')
     if not str(selection.get('evidence') or '').strip():
-        raise ValueError('The ledger interpretation needs source and discovery evidence.')
-    beginning=books_beginning(company['identity'])
-    if beginning and row['date']<beginning: raise ValueError('The transaction date precedes the company books beginning date.')
+        raise ValueError('The ledger interpretation needs evidence from the statement and the books.')
+    if row['date']<company['books_from']: raise ValueError('The transaction date precedes the company books beginning date.')
     bank=selected('LEDGER','bank_ledger_guid')
     counter=selected('LEDGER','counter_ledger_guid')
     groups={normalized(name(r['data'])):scalar(r['data'].get('PARENT')) for r in records if r['type']=='GROUP'}
@@ -62,7 +43,7 @@ def validated_plan(row, companies, selection):
             parent=groups.get(normalized(parent))
             if not parent: return False
         return False
-    if not ancestor(bank,'Bank Accounts'): raise ValueError('The bank ledger must belong to the discovered Bank Accounts group.')
+    if not ancestor(bank,'Bank Accounts'): raise ValueError('The bank ledger must belong to the Bank Accounts group.')
     family=selection.get('family') or ('payment' if row['amount_cents']<0 else 'receipt')
     if family not in ('payment','receipt','contra') or (family!='contra' and family!=('payment' if row['amount_cents']<0 else 'receipt')):
         raise ValueError('Money out is a Payment, money in a Receipt; a transfer between own accounts is a Contra.')
@@ -94,7 +75,7 @@ def validated_plan(row, companies, selection):
         lines,total,names=[],0,{name(bank)}
         for line in selection['lines']:
             ledger=one([r['data'] for r in records if r['type']=='LEDGER' and scalar(r['data'].get('GUID'))==line.get('ledger_guid')],
-                       'Each line must select one discovered ledger.')
+                       'Each line must select one ledger of the company.')
             cents=int(Decimal(str(line['amount']))*100) if isinstance(line.get('amount'),(int,float)) else 0
             if cents<=0 or Decimal(str(line['amount']))*100!=cents or name(ledger) in names:
                 raise ValueError('Each line needs a positive exact amount and a distinct ledger.')
@@ -102,8 +83,8 @@ def validated_plan(row, companies, selection):
             total+=cents
             allocation=None
             if line.get('cost_centre_guid') or line.get('cost_category_guid'):
-                centre=one([r['data'] for r in records if r['type']=='COSTCENTRE' and scalar(r['data'].get('GUID'))==line.get('cost_centre_guid')],'Select one discovered cost centre.')
-                category=one([r['data'] for r in records if r['type']=='COSTCATEGORY' and scalar(r['data'].get('GUID'))==line.get('cost_category_guid')],'Select one discovered cost category.')
+                centre=one([r['data'] for r in records if r['type']=='COSTCENTRE' and scalar(r['data'].get('GUID'))==line.get('cost_centre_guid')],'Select one cost centre of the company.')
+                category=one([r['data'] for r in records if r['type']=='COSTCATEGORY' and scalar(r['data'].get('GUID'))==line.get('cost_category_guid')],'Select one cost category of the company.')
                 if normalized(scalar(centre.get('CATEGORY')))!=normalized(name(category)) or scalar(ledger.get('ISCOSTCENTRESON')).casefold()!='yes':
                     raise ValueError('Cost allocations need a centre of the selected category on a ledger that enables them.')
                 allocation={'centre':name(centre),'category':name(category),'centre_guid':scalar(centre.get('GUID')),'category_guid':scalar(category.get('GUID'))}

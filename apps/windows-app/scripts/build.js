@@ -1,8 +1,11 @@
 import { build } from "esbuild";
 import { mkdir, readFile, writeFile, cp } from "node:fs/promises";
 import { resolve } from "node:path";
+// `--dev` builds the dev channel: the local stack's companion, fixed at build time (see src/main.js).
+const dev = process.argv.includes("--dev");
 await build({
   entryPoints: ["src/main.js"],
+  define: { __MINKOPS_DEV__: String(dev) },
   outfile: "dist/main.cjs",
   bundle: true,
   platform: "node",
@@ -14,6 +17,7 @@ await build({
   alias: {
     "@minkops/desktop-connectors": resolve("../../connectors/desktop/src/index.js"),
     "@minkops/desktop-runtime": resolve("../../platform/desktop-runtime/src/worker.js"),
+    "@minkops/desktop-runtime/jobs": resolve("../../platform/desktop-runtime/src/jobs.js"),
   },
   nodePaths: [resolve("node_modules")],
 });

@@ -1,145 +1,206 @@
-# Accounts desk: Excel and Tally workflows
+# Accounts desk workflows
 
-Source discovery, Bill entry and Statement entry execute through the shared
-tenant API, durable PostgreSQL worker and OpenAI-hosted Agents API. All model calls use `gpt-6-luna`.
-The existing `apps/solution-api/.env` key is reused by the API and worker; it is
-never included in agent files or exposed to the browser.
+Bill entry and Statement entry read a client's documents and save reviewed,
+verified vouchers in that client's own Tally companies. Both run on one run model;
+see [Bill entry](bill-entry.md) and [Statement entry](statement-entry.md). Sessions
+use `gpt-6-luna` at medium reasoning effort on the provider's default tier, through
+the OpenAI hosted Agents API. High effort on the fast tier is set aside until a
+comparison of the two shows which reads bills better. Its key lives in the
+git-ignored `apps/solution-api/.env`, which the API and worker read; it never
+reaches the browser, the companion or a session's tools.
 
-## Product loop and ownership
+## How a run works
 
-1. Connect a local folder in Chrome/Edge, then select the relevant Excel files.
-   Browser directory handles stay in IndexedDB. Only supported files from the
-   chosen folder are synchronized, with immutable tenant-scoped provenance.
-2. Source discovery collects workbook sheet/header/table definitions and formula
-   text through the connected PC. Fresh workbook projections exclude business
-   rows and cached results. The managed Codex harness proposes business meanings,
-   purposes and record keys from this structure; unclear headers require review.
-   For Tally, it collects all loaded companies' undated masters and detailed
-   vouchers for the selected inclusive period. Hosted interpretation proposes
-   only evidenced obscure conventions and exceptions. Confirmation creates a
-   versioned client-context package; see [Source Discovery](source-discovery.md).
-3. Launch Bill entry with multiple PDFs/images and the confirmed catalog.
-   After setup, the dashboard runs saved file selections with tenant defaults in
-   one click; workflow details expose configuration and per-run overrides.
-   Codex recognizes the appropriate workbook/sheet/table from confirmed mappings
-   and bill evidence. Refresh the real workbook before selecting an Excel
-   destination; discovery projections are not writable business snapshots.
-   Tally bill runs pin a complete, confirmed version 2 package and either lock a
-   company or infer it from buyer evidence. No client filename, sheet name or invoice column schema is hardcoded
-   in the executor. Ambiguous recognition becomes an unresolved review item and
-   holds that bill while other bills continue. Confirmed concepts enable selected deterministic checks;
-   missing reference evidence stays visible rather than implying reconciliation.
-4. Review bill identifiers and concise status with one-click decisions.
-   Accounting entry/corrections happen in original systems; no values, correction
-   prompts or operation choices are editable in Minkops. Members can change
-   per-run options; only admins change saved tenant/employee defaults.
-5. The Excel adapter prepares only the approved destination edits. The browser
-   checks the original hash, keeps a recovery copy, saves to the existing file,
-   reads it back and submits a receipt. Only matching saved bytes complete the
-   task. Users do not have to upload a workbook again or download a replacement.
+1. **Books.** The Windows companion mirrors each authorised company's masters and
+   vouchers into the server, read-only and without AI (`accounts/sync.py`, with
+   `connectors/desktop/src/sync.js` on the PC). An idle PC refreshes every 15
+   minutes, and every refresh first reports the companies open in Tally: a newly
+   connected PC's companies are found on its first poll, and a company opened later
+   within 15 minutes. A newly seen company stays pending
+   until one card authorises it for a client business, or continues the client's
+   company from a disconnected PC ([Replacing a PC](#replacing-a-pc)). A run asks the client's PCs
+   to refresh, then pins one mirror version per company, so every check in the
+   run reads the same books.
+2. **Items.** A run splits its inputs into items: a bill file, a statement's
+   layout, or a chunk of up to 50 statement rows. The worker's lanes claim items
+   and run each in its own tool session.
+3. **Proposals.** A session looks things up with read-only tools scoped to the
+   run, each call logged, and proposes. Its lookups include the client's memory:
+   what approved saves taught, the rules people wrote, and how each company keeps
+   its books. The server checks every proposal against the pinned books at once,
+   and tells the session what it refused and why.
+4. **Review.** Each bill or statement row is a record. It moves from `pending`
+   through `proposed` or `held`, then `approved` and `writing`, and ends `saved`
+   or `duplicate`; Do nothing makes it `deferred`. Decisions are idempotent per
+   record version. Under the `only_exceptions` review mode, clean proposals the client
+   has booked this way at least twice before (`memory.STANDING`) are approved once
+   the run is read; the rest wait for a person. One earlier booking may be a one-off.
+5. **Writes.** An approved record becomes a durable native write
+   (`accounts/writes.py`). Each PC runs one `tally.write` at a time; the companion
+   saves the voucher and reads it back, and only a readback that matches the
+   approved plan saves the record.
 
-Minkops owns authorization, immutable inputs, approvals, validation and safe
-commits. OpenAI owns reasoning and its execution environment. This first web
-version synchronizes selected bytes to the API and hosted session; it is not
-fully local processing. The Windows companion implements the same approved
-write contract for granted folders, including requests started from the web.
-See [Windows setup and recovery](windows-app.md). [Source discovery](source-discovery.md)
-provides confirmed Tally context; [Bill entry](bill-entry.md) and
-[Statement entry](statement-entry.md) add reviewed native vouchers, duplicate
-alerts, correction handoff and exact destination readback.
+Minkops owns authorization, inputs, checks, approvals and writes. The model reads
+and proposes; it never writes to Tally. The companion performs every native write,
+and never starts, closes or restarts Tally. See
+[Windows setup and recovery](windows-app.md).
 
-## Run contracts and recovery
+### In the console
 
-Each run pins definition version, instructions, `agent-output.schema.json`,
-configuration, input hashes and confirmed mappings. The agent's JSON artifact
-is accepted only from the completed turn and exact output path. Agent schemas
-describe structure, not business field names. Each definition still declares
-the descriptor's `output.schema.json`, but Accounts validates only the pinned
-agent proposal schema and its business checks.
+A run starts from its workflow's page: the client, the files, and only the run
+settings the workflow declares. Its task page then shows the one review surface
+every workflow shares, driven by what the handler reports and the server offers:
 
-New runs additionally pin the complete hosted execution bundle: SKILL.md,
-execution-instructions.md, workflow/configuration/output contracts, declared
-supporting scripts/references, model, packages, artifact path, and content
-digest. Runtime execution uses the pinned bundle even if checkout files change.
-Launch idempotency, worker recovery, raw-proposal persistence, and cleanup are
-shared platform controls; Accounts retains catalog, evidence, business, approval,
-and destination-write semantics. The hosted executor remains shared.
-Legacy queued runs without a complete bundle require explicit relaunch; saved
-active sessions can still be reconciled without replaying input.
+- each record's status, its holds and their reasons, and what its review asks a
+  person to check;
+- one button per offered decision, such as Approve, Do nothing, Recheck, or each
+  of a statement row's settlement choices, sent with the record's version;
+- Choose and approve, which opens the entry as it will be written with a ledger
+  picker for each of its parts, and Create this ledger, which opens the new party
+  ledger laid out as Tally's ledger creation with the entry to be made with it;
+  Approve all booked this way approves the run's entries proposed again as a person
+  chose for another;
+- its details: the proposed entry and items, the bills it settles, a verified
+  e-invoice, evidence quotes, the rules it follows, and what Tally holds now.
 
-The worker stores session/turn IDs as events arrive, holds an advisory lock and
-reconciles the existing session after a restart. An ambiguous creation without
-a persisted ID fails visibly rather than blindly replaying a charged request.
-Hosted environments are released after durable results; idle workers retry
-pending cleanup. Audit IDs and results stay in PostgreSQL.
+Save ready entries approves every proposal that needs no review. The list is read
+again whenever the run's activity changes, 100 records a page. Scripts and other
+integrations make the same calls: the runs API in [Bill entry](bill-entry.md#launching-a-run).
 
-Local writes reserve each workbook, reject duplicates and changed local files,
-and serialize same-browser tabs. A disconnected receipt can be retried: an
-already matching workbook is verified without appending again. Unverified
-recovery copies remain in IndexedDB; verified writes remove them. Stopping the
-task cancels unsaved writes, releases their reservations, keeps unsaved bills in
-Attention and records the actor; it does not undo changes already saved. A late
-valid receipt is recorded without converting a stopped run into success. Held
-bills are rechecked or deferred only through Attention decisions. External workbook changes require rediscovery;
-Minkops' own verified writes can advance the confirmed catalog safely.
+## Memory
+
+Each client business keeps a memory per employee (`accounts/memory.py`), shared by
+the employee's workflows and looked up only when a session needs it:
+
+- **Learnt entries.** Verified saves a person approved, or whose treatment they
+  chose, teach how a supplier's bills and a payee's bank rows are booked; so do a
+  person's corrections in Tally and work they entered there by hand. The sync's
+  probes, or a person's one-click answer, settle how each company keeps its books,
+  and the supplier names people matched to ledgers are kept for finding them again.
+  Every sync revalidates them: an edit made in Tally demotes an entry, and one whose
+  ledgers are gone retires. A treatment confirmed twice binds the next proposals
+  unless they state why they depart from it.
+- **Rules.** Plain-text instructions only people write, scoped to a workflow or a
+  company, versioned, and cited by the proposals that follow them. A solution can
+  seed the rules its client agreed at installation, once.
+
+The memory page shows both. Every member who can reach the client reads it, and
+only admins change it. See [Bill entry](bill-entry.md#memory-and-practice).
+
+## Replacing a PC
+
+A client's companies are the ones authorised on connected PCs. When the PC holding
+them is replaced, by a new laptop or a hosted server, the client's work moves with
+its books. Reconnecting the same PC is not a replacement: from companion 0.11.2 a
+Windows user on a PC is always the same PC record, through a reinstall, a lost
+app profile or a disconnect and reconnect, and its companies stay authorised
+([Windows app](windows-app.md#companion-0112)). A replacement takes these steps:
+
+1. Connect Minkops on the new PC with the companies open in Tally. Its first
+   refresh finds each one as new, with a "New company found" card. While the old
+   PC is connected, the books are still the client's there, and the card can only
+   keep them out: a client's entries are saved to one Tally copy, never split
+   across two.
+2. Disconnect the old PC under Connected PCs. Each card now offers
+   **Continue *client*'s books here**.
+3. One click moves the client's company to the new PC (`clients.authorise_company`).
+   It is the same company: what Minkops learnt for its books, the rules people
+   wrote for it, how its books are kept, statement continuity and its save history
+   all stay with it. Each move is recorded (migration 0034).
+
+Until then, a run starts with the client's books that are available. A run that
+starts while some are on a disconnected PC opens one "Books left out of this run"
+item in Attention naming them and their PC (`desk_tools.note_unavailable`), and a
+bill addressed to one of them holds rather than entering another company. Enter
+that work in a new run once the books are continued. With none available, a run
+does not start and says which PC the books were on.
+
+After the move:
+
+- **Refresh.** The new PC's first refresh reads the books in full (reason
+  `pc_changed`). Each mirror version records the PC it was read from (migration
+  0033), so the old copy's markers never decide what the new one fetches, and no
+  run works from the old copy.
+- **An older copy.** If the new PC's copy lacks vouchers the old PC's had, such as
+  an older backup restored there, one "Older copy of the books" card names them,
+  newest first. Minkops re-enters nothing: restore the latest copy in Tally and
+  refresh, or enter them again. Memory learnt from vouchers that are gone is
+  demoted.
+- **Saves.** A save the old PC had begun when it was disconnected holds as
+  interrupted. After the move, Retry save saves it on the new PC only if Tally
+  there does not already have it. Saves the old PC had not begun go to the new
+  PC once the company moves, each sent once.
+- **Runs.** A run waiting for the old PC's refresh waits for the new PC's, then
+  carries on.
+
+Some books are never continued:
+
+- **Another client's.** Adding books to a different client starts them afresh, so
+  one client's memory never reaches another.
+- **A year-split part.** It shares the GUID but begins its books later, so it is
+  other books, added afresh.
+- **Books two clients held.** When two clients held the same books on
+  disconnected PCs, the card offers no one-click continuation. Adding them to one
+  of those clients continues that client's company.
+
+Only admins decide. Other members see the card without the client's name.
+
+## Recovery
+
+- **Leases.** A lane holds each item under a lease that one heartbeat renews. An
+  item whose lane disappears is reclaimed with its saved provider session, and the
+  successor reattaches to it; it is the same attempt, never a new paid one.
+- **Tool calls.** Every call is logged once per session and call ID, so a repeated
+  call gets its logged answer instead of running again.
+- **Failures.** A transient provider failure retries with a new session after 30 s
+  and then 120 s, at most three attempts. Anything else fails only its own item.
+- **Writes.** A pending write reserves its destination identity, so two runs never
+  save the same bill or transaction at once. A write interrupted mid-import is never
+  sent again; Retry save reconciles with Tally first.
+- **Controls.** Pause stops new sessions and writes from starting. Stop is final:
+  unsaved records hold, writes no PC has started are withdrawn, and vouchers
+  already saved stay.
 
 ## Local setup
 
 From the repository root, use an isolated development database. Do not reset a
-database whose migration checksum differs; investigate or create a new one.
+database whose migration checksum differs; investigate, or create a new one.
 
 ```sh
 docker compose -f infra/compose.yml up -d app_db
-export DATABASE_URL=postgresql://minkops:minkops-local@127.0.0.1:5433/minkops_accounts_demo
+export DATABASE_URL=postgresql://minkops:minkops-local@127.0.0.1:5433/minkops_app
 uv sync --all-packages
 uv run --all-packages python db/migrate.py
 uv run --all-packages python db/seed_demo.py
 AUTH_DEV_MODE=1 uv run --all-packages uvicorn minkops_api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Create that database first if it does not exist. In another terminal with the
-same DATABASE_URL, run `uv run --all-packages python -m minkops_api.accounts_worker`.
-Start the existing Vite app in `apps/solution-web` (`npm run dev`, port 3000).
-Sign in at `/login` with `demo@example.com` and the seed's printed
-password. The seed installs the mock-client composition (Source discovery,
-Statement entry and Bill entry) for the mock tenant and preserves existing
-operator settings and paused workflows.
+In another terminal with the same `DATABASE_URL`, start the worker:
+`uv run --all-packages python -m minkops_api.accounts_worker`. `--lanes` sets how
+many sessions run at once (1–16, default 12, which reads 50 bills in under six
+minutes; see [the benchmarks](rebuild/evidence.md#performance-benchmarked-live-22-october-2026)), and `--drain` exits once idle
+for scale-to-zero hosting. Start the Vite app in `apps/solution-web` (`npm run dev`,
+port 3000) and sign in at `/login` as `demo@example.com` with the password the seed
+prints. The seed installs the mock-client composition, Statement entry and Bill
+entry, for the mock tenant, and keeps existing settings and paused workflows.
 
-The mock client's workflow policy enables Tally only, so discovery and saves
-need the [Windows companion](windows-app.md) connected to a PC with the test
-companies open in Tally. The [five-company rehearsal](tally-rehearsal.md) seeds
-synthetic companies and bills for that. The Excel adapter below serves
-compositions whose policy enables Excel; its behaviour is covered by the
-database-backed API tests.
+Reads and saves need the [Windows companion](windows-app.md) connected to a PC with
+the companies open in Tally. The [five-company rehearsal](tally-rehearsal.md) seeds
+synthetic companies and bills for that.
 
-## Supported scope and verification
+## Scope and verification
 
-The adapter supports ordinary `.xlsx` sheets and named tables without totals.
-It preserves unrelated cells, copied styles and translated formulas, but does
-not calculate formulas. Macro, pivot, slicer, ActiveX, external-link and protected
-destinations require additional adapters. Table expansion into occupied cells
-is rejected. Browser permissions and an open Chrome/Edge page are required for
-local saves; hosted extraction continues while the page is closed.
+- **Sources** hold at most 100 files of 5 MB each. The console uploads a run's files
+  in batches under 25 MB, each request within the 30 MB a request may carry; the
+  final batch makes the whole set current at once, and an upload never finished
+  leaves nothing current (`account_uploads`). A connected folder still refreshes in
+  one request of at most 30 MB.
+- **Bill runs** take 1–50 PDF or image files, whatever their total size: each is
+  read in its own session.
+- **Statement runs** take CSV and XLSX; convert legacy XLS in Excel.
 
-Sources are limited to 100 supported files, 5 MB per file and 30 MB per refresh.
-Runs allow up to 45 files and 8 MB including workbook references, full Tally
-lookup files and bills; individual lookup files are limited to 4 MB. Oversized
-complete native discovery remains saved but visibly partial for hosted
-interpretation, blocking dependent workflows. Hosted uploads
-also enforce provider limits. Manual uploads work for bill inputs and reference
-inspection; writable destinations require a connected folder.
-
-Offline tests replace only the paid agent boundary and cover real database/auth,
-tenant isolation, approval, cancellation, receipt replay, schema validation,
-safe workbook updates and local commit conflicts. Run API tests with
-TEST_DATABASE_URL pointing to a PostgreSQL server role with database-creation
-permission; pytest creates and seeds its own isolated database. Historical browser
-verification ran the real hosted model before the client-context refactor:
-discovery found headers on row 4;
-three PDFs plus a scanned PNG appended four rows to the existing local register
-(16 → 20), preserved prior rows and reference files, and completed only after a
-verified browser receipt. This is local proof; no production deployment is implied.
-
-Database-backed pytest runs now create and clean up their own database; see
-[isolated integration tests](../db/README.md#isolated-integration-tests). The
-supplied PostgreSQL role needs database-creation permission.
+Offline tests replace only the paid session boundary, with scripted sessions that
+call the real tools. They cover the database, authorization, tenant isolation,
+approvals, stops, receipt replay and write reservations. Set `TEST_DATABASE_URL` to
+a PostgreSQL role that can create databases: pytest creates, seeds and drops its
+own database (see [isolated integration tests](../db/README.md#isolated-integration-tests)).

@@ -1,6 +1,13 @@
 # Data warehouse plan
 
 Status: **approved plan, not yet implemented** (17 October 2026).
+
+> **Schema since superseded.** This plan predates the accounts desk rebuild, which
+> replaced `workflow_runs` and its kin with `runs`, `run_items`, `run_records`,
+> `record_decisions`, `item_sessions`, `tool_calls`, `item_refs` and `native_writes`
+> (migrations `0020`–`0032`), and dropped the old tables. The architecture, layers
+> and gates below stand; re-derive Phase 0's corrections, the extraction manifest
+> and the run facts from the current schema before building them.
 Execution scope now: **local PostgreSQL warehouse for development and testing.**
 Production tools (BigQuery, Datastream, Airflow, BI) are described as the next
 step and must not be built until their gates in [Phase 5](#phase-5--production-path-next-not-now) are met.
@@ -97,7 +104,7 @@ No BI tool is required locally.
 | D6 | Orchestration | **None locally** (one CLI command). Prod: Cloud Scheduler → Cloud Run Job; **self-hosted Airflow + Astronomer Cosmos** at ≥ 2 sources or dependent schedules. | Airflow for a two-step DAG is overhead; adding it later costs about a day because dbt does not depend on it. Not Cloud Composer: its floor cost is ~USD 300+/month. | Second source. |
 | D7 | History (snapshots) | **None until the first production write into a real client system** | History before then has no value to us. Snapshots are additive; nothing built earlier changes. | First real client write (release checklist item). |
 | D8 | Tenancy model | **Build pooled, serve bridged**: pooled layers with `tenant_id` everywhere; per-tenant schemas containing views only, for the customer suite | The OLTP is pooled, so raw arrives pooled regardless of hosting; per-tenant views give Bridge's access boundary without N× builds. | Enterprise contract requiring physical isolation. |
-| D9 | Test tenant | **Exclude `mock-tenant`** (all testing, demos and production verification use it) via a dbt variable now, `tenants.kind` after Phase 0 | `scripts/verify_production.py` and `provision_demo.py` also use `mock-tenant` in production. | When `kind` exists. |
+| D9 | Test tenant | **Exclude `mock-tenant`** (all testing, demos and production verification use it) via a dbt variable now, `tenants.kind` after Phase 0 | The demo workspace is created with `install_workflows mock-client --create-tenant`, as any workspace is. | When `kind` exists. |
 | D10 | Customer business data | **Not extracted** until the Phase 6 policy gate; design exists now | Ledger and bill data need a deliberate data policy and DPA. | Analytics suite kickoff. |
 | D11 | `tenants.industry` | **Deferred** to Phase 6 as a controlled classification | Free text breaks benchmarking; a lookup/standard code must be designed with the suite. | Phase 6. |
 | D12 | Open source vs managed | Managed for stateful storage and near-zero idle cost; open source for logic layers; avoid managed services with high floor cost | Portability where logic lives, no operations burden where data lives. | — |
@@ -272,8 +279,8 @@ derived from the migration timestamp.
 slug breaks once there is a second demo or a staging tenant.
 
 **How.** `kind text NOT NULL DEFAULT 'customer' CHECK (kind IN ('customer','internal','demo'))`;
-backfill `mock-tenant` → `internal`. Update `scripts/provision_demo.py` and
-`db/seed_demo.py` to set `kind` explicitly. Signup keeps the default.
+backfill `mock-tenant` → `internal`. Update `install_workflows --create-tenant` and
+`db/seed_demo.py` to set `kind` explicitly; a client's workspace keeps the default.
 Also add `updated_at` + trigger (tenants are renamed).
 
 **Deferred:** `industry` (D11) and a tenant `timezone` (needed for per-tenant
@@ -468,7 +475,7 @@ tables:
     ...
 excluded_tables:
   sessions: authentication secrets
-  email_verifications: authentication secrets
+  password_resets: authentication secrets
   worker_wakeup: process coordination state
 ```
 
@@ -754,13 +761,12 @@ rows are updated after insert (gets `updated_at` + trigger in 0.1).
 | Table | Extract | Mode | Excluded columns (reason) | Mutable | Phase 0 notes |
 | --- | --- | --- | --- | --- | --- |
 | `tenants` | yes | full | — | yes | `kind`, `updated_at` |
-| `tenant_domains` | yes | full | — | yes (`verified_at`) | |
 | `users` | yes | full | `password_hash` (secret); `email` → HMAC, `name` dropped in staging | yes | |
 | `memberships` | yes | full | — | yes (role) | |
 | `invitations` | yes | full | `token_hash` (secret); `email` → HMAC | yes | |
-| `join_requests` | yes | full | — | yes | |
+| `workflow_assignments` | yes | full | — | no | |
 | `sessions` | **no** | — | authentication secrets | | |
-| `email_verifications` | **no** | — | authentication secrets | | |
+| `password_resets` | **no** | — | authentication secrets | | |
 | `employees` | yes | full | `config_schema`, `config_values` (may hold customer settings; review in Phase 6) | yes | |
 | `workflows` | yes | full | `config_schema`, `config_values`, `execution_binding` (review in Phase 6) | yes | |
 | `workflow_employees` | yes | full | — | no | |

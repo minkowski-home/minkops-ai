@@ -54,27 +54,10 @@ def expire(connection):
     return stopped
 
 
-def enforce(url, *, cancel=True):
-    """Commit stop intent before provider I/O; failed cancellation stays retryable."""
-    with psycopg.connect(url,connect_timeout=5,row_factory=dict_row) as connection:
+def enforce(url):
+    """Stop every task past its active-time budget, each in its own short transaction."""
+    with psycopg.connect(url, connect_timeout=5, row_factory=dict_row) as connection:
         connection.execute("SET LOCAL lock_timeout='1s'")
         count = expire(connection)
         connection.commit()
-        if cancel:
-            pending = connection.execute("SELECT * FROM workflow_runs WHERE config @> '{\"timeout_cancel_pending\":true}' AND session_id IS NOT NULL ORDER BY updated_at LIMIT 4").fetchall()
-            connection.commit()
-            from .runtime.diagnostics import record
-            from .runtime.openai_hosted import cancel_turn
-            for run in pending:
-                try:
-                    cancel_turn(run['session_id'],run['turn_id'])
-                    connection.execute("UPDATE workflow_runs SET config=config || '{\"timeout_cancel_pending\":false}' WHERE id=%s",(run['id'],))
-                    connection.commit()
-                    record(connection,run,'runtime.cancelled','Requested cancellation after active processing limit.')
-                except Exception as error:
-                    connection.rollback()
-                    # Rotate failures behind other pending cancellations.
-                    connection.execute('UPDATE workflow_runs SET updated_at=now() WHERE id=%s',(run['id'],))
-                    connection.commit()
-                    log.warning('Timed-out run cancellation pending for %s (%s)',run['id'],type(error).__name__)
         return count

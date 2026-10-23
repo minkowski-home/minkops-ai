@@ -64,12 +64,15 @@ test("duplicate open names or GUIDs block because requests address companies by 
     [{ company: "Original", company_guid: "a" }, { company: "Backup", company_guid: "a" }],
   ])
     assert.throws(
-      () => openCompanyScope(pair, { pc: "PRAHLAD-GADHWAL" }),
+      () => openCompanyScope(pair, { pc: "OFFICE-PC-07" }),
       (error) =>
         error instanceof TallyUnavailable &&
         error.tallyState === "duplicate_company" &&
-        /Close one in Tally on PRAHLAD-GADHWAL/.test(error.message),
+        /Close one in Tally on OFFICE-PC-07/.test(error.message),
     );
+  // A repeated GUID names both companies, not the first one twice.
+  assert.throws(() => openCompanyScope([{ company: "Original", company_guid: "a" }, { company: "Backup", company_guid: "a" }]),
+    { message: /^Original and Backup share one company identity\./ });
 });
 
 test("an empty or oversized open scope is a typed state, not a crash", () => {
@@ -143,7 +146,7 @@ test("invalid and failed responses are typed, never parsed as companies", async 
 test("a ready check lists companies and warns about a second Tally", async () => {
   const ready = await checkTally({
     request: async () => new Response(companiesXml([sachin])),
-    processes: async () => [{ pid: 1 }, { pid: 2 }],
+    observe: async () => ({ own: 1, listener: { pid: 1, session: 1 }, processes: [{ pid: 1 }, { pid: 2 }] }),
     pc: "PC1",
     wait: noWait,
   });
@@ -152,9 +155,36 @@ test("a ready check lists companies and warns about a second Tally", async () =>
   assert.deepEqual(ready.warnings.map((w) => w.state), ["multiple_instances"]);
 });
 
+test("a Tally answering from another Windows user's session is never read", async () => {
+  let asked = 0;
+  const request = async () => {
+    asked++;
+    return new Response(companiesXml([sachin]));
+  };
+  // On a shared server, another user's Tally holds this port: neither its companies nor its books are read.
+  const foreign = async () => ({ own: 3, listener: { pid: 40, session: 2 }, processes: [{ pid: 40 }] });
+  await assert.rejects(
+    checkTally({ request, port: 9001, pc: "PC1", observe: foreign, wait: noWait }),
+    (error) => error.tallyState === "other_session" && /port 9001/.test(error.message) && /PC1/.test(error.message),
+  );
+  // Unobservable on a shared server, Tally is not assumed to be this user's.
+  await assert.rejects(checkTally({ request, observe: async () => null, shared: true, wait: noWait }),
+    { tallyState: "ownership_unknown" });
+  assert.equal(asked, 0);
+  // The user's own Tally, or an unobservable one on a PC of their own, is read as before.
+  for (const observe of [async () => ({ own: 3, listener: { pid: 41, session: 3 }, processes: [{ pid: 41 }] }),
+    async () => null])
+    assert.equal((await checkTally({ request, observe, shared: false, wait: noWait })).state, "ready");
+  assert.equal(asked, 2);
+});
+
 test("every typed message fits a job receipt and names the PC", async () => {
   const pc = "X".repeat(80);
+  const refusal = async (options) => checkTally({ request: async () => new Response(""), pc, port: 65535,
+    wait: noWait, ...options }).catch((error) => error);
   for (const error of [
+    await refusal({ observe: async () => ({ own: 1, listener: { pid: 9, session: 2 }, processes: [] }) }),
+    await refusal({ observe: async () => null, shared: true }),
     await classifyTallyFailure(refused(), { processes: async () => [], pc }),
     await classifyTallyFailure(refused(), { processes: async () => [{ pid: 1 }], pc }),
     await classifyTallyFailure(timedOut(), { processes: async () => [{ pid: 1 }], pc }),
@@ -283,12 +313,12 @@ test("only whitelisted tally.ini settings are read for diagnostics", async () =>
   const { parseTallyIni, readTallyIni } = await import("../src/tally-session.js");
   const ini = [
     ";;TallyPrime workstation specific parameters file", "[TALLY]",
-    "Tally Gateway Server=PRAHLAD-GADHWAL:9999", "User TDL=Yes", "Default Companies=Yes", "Load=100000",
+    "Tally Gateway Server=OFFICE-PC-07:9999", "User TDL=Yes", "Default Companies=Yes", "Load=100000",
     "Data=D:\\TALLY PRIME\\SACHIN INFRA ORIGINAL DATA", "Client Server=None", "ServerPort=9000",
-    "Enable ODBC Server=Yes", "LicTimeout=", "Tally Gold License Server=secret-host", "Export Path=F:\\PRAHLAD\\BLR",
+    "Enable ODBC Server=Yes", "LicTimeout=", "Tally Gold License Server=secret-host", "Export Path=F:\\OFFICE\\EXPORTS",
   ].join("\r\n");
   assert.deepEqual(parseTallyIni(ini), {
-    "Tally Gateway Server": "PRAHLAD-GADHWAL:9999", "User TDL": "Yes", "Default Companies": "Yes", Load: "100000",
+    "Tally Gateway Server": "OFFICE-PC-07:9999", "User TDL": "Yes", "Default Companies": "Yes", Load: "100000",
     Data: "D:\\TALLY PRIME\\SACHIN INFRA ORIGINAL DATA", "Client Server": "None", ServerPort: "9000",
     "Enable ODBC Server": "Yes",
   });

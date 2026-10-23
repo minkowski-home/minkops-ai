@@ -1,90 +1,121 @@
-"""Contract and policy checks without agent calls or database requirements."""
+"""Workflow contracts: tool-session definitions, their pinned bundles and layered run configuration."""
 
 import json
+import re
+import shutil
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from jsonschema import ValidationError
 
-from minkops_platform.workflows import (
-    load_definition,
-    resolve_run_config,
-)
+from minkops_platform.workflows import load_definition, resolve_run_config
 
 ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / "employees/accounts-desk/workflows"
 
 
 class WorkflowContractTests(unittest.TestCase):
-    def setUp(self):
-        self.defaults = json.loads((ROOT / "db/fixtures/mock_workflows.json").read_text())
-        self.examples = json.loads((ROOT / "db/fixtures/mock_workflow_runs.json").read_text())
+    def test_both_desk_workflows_are_tool_sessions_pinned_with_their_handler_and_instructions(self):
+        for key, handler, stages in (("bill-entry", "desk.bill", []), ("statement-entry", "desk.statement", ["layout"])):
+            with self.subTest(key=key):
+                definition = load_definition(WORKFLOWS / key)
+                bundle = definition.session_bundle
+                self.assertEqual((definition.metadata["owner"], definition.metadata["handler"]),
+                                 ("accounts-desk", handler))
+                # Medium effort on the default tier, as the 50-bill pack run of 2026-10-22 used. High effort on the
+                # fast tier is set aside until a comparison of the two shows which reads bills better.
+                self.assertEqual((bundle["key"], bundle["definition_version"], bundle["model"], bundle["reasoning_effort"],
+                                  bundle["service_tier"]),
+                                 (key, definition.metadata["version"], "gpt-6-luna", "medium", None))
+                self.assertEqual(sorted(bundle["stages"]), stages)
+                # The skill's manifest is checked, then left out of what a session is told.
+                self.assertFalse(bundle["instructions"].startswith("---"))
+                self.assertIn(bundle["instructions"], definition.instructions)
 
-    def definition(self, key):
-        return load_definition(ROOT / "employees/accounts-desk/workflows" / key)
+    def test_a_run_configuration_layers_defaults_preferences_and_its_own_values(self):
+        definition = load_definition(WORKFLOWS / "bill-entry")
+        preferences = {"review_mode": "only_exceptions"}
+        values = {"company_mode": "locked", "locked_company_guid": "guid-1"}
+        resolved = resolve_run_config(definition, preferences, values)
+        self.assertEqual(resolved, {"review_mode": "only_exceptions", "company_mode": "locked",
+                                    "locked_company_guid": "guid-1"})
+        resolved["review_mode"] = "all_outputs"
+        self.assertEqual(preferences, {"review_mode": "only_exceptions"})
+        self.assertEqual(resolve_run_config(definition, {"review_mode": "all_outputs"}, {})["company_mode"], "infer")
 
-    def resolve(self, key, values=None, **policy):
-        return resolve_run_config(
-            self.definition(key),
-            self.defaults[key],
-            self.examples[key] if values is None else values,
-            allowed_source_ids=policy.pop("allowed_source_ids", {"mock-reference", "mock-bills"}),
-            allowed_destination_ids=policy.pop("allowed_destination_ids", {"mock-excel-draft"}),
-            **policy,
-        )
+    def test_unknown_or_invalid_settings_are_refused(self):
+        bill, statement = load_definition(WORKFLOWS / "bill-entry"), load_definition(WORKFLOWS / "statement-entry")
+        for definition, values in ((bill, {"input_format": "mixed"}), (bill, {"review_mode": "sometimes"}),
+                                   (bill, {"company_mode": "chosen"}), (statement, {"branch_mapping_file_id": 5})):
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                resolve_run_config(definition, {"review_mode": "all_outputs"}, values)
 
-    def test_definitions_and_mock_run_contracts(self):
-        for key in self.defaults:
-            self.assertEqual(self.definition(key).metadata["owner"], "accounts-desk")
-            self.resolve(key)
-
-    def test_run_override_does_not_change_defaults_or_other_runs(self):
-        selections = {**self.examples["source-discovery"], "max_files": 3}
-        resolved = self.resolve("source-discovery", selections)
-        self.assertEqual(resolved["max_files"], 3)
-        resolved["source_ids"].append("changed")
-        self.assertEqual(selections["source_ids"], ["mock-reference"])
-        self.assertEqual(self.resolve("source-discovery")["max_files"], 100)
-
-    def test_run_cannot_authorize_its_own_sources_or_destinations(self):
-        with self.assertRaises(ValueError):
-            self.resolve("source-discovery", allowed_source_ids=set())
-        with self.assertRaises(ValueError):
-            self.resolve("bill-entry", allowed_destination_ids=set())
-
-    def test_review_requirement_cannot_be_overridden(self):
-        with self.assertRaises(ValueError):
-            self.resolve(
-                "bill-entry",
-                {**self.examples["bill-entry"], "review_mode": "only_exceptions"},
-                require_review=True,
-            )
-
-    def test_unknown_settings_unsupported_formats_and_traversal_rejected(self):
-        for key, changes in [
-            ("bill-entry", {"input_format": "video"}),
-            ("bill-entry", {"output_mode": "tally"}),
-            ("bill-entry", {"allowed_source_ids": ["other-tenant"]}),
-            ("source-discovery", {"max_files": 0}),
-            ("source-discovery", {"scope_paths": ["../outside"]}),
-            ("source-discovery", {"scope_paths": ["/absolute"]}),
-            ("source-discovery", {"scope_paths": ["nested/../../outside"]}),
-        ]:
-            with self.subTest(key=key, changes=changes), self.assertRaises(ValidationError):
-                self.resolve(key, {**self.examples[key], **changes})
-
-    def test_missing_catalog_is_not_silently_defaulted(self):
-        values = dict(self.examples["bill-entry"])
-        values.pop("catalog_version")
-        with self.assertRaises(ValidationError):
-            self.resolve("bill-entry", values)
-
-    def test_run_requires_explicit_business_schema_selection(self):
-        for key in ("schema_id", "schema_version"):
-            values = dict(self.examples["bill-entry"])
-            values.pop(key)
-            with self.subTest(key=key), self.assertRaises(ValidationError):
-                self.resolve("bill-entry", values)
+    def test_a_definition_must_name_its_handler_and_sessions_and_nothing_hosted(self):
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "bill-entry"
+            shutil.copytree(WORKFLOWS / "bill-entry", directory)
+            original = json.loads((directory / "workflow.json").read_text())
+            for change in ({"handler": None}, {"sessions": None}, {"execution": {"environment": "openai_hosted"}}):
+                descriptor = {key: value for key, value in {**original, **change}.items() if value is not None}
+                (directory / "workflow.json").write_text(json.dumps(descriptor))
+                with self.subTest(change=change), self.assertRaises(ValidationError):
+                    load_definition(directory)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def answer_names(schema, found=None):
+    """Every property name and enum value an answer schema declares."""
+    found = set() if found is None else found
+    if isinstance(schema, dict):
+        found.update(schema.get("properties", {}))
+        found.update(value for value in schema.get("enum", []) if isinstance(value, str))
+        for value in schema.values():
+            answer_names(value, found)
+    elif isinstance(schema, list):
+        for value in schema:
+            answer_names(value, found)
+    return found
+
+
+def resolves(schema, path):
+    """Whether a dotted path names a property of the answer schema, at any depth."""
+    if not path:
+        return True
+    for node in [schema, *schema.get("anyOf", []), schema.get("items") or {}]:
+        if isinstance(node, dict):
+            if path[0] in node.get("properties", {}) and resolves(node["properties"][path[0]], path[1:]):
+                return True
+            if any(resolves(child, path) for child in node.get("properties", {}).values()):
+                return True
+    return False
+
+
+class InstructionContractTests(unittest.TestCase):
+    """Instructions name only what exists: a field renamed in the answer's schema cannot leave them behind."""
+
+    def check(self, instructions, schema, known):
+        for name in re.findall(r"`([a-z][a-z_.]*)`", instructions):
+            with self.subTest(name=name):
+                if "." in name:
+                    self.assertTrue(resolves(schema, name.split(".")), f"{name} is no path of the answer")
+                else:
+                    self.assertIn(name, answer_names(schema) | known)
+
+    def test_the_bill_instructions_name_only_fields_tools_and_codes_that_exist(self):
+        from minkops_platform.accounts import bill_entry, desk_tools
+        # Fields of the session's input and of lookup answers, which no answer schema declares.
+        given = {"decided_bills", "gst_duty", "description", "learnt"}
+        self.check(load_definition(WORKFLOWS / "bill-entry").instructions, bill_entry.PROPOSAL.tool.input_schema,
+                   set(desk_tools.TOOLS) | set(bill_entry.BILL_TOOLS) | given)
+
+    def test_the_statement_instructions_name_only_fields_tools_and_codes_that_exist(self):
+        from minkops_platform.accounts import desk_tools, statement_entry
+        definition = load_definition(WORKFLOWS / "statement-entry")
+        # A lookup answer's field: a ledger that keeps bill-by-bill balances.
+        self.check(definition.instructions, statement_entry.ROWS.tool.input_schema,
+                   set(desk_tools.TOOLS) | set(statement_entry.CHUNK_TOOLS) | {"bill_by_bill"})
+        self.check(definition.session_bundle["stages"]["layout"], statement_entry.READING.tool.input_schema, set())

@@ -14,19 +14,6 @@ body {
   overflow: hidden;
 }
 
-/* One configuration area beside Run; administration remains separate. */
-.run-settings { margin-block: 1.25rem; padding-block: 1rem; border-block: 1px solid var(--border, #565963); }
-.run-settings h4 { margin: 0 0 .5rem; }
-.run-settings .accounts-toolbar { flex-wrap: wrap; margin-top: .75rem; }
-.run-settings .accounts-field-grid { margin-block: .75rem; }
-
-.discovery-panel-heading + .button { margin-bottom: 1rem; }
-
-.statement-summary { min-width: 0; max-width: 100%; overflow-x: auto; }
-.statement-mapping { min-width: 0; }
-.statement-mapping select { min-width: 0; width: 100%; }
-.statement-summary table { width: 100%; border-collapse: collapse; }
-.statement-summary th, .statement-summary td { padding: 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
 .update-notices { min-width: 0; }
 .update-notices:empty { display: none; }
 .update-notice {

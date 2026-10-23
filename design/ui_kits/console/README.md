@@ -8,13 +8,9 @@ The sample belongs to a mock tenant. It illustrates two employees, three workflo
 
 Use this kit for visual review, and use the running app for end-to-end testing.
 
-`accounts.html` adds the Accounts desk launch, editable run configuration,
-searchable discovery mapping, bill evidence/review and verified local-save
-states. It imports the same `design/accounts.css` used by the app and supports
-Minkops Light, Minkops Dark, Slate Light and Slate Dark. Its buttons are disabled
-because execution belongs to the authenticated running app, not this specimen.
-
-The Accounts specimen also shows full Tally discovery with a voucher-only date
-range, reusable client notes, company selection and a company decision beside
-each bill. These additions reuse the current controls and tokens; the connected
-app remains the executable reference.
+`accounts.html` shows the Accounts desk: starting a run for a client, and the
+review surface every workflow's run shares. A bill is ready to approve with its
+proposed entry open, a statement row waits for its settlement choice, and a
+saved bill is done. It imports the same `design/accounts.css` the app uses and
+supports all four themes. Its buttons are disabled: execution belongs to the
+authenticated running app, not this specimen.

@@ -5,9 +5,10 @@
 Minkops completes what it can truthfully automate. It never becomes an accounting
 data-entry screen or a correction-prompt chat. Exceptions use short labels and
 clear bill/file/voucher/cell identifiers, with contextual buttons such as
-**Do nothing**, **Best guess write**, or **Create this ledger** when supported.
-Do nothing preserves an attention item without writing. A best-guess write stays
-pending human review even after a verified save. Manual changes happen in Tally,
+**Do nothing**, **Choose and approve**, or **Create this ledger** when supported.
+Do nothing preserves an attention item without writing. Choose and approve lets a
+reviewer pick, from the client's own ledgers, where an entry goes; the amounts
+stay as the source prints them. Manual changes happen in Tally,
 Excel or the original system. Detailed diagnostics stay in internal audit records.
 
 Attention is shared across workflows and employees, tenant-scoped and durable.
@@ -16,6 +17,8 @@ its actor. Refresh completes items only from verified external resolution or
 an edit after Minkops' write. Viewing an unchanged record cannot prove review.
 Parallelize independent AI steps with bounded concurrency; preserve authorization,
 ordered writes, idempotency and recovery. See [attention and decisions](docs/attention.md).
+A person belongs to one workspace, joined by invitation, and admins assign members
+the workflows they run. See [workspace access](docs/workspace-access.md).
 
 Minkops offers AI Employees that carry out practical business workflows in a
 customer's existing tools and processes.
@@ -40,7 +43,7 @@ workflow implementation remains Git history, not a parallel methodology to
 preserve. Existing deterministic adapters and checks remain where they enforce
 real integration or correctness requirements.
 
-Typically, we want to use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred and best-guess outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are currently internal; independent AI steps should use bounded parallelism without weakening correctness.
+Typically, we want to use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are currently internal; independent AI steps should use bounded parallelism without weakening correctness.
 
 ### Workflow methods and current scope
 
@@ -52,8 +55,8 @@ Codex executors are out of scope.
 | Method | Current implementation | Development direction | Not introduced yet |
 | --- | --- | --- | --- |
 | REST/MCP | Preferred product direction; Accounts does not currently bind business-system MCPs to its sessions. | Let skills compose existing authorized tools; keep access and consequential-write policy enforceable. Add a binding only for a concrete workflow need. | New SaaS/Tally integrations or a general connector catalogue. |
-| Local execution | Browser-granted Excel saves and the Windows tray companion refresh selected folders, save approved Excel bytes, and save approved Tally vouchers (purchase, journal, debit note, payment, receipt and contra) through one native writer with readback. Web users can request bounded work on their connected PC. Codex Python runs in an OpenAI-hosted sandbox. | Keep native adapters bounded by explicit grants, approval and destination readback. | Customer-machine Python/terminal execution, general remote shells, or self-hosted Agents API environments. |
-| Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns approved bytes through the browser adapter to the existing file; users need no replacement-workbook download. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey or replacing proven Excel safeguards before evaluation. |
+| Local execution | Browser folder grants and the Windows tray companion refresh selected input folders; the companion saves approved Tally vouchers (purchase, journal, debit note, payment, receipt and contra) through one native writer with readback. Web users can request bounded work on their connected PC. Codex Python runs in an OpenAI-hosted sandbox. | Keep native adapters bounded by explicit grants, approval and destination readback. | Customer-machine Python/terminal execution, general remote shells, or self-hosted Agents API environments. |
+| Upload → modified → download | Selected file snapshots enter the hosted sandbox. Accounts returns no modified files; approved entries are saved natively in Tally. | Evaluate skill-generated working copies in the hosted environment, retaining independent validation and approval. | A mandatory manual download/re-upload journey. |
 | Computer use | Outside the current product scope. | Keep it in mind when assessing workflows whose tools lack adequate APIs or file access. | UI automation, computer-use permissions, or a computer-use runtime. |
 
 The implementation provides reusable run controls and lifecycle boundaries,
@@ -65,15 +68,15 @@ Skill-generated workbook editing is a later evaluated pilot. New execution
 methods are separate work. See
 [workflow testing and verification](docs/workflow-authoring.md#testing-a-new-definition).
 
-Accounts desk offers three workflows. Source Discovery collects reusable full
-Tally masters, period-scoped vouchers and reviewed client notes, with Excel
-confined to headers and formula structure. Bill Entry pins that context, routes
-each bill to one company, proposes the client's own voucher (using a posting
-pattern derived once per company and confirmed with one click) and saves approved
-entries. Statement Entry reads each bank format through a layout learned once and
-proved against running balances, then saves approved payments, receipts, split
-lines and own-account transfers. Tally retains bookkeeping; Minkops controls
-entry, review and recovery. See [Source Discovery](docs/source-discovery.md),
+Accounts desk offers two workflows over a read-only mirror of the client's Tally
+companies, which the Windows companion keeps current without AI. Bill Entry reads
+each bill, routes it to the company it is addressed to, proposes the voucher the
+client's own practice records, and saves approved entries. Statement Entry reads
+each bank format through a layout learned once and proved against running
+balances, then saves approved payments, receipts, split lines and own-account
+transfers. Every proposal is checked against the books before review, and every
+save is read back. Tally retains bookkeeping; Minkops controls entry, review and
+recovery. See [the accounts desk](docs/accounts-desk.md),
 [Bill Entry](docs/bill-entry.md) and [Statement Entry](docs/statement-entry.md).
 
 ### Where development belongs
@@ -110,10 +113,11 @@ that a consequential write is correct.
 
 The [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview)
 supplies the Codex harness for reasoning, tool use, session orchestration,
-compaction, and recovery. Accounts desk uses **OpenAI-hosted execution environments**
-with `gpt-6-luna`. Minkops persists tenant-scoped runs and approvals; the browser
-or registered Windows companion applies approved Excel changes to a granted local folder;
-the companion also saves approved Tally vouchers and verifies them by readback. See
+compaction, and recovery. Accounts desk runs `gpt-6-luna` tool sessions with no
+hosted environment: a session reads its document and calls Minkops's read-only
+lookups and `propose`, which checks each proposal at once. Minkops persists
+tenant-scoped runs and approvals; the registered Windows companion saves approved
+Tally vouchers and verifies them by readback. See
 [the Accounts desk guide](docs/accounts-desk.md) for contracts and recovery.
 
 Use OpenAI-provided capabilities when appropriate, including web search and
@@ -125,8 +129,7 @@ of its execution.
 
 The shared app now supports verified accounts and tenant membership, employee
 and workflow settings, task observations, and four selectable brand themes.
-`mock-tenant` exposes Source discovery, Statement entry and Bill entry as
-executable workflows. Agent results, reviews and verified local
+`mock-tenant` exposes Statement entry and Bill entry as executable workflows. Agent results, reviews and verified local
 writes appear in task progress and timelines. The outbox has no production
 publisher yet; the app polls durable state. Production uses Firebase Hosting,
 Cloud Run and an isolated PostgreSQL database. See [production operations](infra/README.md#production)
@@ -134,12 +137,14 @@ for hosting, cost controls, deployment and rollback.
 Customer manifests in `solutions/` describe composition.
 
 `apps/windows-app` supplies the Windows 10/11 x64 shell for that shared UI,
-tray execution, native folder grants, and client-PC Tally/Excel source discovery.
-Bill and statement runs use that discovery with one-click review decisions,
+tray execution, native folder grants, the read-only Tally sync and native saves.
+Bill and statement runs read the synced books, with one-click review decisions,
 independent parallel sessions and verified, idempotent destination saves.
-See [Windows app setup and recovery](docs/windows-app.md). Scheduled runs are
-not implemented yet; installer signing and broader Windows/device coverage
-remain distribution work.
+See [Windows app setup and recovery](docs/windows-app.md), and [Hosted Tally](docs/hosted-tally.md)
+for Tally on a server several Windows users share. Scheduled runs are not
+implemented yet; the first signed release (it needs the organization's
+code-signing certificate) and broader Windows/device coverage remain
+distribution work.
 
 For a local manual test, follow [Accounts desk local setup](docs/accounts-desk.md#local-setup):
 start the OLTP database, run migrations and the demo seed, then start the API

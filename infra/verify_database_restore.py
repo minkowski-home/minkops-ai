@@ -1,5 +1,10 @@
-"""Prove logical restore into a newly created disposable Cloud SQL database."""
+"""Prove logical restore into a newly created disposable Cloud SQL database.
 
+Run through the same loopback proxy, against the same instance and state, as
+provision_database.py; it removes that instance's bootstrap login when done.
+"""
+
+import argparse
 import json
 import os
 import subprocess
@@ -10,15 +15,13 @@ import psycopg
 from google_api import GoogleApi
 from psycopg import sql
 
-STATE_DIR = Path.home() / ".local/state/minkops-deployment"
 
-
-def main():
-    state = json.loads((STATE_DIR / "database.json").read_text())
+def main(project, instance, state_dir):
+    state = json.loads((state_dir / "database.json").read_text())
     admin = {"host": "127.0.0.1", "port": 5433, "dbname": "postgres",
              "user": state["bootstrap"], "password": state["bootstrap_password"]}
     restored = "minkops_restore_" + uuid4().hex[:12]
-    dump = STATE_DIR / "minkops-before-launch.dump"
+    dump = state_dir / "minkops-before-launch.dump"
     # Credentials are child environment only, never command arguments/output.
     environment = dict(os.environ, PGHOST="127.0.0.1", PGPORT="5433", PGDATABASE="minkops",
                        PGUSER="minkops_migrate", PGPASSWORD=state["migration_password"],
@@ -46,10 +49,16 @@ def main():
         # This name was generated and created in this invocation, never supplied.
         connection.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(restored)))
     api = GoogleApi("minkops-ai-prod")
-    operation = api.request("https://sqladmin.googleapis.com/v1/projects/myndral-prod/instances/myndral-db/users?name=" + state["bootstrap"], method="DELETE")
-    api.wait("https://sqladmin.googleapis.com/v1/projects/myndral-prod/operations/" + operation["name"])
+    base = f"https://sqladmin.googleapis.com/v1/projects/{project}"
+    operation = api.request(f"{base}/instances/{instance}/users?name=" + state["bootstrap"], method="DELETE")
+    api.wait(f"{base}/operations/" + operation["name"])
     print(f"Logical restore verified: {len(fingerprints[0][1])} tables, {len(fingerprints[0][0])} migrations. Temporary database and bootstrap login removed.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sql-project", required=True)
+    parser.add_argument("--instance", required=True)
+    parser.add_argument("--state-dir", type=Path, required=True)
+    args = parser.parse_args()
+    main(args.sql_project, args.instance, args.state_dir)

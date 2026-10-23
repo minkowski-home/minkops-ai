@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type SessionUser } from "../api";
 import { desktopBridge } from '../desktop/bridge';
+import { reads } from "../readCache";
 
 interface AuthContextValue {
   user: SessionUser | null;
@@ -15,13 +16,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [isLoading, setLoading] = useState(true);
+  const identity = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const current = await api<SessionUser | null>("/api/auth/session");
+      if (identity.current !== (current?.id ?? null)) reads.clear();
+      identity.current = current?.id ?? null;
       setUser(current);
       return current;
     } catch {
+      reads.clear(); identity.current = null;
       setUser(null);
       return null;
     } finally {
@@ -37,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const logout = useCallback(async () => {
+    reads.clear(); identity.current = null;
     await desktopBridge()?.disconnect();
     if (user) await api("/api/auth/logout", { method: "POST" }, user.csrf_token);
     setUser(null);

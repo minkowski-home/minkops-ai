@@ -53,14 +53,20 @@ export function ConsoleShell({ children, title, tenantName, routeSlug, pendingCo
           <Icon name="tasks" size={18}/><span>Attention items</span>
           {pendingCount>0 && <b>{pendingCount}</b>}
         </NavLink>
+        <NavLink aria-label="Memory" to={`/${routeSlug}/memory`} className={({ isActive }) => `console-nav-item${isActive ? " is-active" : ""}`}>
+          <Icon name="analytics" size={18} /><span>Memory</span>
+        </NavLink>
         {canEdit && <NavLink to={`/${routeSlug}/access`}
           className={({ isActive }) => `console-nav-item${isActive ? " is-active" : ""}`}>
           <Icon name="settings" size={18} /><span>Access</span>
         </NavLink>}
       </nav>
       <div className="console-account">
-        <div className="human-avatar" aria-hidden="true">{user ? initials(user.name) : "?"}</div>
-        <div className="console-account-copy"><strong>{user?.name}</strong><span>{user?.email}</span></div>
+        <NavLink to={`/${routeSlug}/profile`} className="console-account-link" aria-label="Your account"
+          title="Your account">
+          <div className="human-avatar" aria-hidden="true">{user ? initials(user.name) : "?"}</div>
+          <div className="console-account-copy"><strong>{user?.name}</strong><span>{user?.email}</span></div>
+        </NavLink>
         <button className="icon-button account-logout" title="Sign out" aria-label="Sign out"
           onClick={() => { void logout().then(() => navigate("/login")); }}>
           <Icon name="logout" size={17} />

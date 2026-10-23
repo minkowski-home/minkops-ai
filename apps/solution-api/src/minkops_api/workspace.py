@@ -9,8 +9,9 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict
 
 from minkops_api.auth import Db, User, require_csrf, tenant_access
+from minkops_platform import attention, clients, members
+from minkops_platform.installation import installed_definition
 from minkops_platform.run_controls import owns_task, task_control
-from minkops_platform.runtime.launch import installed_definition
 
 from .desktop import call
 
@@ -47,32 +48,52 @@ def workflows_for(connection, tenant_id):
         workflow["run_schema"] = None
         workflow["run_defaults"] = None
         if binding:
-            definition = installed_definition(binding, workflow["key"])
+            try:
+                definition = installed_definition(binding, workflow["key"])
+            except (ValueError, OSError):
+                # Installed from a definition this version no longer ships: listed, but not runnable.
+                continue
             workflow["run_schema"] = definition.run_schema
             workflow["run_defaults"] = definition.metadata["run_defaults"]
     return workflows
 
 
-def tasks_for(connection, tenant_id):
+def tasks_for(connection, tenant_id, visible=None, runs=None):
+    """Recent tasks; `visible` limits client work to the clients a member can reach, and `runs` to the workflows they
+    run. A task of no workflow, such as a PC's refresh, reaches everyone."""
     return connection.execute(
-        """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
-                  control_state, progress, summary, created_at, updated_at
-           FROM tasks WHERE tenant_id = %s ORDER BY updated_at DESC""",
-        (tenant_id,),
+        """SELECT id, workflow_id, client_id, title,
+                  CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
+                  control_state, progress, summary, created_at, updated_at,
+                  (SELECT e.event_type FROM task_events e WHERE e.tenant_id=tasks.tenant_id AND e.task_id=tasks.id
+                   AND e.event_type IN ('queued','executing','review','writing','completed') ORDER BY e.id DESC LIMIT 1) AS stage
+           FROM tasks WHERE tenant_id = %s AND (client_id IS NULL OR %s::uuid[] IS NULL OR client_id = ANY(%s::uuid[]))
+               AND (workflow_id IS NULL OR %s::uuid[] IS NULL OR workflow_id = ANY(%s::uuid[]))
+           ORDER BY updated_at DESC LIMIT 100""",
+        (tenant_id, *(2 * [None if visible is None else list(visible)]), *(2 * [None if runs is None else list(runs)])),
     ).fetchall()
+
+
+def runnable(connection, tenant, user, member):
+    """The tenant's workflows this person runs: every one for an admin, the assigned ones for a member."""
+    runs = members.assigned(connection, tenant, user, member)
+    return runs, [w for w in workflows_for(connection, tenant["id"]) if runs is None or w["id"] in runs]
 
 
 @router.get("/workspace")
 def workspace(slug: str, user: User, connection: Db):
     tenant, member = tenant_access(slug, user, connection)
+    visible = clients.visible_ids(connection, tenant, user, member)
+    runs, flows = runnable(connection, tenant, user, member)
     return {
         "tenant": {"slug": tenant["slug"], "name": tenant["name"]},
         "can_edit": user["is_platform_admin"] or (member and member["role"] == "admin"),
+        "clients": clients.listing(connection, tenant, user, member),
         "employees": employees_for(connection, tenant["id"]),
-        "workflows": workflows_for(connection, tenant["id"]),
-        "tasks": tasks_for(connection, tenant["id"]),
-        "attention_count": connection.execute("SELECT count(*) AS n FROM attention_items WHERE tenant_id=%s AND status='pending'",
-                                              (tenant["id"],)).fetchone()["n"],
+        "workflows": flows,
+        "tasks": tasks_for(connection, tenant["id"], visible, runs),
+        "attention_count": attention.pending_count(connection, tenant["id"], visible,
+                                                   None if runs is None else runs.values()),
     }
 
 
@@ -84,7 +105,7 @@ def employees(slug: str, user: User, connection: Db):
 
 @router.get("/employees/{employee_id}")
 def employee_detail(slug: str, employee_id: str, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
+    tenant, member = tenant_access(slug, user, connection)
     row = connection.execute(
         """SELECT id, key, name, description, status, config_schema,
                   config_values, config_version FROM employees
@@ -95,7 +116,7 @@ def employee_detail(slug: str, employee_id: str, user: User, connection: Db):
         raise HTTPException(404, "Employee not found.")
     row["workflows"] = [
         workflow
-        for workflow in workflows_for(connection, tenant["id"])
+        for workflow in runnable(connection, tenant, user, member)[1]
         if str(row["id"]) in workflow["employee_ids"]
     ]
     return row
@@ -103,17 +124,17 @@ def employee_detail(slug: str, employee_id: str, user: User, connection: Db):
 
 @router.get("/workflows")
 def workflows(slug: str, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
-    return workflows_for(connection, tenant["id"])
+    tenant, member = tenant_access(slug, user, connection)
+    return runnable(connection, tenant, user, member)[1]
 
 
 @router.get("/workflows/{workflow_id}")
 def workflow_detail(slug: str, workflow_id: str, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
+    tenant, member = tenant_access(slug, user, connection)
     row = next(
         (
             item
-            for item in workflows_for(connection, tenant["id"])
+            for item in runnable(connection, tenant, user, member)[1]
             if str(item["id"]) == workflow_id
         ),
         None,
@@ -199,18 +220,37 @@ def update_workflow(
     return update_settings("workflows", slug, workflow_id, body, request, user, connection)
 
 
-@router.get("/tasks/{task_id}")
-def task_detail(slug: str, task_id: str, user: User, connection: Db):
-    tenant, _ = tenant_access(slug, user, connection)
+def reachable_task(connection, tenant, user, member, task_id):
+    """The task, or 404 when it is not this tenant's, or belongs to a client or workflow the person does not reach."""
+    visible = clients.visible_ids(connection, tenant, user, member)
+    runs = members.assigned(connection, tenant, user, member)
     task = connection.execute(
         """SELECT id, workflow_id, title, CASE WHEN control_state='active' THEN status ELSE control_state END AS status,
-                  control_state, progress, summary, created_at, updated_at
-           FROM tasks WHERE tenant_id = %s AND id = %s""",
-        (tenant["id"], task_id),
+                  control_state, progress, summary, created_at, updated_at,
+                  (SELECT e.event_type FROM task_events e WHERE e.tenant_id=tasks.tenant_id AND e.task_id=tasks.id
+                   AND e.event_type IN ('queued','executing','review','writing','completed') ORDER BY e.id DESC LIMIT 1) AS stage
+           FROM tasks WHERE tenant_id = %s AND id = %s
+               AND (client_id IS NULL OR %s::uuid[] IS NULL OR client_id = ANY(%s::uuid[]))
+               AND (workflow_id IS NULL OR %s::uuid[] IS NULL OR workflow_id = ANY(%s::uuid[]))""",
+        (tenant["id"], task_id, *(2 * [None if visible is None else list(visible)]),
+         *(2 * [None if runs is None else list(runs)])),
     ).fetchone()
     if not task:
         raise HTTPException(404, "Task not found.")
+    return task
+
+
+@router.get("/tasks/{task_id}")
+def task_detail(slug: str, task_id: UUID, user: User, connection: Db):
+    tenant, member = tenant_access(slug, user, connection)
+    task = reachable_task(connection, tenant, user, member, task_id)
     task["can_control"] = owns_task(connection, tenant["id"], task_id, user["id"])
+    # A run's task opens its review: the run, and the client whose routes serve it.
+    run = connection.execute(
+        """SELECT r.id, c.slug FROM runs r JOIN client_businesses c ON c.tenant_id=r.tenant_id AND c.id=r.client_id
+           WHERE r.tenant_id=%s AND r.task_id=%s ORDER BY r.created_at LIMIT 1""", (tenant["id"], task_id)).fetchone()
+    if run:
+        task["run"] = {"id": str(run["id"]), "client": run["slug"]}
     task["events"] = connection.execute(
         """SELECT id, event_type, summary, progress, created_at
            FROM task_events WHERE tenant_id = %s AND task_id = %s ORDER BY id""",
@@ -227,6 +267,7 @@ class TaskControl(BaseModel):
 @router.post("/tasks/{task_id}/control")
 def control_task(slug: str, task_id: UUID, body: TaskControl, request: Request, user: User, connection: Db):
     require_csrf(request)
-    tenant, _ = tenant_access(slug, user, connection)
+    tenant, member = tenant_access(slug, user, connection)
+    reachable_task(connection, tenant, user, member, task_id)
     call(task_control, connection, tenant["id"], user, task_id, body.action)
-    return task_detail(slug, str(task_id), user, connection)
+    return task_detail(slug, task_id, user, connection)

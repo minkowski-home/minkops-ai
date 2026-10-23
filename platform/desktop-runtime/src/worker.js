@@ -1,4 +1,13 @@
 /** Reusable local dispatch control; adapters supply network and file effects. */
+
+// What a member is told when a job fails for a reason no connector could name.
+const FAILURES = {
+  "tally.probe": "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again.",
+  "tally.sync": "Tally could not be read on this PC. Keep Tally open with the company loaded; Minkops reads it again shortly.",
+  "tally.write": "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing.",
+  "tally.ledger": "Tally could not create this ledger. Check the company, then use Create this ledger again; an existing ledger is read back, never created twice.",
+};
+
 export class CompanionWorker {
   constructor({
     request,
@@ -7,6 +16,7 @@ export class CompanionWorker {
     savePending,
     acknowledge = async () => {},
     diagnosticFor = () => null,
+    heartbeat = async () => {},
   }) {
     Object.assign(this, {
       request,
@@ -15,86 +25,97 @@ export class CompanionWorker {
       savePending,
       acknowledge,
       diagnosticFor,
+      heartbeat,
     });
     this.busy = false;
+    this.beating = false;
+  }
+  async reportPresence() {
+    if (this.beating) return;
+    this.beating = true;
+    try {
+      await this.heartbeat();
+    } finally {
+      this.beating = false;
+    }
   }
   async tick() {
-    if (this.busy) return;
+    // Presence must not claim another job or renew an execution lease. Keep it
+    // independent of long native reads and durable receipts.
+    if (this.busy) return this.reportPresence();
     this.busy = true;
     try {
-      let pending = this.pending();
-      if (!pending) {
-        const job = await this.request("/api/desktop/worker/claim", {});
-        if (!job) return;
-        let receipt;
-        try {
-          receipt = {
-            claim_token: job.claim_token,
-            result: await this.execute(job),
-            error: null,
-          };
-        } catch (error) {
-          receipt = {
-            claim_token: job.claim_token,
-            result: null,
-            // Connector errors flagged user-safe carry one specific action (for
-            // example "Tally isn't open on <PC>"); anything else stays generic.
-            error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
-              error.userSafe && typeof error.message === "string" && error.message.trim()
-                ? error.message.slice(0, 300)
-              : ["tally.probe", "tally.references"].includes(job.operation)
-                ? "Tally could not be checked on this PC. Use Send diagnostics in the Minkops tray menu, then try again."
-                : ["tally.save", "tally.statement"].includes(job.operation)
-                  ? "Tally could not confirm this entry. Check the company, then use Retry save; existing vouchers are reconciled before writing."
-                  : job.operation === "accounts.save"
-                  ? "The workbook could not be saved. Close Excel, check the original folder, and select Resume saves."
-                  : "The connected folder could not be read. Reconnect it and try again.",
-          };
-        }
-        // Evidence collected while the job ran (for example a classified Tally
-        // failure) is sent with the receipt so support never needs the PC.
-        const diagnostic = await Promise.resolve()
-          .then(() => this.diagnosticFor(job, receipt))
-          .catch(() => null);
-        if (diagnostic) receipt.diagnostic = diagnostic;
-        pending = { id: job.id, receipt };
-        await this.savePending(pending);
-      }
+      if (this.pending()) await this.reportPresence();
+      await this.dispatch();
+    } finally {
+      this.busy = false;
+    }
+  }
+  async dispatch() {
+    let pending = this.pending();
+    if (!pending) {
+      const job = await this.request("/api/desktop/worker/claim", {});
+      if (!job) return;
+      let receipt;
       try {
+        receipt = {
+          claim_token: job.claim_token,
+          result: await this.execute(job),
+          error: null,
+        };
+      } catch (error) {
+        receipt = {
+          claim_token: job.claim_token,
+          result: null,
+          // Connector errors flagged user-safe carry one specific action (for
+          // example "Tally isn't open on <PC>"); anything else stays generic.
+          error: error.code === "TASK_STOPPED" ? "Stopped by operator." :
+            error.userSafe && typeof error.message === "string" && error.message.trim()
+              ? error.message.slice(0, 300)
+            : FAILURES[job.operation] ?? "The connected folder could not be read. Reconnect it and try again.",
+        };
+      }
+      // Evidence collected while the job ran (for example a classified Tally
+      // failure) is sent with the receipt so support never needs the PC.
+      const diagnostic = await Promise.resolve()
+        .then(() => this.diagnosticFor(job, receipt))
+        .catch(() => null);
+      if (diagnostic) receipt.diagnostic = diagnostic;
+      pending = { id: job.id, receipt };
+      await this.savePending(pending);
+    }
+    try {
+      await this.request(
+        `/api/desktop/worker/jobs/${pending.id}/finish`,
+        pending.receipt,
+      );
+    } catch (error) {
+      // A superseded attempt is terminal; network failures retain the receipt.
+      if ([413, 422].includes(error.status) && !pending.receipt.error) {
+        // A rejected result must become an observable failure, not an endless
+        // reclaim loop. Persist the small error receipt before trying again.
+        pending = {
+          id: pending.id,
+          receipt: {
+            claim_token: pending.receipt.claim_token,
+            result: null,
+            error:
+              "The collected result could not be accepted. Choose a smaller supported scope and start again.",
+          },
+        };
+        await this.savePending(pending);
         await this.request(
           `/api/desktop/worker/jobs/${pending.id}/finish`,
           pending.receipt,
         );
-      } catch (error) {
-        // A superseded attempt is terminal; network failures retain the receipt.
-        if ([413, 422].includes(error.status) && !pending.receipt.error) {
-          // A rejected result must become an observable failure, not an endless
-          // reclaim loop. Persist the small error receipt before trying again.
-          pending = {
-            id: pending.id,
-            receipt: {
-              claim_token: pending.receipt.claim_token,
-              result: null,
-              error:
-                "The collected result could not be accepted. Choose a smaller supported scope and start again.",
-            },
-          };
-          await this.savePending(pending);
-          await this.request(
-            `/api/desktop/worker/jobs/${pending.id}/finish`,
-            pending.receipt,
-          );
-          await this.savePending(null);
-          return;
-        }
-        if ([404, 409, 422].includes(error.status))
-          await this.savePending(null);
-        throw error;
+        await this.savePending(null);
+        return;
       }
-      if (!pending.receipt.error) await this.acknowledge(pending.id);
-      await this.savePending(null);
-    } finally {
-      this.busy = false;
+      if ([404, 409, 422].includes(error.status))
+        await this.savePending(null);
+      throw error;
     }
+    if (!pending.receipt.error) await this.acknowledge(pending.id);
+    await this.savePending(null);
   }
 }

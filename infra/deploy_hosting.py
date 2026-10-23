@@ -10,11 +10,15 @@ import gzip
 import hashlib
 import json
 import shutil
+import struct
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import yaml
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import pkcs7
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from google_api import GoogleApi
 
 SITES = {"corporate": "minkops-ai-prod", "console": "minkops-ai-console"}
@@ -64,6 +68,46 @@ def verified_feed(installer, manifest):
     return feed, blockmap
 
 
+def authenticode_publisher(installer):
+    """The common name of the certificate that signed a Windows executable, or None when it carries no signature.
+
+    This reads the Authenticode signature the file embeds, which names its signer. Windows verifies the
+    signature itself, as packaging does before a release (`apps/windows-app/scripts/package.js`).
+    """
+    data = installer.read_bytes()
+    try:
+        if data[:2] != b"MZ":
+            return None
+        header = int.from_bytes(data[0x3C:0x40], "little")
+        if data[header:header + 4] != b"PE\0\0":
+            return None
+        optional = header + 24
+        directories = optional + {0x10B: 96, 0x20B: 112}[int.from_bytes(data[optional:optional + 2], "little")]
+        offset, size = struct.unpack_from("<II", data, directories + 4 * 8)  # the certificate table
+        length, _, kind = struct.unpack_from("<IHH", data, offset)
+        if not size or kind != 2:  # WIN_CERT_TYPE_PKCS_SIGNED_DATA
+            return None
+        signed = data[offset + 8:offset + length]
+        # The entry is padded to eight bytes; the DER header gives the signature's own length.
+        count = signed[1] & 0x7F if signed[1] & 0x80 else 0
+        size = 2 + count + (int.from_bytes(signed[2:2 + count], "big") if count else signed[1])
+        certificates = pkcs7.load_der_pkcs7_certificates(signed[:size])
+    except (IndexError, KeyError, struct.error, ValueError):
+        return None
+    # The signer's certificate is the one for code signing that issued no other in the chain.
+    issuers = {c.issuer for c in certificates if c.issuer != c.subject}
+    signers = [c for c in certificates if c.subject not in issuers and _signs_code(c)]
+    names = [a.value for c in signers for a in c.subject.get_attributes_for_oid(NameOID.COMMON_NAME)]
+    return names[0] if len(names) == 1 else None
+
+
+def _signs_code(certificate):
+    try:
+        return ExtendedKeyUsageOID.CODE_SIGNING in certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    except x509.ExtensionNotFound:
+        return False
+
+
 def deploy(target, installer=None):
     configuration_path = Path(__file__).with_name("firebase.json")
     configuration = next(item for item in json.loads(configuration_path.read_text())["hosting"] if item["target"] == target)
@@ -81,6 +125,10 @@ def deploy(target, installer=None):
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         if source.stat().st_size != manifest["bytes"] or digest != manifest["sha256"]:
             raise RuntimeError("Installer does not match the checked-in release manifest")
+        # Only a release the manifest declares unsigned (and whose page says so) ships without its publisher's
+        # signature; installed companions accept updates only from the publisher that signed them.
+        if not manifest.get("unsigned") and authenticode_publisher(source) != manifest.get("publisher"):
+            raise RuntimeError(f"The installer is not signed by {manifest.get('publisher')}, the release's publisher")
         # Installed companions update from this feed, so it ships with every release.
         feed, blockmap = verified_feed(source, manifest)
         destination.parent.mkdir(exist_ok=True)

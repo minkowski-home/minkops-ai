@@ -37,7 +37,10 @@ class TaskControlTests(unittest.TestCase):
         done=self.client.post(self.worker_base+f"/jobs/{job['id']}/finish",headers=self.worker,json=receipt)
         self.assertEqual(done.status_code,200,done.text)
         self.assertEqual(done.json()['result'],receipt['result'])
-        self.assertIsNone(self.client.post(self.worker_base+'/claim',headers=self.worker,json={}).json())
+        # The stopped job is never handed out again; the idle PC gets only its own periodic Tally read.
+        after=self.client.post(self.worker_base+'/claim',headers=self.worker,json={}).json()
+        self.assertEqual((after['operation'],after['input']),('tally.sync',{'reason':'background'}))
+        self.assertNotEqual(after['id'],job['id'])
         self.assertEqual(self.client.get(f"/api/tenants/{self.slug}/tasks/{job['task_id']}").json()['status'],'stopped')
 
     def test_pause_resume_stop_and_duplicate_requests_are_audited_once(self):

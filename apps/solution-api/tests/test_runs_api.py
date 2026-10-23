@@ -1,0 +1,204 @@
+"""Run status, record pages and idempotent decisions over per-client access."""
+
+import os
+import sys
+import unittest
+from pathlib import Path
+from uuid import uuid4
+
+import psycopg
+from fastapi.testclient import TestClient
+from psycopg.rows import dict_row
+from pwdlib import PasswordHash
+
+from minkops_api.main import app
+from minkops_platform import work
+from minkops_platform.errors import ServiceError
+
+URL = os.environ.get("TEST_DATABASE_URL")
+PASSWORD = "long test password 123!"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "platform/tests"))
+
+
+class Handler:
+    """The smallest workflow handler: Do nothing defers a record."""
+
+    def summarize(self, run, record):
+        return {"id": str(record["id"]), "status": record["status"], "version": record["version"]}
+
+    def detail(self, connection, run, record):
+        return {**self.summarize(run, record), "hold_codes": record["hold_codes"]}
+
+    def decide(self, connection, run, record, action, detail, context):
+        if action != "nothing":
+            raise ServiceError("invalid", "Choose an offered action.")
+        work.update_record(connection, record, status="deferred")
+        work.refresh(connection, run["tenant_id"], run["id"])
+        return {"status": "deferred", "version": record["version"]}
+
+    def ledgers(self, connection, run, record, role, query):
+        return {"role": role, "query": query, "record": str(record["id"])}
+
+
+HANDLER = Handler()
+
+
+@unittest.skipUnless(URL, "TEST_DATABASE_URL required")
+class RunsApiTests(unittest.TestCase):
+    def setUp(self):
+        import factory
+        os.environ["DATABASE_URL"] = URL
+        work.HANDLER_MODULES["desk.test"] = __name__
+        self.addCleanup(work.HANDLER_MODULES.pop, "desk.test")
+        hashed = PasswordHash.recommended().hash(PASSWORD)
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            self.tenant = factory.tenant(db, scoping=True)
+            self.admin = factory.user(db, self.tenant, role="admin")
+            self.member = factory.user(db, self.tenant)
+            db.execute("UPDATE users SET password_hash=%s WHERE id = ANY(%s)", (hashed, [self.admin["id"], self.member["id"]]))
+            self.granted, self.other = factory.client(db, self.tenant), factory.client(db, self.tenant)
+            db.execute("INSERT INTO client_access(tenant_id,client_id,user_id) VALUES (%s,%s,%s)",
+                       (self.tenant["id"], self.granted["id"], self.member["id"]))
+            flow = factory.workflow(db, self.tenant)
+            factory.assign(db, self.tenant, self.member, flow)
+            self.flow, self.runs = flow, {}
+            for client in (self.granted, self.other):
+                run = factory.run(db, self.tenant, client, flow, self.admin, [work.ItemSpec("bill", {"file_id": "a"})])
+                item = db.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
+                (record,) = work.add_records(db, item, [{"kind": "bill", "source": {"file_id": "a"}, "status": "held",
+                                                         "hold_codes": ["supplier_missing"]}])
+                self.runs[client["slug"]] = (run, record)
+
+    def login(self, user):
+        client = TestClient(app)
+        response = client.post("/api/auth/login", json={"email": user["email"], "password": PASSWORD})
+        self.assertEqual(response.status_code, 200, response.text)
+        return client, {"x-csrf-token": client.get("/api/auth/me").json()["csrf_token"]}
+
+    def base(self, client_slug):
+        return f"/api/tenants/{self.tenant['slug']}/clients/{client_slug}"
+
+    def test_members_reach_only_granted_clients_and_their_work(self):
+        client, _ = self.login(self.member)
+        listed = client.get(f"/api/tenants/{self.tenant['slug']}/clients").json()
+        self.assertEqual([c["slug"] for c in listed], [self.granted["slug"]])
+        workspace = client.get(f"/api/tenants/{self.tenant['slug']}/workspace").json()
+        self.assertEqual({t["id"] for t in workspace["tasks"]}, {str(self.runs[self.granted["slug"]][0]["task_id"])})
+        run, _ = self.runs[self.other["slug"]]
+        self.assertEqual(client.get(self.base(self.other["slug"]) + f"/runs/{run['id']}/status").status_code, 403)
+
+    def test_a_records_ledger_picker_is_reached_only_under_its_own_client(self):
+        client, _ = self.login(self.member)
+        _, granted = self.runs[self.granted["slug"]]
+        _, other = self.runs[self.other["slug"]]
+        picker = f"{self.base(self.granted['slug'])}/records/{granted['id']}/ledgers"
+        self.assertEqual(client.get(picker, params={"role": "expense", "q": "cab"}).json(),
+                         {"role": "expense", "query": "cab", "record": str(granted["id"])})
+        self.assertEqual(client.get(picker, params={"role": "Expense!"}).status_code, 422)
+        # Another client's record is not found, whether asked for under that client or under this one.
+        for slug in (self.granted["slug"], self.other["slug"]):
+            response = client.get(f"{self.base(slug)}/records/{other['id']}/ledgers", params={"role": "any"})
+            self.assertIn(response.status_code, (403, 404), response.text)
+
+    def test_a_run_is_reachable_only_under_its_own_client(self):
+        client, _ = self.login(self.admin)
+        run, _ = self.runs[self.granted["slug"]]
+        self.assertEqual(client.get(self.base(self.granted["slug"]) + f"/runs/{run['id']}/status").status_code, 200)
+        self.assertEqual(client.get(self.base(self.other["slug"]) + f"/runs/{run['id']}/status").status_code, 404)
+
+    def test_status_is_small_and_an_unchanged_poll_is_smaller(self):
+        client, _ = self.login(self.member)
+        run, _ = self.runs[self.granted["slug"]]
+        route = self.base(self.granted["slug"]) + f"/runs/{run['id']}/status"
+        status = client.get(route).json()
+        self.assertEqual(status["records"]["held"], 1)
+        self.assertEqual(client.get(route, params={"since": status["activity"]}).json(),
+                         {"unchanged": True, "activity": status["activity"]})
+        page = client.get(self.base(self.granted["slug"]) + f"/runs/{run['id']}/records").json()
+        self.assertEqual([r["status"] for r in page["records"]], ["held"])
+
+    def test_a_repeated_decision_returns_its_receipt_and_a_conflicting_one_gets_the_winner(self):
+        client, csrf = self.login(self.member)
+        _, record = self.runs[self.granted["slug"]]
+        route = self.base(self.granted["slug"]) + f"/records/{record['id']}/decisions"
+        body = {"action": "nothing", "version": record["version"]}
+        first = client.post(route, headers=csrf, json=body)
+        again = client.post(route, headers=csrf, json=body)
+        self.assertEqual((first.status_code, again.status_code), (200, 200), first.text)
+        self.assertEqual((first.json()["replayed"], again.json()["replayed"]), (False, True))
+        admin, admin_csrf = self.login(self.admin)
+        conflict = admin.post(route, headers=admin_csrf, json=body)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.json()["detail"]["receipt"]["status"], "deferred")
+        self.assertEqual(client.post(route, json=body).status_code, 403)  # No CSRF token.
+
+    def test_an_installed_workflow_launches_for_a_granted_client_and_a_replay_returns_the_same_run(self):
+        import factory
+        from psycopg.types.json import Jsonb
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            flow = factory.workflow(db, self.tenant, key="statement-entry")
+            factory.assign(db, self.tenant, self.member, flow)
+            db.execute("""UPDATE workflows SET status='active', config_values=%s, execution_binding=%s WHERE id=%s""",
+                       (Jsonb({"review_mode": "all_outputs"}), Jsonb({
+                           "definition": "accounts-desk/workflows/statement-entry", "handler": "desk.statement",
+                           "presentation": "desk-review", "capabilities": ["files.snapshot"], "policies": []}),
+                        flow["id"]))
+            device = factory.device(db, self.tenant, self.admin)
+            factory.company(db, self.tenant, device, self.granted)
+            [statement] = factory.upload(db, self.tenant, self.member, {"bank.csv": b"Date,Amount,Balance\n"})
+        client, csrf = self.login(self.member)
+        body = {"workflow": "statement-entry", "file_ids": [str(statement["id"])], "request_key": str(uuid4())}
+        launched = client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf, json=body)
+        self.assertEqual(launched.status_code, 200, launched.text)
+        self.assertEqual(launched.json()["items"]["queued"], 1)  # one sheet, in a format still to be learned
+        again = client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf, json=body)
+        self.assertEqual(again.json()["run"]["id"], launched.json()["run"]["id"])
+        changed = client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf, json={**body, "config": {
+            "review_mode": "only_exceptions"}})
+        self.assertEqual(changed.status_code, 409)
+        # A client the member cannot reach cannot be launched for, and a missing workflow is not installed.
+        self.assertEqual(client.post(self.base(self.other["slug"]) + "/runs", headers=csrf, json=body).status_code, 403)
+        self.assertEqual(client.post(self.base(self.granted["slug"]) + "/runs", headers=csrf,
+                                     json={**body, "workflow": "bill-entry", "request_key": str(uuid4())}).status_code,
+                         409)
+
+    def test_a_member_reaches_only_the_workflows_assigned_and_their_runs_go_on_without_them(self):
+        """Assigned Bill entry only, a member neither sees nor acts on Statement entry's runs, tasks or items; an
+        admin reaches both. Taking the assignment away hides the work, and the work itself carries on."""
+        import factory
+        with psycopg.connect(URL, row_factory=dict_row) as db:
+            statements = factory.workflow(db, self.tenant, key="statement-entry")
+            run = factory.run(db, self.tenant, self.granted, statements, self.admin,
+                              [work.ItemSpec("statement_sheet", {"file_id": "s"})])
+            item = db.execute("SELECT * FROM run_items WHERE run_id=%s", (run["id"],)).fetchone()
+            (record,) = work.add_records(db, item, [{"kind": "statement_row", "source": {"row": 1}, "status": "held",
+                                                     "hold_codes": ["ledger_unresolved"]}])
+            db.execute("""INSERT INTO attention_items(tenant_id,task_id,event_key,identifier,label,kind)
+                          VALUES (%s,%s,%s,'Row 1','Other side unclear','manual')""",
+                       (self.tenant["id"], run["task_id"], f"run:{run['id']}:row"))
+        member, csrf = self.login(self.member)
+        admin, _ = self.login(self.admin)
+        tenant = f"/api/tenants/{self.tenant['slug']}"
+        workspace = member.get(tenant + "/workspace").json()
+        self.assertEqual([w["key"] for w in workspace["workflows"]], ["bill-entry"])
+        self.assertNotIn(str(run["task_id"]), {t["id"] for t in workspace["tasks"]})
+        self.assertEqual(workspace["attention_count"], 0)
+        self.assertEqual(admin.get(tenant + "/workspace").json()["attention_count"], 1)
+        base = self.base(self.granted["slug"])
+        for response in (member.get(base + f"/runs/{run['id']}/status"), member.get(base + f"/runs/{run['id']}/records"),
+                         member.get(base + f"/records/{record['id']}"),
+                         member.post(base + f"/records/{record['id']}/decisions", headers=csrf,
+                                     json={"action": "nothing", "version": record["version"]}),
+                         member.get(tenant + f"/tasks/{run['task_id']}"),
+                         member.get(tenant + f"/workflows/{statements['id']}"),
+                         member.post(base + "/runs", headers=csrf, json={
+                             "workflow": "statement-entry", "file_ids": [str(uuid4())], "request_key": str(uuid4())})):
+            self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(member.get(tenant + "/attention").json(), [])
+        self.assertEqual(admin.get(base + f"/runs/{run['id']}/status").status_code, 200)
+        # Without Bill entry either, the member's own client's bill run is hidden too; nobody's run stops.
+        bill_run, _ = self.runs[self.granted["slug"]]
+        with psycopg.connect(URL) as db:
+            db.execute("DELETE FROM workflow_assignments WHERE user_id=%s", (self.member["id"],))
+        self.assertEqual(member.get(base + f"/runs/{bill_run['id']}/status").status_code, 404)
+        self.assertEqual(admin.get(base + f"/runs/{bill_run['id']}/status").json()["run"]["state"], bill_run["state"])

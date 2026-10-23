@@ -1,1 +1,1 @@
-{"tenant": "pr-infra", "employees": ["accounts-desk"]}
+{"tenant": "pr-infra", "client": {"slug": "pr-infra", "name": "PR Infra"}, "employees": ["accounts-desk"]}

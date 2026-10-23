@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import "./index.css";
-import { api, tenantSlug, type Workspace } from "./api";
+import { tenantSlug, type Workspace } from "./api";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ConsoleShell } from "./console/ConsoleShell";
-import { AccessScreen, DashboardScreen, EmployeeDetail, EmployeesScreen, TaskDetail,
+import { AccessScreen } from "./console/Access";
+import { ProfileScreen } from "./console/Profile";
+import { DashboardScreen, EmployeeDetail, EmployeesScreen, TaskDetail,
   WorkflowDetail, WorkflowsScreen } from "./console/screens";
-import Login, { InvitePage, JoinPage, SignupPage, VerifyPage } from "./pages/Login";
+import Login, { InvitePage, NoWorkspacePage, ResetPage, ResetRequestPage } from "./pages/Login";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { DevicesScreen } from './desktop/DevicesScreen';
 import { Attention } from './workspace/Attention';
+import { MemoryScreen } from './workspace/Memory';
 import { LoadingIndicator } from './components/Feedback';
+import { useRead } from "./useRead";
 
 function HomeRedirect() {
   const { user, isLoading } = useAuth();
@@ -18,7 +22,7 @@ function HomeRedirect() {
   if (!user) return <Navigate to="/login" replace />;
   if (user.memberships[0]) return <Navigate to={`/${user.memberships[0].slug}/dashboard`} replace />;
   if (user.is_platform_admin) return <Navigate to="/pr-infra/dashboard" replace />;
-  return <Navigate to="/join" replace />;
+  return <Navigate to="/no-workspace" replace />;
 }
 
 function Console() {
@@ -27,50 +31,31 @@ function Console() {
   const { user, isLoading } = useAuth();
   const routeSlug = workspaceId ?? "pr-infra";
   const slug = tenantSlug(routeSlug);
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [error, setError] = useState("");
   const [collapsed, setCollapsed] = useState(false);
-
-  const refreshWorkspace = useCallback(async () => {
-    try {
-      const loaded = await api<Workspace>(`/api/tenants/${encodeURIComponent(slug)}/workspace`);
-      setWorkspace(loaded);
-      setError("");
-    } catch (caught) {
-      setWorkspace(null);
-      setError(caught instanceof Error ? caught.message : "Could not open workspace.");
-    }
-  }, [slug]);
-
-  useEffect(() => {
-    if (user) void refreshWorkspace();
-  }, [user, refreshWorkspace, location.pathname]);
-
-  useEffect(() => {
-    if (!user || !location.pathname.endsWith('/dashboard')) return;
-    // Durable workflow state changes independently of this browser. Refresh
-    // the activity queue while it is visible, including after returning from review.
-    const timer = setInterval(() => void refreshWorkspace(), 4000);
-    return () => clearInterval(timer);
-  }, [user, refreshWorkspace, location.pathname]);
+  const { data: workspace, error, refresh: refreshWorkspace } = useRead<Workspace>(`${user?.id ?? ""}:${slug}`,
+    `/api/tenants/${encodeURIComponent(slug)}/workspace`, {
+      enabled: Boolean(user), interval: () => location.pathname.endsWith('/dashboard') ? 4000 : 15000,
+    });
 
   if (isLoading) return <main className="loading-state"><LoadingIndicator>Opening Minkops…</LoadingIndicator></main>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
-  if (error) return <main className="access-state"><h1>Workspace unavailable</h1><p>{error}</p>
+  if (error && !workspace) return <main className="access-state"><h1>Workspace unavailable</h1><p>{error}</p>
     <button className="button button-ghost" onClick={() => void refreshWorkspace()}>Retry loading</button>
-    <Link className="button button-primary" to="/join">Request access</Link></main>;
+    <Link className="button button-primary" to="/">Go to your workspace</Link></main>;
   if (!workspace) return <main className="loading-state"><LoadingIndicator>Loading workspace…</LoadingIndicator></main>;
 
   const path = location.pathname;
   const title = path.includes("/employees/") ? "Employee" : path.endsWith("/employees") ? "Employees"
     : path.includes("/workflows/") ? "Workflow" : path.endsWith("/workflows") ? "Workflows"
       : path.includes("/tasks/") ? "Task" : path.endsWith("/connections") ? "Connected PCs"
-        : path.endsWith("/attention") ? "Attention items" : path.endsWith("/access") ? "Access" : "Dashboard";
+        : path.endsWith("/attention") ? "Attention items" : path.endsWith("/memory") ? "Memory"
+          : path.endsWith("/access") ? "Access" : path.endsWith("/profile") ? "Your account" : "Dashboard";
   const attentionCount = workspace.attention_count ?? 0;
 
   return <ConsoleShell title={title} tenantName={workspace.tenant.name} routeSlug={routeSlug}
     pendingCount={attentionCount} collapsed={collapsed} onToggleSidebar={() => setCollapsed((value) => !value)}
     canEdit={workspace.can_edit}>
+    {error && <p role="alert">Could not refresh workspace. Showing the last received results.</p>}
     <Routes>
       <Route path="dashboard" element={<DashboardScreen workspace={workspace} routeSlug={routeSlug} />} />
       <Route path="employees" element={<EmployeesScreen workspace={workspace} routeSlug={routeSlug} />} />
@@ -82,9 +67,11 @@ function Console() {
       <Route path="tasks/:id" element={<TaskRoute workspace={workspace} routeSlug={routeSlug} />} />
       <Route path="connections" element={<DevicesScreen tenant={slug} routeSlug={routeSlug} />} />
       <Route path="attention" element={<Attention tenant={slug} routeSlug={routeSlug} />} />
+      <Route path="memory" element={<MemoryScreen tenant={slug} />} />
       <Route path="access" element={workspace.can_edit
-        ? <AccessScreen workspace={workspace} onSaved={refreshWorkspace} />
+        ? <AccessScreen workspace={workspace} />
         : <Navigate to="dashboard" replace />} />
+      <Route path="profile" element={<ProfileScreen />} />
       <Route path="login" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="dashboard" replace />} />
     </Routes>
@@ -114,10 +101,10 @@ export default function App() {
   return <ThemeProvider><AuthProvider><BrowserRouter><Routes>
     <Route path="/" element={<HomeRedirect />} />
     <Route path="/login" element={<Login />} />
-    <Route path="/signup" element={<SignupPage />} />
-    <Route path="/verify/:token" element={<VerifyPage />} />
     <Route path="/invite/:token" element={<InvitePage />} />
-    <Route path="/join" element={<JoinPage />} />
+    <Route path="/reset" element={<ResetRequestPage />} />
+    <Route path="/reset/:token" element={<ResetPage />} />
+    <Route path="/no-workspace" element={<NoWorkspacePage />} />
     <Route path="/:workspaceId/*" element={<Console />} />
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes></BrowserRouter></AuthProvider></ThemeProvider>;

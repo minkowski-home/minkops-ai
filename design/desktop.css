@@ -8,49 +8,6 @@
   padding: 24px;
   background: var(--surface-raised);
 }
-.task-stage-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border: var(--rule-default);
-  color: var(--text-accent);
-  background: var(--surface-selected);
-}
-.task-stage-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  padding: 0;
-  margin: 22px 0 0;
-  list-style: none;
-}
-.task-stage-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font: var(--type-label);
-}
-.task-stage-list li > span {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border: var(--rule-default);
-  font: var(--type-mono);
-}
-.task-stage-list .is-current {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-.task-stage-list .is-current > span {
-  border-color: var(--border-accent);
-  background: var(--surface-selected);
-}
-.task-stage-list .is-done {
-  color: var(--text-accent);
-}
 .timeline > summary {
   cursor: pointer;
   color: var(--text-secondary);
@@ -94,36 +51,16 @@
 .device-card .button + .button {
   margin-left: 8px;
 }
-.accounts-review-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 16px 0;
-}
-.accounts-review-summary span {
-  padding: 8px 12px;
-  border: var(--rule-default);
-  background: var(--surface-inset);
-  font: var(--type-label);
-}
 @media (max-width: 640px) {
   .task-progress {
     grid-template-columns: 1fr;
     padding: 18px;
-  }
-  .task-stage-list {
-    gap: 12px;
   }
   .device-connect-card {
     align-items: start;
     flex-direction: column;
   }
 }
-
-.discovery-source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 20px 0; }
-.discovery-source-card { border: var(--rule-default); border-radius: var(--radius-card, 12px); padding: 20px; background: var(--surface-raised); }
-.discovery-source-card h4 { margin: 0 0 12px; }
-.discovery-source-card details { margin-top: 12px; }
 
 /* Progress is a measured phase plus explicit checkpoints. Indeterminate motion
    communicates activity only; it never increments a fictional percentage. */
@@ -159,7 +96,12 @@
 @media (prefers-reduced-motion: reduce) {
   .activity-spinner, .workflow-meter.is-indeterminate > span { animation: none; }
   .workflow-meter.is-indeterminate > span { transform: translateX(100%); }
-  .workflow-meter > span, .discovery-row-chevron { transition: none; }
+  .workflow-meter > span { transition: none; }
 }
 .device-connections { margin: 16px 0; padding: 16px 0; border-top: var(--rule-default); border-bottom: var(--rule-default); }
+/* A PC's own Tally port: on a shared server each Windows user's Tally serves on its own. */
+.device-port { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin: 0 0 16px; }
+.device-port label { display: grid; gap: 6px; font: var(--type-label); color: var(--text-secondary); }
+.device-port input { width: 10ch; min-height: 36px; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: var(--radius-2); color: inherit; background: var(--surface-raised); }
+.device-port .quiet-state { flex-basis: 100%; margin: 0; }
 .device-connections h4, .device-connections h5 { margin: 0 0 8px; }

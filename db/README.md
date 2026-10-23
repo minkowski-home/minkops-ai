@@ -1,36 +1,22 @@
 # OLTP migrations
 
-Fresh installations execute **one reconciled baseline**, `migrations/0001_baseline.sql`.
-It creates final tables, constraints, indexes, triggers, the updatable compatibility
-view and the worker coordination singleton. It does not install demo/client data.
-
-Existing databases retain all rows and migration history. `migrate.py` checks every
-recorded checksum against the immutable `archive/pre-baseline` or active migrations,
-applies missing legacy SQL to converge either previously released branch, and then
-records adoption of the baseline. It never runs baseline CREATE statements over an
-existing schema. Unknown history or changed checksums fail the entire transaction.
-An advisory lock serializes migration runners. No production database reset is needed.
+Fresh installations execute **one reconciled baseline**, `migrations/0001_baseline.sql`,
+then every later file in `migrations/` in order. `migrate.py` records each with its
+checksum. Unknown or changed history fails the entire transaction, and an advisory
+lock serializes runners. New changes go in new ordered files; never edit one that
+has been applied, and never squash again.
 
 The baseline's one formatting-only cleanup moved dump-style ALTER statements into
 dependency-ordered CREATE definitions. The runner accepts the exact original/new
-checksum pair, preserving existing history; any other baseline edit still fails.
+checksum pair; any other baseline edit still fails.
 
-The archive is a **compatibility artifact**, not an active fresh-install migration
-chain. Never edit or remove it while a supported installation can need it. New
-changes go in new ordered files under `migrations/`; never squash again after this
-pre-client baseline. Back up and rehearse adoption on a restored database before
-deployment (see [production restores](../infra/README.md#production)).
-
-The archive exists because two branches were released before the shared workflow
-architecture. Their original `0009` files and `0010` stay byte-identical (the
-runner keys versions by full filename stem, so the shared prefix is harmless).
-`0008z` runs before both and temporarily restores the `account_runs` table name
-their ALTER statements expect; `0011` restores `workflow_runs` and the updatable
-`account_runs` view. Each predecessor's source is preserved under the tags
-`archive/2026-10-07/*-before-convergence`; recover from one in a new branch.
-
-Tests compare fresh and upgraded schemas and verify preserved paid sessions,
-approvals, native write plans, company reservations, checksums and view updates.
+The rebuilt accounts desk starts on a fresh database (see
+[cut-over](../docs/rebuild/cutover.md)); the parked build keeps its own. A database
+whose history predates the baseline holds that build's work and is refused, and
+migration `0032`, which drops the old runtime's tables, refuses a database that
+still holds its rows. The archived pre-baseline history and its convergence path
+left with the old build. Its source stays in git history, under the tags
+`archive/2026-10-07/*-before-convergence`, and in the parked build's own tag.
 
 ## Isolated integration tests
 

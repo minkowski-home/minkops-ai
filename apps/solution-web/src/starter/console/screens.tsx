@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Employee, type SettingSpec, type Task,
   type Workflow, type Workspace } from "../api";
 import { useAuth } from "../contexts/AuthContext";
-import { WorkflowLaunch, WorkflowQuickRun, WorkflowReview } from "../workflows/WorkflowControls";
-import { presentationFor } from "../workflows/presentation";
 import { greetingFor, groupWorkflows, sortWorkflows, type WorkflowGroup,
   type WorkflowSort } from "../workspace/presentation";
 import { taskSnapshot, type TaskDetails } from "../workspace/taskDetail";
@@ -13,8 +11,11 @@ import { progressView, type ProgressMode } from '../workspace/progress';
 import { RunTiming } from "../workspace/RunTiming";
 import { TaskProgress } from "../workspace/TaskProgress";
 import { RunControls } from "../workspace/RunControls";
-import { sourceModes } from "../accounts/discoveryView";
+import { RunReview } from "../workspace/RunReview";
+import { LaunchRun } from "../workspace/LaunchRun";
 import { LoadingIndicator, Spinner } from "../components/Feedback";
+import { useRead } from "../useRead";
+import { reads } from "../readCache";
 
 const statusText: Record<string, string> = {
   active: "Active", inactive: "Inactive", paused: "Paused", planned: "Planned",
@@ -31,13 +32,18 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
     <h3>{title}</h3><p>{detail}</p></div>;
 }
 
-function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = false }: {
+/** Labels for the settings' enumerated choices; any other value shows as it is stored. */
+const CHOICES: Record<string, string> = {
+  all_outputs: "Approve every output", only_exceptions: "Only exceptions",
+  infer: "The company each bill is addressed to", locked: "One chosen company for every bill",
+};
+
+function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved }: {
   item: Employee | Workflow;
   kind: "employees" | "workflows";
   tenantSlug: string;
   canEdit: boolean;
   onSaved: () => Promise<void>;
-  statusOnly?: boolean;
 }) {
   const { user } = useAuth();
   const [savedValues, setValues] = useState(item.config_values);
@@ -45,7 +51,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = fa
   const [status, setStatus] = useState(item.status);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const fields = statusOnly ? [] : Object.entries(item.config_schema.properties);
+  const fields = Object.entries(item.config_schema.properties);
   function update(next: Workflow['config_values']) {
     setValues(next);
   }
@@ -57,7 +63,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = fa
     try {
       await api(`/api/tenants/${encodeURIComponent(tenantSlug)}/${kind}/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify(statusOnly ? {status} : { status, config_values: values }),
+        body: JSON.stringify({ status, config_values: values }),
       }, user.csrf_token);
       await onSaved();
       setMessage("Settings saved.");
@@ -66,7 +72,7 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = fa
     } finally { setBusy(false); }
   }
   return <form className="config-panel" onSubmit={(event) => void save(event)}>
-    <div className="section-heading"><div><h2>{statusOnly ? "Workflow administration" : "Settings"}</h2><p>{statusOnly ? "Availability applies to future runs. Pause or stop an existing run from its task page." : `Simple controls for this ${kind === "employees" ? "employee" : "workflow"}.`}</p></div>
+    <div className="section-heading"><div><h2>Settings</h2><p>{`Simple controls for this ${kind === "employees" ? "employee" : "workflow"}.`}</p></div>
       {!canEdit && <span className="read-only-note">View only</span>}
     </div>
     <label className="config-field"><span>Status</span>
@@ -85,15 +91,15 @@ function ConfigPanel({ item, kind, tenantSlug, canEdit, onSaved, statusOnly = fa
         : spec.enum
           ? <select aria-label={spec.title ?? key} value={String(values[key] ?? "")} disabled={!canEdit}
             onChange={(event) => update({ ...values, [key]: event.target.value })}>
-              {spec.enum.map((option) => <option key={String(option)} value={String(option)} disabled={Boolean(spec['x-enabled-options'] && !spec['x-enabled-options'].includes(option))}>{({excel_in_place:'Excel',tally_in_place:'Tally',both_in_place:'Both',draft_excel:'Excel draft',all_outputs:'Approve every output',only_exceptions:'Only exceptions',pdf:'PDFs',image:'Images',mixed:'PDFs and images'} as Record<string,string>)[String(option)] ?? option}</option>)}
+              {spec.enum.map((option) => <option key={String(option)} value={String(option)}>{CHOICES[String(option)] ?? option}</option>)}
             </select>
           : <input aria-label={spec.title ?? key} type={spec.type === "integer" ? "number" : "text"} value={String(values[key] ?? "")}
             disabled={!canEdit} onChange={(event) => update({
               ...values, [key]: spec.type === "integer" ? Number(event.target.value) : event.target.value,
             })} />}
     </label>)}
-    {!statusOnly && !fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
-    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : statusOnly ? "Save availability" : "Save settings"}</button>}
+    {!fields.length && <p className="quiet-state">No additional controls for this item yet.</p>}
+    {canEdit && <button className="button button-primary" disabled={busy}>{busy && <Spinner />}{busy ? "Saving…" : "Save settings"}</button>}
     {message && <p role="status" className="form-message">{message}</p>}
   </form>;
 }
@@ -183,20 +189,15 @@ export function WorkflowDetail(props: { workspace: Workspace; routeSlug: string;
 function WorkflowDetailContent({ workspace, routeSlug, id, onSaved }: {
   workspace: Workspace; routeSlug: string; id: string; onSaved: () => Promise<void>;
 }) {
-  const [overrides, setOverrides] = useState<Workflow['config_values']>({});
-  useEffect(() => { setOverrides({}); }, [id]);
   const item = workspace.workflows.find((workflow) => workflow.id === id);
   if (!item) return <section className="route-screen"><EmptyState title="Workflow not found" detail="This workflow is not in your workspace." /></section>;
   const linked = workspace.employees.filter((employee) => item.employee_ids.includes(employee.id));
-  const executable = Boolean(presentationFor(item));
-  const runWorkflow = { ...item, config_values: { ...item.config_values, ...overrides } };
   return <section className="route-screen detail-screen">
     <Link className="back-link" to={`/${routeSlug}/workflows`}>← Workflows</Link>
-    <header className="detail-heading"><div><h2>{item.name}</h2><p>{presentationFor(item) === 'accounts-discovery' ? `Collect reusable context from ${sourceModes(item.config_schema.properties.destination_mode, null).modes.includes('excel') ? 'Tally and Excel' : 'Tally'}.` : item.description}</p></div><Status value={item.status} /></header>
-    {presentationFor(item) && <WorkflowLaunch key={item.id}
-      tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={runWorkflow} onConfigChange={setOverrides} settings={{canEdit: workspace.can_edit, savedValues: item.config_values, onSaved}} />}
+    <header className="detail-heading"><div><h2>{item.name}</h2><p>{item.description}</p></div><Status value={item.status} /></header>
+    <LaunchRun workspace={workspace} workflow={item} routeSlug={routeSlug} />
     <div className="detail-grid"><ConfigPanel key={`${item.id}:${item.status}`} item={item} kind="workflows" tenantSlug={workspace.tenant.slug}
-      canEdit={workspace.can_edit} onSaved={onSaved} statusOnly={executable} />
+      canEdit={workspace.can_edit} onSaved={onSaved} />
       <aside className="related-panel"><h2>Employees</h2>
         {linked.map((employee) => <Link key={employee.id} to={`/${routeSlug}/employees/${employee.id}`}
           className="related-row"><span>{employee.name}</span><Icon name="chevronRight" size={16} /></Link>)}
@@ -244,8 +245,6 @@ export function DashboardScreen({ workspace, routeSlug }: { workspace: Workspace
             <div className="workflow-launch-card__mark"><Icon name="tasks" size={20} /></div>
             <div><h4>{workflow.name}</h4><p>{workflow.description}</p></div>
             <footer><Link className="button button-ghost" to={`/${routeSlug}/workflows/${workflow.id}`}>View details</Link>
-              {presentationFor(workflow) && <WorkflowQuickRun
-                tenant={workspace.tenant.slug} routeSlug={routeSlug} workflow={workflow} />}
             </footer>
           </article>)}</div>
           : <EmptyState title="Your workspace starts here" detail="Activated workflows will appear when your team is ready." />}
@@ -275,111 +274,31 @@ export function TaskDetail({ workspace, routeSlug, id }: {
   workspace: Workspace; routeSlug: string; id: string;
 }) {
   const snapshot = useMemo(() => taskSnapshot(workspace.tasks, id), [workspace.tasks, id]);
-  const [detail, setDetail] = useState<TaskDetails | null>(() => snapshot);
-  const [error, setError] = useState("");
-  const [attempt, setAttempt] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const controlRevision = useRef(0);
-  useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    setDetail((current) => current?.id === id ? current : snapshot);
-    setError("");
-    setLoading(true);
-    const poll = async () => {
-      const revision = controlRevision.current;
-      try {
-        const result = await api<TaskDetails>(`/api/tenants/${workspace.tenant.slug}/tasks/${id}`);
-        if (!active || revision !== controlRevision.current) return;
-        setDetail(result); setError("");
-        if (!["completed", "failed", "stopped"].includes(result.status)) timer = setTimeout(() => void poll(), 2000);
-      } catch (caught) {
-        if (active) {
-          setError(caught instanceof Error ? caught.message : "Could not load task.");
-          timer = setTimeout(() => void poll(), 5000);
-        }
-      } finally { if (active) setLoading(false); }
-    };
-    void poll();
-    return () => { active = false; clearTimeout(timer); };
-  }, [workspace.tenant.slug, id, snapshot, attempt]);
+  const { user } = useAuth();
+  const scope = `${user?.id ?? ""}:${workspace.tenant.slug}`;
+  const path = `/api/tenants/${workspace.tenant.slug}/tasks/${id}`;
+  const { data: detail, error, loading, refresh, setData } = useRead<TaskDetails>(scope, path, {
+    initial: snapshot ?? undefined, interval: result => result && ["completed", "failed", "stopped"].includes(result.status) ? 0 : 2000,
+  });
   if (error && !detail) return <section className="route-screen">
     <h2>Task unavailable</h2><p role="alert">{error}</p>
-    <button className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
+    <button className="button button-ghost" onClick={() => void refresh()}>Retry</button>
   </section>;
   if (!detail) return <section className="route-screen"><LoadingIndicator>Loading task…</LoadingIndicator></section>;
-  const workflow = workspace.workflows.find((w) => w.id === detail.workflow_id);
-  const presentation = workflow ? presentationFor(workflow) : null;
-  const mode: ProgressMode = presentation === "accounts-bill" ? "bill-entry" : presentation === "accounts-discovery" ? "source-discovery"
-    : !detail.workflow_id && detail.title === 'Check Tally connection' ? 'tally.probe'
-      : !detail.workflow_id && detail.title === 'Refresh local folder' ? 'files.refresh' : detail.workflow_id ? 'proposal' : 'simple';
+  const mode: ProgressMode = detail.workflow_id ? "run"
+    : detail.title === "Check Tally connection" ? "tally.probe"
+      : detail.title === "Refresh local folder" ? "files.refresh" : "simple";
   const progress = progressView(detail, mode);
   return <section className="route-screen detail-screen task-detail">
     <Link className="back-link" to={`/${routeSlug}/dashboard`}>← Dashboard</Link>
     <header className="detail-heading"><div><h2>{detail.title}</h2></div>
       <Status value={detail.status} /></header>
     <RunTiming task={detail} />
-    <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { controlRevision.current++; setDetail(task); setAttempt(value => value + 1); }} />
-    {mode === 'source-discovery' && detail.status === 'stopped' && <p role="status" className="form-message">{progress.activity}</p>}
-    {mode !== 'source-discovery' && <TaskProgress view={progress} stale={Boolean(error)} />}
-    <WorkflowReview key={id} tenant={workspace.tenant.slug} taskId={id} workflow={workflow} controlState={detail.control_state ?? 'active'} />
+    <RunControls tenant={workspace.tenant.slug} task={detail} onChanged={task => { setData(task); reads.invalidate(scope, resource => resource !== path); }} />
+    <TaskProgress view={progress} stale={Boolean(error)} />
+    {detail.run && <RunReview tenant={workspace.tenant.slug} client={detail.run.client} run={detail.run.id} />}
       {error && <p role="alert" className="form-message">Could not refresh <button
-        className="button button-ghost" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
+        className="button button-ghost" onClick={() => void refresh()}>Retry</button></p>}
       {loading && detail.events.length === 0 && <p className="quiet-state">Refreshing…</p>}
-  </section>;
-}
-
-interface JoinRequest {
-  id: string; name: string; email: string;
-}
-
-export function AccessScreen({ workspace, onSaved }: { workspace: Workspace; onSaved: () => Promise<void> }) {
-  const { user } = useAuth();
-  const [requests, setRequests] = useState<JoinRequest[]>([]);
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState("");
-  const [inviteLink, setInviteLink] = useState("");
-  const tenant = workspace.tenant.slug;
-  useEffect(() => {
-    if (!workspace.can_edit) return;
-    void api<JoinRequest[]>(`/api/tenants/${tenant}/join-requests`).then(setRequests).catch(() => setRequests([]));
-  }, [tenant, workspace.can_edit]);
-  async function approve(id: string) {
-    if (!user) return;
-    try {
-      await api(`/api/tenants/${tenant}/join-requests/${id}/approve`, { method: "POST" }, user.csrf_token);
-      setRequests((current) => current.filter((item) => item.id !== id));
-      setStatus("Access approved.");
-      await onSaved();
-    } catch (caught) { setStatus(caught instanceof Error ? caught.message : "Could not approve."); }
-  }
-  async function invite(event: FormEvent) {
-    event.preventDefault();
-    if (!user) return;
-    try {
-      const result = await api<{ invitation_link?: string }>(`/api/tenants/${tenant}/invitations`, {
-        method: "POST", body: JSON.stringify({ email, role: "member" }),
-      }, user.csrf_token);
-      setStatus("Invitation sent.");
-      setInviteLink(result.invitation_link ?? "");
-      setEmail("");
-    } catch (caught) { setStatus(caught instanceof Error ? caught.message : "Could not invite."); }
-  }
-  return <section className="route-screen"><header className="route-heading"><div>
-    <h2>Workspace access</h2><p>Approve requests or invite a teammate.</p></div></header>
-    <div className="detail-grid"><section className="related-panel"><h3>Pending requests</h3>
-      {requests.length ? requests.map((item) => <div className="related-row" key={item.id}>
-        <span>{item.name}<small>{item.email}</small></span>
-        <button className="button button-ghost" onClick={() => void approve(item.id)}>Approve</button>
-      </div>) : <p className="quiet-state">No requests waiting.</p>}
-    </section>
-      <form className="config-panel" onSubmit={(event) => void invite(event)}><h3>Invite someone</h3>
-        <label className="config-field">Email<input type="email" required value={email}
-          onChange={(event) => setEmail(event.target.value)} /></label>
-        <button className="button button-primary">Send invitation</button>
-        {inviteLink && <p className="form-message">Local invite link: <a href={inviteLink}>{inviteLink}</a></p>}
-      </form>
-    </div>
-    {status && <p role="status" className="form-message">{status}</p>}
   </section>;
 }

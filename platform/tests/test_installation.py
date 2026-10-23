@@ -17,17 +17,9 @@ class SolutionDefinitionTests(unittest.TestCase):
         installation = load_solution(REPOSITORY_ROOT, "mock-client")
         self.assertEqual(installation.tenant_slug, "mock-tenant")
         self.assertEqual([e.metadata["key"] for e in installation.employees], ["accounts-desk"])
-        self.assertEqual(set(installation.workflows), {"source-discovery", "bill-entry", "statement-entry"})
-        self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "accounts.bill")
-        self.assertEqual(
-            installation.workflows["bill-entry"].tenant_schema["properties"]["output_mode"][
-                "x-enabled-options"
-            ],
-            ["tally_in_place"],
-        )
-        self.assertEqual(
-            installation.bindings["bill-entry"]["defaults"]["output_mode"], "tally_in_place"
-        )
+        self.assertEqual(set(installation.workflows), {"bill-entry", "statement-entry"})
+        self.assertEqual(installation.workflows["bill-entry"].metadata["handler"], "desk.bill")
+        self.assertEqual(installation.bindings["bill-entry"]["handler"], "desk.bill")
         # The demo workspace grants standing exception-only authorization; the
         # reusable definition keeps explicit review of every output by default.
         self.assertEqual(
@@ -42,12 +34,20 @@ class SolutionDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_solution(REPOSITORY_ROOT, "../employees")
 
-    def test_pr_infra_enables_skill_interpreted_statements_without_ledger_defaults(self):
+    def test_pr_infra_enables_all_accounts_workflows_without_ledger_defaults(self):
         installation = load_solution(REPOSITORY_ROOT, "pr-infra")
         self.assertEqual([e.metadata['key'] for e in installation.employees], ['accounts-desk'])
-        self.assertEqual(set(installation.workflows), {'source-discovery', 'statement-entry'})
+        self.assertEqual(set(installation.workflows), {'statement-entry', 'bill-entry'})
+        self.assertEqual(installation.bindings['bill-entry']['defaults']['review_mode'], 'all_outputs')
         self.assertNotIn('other_side_ledger',installation.workflows['statement-entry'].metadata['tenant_defaults'])
-        self.assertEqual(installation.workflows['statement-entry'].execution_snapshot['execution']['model'],'gpt-6-luna')
+        self.assertEqual(installation.workflows['statement-entry'].session_bundle['model'], 'gpt-6-luna')
+        self.assertEqual(installation.bindings['statement-entry']['handler'], 'desk.statement')
+        # The client's own procedure is added to both workflows, and the rule it agreed is seeded into memory.
+        for key in ('bill-entry', 'statement-entry'):
+            self.assertIn('## Client procedure', installation.workflows[key].session_bundle['instructions'])
+        self.assertEqual(installation.client, {'slug': 'pr-infra', 'name': 'PR Infra'})
+        self.assertEqual([(r['key'], r['workflow']) for r in installation.rules['accounts-desk']],
+                         [('neft-returns', 'statement-entry')])
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is required")
@@ -59,6 +59,18 @@ class InstallationDatabaseTests(unittest.TestCase):
         self.connection.execute("""INSERT INTO users(email,name,password_hash,email_verified_at,is_platform_admin)
             VALUES ('installer@example.com','Installer','unused',now(),true) ON CONFLICT DO NOTHING""")
         return replace(load_solution(REPOSITORY_ROOT, "mock-client"), tenant_slug="mock")
+
+    def test_a_clients_business_is_created_and_its_agreed_rules_seeded_once(self):
+        self.composition()
+        composition = replace(load_solution(REPOSITORY_ROOT, "pr-infra"), tenant_slug="mock")
+        for _ in range(2):
+            install(self.connection, composition, actor_email="installer@example.com")
+        client = self.connection.execute(
+            "SELECT id, name FROM client_businesses WHERE tenant_id=%s AND slug='pr-infra'", (self.tenant,)).fetchone()
+        self.assertEqual(client[1], "PR Infra")
+        rules = self.connection.execute(
+            "SELECT workflow_key, status FROM memory_instructions WHERE client_id=%s", (client[0],)).fetchall()
+        self.assertEqual(rules, [("statement-entry", "active")])
 
     def test_repeat_install_preserves_employee_and_workflow_settings_and_status(self):
         composition = self.composition()
@@ -108,11 +120,49 @@ class InstallationDatabaseTests(unittest.TestCase):
         with self.assertRaises(ServiceError):
             install(self.connection, composition, actor_email="installer@example.com")
 
+    def test_an_operator_creates_a_clients_workspace_and_invites_its_first_admin(self):
+        """The admin needs no account yet: the operator sends them a sign-up link. Repeating it replaces the link
+        until they join, then changes nothing; nobody else can take the workspace over."""
+        from psycopg.rows import dict_row
+
+        from minkops_platform import identity, members
+        from minkops_platform.errors import ServiceError
+        from minkops_platform.installation import provision_tenant
+
+        composition = load_solution(REPOSITORY_ROOT, "pr-infra")
+        tenant, first = provision_tenant(self.connection, composition, name="PR Infra", admin_email="Owner@client.example")
+        again, link = provision_tenant(self.connection, composition, name="PR Infra", admin_email="owner@client.example")
+        self.assertEqual(again, tenant)
+        with self.connection.cursor(row_factory=dict_row) as cursor:
+            with self.assertRaises(ServiceError):
+                members.invitation(cursor, first)
+            self.assertEqual(members.invitation(cursor, link)["role"], "admin")
+            # Before the admin joins, the operator may name another: the latest link is the one that works.
+            _, other = provision_tenant(self.connection, composition, name="PR Infra", admin_email="other@client.example")
+            with self.assertRaises(ServiceError):
+                members.invitation(cursor, link)
+            _, link = provision_tenant(self.connection, composition, name="PR Infra", admin_email="owner@client.example")
+            joined = members.accept(cursor, link, name="Owner", password="a long enough password")
+        self.assertEqual(provision_tenant(self.connection, composition, name="PR Infra",
+                                          admin_email="owner@client.example"), (tenant, None))
+        self.assertEqual(self.connection.execute(
+            """SELECT t.slug, t.name, u.email, m.role FROM tenants t JOIN memberships m ON m.tenant_id=t.id
+               JOIN users u ON u.id=m.user_id WHERE t.id=%s""", (tenant,)).fetchall(),
+            [("pr-infra", "PR Infra", "owner@client.example", "admin")])
+        self.assertIsNotNone(identity.authenticate(self.connection.cursor(row_factory=dict_row), joined["email"],
+                                                   "a long enough password"))
+        with self.assertRaisesRegex(ServiceError, "another administrator"):
+            provision_tenant(self.connection, composition, name="PR Infra", admin_email="other@client.example")
+        # The operator installs; an admin may be named to attribute it.
+        self.assertEqual(install(self.connection, composition), ["statement-entry", "bill-entry"])
+        self.assertEqual(install(self.connection, composition, actor_email="owner@client.example"),
+                         ["statement-entry", "bill-entry"])
+
     def test_dry_run_really_rolls_back_registration(self):
         composition = self.composition()
         with self.connection.transaction(force_rollback=True):
             install(self.connection, composition, actor_email="installer@example.com")
             self.assertEqual(
-                self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 3
+                self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 2
             )
         self.assertEqual(self.connection.execute("SELECT count(*) FROM workflows").fetchone()[0], 0)

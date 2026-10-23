@@ -11,8 +11,9 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 // Reuse the connector's declared dependency; fixtures need no root install.
 const { XMLParser, XMLBuilder } = createRequire(new URL("../connectors/desktop/package.json", import.meta.url))("fast-xml-parser");
-import { discoverClientContext, requireOpenCompany, readTallyReferences,
-  saveTallyBill, tallyTransport, tallyProcesses } from "../connectors/desktop/src/index.js";
+import { requireOpenCompany, readTallyReferences,
+  saveVoucher, tallyTransport, tallyProcesses } from "../connectors/desktop/src/index.js";
+import { MASTER_TYPES, readCompanies, readMasters, readVouchers } from "../connectors/desktop/src/sync.js";
 
 const parser = new XMLParser({ignoreAttributes:false,parseTagValue:false,trimValues:true});
 const scalar = value => typeof value === "object" && value !== null ? value["#text"] : value;
@@ -86,6 +87,30 @@ export function checkImport(xml, expected) {
 const recordName = record => String(scalar(record?.["@_NAME"] ?? record?.NAME) ?? "").trim();
 const recordEntries = (record, inventory) => list(inventory ? record["LEDGERENTRIES.LIST"] : record["ALLLEDGERENTRIES.LIST"])
   .map(e => [scalar(e.LEDGERNAME), cents(String(scalar(e.AMOUNT)).trim())]);
+/** The protocol-5 plan the server would approve for a fixture purchase bill:
+ * the adapter proof saves it once, then replays it as a duplicate. */
+export function proofPlan(company, voucher, ledgers, purchase) {
+  const identity = new Map(ledgers.map(record => [recordName(record), record]));
+  const lines = voucher.entries.map(entry => {
+    const amount = cents(entry.amount);
+    return {ledger:entry.ledger, side:amount > 0n ? "credit" : "debit", amount_cents:Number(amount < 0n ? -amount : amount), allocation:null};
+  });
+  const year = Number(voucher.date.slice(0,4)) - (Number(voucher.date.slice(5,7)) < 4 ? 1 : 0);
+  return {format_version:5, family:"purchase", operation:"append", fence:"retry_after_read",
+    company:company.company, company_guid:company.company_guid, port:9000, remote_id:voucher.guid,
+    voucher_type:{NAME:recordName(purchase), GUID:scalar(purchase.GUID)},
+    header:{date:voucher.date, reference:voucher.reference, party_ledger:voucher.party,
+      narration:`Minkops reviewed bill ${voucher.reference}`, tag:null},
+    lines,
+    references:{company_guid:company.company_guid, ledgers:Object.fromEntries(lines.map(({ledger}) => {
+      const record = identity.get(ledger);
+      return [ledger, {GUID:scalar(record?.GUID), PARENT:scalar(record?.PARENT), ALTERID:scalar(record?.ALTERID)}];
+    }))},
+    duplicate:{strategy:"document", families:["purchase","journal"], party_ledger:voucher.party, number:voucher.reference,
+      number_fields:["REFERENCE"], window:{from:`${year}-04-01`, to:`${year + 1}-03-31`}},
+    expected:null};
+}
+
 export function verifyVoucher(expected, actual) {
   assert.equal(scalar(actual.DATE), expected.date.replaceAll("-",""));
   assert.equal(scalar(actual.VOUCHERTYPENAME),expected.type);
@@ -129,10 +154,17 @@ async function main() {
   const config = {port:9000,period:{from:"2026-04-01",to:"2026-10-31"}};
   const diagnostics = [];
   const request = tallyTransport({diagnose: async event => diagnostics.push(event)});
+  // The sync's own readers: every master of each mirrored type, and the period's vouchers, per open company.
   const discover = async () => {
-    const snapshot = await discoverClientContext(config,{request});
-    assert.equal(snapshot.partial,false,"Complete discovery required");
-    return snapshot;
+    const companies = [];
+    for (const open of await readCompanies({port:config.port,request})) {
+      const masters = [];
+      for (const type of MASTER_TYPES) masters.push(...await readMasters({port:config.port,company:open.name,type,request}));
+      const vouchers = await readVouchers({port:config.port,company:open.name,...config.period,request});
+      companies.push({company:open.name,company_guid:open.guid,masters:{records:masters,count:masters.length},
+        vouchers:{records:vouchers.map(data=>({data})),count:vouchers.length}});
+    }
+    return {companies};
   };
   const started = await discover();
   const nativeUnit = started.companies.flatMap(c=>c.masters.records)
@@ -189,17 +221,11 @@ async function main() {
     const ledgers = refs.collections.find(c=>c.category === "ledgers").records;
     const purchase = refs.collections.find(c=>c.category === "voucher_types").records.find(r=>recordName(r)==="Purchase");
     assert.ok(purchase);
-    const first = company.vouchers[0], entry = first.entries;
-    const approved = {company:company.company,port:9000,format_version:3,operation:"append",expected:null,remote_id:first.guid,
-      references:{company_guid:company.company_guid,voucher_type:{NAME:"Purchase",GUID:purchase.GUID},
-        ledgers:Object.fromEntries(ledgers.map(l=>[recordName(l),l]))},
-      data:{invoice_number:first.reference,vendor:first.party,date:first.date,purchase_ledger:entry[1].ledger,
-        subtotal:Number(-cents(entry[1].amount))/100,tax:Number(entry.slice(2).reduce((s,e)=>s-cents(e.amount),0n))/100,
-        tax_ledger:null,total:Number(entry[0].amount),cost_code:null},
-      tax_allocations:entry.slice(2).map(e=>({ledger:e.ledger,amount:Number(-cents(e.amount))/100}))};
-    const proof = await saveTallyBill(approved,{request});
+    const first = company.vouchers[0];
+    const approved = proofPlan(company, first, ledgers, purchase);
+    const proof = await saveVoucher(approved,{request});
     assert.ok(["saved","duplicate"].includes(proof.outcome),JSON.stringify(proof));
-    const replay = await saveTallyBill(approved,{request});
+    const replay = await saveVoucher(approved,{request});
     assert.equal(replay.outcome,"duplicate");
     proofs.push({company:company.company,first_save:proof.outcome,replay:replay.outcome});
     await writeFile(join(root,"evidence/adapter-proofs.json"),JSON.stringify(proofs,null,2));

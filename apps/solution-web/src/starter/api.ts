@@ -15,13 +15,43 @@ export interface SessionUser {
   csrf_token: string;
 }
 
+/** A workspace's person, as its admins see them. */
+export interface Member {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "member";
+  joined_at: string;
+  /** The workflows a member runs; an admin runs every one. */
+  workflow_ids: string[];
+  /** Their connected PCs, which removing them disconnects. */
+  pcs: number;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: "admin" | "member";
+  created_at: string;
+  expires_at: string;
+  expired: boolean;
+  invited_by: string | null;
+}
+
+/** A browser a person is signed in on. */
+export interface SessionInfo {
+  id: string;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string;
+  current: boolean;
+}
+
 export interface SettingSpec {
   type: "boolean" | "string" | "integer";
   title?: string;
   description?: string;
   enum?: (string | number)[];
-  "x-enabled-options"?: (string | number)[];
-  "x-step"?: string;
 }
 
 export interface ConfigSchema {
@@ -39,6 +69,8 @@ export interface Employee {
   config_values: Record<string, string | number | boolean>;
   config_version: number;
 }
+
+export interface Client { id: string; slug: string; name: string; can_edit?: boolean }
 
 export interface Workflow {
   id: string;
@@ -66,6 +98,7 @@ export interface Task {
   summary: string;
   created_at: string;
   updated_at: string;
+  stage?: string;
 }
 
 export interface TaskEvent {
@@ -80,9 +113,20 @@ export interface Workspace {
   tenant: { slug: string; name: string };
   can_edit: boolean;
   attention_count?: number;
+  /** The client businesses this member can reach. */
+  clients?: Client[];
   employees: Employee[];
   workflows: Workflow[];
   tasks: Task[];
+}
+
+export class ApiError extends Error {
+  status: number;
+  /** Structured context from the server, such as the receipt that won a conflict. */
+  payload: Record<string, unknown> | null;
+  constructor(status: number, message: string, payload: Record<string, unknown> | null = null) {
+    super(message); this.status = status; this.payload = payload;
+  }
 }
 
 export async function api<T>(path: string, options: RequestInit = {}, csrf?: string): Promise<T> {
@@ -92,8 +136,13 @@ export async function api<T>(path: string, options: RequestInit = {}, csrf?: str
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const body = await response.json().catch(() => null) as (T & { detail?: string }) | null;
   if (!response.ok) {
-    const detail = body?.detail;
-    throw new Error(typeof detail === "string" ? detail : `Request failed (${response.status}).`);
+    const detail = body?.detail as unknown;
+    if (typeof detail === "string") throw new ApiError(response.status, detail);
+    if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+      const { message, ...payload } = detail as { message: string } & Record<string, unknown>;
+      throw new ApiError(response.status, message, payload);
+    }
+    throw new ApiError(response.status, `Request failed (${response.status}).`);
   }
   return body as T;
 }

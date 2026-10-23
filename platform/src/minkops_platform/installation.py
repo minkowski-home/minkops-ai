@@ -7,14 +7,15 @@ identity/membership, grants no file/tool access, and preserves operator settings
 import json
 import re
 from copy import deepcopy
-from dataclasses import dataclass, replace
-from pathlib import Path
+from dataclasses import dataclass, field, replace
+from pathlib import Path, PurePosixPath
 
 from jsonschema import Draft202012Validator
 from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
 from .errors import ServiceError
+from .resources import REPOSITORY_ROOT
 from .workflows import load_definition, register_workflow, validate
 
 SLUG = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -54,8 +55,21 @@ BINDING_SCHEMA = {
                     "key": {"type": "string", "pattern": SLUG.pattern},
                     "status": {"enum": ["active", "paused", "planned"]},
                     "defaults": {"type": "object"},
-                    "policies": {"type": "array"},
                     "variant": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+        # Rules the client agreed, seeded once into the employee's memory for the solution's client business.
+        "rules": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["key", "text"],
+                "additionalProperties": False,
+                "properties": {
+                    "key": {"type": "string", "pattern": SLUG.pattern},
+                    "workflow": {"type": "string", "pattern": SLUG.pattern},
+                    "text": {"type": "string", "minLength": 1, "maxLength": 2000},
                 },
             },
         },
@@ -89,16 +103,19 @@ class Installation:
     employees: list
     workflows: dict
     bindings: dict
+    # The solution's own client business in the tenant, and each employee's rules to seed for it.
+    client: dict | None = None
+    rules: dict = field(default_factory=dict)
 
 
 def client_variant(definition, directory, filename, solution_id):
-    """Add client guidance/resources to a core bundle; never replace executable contracts.
+    """Add a client's procedure to a core workflow's instructions; never replace its contracts.
 
-    Client procedures are trusted repository content, but permission/approval
-    enforcement stays in the installed handler and deterministic policy layer.
-    Both versions and the exact composed bytes travel with each durable run.
+    Client procedures are trusted repository content, but permission and
+    approval enforcement stays in the run's handler. Both versions and the
+    exact composed instructions are pinned with each run's bundle.
     """
-    from .runtime.bundles import digest, read_resource, validate_snapshot
+    from .runtime.bundles import read_resource
 
     variant = json.loads(read_resource(directory, filename))
     validate(
@@ -109,12 +126,6 @@ def client_variant(definition, directory, filename, solution_id):
             "properties": {
                 "version": {"type": "string", "pattern": r"^[0-9]+\.[0-9]+\.[0-9]+$"},
                 "instructions": {"type": "string", "minLength": 1},
-                "resources": {
-                    "type": "array",
-                    "uniqueItems": True,
-                    "maxItems": 30,
-                    "items": {"type": "string"},
-                },
                 "defaults": {"type": "object"},
                 "name": {"type": "string", "minLength": 1},
                 "description": {"type": "string"},
@@ -125,42 +136,23 @@ def client_variant(definition, directory, filename, solution_id):
     metadata = deepcopy(definition.metadata)
     metadata["tenant_defaults"] = {**metadata["tenant_defaults"], **variant.get("defaults", {})}
     validate(definition.tenant_schema, metadata["tenant_defaults"])
-    for field in ("name", "description"):
-        if field in variant:
-            metadata[field] = variant[field]
-    snapshot = deepcopy(definition.execution_snapshot)
-    if snapshot is None:
-        raise ValueError("Client variants require a core execution bundle.")
-    snapshot["variant"] = {
-        "solution": solution_id,
-        "core_version": metadata["version"],
-        "version": variant["version"],
-    }
-    snapshot["files"]["client/variant.json"] = json.dumps(variant, sort_keys=True)
-    for resource in variant.get("resources", []):
-        name = "client/" + resource
-        snapshot["files"][name] = read_resource(directory, resource)
-        snapshot["execution"]["resources"].append(name)
+    for key in ("name", "description"):
+        if key in variant:
+            metadata[key] = variant[key]
+    bundle = deepcopy(definition.session_bundle)
+    bundle["variant"] = {"solution": solution_id, "core_version": metadata["version"], "version": variant["version"]}
     instructions = definition.instructions
     if variant.get("instructions"):
         addition = read_resource(directory, variant["instructions"])
         if not addition.strip():
             raise ValueError("Client instructions must not be empty.")
-        addition = "\n\n## Client procedure\n\n" + addition
-        instructions += addition
-        for path in {"SKILL.md", snapshot["execution"]["instructions"]}:
-            snapshot["files"][path] += addition
-    snapshot["sha256"] = digest(snapshot)
-    return replace(
-        definition,
-        metadata=metadata,
-        instructions=instructions,
-        execution_snapshot=validate_snapshot(snapshot),
-    )
+        bundle["instructions"] += "\n\n## Client procedure\n\n" + addition.strip()
+        instructions += "\n\n## Client procedure\n\n" + addition
+    return replace(definition, metadata=metadata, instructions=instructions, session_bundle=bundle)
 
 
 def load_solution(root: Path, solution_id: str) -> Installation:
-    from .runtime.application import get_handler, validate_policies
+    from .work import HANDLER_MODULES
 
     solution = owned_directory(root / "solutions", solution_id)
     manifest = read_json(solution / "installation.json")
@@ -170,6 +162,15 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             "required": ["tenant", "employees"],
             "properties": {
                 "tenant": {"type": "string", "pattern": SLUG.pattern},
+                "client": {
+                    "type": "object",
+                    "required": ["slug", "name"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "slug": {"type": "string", "pattern": SLUG.pattern},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                    },
+                },
                 "employees": {
                     "type": "array",
                     "uniqueItems": True,
@@ -180,7 +181,7 @@ def load_solution(root: Path, solution_id: str) -> Installation:
         },
         manifest,
     )
-    employees, workflows, bindings = [], {}, {}
+    employees, workflows, bindings, rules = [], {}, {}, {}
     for employee_key in manifest["employees"]:
         directory = owned_directory(root / "employees", employee_key)
         metadata = read_json(directory / "employee.json")
@@ -207,9 +208,6 @@ def load_solution(root: Path, solution_id: str) -> Installation:
             if key in workflows:
                 raise ValueError("Workflow keys must be unique in a tenant.")
             definition = load_definition(owned_directory(directory / "workflows", key))
-            from .solution_policy import bind_definition
-
-            definition = bind_definition(definition, solution_id, repository_root=root)
             if item.get("variant"):
                 variant_directory = owned_directory(client_employee / "workflows", key)
                 definition = client_variant(
@@ -217,10 +215,9 @@ def load_solution(root: Path, solution_id: str) -> Installation:
                 )
             if definition.metadata["owner"] != employee_key:
                 raise ValueError("Workflow must belong to its declared employee.")
-            handler = definition.metadata.get("handler", "skill.proposal")
-            get_handler(handler)
-            policies = item.get("policies", [])
-            validate_policies(policies)
+            handler = definition.metadata["handler"]
+            if handler not in HANDLER_MODULES:
+                raise ValueError(f"Workflow {key} names an unknown handler.")
             defaults = {**definition.metadata["tenant_defaults"], **item.get("defaults", {})}
             validate(definition.tenant_schema, defaults)
             workflows[key] = definition
@@ -230,11 +227,16 @@ def load_solution(root: Path, solution_id: str) -> Installation:
                 "solution": solution_id,
                 "definition": f"{employee_key}/workflows/{key}",
                 "handler": handler,
-                "presentation": definition.metadata.get("presentation", "proposal"),
-                "capabilities": definition.metadata.get("capabilities", []),
-                "policies": policies,
+                "presentation": definition.metadata.get("presentation"),
             }
-    return Installation(manifest["tenant"], employees, workflows, bindings)
+        if binding.get("rules"):
+            if "client" not in manifest:
+                raise ValueError("Seeded rules need the solution's client business in installation.json.")
+            known = {item["key"] for item in binding["workflows"]}
+            if any(rule.get("workflow") not in (None, *known) for rule in binding["rules"]):
+                raise ValueError("A seeded rule must name one of its employee's workflows.")
+            rules[employee_key] = binding["rules"]
+    return Installation(manifest["tenant"], employees, workflows, bindings, manifest.get("client"), rules)
 
 
 def register_employee(connection, tenant_id, definition):
@@ -266,24 +268,53 @@ def register_employee(connection, tenant_id, definition):
         ).fetchone()[0]
 
 
-def install(connection, installation: Installation, *, actor_email: str):
-    """Authorize installation, then apply the entire composition in one transaction."""
+def provision_tenant(connection, installation: Installation, *, name: str, admin_email: str):
+    """Create a composition's workspace, and invite its first admin by a sign-up link the operator sends them.
+
+    An operator's decision: the workspace takes the composition's slug, which no one else can give it. Until an admin
+    joins, repeating it names the first admin afresh, and only the latest link works; once they have joined, it
+    changes nothing, and anyone else is refused. Returns the workspace's id and the link's token, or None for the
+    token once the admin has joined.
+    """
+    from . import members
+
+    with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
+        tenant = cursor.execute("INSERT INTO tenants(slug, name) VALUES (%s, %s) ON CONFLICT (slug) DO NOTHING "
+                                "RETURNING id, slug, name", (installation.tenant_slug, name)).fetchone() or \
+            cursor.execute("SELECT id, slug, name FROM tenants WHERE slug=%s", (installation.tenant_slug,)).fetchone()
+        admins = [row["email"].lower() for row in cursor.execute(
+            """SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id
+               WHERE m.tenant_id=%s AND m.role='admin'""", (tenant["id"],))]
+        if admin_email.strip().lower() in admins:
+            return tenant["id"], None
+        if admins:
+            raise ServiceError("conflict", "This workspace exists and belongs to another administrator.")
+        cursor.execute("DELETE FROM invitations WHERE tenant_id=%s AND accepted_at IS NULL AND lower(email) <> lower(%s)",
+                       (tenant["id"], admin_email.strip()))
+        return tenant["id"], members.invite(cursor, tenant, None, admin_email, "admin")["token"]
+
+
+def install(connection, installation: Installation, *, actor_email: str | None = None):
+    """Apply the entire composition in one transaction. The operator installs, holding the database itself; an
+    `actor_email` attributes it to the workspace's admin, or a platform admin, and anyone else is refused."""
     with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
         tenant = cursor.execute(
             "SELECT * FROM tenants WHERE slug=%s FOR UPDATE", (installation.tenant_slug,)
         ).fetchone()
         if not tenant:
             raise ServiceError("not_found", "Create the tenant through normal provisioning first.")
-        actor = cursor.execute(
-            """SELECT u.id,u.is_platform_admin,m.role FROM users u
-            LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=%s
-            WHERE lower(u.email)=lower(%s) AND u.email_verified_at IS NOT NULL""",
-            (tenant["id"], actor_email),
-        ).fetchone()
-        if not actor or not (actor["is_platform_admin"] or actor["role"] == "admin"):
-            raise ServiceError(
-                "forbidden", "Installation requires a verified tenant or platform administrator."
-            )
+        actor = {"id": None}
+        if actor_email is not None:
+            actor = cursor.execute(
+                """SELECT u.id,u.is_platform_admin,m.role FROM users u
+                LEFT JOIN memberships m ON m.user_id=u.id AND m.tenant_id=%s
+                WHERE lower(u.email)=lower(%s) AND u.email_verified_at IS NOT NULL""",
+                (tenant["id"], actor_email),
+            ).fetchone()
+            if not actor or not (actor["is_platform_admin"] or actor["role"] == "admin"):
+                raise ServiceError(
+                    "forbidden", "Installation requires a verified tenant or platform administrator."
+                )
         for employee in installation.employees:
             register_employee(connection, tenant["id"], employee)
         installed = []
@@ -295,17 +326,7 @@ def install(connection, installation: Installation, *, actor_email: str):
             workflow_id = register_workflow(
                 connection, tenant["id"], definition, spec.get("defaults")
             )
-            binding = {
-                k: spec[k]
-                for k in (
-                    "definition",
-                    "handler",
-                    "presentation",
-                    "policies",
-                    "capabilities",
-                    "solution",
-                )
-            }
+            binding = {k: spec[k] for k in ("definition", "handler", "presentation", "solution")}
             cursor.execute(
                 "UPDATE workflows SET execution_binding=%s WHERE tenant_id=%s AND id=%s",
                 (Jsonb(binding), tenant["id"], workflow_id),
@@ -323,7 +344,7 @@ def install(connection, installation: Installation, *, actor_email: str):
                     workflow_id,
                     Jsonb(
                         {
-                            "actor_id": str(actor["id"]),
+                            "actor_id": str(actor["id"]) if actor["id"] else None,
                             "key": key,
                             "definition_version": definition.metadata["version"],
                         }
@@ -331,4 +352,51 @@ def install(connection, installation: Installation, *, actor_email: str):
                 ),
             )
             installed.append(key)
+        if installation.client:
+            from . import clients
+            from .accounts import memory
+
+            # Both run on this installation's dict-row cursor, whatever the caller's connection returns.
+            client = clients.ensure(cursor, tenant, installation.client["slug"], installation.client["name"])
+            for employee_key, seeds in installation.rules.items():
+                memory.seed(cursor, tenant["id"], client["id"], seeds, employee=employee_key)
         return installed
+
+
+def installed_definition(binding, key):
+    """Resolve only a trusted installation's employee-owned path."""
+    relative = binding["definition"]
+    parts = PurePosixPath(relative).parts
+    if len(parts) != 3 or parts[1] != "workflows" or parts[2] != key or "\\" in relative:
+        raise ValueError("Installed workflow definition has an invalid path.")
+    root = REPOSITORY_ROOT / "employees"
+    directory = root / relative
+    if not directory.resolve().is_relative_to(root.resolve()):
+        raise ValueError("Installed workflow definition must stay inside employees.")
+    definition = load_definition(directory)
+    if binding.get("solution"):
+        composition = load_solution(REPOSITORY_ROOT, binding["solution"])
+        if key not in composition.workflows or composition.bindings[key]["definition"] != relative:
+            raise ValueError("Installed client variant differs from its composition. Reinstall explicitly.")
+        definition = composition.workflows[key]
+    if (
+        definition.metadata["owner"] != parts[0]
+        or definition.metadata["handler"] != binding["handler"]
+        or definition.metadata.get("presentation") != binding.get("presentation")
+    ):
+        raise ValueError(
+            "Installed workflow binding differs from its definition. Reinstall explicitly."
+        )
+    return definition
+
+
+def installed(connection, tenant_id, key):
+    """An active workflow of the tenant and its definition, exactly as its installation binds it."""
+    workflow = connection.execute("SELECT * FROM workflows WHERE tenant_id=%s AND key=%s AND status='active'",
+                                  (tenant_id, key)).fetchone()
+    if not workflow or not workflow["execution_binding"]:
+        raise ServiceError("conflict", "This workflow is not active.")
+    try:
+        return workflow, installed_definition(workflow["execution_binding"], key)
+    except ValueError as error:
+        raise ServiceError("conflict", str(error)) from error

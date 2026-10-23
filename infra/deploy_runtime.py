@@ -1,11 +1,18 @@
 """Deploy the deliberately bounded pilot runtime using versioned images."""
 
 import argparse
+import json
 import subprocess
+import tempfile
+from pathlib import Path
 
 PROJECT = "minkops-ai-prod"
 REGION = "us-central1"
-INSTANCE = "myndral-prod:us-central1:myndral-db"
+# The rebuild runs on its own instance (provision_database.py --create-instance); the pre-rebuild build, which
+# used Myndral's shared instance, is retired (docs/rebuild/cutover.md).
+INSTANCE = f"{PROJECT}:{REGION}:minkops-books"
+# The runtime role's connection to it, written by configure_runtime.py.
+DATABASE = "DATABASE_URL=minkops-books-database-url:1"
 JOB = f"projects/{PROJECT}/locations/{REGION}/jobs/minkops-worker"
 
 
@@ -17,13 +24,42 @@ def run(*args):
     print(f"Ready: {' '.join(args[:4])}", flush=True)
 
 
+def output(*args):
+    return subprocess.run(["gcloud", *args, "--quiet"], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def private_invoker(service, identity):
+    """Keep recovery private even when updating a previously public service.
+
+    Preserve the IAM etag and unrelated bindings; remove only public principals.
+    A deployment conflict fails instead of overwriting concurrent IAM edits.
+    """
+    scope = (f"--project={PROJECT}", f"--region={REGION}")
+    policy = json.loads(output("run", "services", "get-iam-policy", service, *scope, "--format=json"))
+    public = {"allUsers", "allAuthenticatedUsers"}
+    bindings = [{**binding, "members": [member for member in binding.get("members", []) if member not in public]}
+                for binding in policy.get("bindings", [])]
+    bindings = [binding for binding in bindings if binding["members"]]
+    if bindings != policy.get("bindings", []):
+        with tempfile.TemporaryDirectory(prefix="minkops-recovery-iam-") as folder:
+            path = Path(folder) / "policy.json"
+            path.write_text(json.dumps({**policy, "bindings": bindings}))
+            run("run", "services", "set-iam-policy", service, str(path), *scope)
+    run("run", "services", "add-iam-policy-binding", service, *scope,
+        f"--member=serviceAccount:{identity}", "--role=roles/run.invoker")
+    verified = json.loads(output("run", "services", "get-iam-policy", service, *scope, "--format=json"))
+    if any(public.intersection(binding.get("members", [])) for binding in verified.get("bindings", [])):
+        raise RuntimeError("Recovery service still has a public IAM principal; scheduler was not configured.")
+
+
 def main(image, interest_image):
-    common = (f"--project={PROJECT}", f"--region={REGION}", "--cpu=1", "--memory=512Mi")
-    database = "DATABASE_URL=minkops-database-url:1,OPENAI_API_KEY=minkops-openai-key:1"
-    run("run", "jobs", "deploy", "minkops-worker", *common, f"--image={image}",
+    scope = (f"--project={PROJECT}", f"--region={REGION}", "--cpu=1")
+    common = (*scope, "--memory=512Mi")
+    database = f"{DATABASE},OPENAI_API_KEY=minkops-openai-key:1"
+    run("run", "jobs", "deploy", "minkops-worker", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-worker@{PROJECT}.iam.gserviceaccount.com",
         f"--set-cloudsql-instances={INSTANCE}", "--command=python",
-        "--args=-m,minkops_api.accounts_worker,--drain,--lanes,1", "--tasks=1", "--parallelism=1",
+        "--args=-m,minkops_api.accounts_worker,--drain,--lanes,12", "--tasks=1", "--parallelism=1",
         # Leave time for the shared 45-minute budget to stop and reconcile
         # before the infrastructure's hard wall-time cutoff.
         "--max-retries=0", "--task-timeout=3600s", f"--set-secrets={database}",
@@ -32,15 +68,14 @@ def main(image, interest_image):
         run("run", "jobs", "add-iam-policy-binding", "minkops-worker", f"--project={PROJECT}",
             f"--region={REGION}", f"--member=serviceAccount:minkops-{account}@{PROJECT}.iam.gserviceaccount.com",
             "--role=roles/run.invoker")
-    sql_number = subprocess.run(["gcloud", "projects", "describe", "myndral-prod",
-                                 "--format=value(projectNumber)"], check=True, capture_output=True, text=True).stdout.strip()
-    smtp = ",".join(f"SMTP_{key.upper()}=projects/{sql_number}/secrets/myndral-smtp-{key}:latest"
+    smtp_project = output("projects", "describe", "myndral-prod", "--format=value(projectNumber)")
+    smtp = ",".join(f"SMTP_{key.upper()}=projects/{smtp_project}/secrets/myndral-smtp-{key}:latest"
                     for key in ("host", "port", "user", "password"))
-    run("run", "deploy", "minkops-solution-api", *common, f"--image={image}",
+    run("run", "deploy", "minkops-solution-api", *scope, "--memory=1Gi", f"--image={image}",
         f"--service-account=minkops-api@{PROJECT}.iam.gserviceaccount.com",
-        f"--add-cloudsql-instances={INSTANCE}", "--min=0", "--max=1", "--max-instances=1",
-        # Argon2 account verification consumes memory per request. Two concurrent
-        # requests leave headroom in this 512 MiB pilot instead of risking OOMs.
+        f"--set-cloudsql-instances={INSTANCE}", "--min=0", "--max=1", "--max-instances=1",
+        # Full native discovery is decoded during launch/receipt validation.
+        # Bound concurrency while allowing independent companion presence.
         "--concurrency=2", "--timeout=60s", "--no-cpu-boost", "--no-invoker-iam-check",
         f"--set-secrets={database},{smtp}",
         f"--set-env-vars=AUTH_DEV_MODE=0,COOKIE_SECURE=1,MINKOPS_RUN_TIMEOUT_MINUTES=45,PUBLIC_APP_URL=https://app.minkops.com,SMTP_FROM=info@minkops.com,SMTP_EHLO_HOST=minkops.com,SMTP_STARTTLS=1,WORKER_JOB_RESOURCE={JOB}")
@@ -49,14 +84,26 @@ def main(image, interest_image):
         "--min=0", "--max=1", "--max-instances=1", "--concurrency=8", "--timeout=30s",
         "--no-cpu-boost", "--no-invoker-iam-check", f"--set-secrets={smtp}",
         "--set-env-vars=SMTP_FROM_EMAIL=info@minkops.com,SMTP_FROM_NAME=Minkops")
-    jobs = subprocess.run(["gcloud", "scheduler", "jobs", "list", f"--project={PROJECT}",
-                           f"--location={REGION}", "--format=value(name)"], check=True, capture_output=True, text=True).stdout
-    action = "update" if "minkops-worker-recovery" in jobs else "create"
+    ops_identity = f"minkops-ops@{PROJECT}.iam.gserviceaccount.com"
+    run("run", "deploy", "minkops-operations", f"--project={PROJECT}", f"--region={REGION}",
+        "--cpu=1", "--memory=256Mi", f"--image={image}", f"--service-account={ops_identity}",
+        f"--set-cloudsql-instances={INSTANCE}", "--command=uvicorn",
+        "--args=minkops_api.operations:app,--host,0.0.0.0,--port,8080",
+        "--min=0", "--max=1", "--max-instances=1", "--concurrency=1", "--timeout=60s",
+        "--no-cpu-boost", "--invoker-iam-check", "--no-allow-unauthenticated",
+        f"--set-secrets={DATABASE}", f"--set-env-vars=WORKER_JOB_RESOURCE={JOB}")
+    private_invoker("minkops-operations", ops_identity)
+    operations_url = output("run", "services", "describe", "minkops-operations", f"--project={PROJECT}",
+                            f"--region={REGION}", "--format=value(status.url)")
+    if not operations_url.startswith("https://") or not operations_url.endswith(".run.app"):
+        raise RuntimeError("Recovery service URL is unavailable; scheduler was not configured.")
+    jobs = output("scheduler", "jobs", "list", f"--project={PROJECT}", f"--location={REGION}", "--format=value(name)")
+    action = "update" if "minkops-worker-recovery" in {name.rsplit("/", 1)[-1] for name in jobs.splitlines()} else "create"
     run("scheduler", "jobs", action, "http", "minkops-worker-recovery", f"--project={PROJECT}",
-        f"--location={REGION}", "--schedule=0 * * * *", "--time-zone=Etc/UTC",
-        f"--uri=https://run.googleapis.com/v2/{JOB}:run", "--http-method=POST", "--message-body={}",
-        f"--oauth-service-account-email=minkops-ops@{PROJECT}.iam.gserviceaccount.com",
-        "--oauth-token-scope=https://www.googleapis.com/auth/cloud-platform", "--max-retry-attempts=0")
+        f"--location={REGION}", "--schedule=*/5 * * * *", "--time-zone=Etc/UTC",
+        f"--uri={operations_url}/reconcile", "--http-method=POST", "--message-body={}",
+        f"--oidc-service-account-email={ops_identity}", f"--oidc-token-audience={operations_url}",
+        "--max-retry-attempts=0")
 
 
 if __name__ == "__main__":
