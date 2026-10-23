@@ -105,8 +105,19 @@ and proves it:
   ledger taxed at several GST rates is one line per rate (plan protocol 7, which
   only such a bill needs); lines nothing sets apart are summed;
 - TDS follows its section and rate, on the expense value only;
-- the date falls within the company's books. A bill before they begin, or after
-  a year-split sibling takes over, holds at once;
+- the date is the one the bill prints: it must agree with the date the session
+  quoted (read day first or month first) and be a plausible bill date, or the
+  bill is read again. Only then does it fall within the company's books: a bill
+  before they begin, or after a year-split sibling takes over, holds at once;
+- input tax is claimed only by a registered buyer the bill names: a company with
+  GST on in Tally but no GSTIN holds, and a registered company's bill printing no
+  buyer GSTIN is read again, then held. A company with GST off keeps its tax
+  ledgers as plain bookkeeping;
+- what the bill prints as held back or adjusted is carried: retention or
+  contractual withholding as a retention line on the supplier's side, which
+  reduces what it is owed as TDS does, and a refundable deposit as its own line,
+  never expense. An advance already paid is matched in Tally; the bill is booked
+  at its full value with a note, so standing approval leaves it to a person;
 - a supplier that keeps bill-by-bill balances gets the bill recorded under its
   invoice number (a New Ref on the supplier's line). Its credit note holds as
   `unsupported_structure`, because it must name the bill it adjusts: enter it in
@@ -200,7 +211,9 @@ whatever the review mode, when:
 - it is a copy of a bill in another file, or a best guess;
 - the same bill (buyer, supplier, number, date and total as printed) is held in
   another file. Each copy names the other, so the proposed one is not written while
-  its copy waits for a reason no one has seen.
+  its copy waits for a reason no one has seen. Two held copies name each other
+  too, so the one settled first is never entered again from the other;
+- it adjusts an advance already paid, which a person matches in Tally.
 
 The session never learns of these notes, so it cannot rebook a sound bill to
 avoid review.
