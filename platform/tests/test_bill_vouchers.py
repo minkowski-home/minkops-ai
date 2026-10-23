@@ -689,3 +689,37 @@ def test_every_faulty_line_is_named_at_once():
     assert refused.value.code == "classification_uncertain"
     assert "Purchase 5% must enable cost centres in Tally before allocating it." in str(refused.value)
     assert "Input SGST 9%" in str(refused.value).split("allocating it.")[1]
+
+
+def split_bill(*carried):
+    """The two-rate bill whose 18% goods (4,000.00) it prints as split 60/40 between two sites."""
+    record = proposal(**{"document.cost_split": [
+        {"name": "Site 4", "amount": None, "percent": 60, "evidence": "Site 4 bears 60%"},
+        {"name": "Site 9", "amount": None, "percent": 40, "evidence": "Site 9 bears 40%"}]})
+    if carried:
+        record["voucher"]["lines"][0:1] = [line("expense", "Purchase 18%", "debit", amount, centre=centre)
+                                           for amount, centre in carried]
+    return record
+
+
+def test_a_split_the_bill_prints_is_carried_on_its_cost_centres_or_refused():
+    """B11 and B12: a session that books the supplier's usual ledger, which keeps no cost centres, must not drop it."""
+    with pytest.raises(HoldReason) as refused:
+        check(split_bill())
+    assert (refused.value.code, refused.value.final) == ("classification_uncertain", False)
+    assert str(refused.value) == (
+        "The bill splits its cost between Site 4 (60%) and Site 9 (40%), but the voucher allocates none of it. "
+        "Carry each part on its cost centre, on a ledger that keeps them; if the company has no such ledger for "
+        "this cost, propose classification_uncertain and name the split.")
+    sites = (("cc-site-4", "cat-sites"), ("cc-site-9", "cat-sites"))
+    assert check(split_bill((2400.00, sites[0]), (1600.00, sites[1])))
+    # Carried at other shares, it is not the bill's split.
+    with pytest.raises(HoldReason, match="allocates 50% and 50%"):
+        check(split_bill((2000.00, sites[0]), (2000.00, sites[1])))
+    # Printed as amounts, the centres carry those amounts.
+    amounts = split_bill((2400.00, sites[0]), (1600.00, sites[1]))
+    amounts["document"]["cost_split"] = [{"name": "Site 4", "amount": 2400.00, "percent": None, "evidence": "2,400.00"},
+                                         {"name": "Site 9", "amount": 1600.00, "percent": None, "evidence": "1,600.00"}]
+    assert check(amounts)
+    # A bill printing no split, or one part only, needs no allocation.
+    assert check(proposal(**{"document.cost_split": None}))

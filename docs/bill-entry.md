@@ -103,7 +103,10 @@ and proves it:
 - cost centres belong to their category, on a ledger that enables them. A ledger
   the bill splits across centres is one line carrying each centre's share, and a
   ledger taxed at several GST rates is one line per rate (plan protocol 7, which
-  only such a bill needs); lines nothing sets apart are summed;
+  only such a bill needs); lines nothing sets apart are summed. A split the bill
+  prints between two or more sites or projects is carried on cost centres at its
+  printed amounts or percentages, matched by share, or the bill is refused, then
+  held;
 - TDS follows its section and rate, on the expense value only;
 - the date is the one the bill prints: it must agree with the date the session
   quoted (read day first or month first) and be a plausible bill date, or the

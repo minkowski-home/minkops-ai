@@ -714,6 +714,10 @@ EVIDENCE = {"type": "array", "maxItems": 40, "description": "Where the bill prin
 ADJUSTMENT = schema({
     "kind": choice("advance", "retention", "withholding", "deposit"), "amount": MONEY, "evidence": TEXT},
     ["kind", "amount", "evidence"])
+SPLIT_PART = schema({
+    "name": {"type": "string", "minLength": 1, "maxLength": 120, "description": "The site, project or department, as printed."},
+    "amount": PRINTED, "percent": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 100},
+    "evidence": TEXT}, ["name", "amount", "percent", "evidence"])
 DOCUMENT = schema({
     "kind": choice("invoice", "credit_note", null=True),
     "number": {"type": ["string", "null"], "maxLength": 100, "description": "The supplier's document number."},
@@ -738,9 +742,12 @@ DOCUMENT = schema({
     "adjustments": {**_nullable({"type": "array", "maxItems": 10, "items": ADJUSTMENT}), "description": (
         "What the bill prints as taken off, or held back from, what the supplier is paid: an advance already paid "
         "and adjusted, retention or contractual withholding, or a refundable deposit it charges. Null when it "
-        "prints none.")}},
+        "prints none.")},
+    "cost_split": {**_nullable({"type": "array", "maxItems": 20, "items": SPLIT_PART}), "description": (
+        "How the bill divides its cost between sites, projects or departments: each part with its amount or its "
+        "percentage as printed, never both. Null when it prints no split; a project the bill merely names is none.")}},
     ["kind", "number", "date", "total", "supplier_name", "supplier_gstin", "origin", "buyer_gstin", "place_of_supply",
-     "taxable", "tax", "receipt_register", "adjustments"])
+     "taxable", "tax", "receipt_register", "adjustments", "cost_split"])
 LINE = schema({
     "role": choice("expense", "tax", "round_off", "freight", "other_charge", "discount", "tds", "retention",
                    "deposit"),

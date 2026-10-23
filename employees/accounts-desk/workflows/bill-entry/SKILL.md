@@ -77,6 +77,9 @@ has a text layer, the total and any round-off must be figures it prints.
   held back from, what the supplier is paid: an advance already paid and
   adjusted, retention, contractual withholding, or a refundable deposit it
   charges. A previous balance is none of these.
+- **Cost split.** Give in `cost_split` how the bill divides its cost between
+  sites, projects or departments: each part with its amount or its percentage
+  as printed. A project the bill merely names is no split.
 
 ## The buyer: which company
 
@@ -170,7 +173,11 @@ Propose the voucher this client's own practice records for the document.
   finds each centre and its category comes with it. A site or project the bill
   merely names is no allocation on a ledger that keeps no cost centres: book the
   bill without one. On a ledger that keeps them, several projects named with no
-  split printed is `classification_uncertain`.
+  split printed is `classification_uncertain`. A split the bill prints is always
+  carried, at its shares: when the ledger the supplier's bills use keeps no cost
+  centres, use the ledger the client allocates such costs on, as history with
+  cost centres shows; if there is none, propose `classification_uncertain` and
+  name the split. Minkops refuses a voucher that drops a printed split.
 - **Taxes.** State each tax as the bill prints it: one line per head and rate.
   Its ledger is the one for that head and rate: a ledger Tally marks as a GST
   duty says so in `find_ledger` (`gst_duty`, such as `CGST at 9%`), and Minkops

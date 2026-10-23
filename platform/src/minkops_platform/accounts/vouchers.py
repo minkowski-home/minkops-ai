@@ -532,6 +532,54 @@ def _merged(lines, raw):
     return merged
 
 
+def _split(document, lines):
+    """A cost split the bill prints, between two or more sites or projects, is carried at its printed shares.
+
+    Booked to the supplier's usual ledger, which may keep no cost centres, a split was dropped unseen, and with
+    precedent behind the booking it was written so. Centres are matched by share, not by name: the session chose each
+    by reference, and a project's printed name need not be Tally's.
+    """
+    parts = document.get("cost_split") or []
+    if not isinstance(parts, list) or len(parts) < 2:
+        return
+    if any(not isinstance(part, dict) or not isinstance(part.get("name"), str) or not part["name"].strip()
+           or (part.get("amount") is None) == (part.get("percent") is None) for part in parts):
+        raise HoldReason("source_values_conflict", "Each part of a printed split needs its name, and its amount or "
+                                                   "its percentage as the bill prints it.")
+    percents = all(part.get("percent") is not None for part in parts)
+
+    def listed(labels):
+        return " and ".join(labels) if len(labels) < 3 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+    printed = listed([f"{part['name'].strip()} ({part['percent']:g}%)" if percents
+                      else f"{part['name'].strip()} ({rupees(_money(part['amount'], 'A printed share'))})"
+                      for part in parts])
+    allocated = {}
+    for line in lines:
+        if line["allocation"]:
+            centre = line["allocation"]["centre"]
+            allocated[centre] = allocated.get(centre, 0) + line["amount_cents"]
+    if not allocated:
+        raise HoldReason("classification_uncertain", (
+            f"The bill splits its cost between {printed}, but the voucher allocates none of it. Carry each part on its "
+            "cost centre, on a ledger that keeps them; if the company has no such ledger for this cost, propose "
+            "classification_uncertain and name the split."))
+    total = sum(allocated.values())
+    if percents:
+        wanted = sorted(Decimal(str(part["percent"])) for part in parts)
+        carried = sorted(Decimal(cents) * 100 / total for cents in allocated.values())
+        matches = len(carried) == len(wanted) and all(abs(c - w) <= Decimal("0.5") for c, w in zip(carried, wanted, strict=True))
+        shown = listed([f"{share.quantize(Decimal(1)):f}%" for share in sorted(carried, reverse=True)])
+    else:
+        wanted = sorted(_money(part["amount"], "A printed share") for part in parts)
+        carried = sorted(allocated.values())
+        matches = len(carried) == len(wanted) and all(abs(c - w) <= TOLERANCE_CENTS for c, w in zip(carried, wanted, strict=True))
+        shown = listed([rupees(cents) for cents in sorted(carried, reverse=True)])
+    if not matches:
+        raise HoldReason("classification_uncertain", (
+            f"The bill splits its cost between {printed}, but the voucher allocates {shown}. Carry each part on its "
+            "cost centre at the share the bill prints."))
+
+
 def _adjustments(document, raw, lines, retained, company):
     """What the bill prints as held back, refundable or adjusted is carried by the voucher; returns notes for a person.
 
@@ -887,6 +935,7 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
     if round_offs > 1:
         raise HoldReason("source_values_conflict", "A bill has at most one round-off line.")
     _repeated(lines, raw)
+    _split(document, lines)
     advances = _adjustments(document, raw, lines, retained, company)
     _tax_consistent(taxes)
     _printed_totals(document, lines, raw, items_cents)
