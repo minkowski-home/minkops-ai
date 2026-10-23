@@ -99,6 +99,13 @@ app profile or a disconnect and reconnect, and its companies stay authorised
    wrote for it, how its books are kept, statement continuity and its save history
    all stay with it. Each move is recorded (migration 0034).
 
+Until then, a run starts with the client's books that are available. A run that
+starts while some are on a disconnected PC opens one "Books left out of this run"
+item in Attention naming them and their PC (`desk_tools.note_unavailable`), and a
+bill addressed to one of them holds rather than entering another company. Enter
+that work in a new run once the books are continued. With none available, a run
+does not start and says which PC the books were on.
+
 After the move:
 
 - **Refresh.** The new PC's first refresh reads the books in full (reason

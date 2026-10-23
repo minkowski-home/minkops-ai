@@ -276,6 +276,13 @@ under Uncertain Transactions, whatever its masters say. With them it is
 included. Tally also accepted a tax head its states rule out, and a line rate
 its tax does not bear, so `accounts/gst.py` checks both first.
 
+Whatever the company keeps in Tally, a bill whose `buyer_gstin` is another of the
+client's companies' is `company_unresolved`, naming that company
+(`bill_entry._addressed`): the GSTIN routes a bill, never a name it resembles. The
+check reads every company in the run, and the client's companies whose PC was
+disconnected at their last copy; a bill addressed to one of those holds at once,
+since no reading of this run can reach its books.
+
 For a company with GST switched on in Tally:
 
 - **The registration.** The bill's `buyer_gstin` names which of the company's

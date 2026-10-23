@@ -113,6 +113,7 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
     items = connection.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
     for item in items:
         work.add_records(connection, item, [_blank(item, paths[item["source"]["file_id"]], 1)])
+    desk_tools.note_unavailable(connection, run)
     return run
 
 
@@ -400,6 +401,25 @@ def _company(desk, bill):
     return desk.company(guid, on=_iso((bill.get("document") or {}).get("date")))
 
 
+def _addressed(connection, desk, document, company):
+    """Hold a bill whose buyer GSTIN is another of the client's companies': the GSTIN routes it, whatever its name
+    resembles. Checked here, where every company is in view: a company Tally keeps without GST has no registration
+    of its own to compare (vouchers.check)."""
+    buyer = (document.get("buyer_gstin") or "").strip().upper()
+    if not buyer or buyer in desk.gstins(connection, company):
+        return
+    other = desk.addressee(connection, buyer, company)
+    if other is None:
+        return
+    if other.get("unavailable"):
+        raise HoldReason("company_unresolved", f"The bill is addressed to GSTIN {buyer}, which is {other['name']}'s, "
+                                               f"whose books were on {other['device_name']}, which was disconnected. "
+                                               "Continue them on the PC that holds them now, then enter this bill in a "
+                                               "new run.", final=True)
+    raise HoldReason("company_unresolved", f"The bill is addressed to GSTIN {buyer}, which is {other['name']}'s, not "
+                                           f"{company['name']}'s. Choose {other['name']} with find_company.")
+
+
 def _facts(record, document, company):
     read = {"supplier": document.get("supplier_name"), "number": document.get("number"),
             "date": document.get("date"), "total": document.get("total"),
@@ -437,6 +457,7 @@ def _propose_one(connection, desk, record, bill, count):
         if locked and company["guid"] != locked:
             raise HoldReason("company_unresolved", "This run enters every bill into its locked company. When the bill "
                                                    "is addressed to another buyer, propose company_unresolved.")
+        _addressed(connection, desk, document, company)
         registered = None
         if bill["document"] and bill["voucher"]:
             _printed(desk, bill)

@@ -251,6 +251,22 @@ def learned(desk, run, fake):
     refreshed(desk)
 
 
+def test_a_statement_run_names_the_books_a_disconnected_pc_held(desk):
+    import factory
+
+    from minkops_platform import desktop
+    db = desk["db"]
+    laptop = factory.device(db, desk["tenant"], desk["operator"])
+    factory.company(db, desk["tenant"], laptop, desk["client"], name="Sister Infra")
+    desktop.revoke(db, desk["tenant"], desk["operator"], laptop["id"])
+    db.commit()
+    run = launch(desk, {"icici-sep.csv": ICICI})
+    left = db.execute("SELECT * FROM attention_items WHERE event_key=%s", (f"run:{run['id']}:unavailable",)).fetchone()
+    assert (left["identifier"], left["label"], left["task_id"]) == ("Sister Infra", "Books left out of this run",
+                                                                   run["task_id"])
+    assert left["target"]["reason"].startswith(f"Sister Infra was on {laptop['name']}, which was disconnected")
+
+
 def test_each_row_is_checked_as_it_is_proposed_and_a_rejection_says_why(desk):
     company = desk["company"]["guid"]
 

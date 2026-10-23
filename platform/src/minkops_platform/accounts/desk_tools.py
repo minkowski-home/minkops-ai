@@ -20,7 +20,7 @@ import json
 import re
 from datetime import timedelta
 
-from minkops_platform import clients
+from minkops_platform import attention, clients
 from minkops_platform.errors import ServiceError
 from minkops_platform.lanes import Wait
 from minkops_platform.runtime.tools import Tool, ToolError
@@ -31,19 +31,31 @@ from .voucher_types import base_types
 from .vouchers import HoldReason
 
 
+def unavailable(connection, tenant_id, client_id):
+    """The client's authorised companies on a PC that was disconnected, most recently disconnected first.
+
+    Their books wait for the PC that holds them now to continue them (docs/accounts-desk.md, Replacing a PC), so a
+    run cannot enter work addressed to them. Each row names its PC (`device_name`).
+    """
+    return connection.execute(
+        """SELECT c.*, d.name AS device_name FROM companies c
+           JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NOT NULL
+           WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised' ORDER BY d.revoked_at DESC, c.name""",
+        (tenant_id, client_id)).fetchall()
+
+
 def prepare(connection, tenant, user, client):
-    """The client's authorised companies, after asking each PC that holds them to refresh its Tally copy."""
+    """The client's authorised companies, after asking each PC that holds them to refresh its Tally copy.
+
+    A run starts with the books that are available; note_unavailable() names the rest once it exists.
+    """
     companies = clients.companies(connection, tenant, client)
     if not companies:
-        # Books authorised on a PC that was since disconnected wait for the PC that holds them now to continue them.
-        left = connection.execute(
-            """SELECT d.name FROM companies c JOIN desktop_devices d ON d.id=c.device_id AND d.revoked_at IS NOT NULL
-               WHERE c.tenant_id=%s AND c.client_id=%s AND c.status='authorised'
-               ORDER BY d.revoked_at DESC LIMIT 1""", (tenant["id"], client["id"])).fetchone()
+        left = unavailable(connection, tenant["id"], client["id"])
         if left:
-            raise ServiceError("conflict", f"{client['name']}'s books were on {left['name']}, which was disconnected. "
-                                           "Connect the PC that holds them now, then continue them from its "
-                                           "\"New company found\" card in Attention.")
+            raise ServiceError("conflict", f"{client['name']}'s books were on {left[0]['device_name']}, which was "
+                                           "disconnected. Connect the PC that holds them now, then continue them from "
+                                           "its \"New company found\" card in Attention.")
         raise ServiceError("conflict", "Authorise this client's Tally companies before entering its work.")
     wanted = {c["device_id"] for c in companies}
     devices = connection.execute(
@@ -54,6 +66,24 @@ def prepare(connection, tenant, user, client):
     for device in devices:
         sync.queue(connection, device, user["id"], reason="run")
     return companies, devices
+
+
+def note_unavailable(connection, run):
+    """At a run's launch, one Attention item naming the client's books it cannot enter, and why; none when all are
+    available. Work addressed to them holds (Desk.addressee), and is entered in a new run once they are continued."""
+    left = unavailable(connection, run["tenant_id"], run["client_id"])
+    if not left:
+        return None
+    names = ", ".join(c["name"] for c in left)
+    devices = list(dict.fromkeys(c["device_name"] for c in left))
+    pcs, one = ", ".join(devices), len(left) == 1
+    return attention.record(connection, run, f"run:{run['id']}:unavailable", names[:200], "Books left out of this run",
+                            target={"reason": (
+                                f"{names} {'was' if one else 'were'} on {pcs}, which {'was' if len(devices) == 1 else 'were'} "
+                                f"disconnected, so this run holds work addressed to {'it' if one else 'them'}. Connect the "
+                                f"PC that holds {'it' if one else 'them'} now and continue {'it' if one else 'them'} from "
+                                "its \"New company found\" card, then enter that work in a new run.")[:1000]},
+                            actor=run["actor_id"])
 
 
 def refreshing(connection, client_id, *, since=None):
@@ -252,6 +282,26 @@ class Desk:
                     "the rules lookup returns."))
         return [{"id": rule_id, "version": known[rule_id]["version"], "text": known[rule_id]["text"]}
                 for rule_id in dict.fromkeys(ids)]
+
+    def addressee(self, connection, gstin, chosen):
+        """Another of the client's companies registered under this GSTIN, or None.
+
+        One in this run, or one whose books wait on a disconnected PC (`unavailable` set, read at its last published
+        version), so a bill addressed to it is never entered into a company it only resembles. A year split's parts
+        are one company.
+        """
+        for parts in self.parts.values():
+            for part in parts:
+                if part["guid"] != chosen["guid"] and gstin in self.gstins(connection, part):
+                    return part
+        left = unavailable(connection, self.run["tenant_id"], self.run["client_id"])
+        versions = mirror.pins(connection, [c["id"] for c in left])
+        for company in left:
+            version = versions.get(str(company["id"]))
+            if version is not None and company["guid"] != chosen["guid"] \
+                    and gstin in self.gstins(connection, {**company, "version": version}):
+                return {**company, "version": version, "unavailable": True}
+        return None
 
     def until(self, company):
         """The last day this part's books cover before a later part of the same company begins, or None."""

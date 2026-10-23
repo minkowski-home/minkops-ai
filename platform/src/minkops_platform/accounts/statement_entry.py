@@ -118,6 +118,7 @@ def launch(connection, *, tenant, user, client, workflow, definition, body):
                       request_hash=fingerprint, config=config,
                       title=work.title("Statement entry", [Path(f["path"]).name for f in statements]), items=specs,
                       describe=describe)
+    desk_tools.note_unavailable(connection, run)
     items = connection.execute("SELECT * FROM run_items WHERE run_id=%s ORDER BY ordinal", (run["id"],)).fetchall()
     for item, chunk in zip(items, rows, strict=True):
         if chunk:

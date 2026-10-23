@@ -803,6 +803,66 @@ def test_a_locked_run_enters_bills_into_its_company_and_a_year_split_routes_by_d
         launch(desk, {"any.pdf": B01}, company_mode="locked", locked_company_guid="not-a-company")
 
 
+SISTER = gstin("37SISIF4321B1Z")
+
+
+def registered_as(company, number):
+    """The company's books, registered under this GSTIN without GST switched on in Tally."""
+    found = masters(company)
+    found[0]["data"]["GSTREGISTRATIONNUMBER"] = number
+    return found
+
+
+def test_a_bill_addressed_to_another_of_the_clients_companies_is_never_entered_into_this_one(desk):
+    """The buyer's GSTIN routes a bill, even into a company Tally keeps without GST, whose own checks cannot see it."""
+    db = desk["db"]
+    sister = factory.company(db, desk["tenant"], desk["device"], desk["client"], name="Sister Infra")
+    factory.books(db, sister, registered_as(sister, SISTER))
+    db.commit()
+    names = names_of(desk["company"], sister)
+    wrong = proposal(desk["company"]["guid"], **{"document.buyer_gstin": SISTER})
+    held = {**wrong, "exception": {"code": "company_unresolved", "detail": "Addressed to Sister Infra."}}
+    fake = by_file(**{"sister.pdf": [*proposing(names, wrong), reproposing(names, held)]})
+    run = launch(desk, {"sister.pdf": B01})
+    read(desk, fake, run)
+    assert answers(fake.created[-1], "propose")[0]["bills"][0]["reason"] == (
+        f"The bill is addressed to GSTIN {SISTER}, which is Sister Infra's, not Rehearsal Infra Private Limited's. "
+        "Choose Sister Infra with find_company.")
+    (row,) = records(desk, run)
+    assert (row["status"], row["hold_codes"]) == ("held", ["company_unresolved"])
+    # Every company was available: nothing was left out of the run.
+    assert db.execute("SELECT count(*) AS n FROM attention_items WHERE event_key=%s",
+                      (f"run:{run['id']}:unavailable",)).fetchone()["n"] == 0
+
+
+def test_a_run_names_the_books_a_disconnected_pc_held_and_holds_their_bills(desk):
+    db = desk["db"]
+    laptop = factory.device(db, desk["tenant"], desk["operator"])
+    sister = factory.company(db, desk["tenant"], laptop, desk["client"], name="Sister Infra")
+    factory.books(db, sister, registered_as(sister, SISTER))
+    desktop.revoke(db, desk["tenant"], desk["operator"], laptop["id"])
+    db.commit()
+    names = names_of(desk["company"])
+    # Without Sister Infra in the run, the session sees one company: the bill's GSTIN still names its buyer.
+    wrong = proposal(desk["company"]["guid"], **{"document.buyer_gstin": SISTER})
+    fake = by_file(**{"sister.pdf": proposing(names, wrong)})
+    run = launch(desk, {"sister.pdf": B01})
+    left = db.execute("SELECT * FROM attention_items WHERE event_key=%s", (f"run:{run['id']}:unavailable",)).fetchone()
+    assert (left["identifier"], left["label"], left["task_id"]) == ("Sister Infra", "Books left out of this run",
+                                                                   run["task_id"])
+    assert left["target"]["reason"] == (
+        f"Sister Infra was on {laptop['name']}, which was disconnected, so this run holds work addressed to it. "
+        "Connect the PC that holds it now and continue it from its \"New company found\" card, then enter that work "
+        "in a new run.")
+    read(desk, fake, run)
+    (row,) = records(desk, run)
+    # Final at once: no reading of this run can reach books it does not hold.
+    assert (row["status"], row["hold_codes"]) == ("held", ["company_unresolved"])
+    assert row["review_reasons"] == [
+        f"The bill is addressed to GSTIN {SISTER}, which is Sister Infra's, whose books were on {laptop['name']}, "
+        "which was disconnected. Continue them on the PC that holds them now, then enter this bill in a new run."]
+
+
 def test_a_scan_is_read_from_its_image_and_an_unreadable_file_holds_without_a_session(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
