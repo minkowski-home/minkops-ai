@@ -14,10 +14,10 @@ on from another machine. The evidence behind each decision is in
 - **`platform/workflow-reliability` is left untouched and will most likely be discarded.**
   - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
-- **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
+- **Every slice is built.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook that took it live and creates each client's workspace.
 - **[Demo readiness and learning loops](demo-readiness.md) is built and regression-checked live** (23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, and batched uploads ([progress](#progress)). The checks ran on a synthetic pack and books built for it; accuracy on a client's own books is unproven until PR Infra's bills and statements run against them.
 - **[Workspace access](../workspace-access.md) is built** (23 October 2026): joining only by invitation, one workspace per person, workflow assignments, removal, and each person's profile, password reset and sessions ([progress](#progress)).
-- **Next: the cut-over** by [cutover.md](cutover.md).
+- **Live since 23 October 2026.** The rebuild runs on its own Cloud SQL instance, `minkops-books`, and the old build is retired; production holds only the mock workspace for now ([evidence](evidence.md#cut-over-23-october-2026)). PR Infra's workspace is created by [cutover.md](cutover.md#5-fresh-workspaces) when the owner decides.
 
 ## Continue on Windows
 

@@ -693,3 +693,49 @@ then its workflows review everything ([cut-over](cutover.md#5-fresh-workspaces))
 - **On the local stack only:** the standing-approval run waited 23 minutes after code changed under a running
   worker, which then imported a new module against an old one. Each lane left its items for a successor, as it
   must during a deployment, and a restart resumed the run. A deployed image never changes under its worker.
+
+## Cut-over (23 October 2026)
+
+The rebuild went live by the [runbook](cutover.md), from `main`.
+
+- **Before.** Production ran the old build: `minkops-solution-api` and `minkops-operations` on
+  `solution:workflow-recovery-20261021-a944022`, against a `minkops` database on Myndral's shared instance.
+- **Database.** `minkops-books`, PostgreSQL 16 at Myndral's tier (`db-f1-micro`, zonal, 10 GB), migrated through
+  0041 by `provision_database.py`. `verify_database_restore.py` restored it logically (52 tables, 41 migrations) and
+  removed the bootstrap login. `configure_runtime.py` wrote the `minkops-books` connection secrets and kept the
+  model key.
+- **Cost.** The instance bills to `minkops-ai-prod`. At the catalog rates `infra/README.md` records, a 31-day month
+  costs about CAD 13.48 before backups and network, where the envelope reserved CAD 8 for Minkops' half of the shared
+  instance. The envelope, and the project's CAD 10 alert, which now counts the instance, wait on the owner.
+- **Runtime.** `solution:rebuild-20261023-db786c7` (digest `sha256:8f38285f…`), built from `main` at `db786c7` with
+  `infra/solution.Dockerfile` and checked with `install_workflows mock-client --validate-only`. It serves the API,
+  the 12-lane worker job and the recovery service on `minkops-books`, each Ready with all traffic. The interest API
+  kept its unchanged image. Public sign-up answers 404.
+- **Console and site.** `app.minkops.com` serves the new console. `minkops.com` offers companion 0.11.5, an unsigned
+  release candidate (`Minkops-Setup-0.11.5.exe`, 102,599,914 bytes), with its checksum, update feed and release notes.
+- **Workspaces.** Only the mock client's ("Mock client", with its "Rehearsal companies" client business), with the
+  owner invited as its first admin. PR Infra waits for the owner's decision.
+- **The old build, retired.**
+  - Its database was dumped once with PostgreSQL 16's `pg_dump` into an owner-only folder outside git. Restored into
+    a throwaway database, the dump matched the source: 37 tables, 1 view and 7,721 rows, table by table.
+  - Then its database and its three roles left Myndral's instance, and its two database secrets were deleted.
+  - Minkops' service accounts lost their Cloud SQL access in Myndral's project. They keep their per-secret access to
+    Myndral's SMTP secrets, which the new build sends mail with.
+  - Its Cloud Run revisions and solution images were deleted, and the earlier Hosting versions too, the 0.9.1
+    installer's among them.
+  - Myndral's instance, databases, users and secrets are untouched.
+- **This PC.** Minkops 0.11.5 is installed over 0.9.1 and running; Minkops Dev is uninstalled.
+
+**Found on the way:**
+
+- **The candidate would not package** (fixed in `378df93`). electron-builder merges a repeated publish list into
+  the list's first entry. The packaging script passed `package.json`'s `build` again, so the candidate's update feed
+  was refused. Dev builds turn publishing off, which is why they passed.
+- **Operator snags, worked around.** Each is worth fixing in the tools:
+  - `provision_database.py` expects its proxy on 127.0.0.1:5433, which the local dev database also uses, so the
+    local stack was paused meanwhile.
+  - `verify_database_restore.py` looks for PostgreSQL 16 at `/usr/lib/postgresql/16/bin`, so it was run with the
+    local copy's tools.
+  - Cloud Build's default service account here cannot read its source bucket, so the image was built and pushed
+    with local Docker.
+
