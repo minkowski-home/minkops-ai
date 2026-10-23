@@ -15,6 +15,7 @@ on from another machine. The evidence behind each decision is in
   - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
 - **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
+- **Next: [demo readiness and learning loops](demo-readiness.md)** (agreed 23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, batched uploads, and the acceptance runs before deployment.
 
 ## Continue on Windows
 
