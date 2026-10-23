@@ -15,7 +15,10 @@ Commands run from the repository root as the authenticated owner (see
 [operator deployment](../../infra/README.md#operator-deployment)). `DIR` is a new
 private directory for the new instance's credentials, such as
 `~/.local/state/minkops-books`. `ARCHIVE` is the owner-only folder outside git for
-the old build's final backup, `~/minkops-private/retired-build`.
+the old build's final backup, `~/minkops-private/retired-build`. `PORT` is the local
+port of the Cloud SQL Auth Proxy to the new instance: 5433, the database tools'
+default, or a free port if a local PostgreSQL already holds 5433, as the dev stack's
+does.
 
 ## 1. Record what production runs
 
@@ -42,16 +45,19 @@ gcloud run services list --project=minkops-ai-prod --region=us-central1 --format
    PYTHONPATH=. uv run --all-packages python infra/provision_database.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR --create-instance --tier <tier>
    ```
 
-3. Start the Cloud SQL Auth Proxy on `127.0.0.1:5433` for
+3. Start the Cloud SQL Auth Proxy on `127.0.0.1:PORT` for
    `minkops-ai-prod:us-central1:minkops-books`. Create the roles, the database, every
-   migration and the runtime grants, then prove a restore:
+   migration and the runtime grants, then prove a restore. The restore check runs
+   PostgreSQL 16's `pg_dump` and `pg_restore` from `PATH` and refuses any other major
+   version; if `PATH` holds another, add `--pg-bindir` with 16's bin directory, such
+   as `~/.local/pg16/usr/lib/postgresql/16/bin`:
 
    ```bash
-   PYTHONPATH=. uv run --all-packages python infra/provision_database.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR
+   PYTHONPATH=. uv run --all-packages python infra/provision_database.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR --proxy-port PORT
    ```
 
    ```bash
-   uv run --all-packages python infra/verify_database_restore.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR
+   uv run --all-packages python infra/verify_database_restore.py --sql-project minkops-ai-prod --instance minkops-books --state-dir DIR --proxy-port PORT
    ```
 
 4. Configure the runtime. This grants Cloud SQL access in `minkops-ai-prod`, creates
@@ -122,12 +128,11 @@ Only after the new deployment serves, so the old database no longer changes:
 
 For PR Infra, and each later client:
 
-1. Through the proxy, as the runtime role, with the console's address for the
-   sign-up link. If a local PostgreSQL already holds 5433, as the dev stack's does,
-   run the proxy on a free port and put that port in the URL:
+1. Through the proxy on `127.0.0.1:PORT`, as the runtime role, with the console's
+   address for the sign-up link:
 
    ```bash
-   export DATABASE_URL="$(python3 -c 'import json, sys; print("postgresql://minkops_app:{runtime_password}@127.0.0.1:5433/minkops".format(**json.load(open(sys.argv[1]))))' DIR/database.json)" PUBLIC_APP_URL=https://app.minkops.com
+   export DATABASE_URL="$(python3 -c 'import json, sys; print("postgresql://minkops_app:{runtime_password}@127.0.0.1:PORT/minkops".format(**json.load(open(sys.argv[1]))))' DIR/database.json)" PUBLIC_APP_URL=https://app.minkops.com
    ```
 
    Create the workspace, install its composition (the client business, the
