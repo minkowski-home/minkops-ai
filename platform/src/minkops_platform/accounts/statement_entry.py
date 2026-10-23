@@ -58,8 +58,10 @@ REPROPOSABLE = {*EXCEPTIONS, "statement_interpretation"}
 # Native refusals the companion names; any other unverified save holds as statement_save_held.
 SAVE_HOLDS = {"possible_existing", "uncertain_import", "destination_changed", "company_not_open", "no_company",
               "duplicate_company", "not_running", "port_closed", "busy", "too_many", "invalid_response", "rejected"}
-# A statement row offers these of its holds' actions; a best-guess write needs a plan the checks accepted.
-OFFERED = ("nothing", "retry", "retry_save", "settle")
+# A statement row offers these of its holds' actions; choosing its treatment needs the company it is entered in.
+OFFERED = ("nothing", "retry", "choose", "retry_save", "settle")
+# Buttons beside the holds' own: approving a proposal, and every row booked as a person chose for another.
+LABELS = {**ACTIONS, "approve": "Approve", "alike": "Approve all booked this way"}
 
 
 # --- launch ---------------------------------------------------------------------------
@@ -305,10 +307,16 @@ def propose(call, arguments):
             rejected.append({"ref": ref, "reason": "No more resubmissions for this row; it waits for review."})
             continue
         if "exception" in entry:
+            try:
+                company, weighed = _weighed(connection, state, entry["exception"])
+            except ToolError as refusal:
+                rejected.append({"ref": ref, "reason": str(refusal)})
+                continue
             work.update_record(connection, record, status="held", hold_codes=[entry["exception"]["code"]],
                                review_reasons=[state.spelled(connection, entry["exception"]["detail"])[:300]],
-                               company_id=None,
-                               proposal={"exception": entry["exception"]}, checks={"submissions": submissions + 1})
+                               company_id=company["id"] if company else None,
+                               proposal={"exception": {key: entry["exception"][key] for key in ("code", "detail")},
+                                         **weighed}, checks={"submissions": submissions + 1})
             held.append(ref)
             continue
         try:
@@ -353,6 +361,20 @@ def propose(call, arguments):
     remaining = connection.execute("SELECT count(*) AS n FROM run_records WHERE item_id=%s AND status='pending'",
                                    (state.item["id"],)).fetchone()["n"]
     return {"accepted": accepted, "held": held, "rejected": rejected, "remaining": remaining}
+
+
+def _weighed(connection, state, exception):
+    """What a held row's session established: its company, bank ledger and payee, and the ledgers it weighed for the
+    other side, by GUID; a person choosing the row's treatment starts from them. A reference the session was not
+    given is refused, so the session answers again."""
+    company = state.company_of(connection, exception["company"]) if exception.get("company") else None
+    refs = [ref for ref in [exception.get("bank_ledger"), *(exception.get("candidates") or [])] if ref]
+    guids = state.resolve(connection, "ledger", refs, company)
+    return company, {key: value for key, value in {
+        "company_guid": company["guid"] if company else None,
+        "bank_ledger_guid": guids.get(exception.get("bank_ledger")),
+        "payee": exception.get("payee"), "candidates": [guids[ref] for ref in exception.get("candidates") or []],
+    }.items() if value not in (None, [])}
 
 
 def _precedents(connection, state, company, entry, resolved):
@@ -580,8 +602,16 @@ SELECTION = schema({
     "evidence": {"type": "string", "minLength": 1, "maxLength": 1500},
 }, ["company", "bank_ledger", "counter_ledger", "voucher_type", "family", "cost_centre", "lines", "pair", "bills",
     "rules", "payee", "evidence"])
-EXCEPTION = schema({"code": choice(*EXCEPTIONS), "detail": {"type": "string", "minLength": 1, "maxLength": 1000}},
-                   ["code", "detail"])
+EXCEPTION = schema({
+    "code": choice(*EXCEPTIONS), "detail": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "company": {"anyOf": [{"type": "null"}, COMPANY], "description": "The company, when you established it."},
+    "bank_ledger": {"anyOf": [{"type": "null"}, LEDGER], "description": "The bank ledger, when you established it."},
+    "payee": {"type": ["string", "null"], "minLength": 1, "maxLength": 200,
+              "description": "The counterparty the narration names, as printed; null when it names none."},
+    "candidates": {"type": "array", "maxItems": 5, "items": LEDGER, "description": (
+        "The ledgers you weighed for the other side, most likely first. A person chooses among them; empty if none "
+        "fits.")}},
+    ["code", "detail", "company", "bank_ledger", "payee", "candidates"])
 ROW_ANSWER = schema({
     "ref": REF,
     "amount": {"type": "string", "pattern": r"^-?\d+\.\d{2}$", "description": (
@@ -853,14 +883,20 @@ def _holds(record):
 
 
 def _offered(record, run=None):
-    """The decisions a row offers now. A row left as is can be read again once Tally is fixed; a stopped run offers
-    only Do nothing, since every other decision needs it active."""
-    offered = []
+    """The decisions a row offers now. A proposal may be approved as it is, or with a treatment a person chooses;
+    one proposed again as a person chose for another row may be approved with all of them. A row left as is can be
+    read again once Tally is fixed. A stopped run offers only Do nothing, since every other decision needs it active.
+    """
+    proposal, offered = record["proposal"] or {}, []
     if record["status"] == "proposed":
-        offered = ["approve", "nothing"]
+        # A transfer's legs and a repeated row follow the row that writes them, so their treatment is not chosen.
+        follows = proposal.get("transfer") or proposal.get("repeat_of")
+        offered = ["approve", "nothing"] if follows else [
+            *(["alike"] if proposal.get("alike") else []), "approve", "choose", "nothing"]
     elif record["status"] == "held":
         offered = [action for action in hold_actions(record["hold_codes"]) if action in OFFERED
-                   and (action != "retry" or record["kind"] == ROW)]
+                   and (action != "retry" or record["kind"] == ROW)
+                   and (action != "choose" or record["company_id"] is not None)]
     elif record["status"] == "deferred" and record["kind"] == ROW:
         offered = ["retry"]
     if (run or {}).get("control_state") == "stopped":
@@ -877,7 +913,7 @@ def _actions(record, run=None):
             actions.extend({"action": action, "label": choice["label"], "detail": {"choice": index}}
                            for index, choice in enumerate(choices))
         else:
-            actions.append({"action": action, "label": ACTIONS.get(action, "Approve")})
+            actions.append({"action": action, "label": LABELS[action]})
     return actions
 
 
@@ -900,7 +936,65 @@ def detail(connection, run, record):
         "evidence") or (proposal.get("exception") or {}).get("detail"), "transfer": proposal.get("transfer"),
             "repeat_of": proposal.get("repeat_of"), "current": record["current"],
             "lines": (proposal.get("resolved") or {}).get("lines"), "rules": proposal.get("rules"),
-            "settlement": proposal.get("settlement")}
+            "settlement": proposal.get("settlement"),
+            **({"choice": _choice(connection, run, record)} if "choose" in _offered(record, run) else {})}
+
+
+def _company(connection, run, record):
+    """The run's desk and the company part a row is entered into."""
+    desk = Desk(connection, run)
+    company = next((part for parts in desk.parts.values() for part in parts if part["id"] == record["company_id"]), None)
+    if company is None:
+        raise ServiceError("conflict", "This entry's company is no longer one of its run's books.")
+    return desk, company
+
+
+def _established(connection, record):
+    """What the row's own proposal or exception says of its treatment, by GUID: bank, other side, voucher type, payee.
+
+    A held row whose session named no bank ledger takes the one its own statement's proposed rows agree on.
+    """
+    proposal = record["proposal"] or {}
+    selection = proposal.get("selection") or {}
+    bank = selection.get("bank_ledger_guid") or proposal.get("bank_ledger_guid")
+    if bank is None:
+        banks = {row["bank"] for row in connection.execute(
+            """SELECT proposal->'selection'->>'bank_ledger_guid' AS bank FROM run_records WHERE item_id=%s AND kind=%s
+                   AND status IN ('proposed','approved','writing','saved') AND company_id=%s
+                   AND facts->>'account' IS NOT DISTINCT FROM %s""",
+            (record["item_id"], ROW, record["company_id"], record["facts"].get("account"))).fetchall()}
+        bank = next(iter(banks)) if len(banks) == 1 else None
+    return {"bank": bank, "counter": selection.get("counter_ledger_guid"), "voucher_type": selection.get(
+        "voucher_type_guid"), "payee": selection.get("payee") or proposal.get("payee"),
+            "candidates": proposal.get("candidates") or []}
+
+
+def _choice(connection, run, record):
+    """What Choose and approve shows: the row as it will be entered, the voucher types it may be, its bank and other
+    side now, and the ledgers its session weighed, by GUID and name. The amount is the statement's own."""
+    desk, company = _company(connection, run, record)
+    now = _established(connection, record)
+    wanted = [guid for guid in (now["bank"], now["counter"], *now["candidates"]) if guid]
+    names = {row["guid"]: row["name"] for row in mirror.ledger_list(connection, company["id"], company["version"],
+                                                                    guids=wanted)}
+    named = lambda guid: {"guid": guid, "name": names[guid]} if guid in names else None  # noqa: E731
+    return {"company": company["name"], "amount": _rupees(record["facts"].get("amount_cents")), "payee": now["payee"],
+            "voucher_types": [{"guid": t["guid"], "name": t["name"]} for t in desk.voucher_types(connection, company)
+                              if t["active"] and t["family"] in ("payment", "receipt", "contra")],
+            "voucher_type": now["voucher_type"], "bank_ledger": named(now["bank"]),
+            "counter_ledger": named(now["counter"]),
+            "candidates": [found for guid in now["candidates"] if (found := named(guid))]}
+
+
+def ledgers(connection, run, record, role, query):
+    """The ledgers a person may choose for this row's bank or other side, the session's candidates first, in the
+    company it is entered into; never its own bank as its other side."""
+    if "choose" not in _offered(record, run):
+        raise ServiceError("conflict", "This entry's treatment cannot be chosen now.")
+    now = _established(connection, record)
+    return desk_tools.ledger_choices(connection, run, record["company_id"], role, query,
+                                     first=[*now["candidates"], now["counter"], now["bank"]],
+                                     exclude=[now["bank"]] if role != "bank" and now["bank"] else [])
 
 
 def decide(connection, run, record, action, detail, context):
@@ -917,7 +1011,74 @@ def decide(connection, run, record, action, detail, context):
         require_active(connection, run["tenant_id"], run["task_id"])
         work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=[])
         return _approve(connection, run, record, actor=context["user"]["id"])
+    if action == "choose":
+        return _choose(connection, run, record, detail, actor=context["user"]["id"])
+    if action == "alike":
+        return _approve_alike(connection, run, record, actor=context["user"]["id"])
     return _recheck(connection, run, record, actor=context["user"]["id"])
+
+
+def _rebooked(connection, desk, company, record, *, bank, counter, voucher_type, payee, evidence):
+    """The row booked to this bank, other side and voucher type, checked as a session's proposal is: its selection
+    and resolved plan. A split's other lines and a cost allocation stay as proposed; which bills it settles is left
+    to its open bills (`_settled`). Raises ValueError for a treatment the checks refuse."""
+    types = {t["guid"]: t for t in desk.voucher_types(connection, company)}
+    family = (types.get(voucher_type) or {}).get("family")
+    if family not in ("payment", "receipt", "contra"):
+        raise ValueError("Choose one of the company's active Payment, Receipt or Contra voucher types.")
+    before = (record["proposal"] or {}).get("selection") or {}
+    selection = {
+        "family": "contra" if family == "contra" else None, "cost_centre_guid": None, "cost_category_guid": None,
+        "lines": None, "rules": [], **{key: value for key, value in before.items() if key in (
+            "cost_centre_guid", "cost_category_guid", "lines", "rules")},
+        "company_guid": company["guid"], "bank_ledger_guid": bank, "counter_ledger_guid": counter,
+        "voucher_type_guid": voucher_type, "pair": None, "bills": None, "payee": payee, "evidence": evidence}
+    if selection["lines"]:
+        selection["lines"] = [{**selection["lines"][0], "ledger_guid": counter}, *selection["lines"][1:]]
+    return selection, validated_plan(record["facts"], [desk.view(connection, company)], selection)
+
+
+def _choose(connection, run, record, detail, *, actor):
+    """A person's treatment for this row: its bank, other side and voucher type, checked as a session's proposal is,
+    then approved and saved; the save teaches the routing as their choice. When which bills the row settles is a
+    person's choice too, it holds for that one click. A treatment the checks refuse changes nothing and says why."""
+    require_active(connection, run["tenant_id"], run["task_id"])
+    detail = detail if isinstance(detail, dict) else {}
+    named = lambda value: isinstance(value, str) and 0 < len(value) <= 200  # noqa: E731
+    if not all(named(detail.get(key)) for key in ("bank_ledger", "counter_ledger", "voucher_type")):
+        raise ServiceError("invalid", "Choose the bank ledger, the other side and the voucher type.")
+    if detail["bank_ledger"] == detail["counter_ledger"]:
+        raise ServiceError("invalid", "The other side must be another ledger than the bank's.")
+    desk, company = _company(connection, run, record)
+    chosen = {"by": str(actor), "held": record["hold_codes"][0] if record["status"] == "held" else None}
+    rules = {key: record["proposal"][key] for key in ("rules",) if (record["proposal"] or {}).get(key)}
+    try:
+        selection, resolved = _rebooked(
+            connection, desk, company, record, bank=detail["bank_ledger"], counter=detail["counter_ledger"],
+            voucher_type=detail["voucher_type"], payee=_established(connection, record)["payee"],
+            evidence="Chosen by a person in review.")
+        settled = _settled(connection, desk, company, record, resolved, None)
+    except settlement.Unresolved as unresolved:
+        work.update_record(connection, record, status="held", hold_codes=["bill_unresolved"],
+                           review_reasons=[unresolved.reason], proposal={
+                               "selection": selection, "resolved": resolved, **rules,
+                               "settlement": {"choices": unresolved.choices}, "chosen": chosen})
+        return {"status": "held"}
+    except (ValueError, ToolError) as refusal:
+        raise ServiceError("invalid", str(refusal)) from None
+    work.update_record(connection, record, status="proposed", hold_codes=[], review_reasons=[], proposal={
+        "selection": selection, "resolved": settled, **rules, "chosen": chosen})
+    return _approve(connection, run, record, actor=actor)
+
+
+def _approve_alike(connection, run, record, *, actor):
+    """One click approves every row of the run proposed again as a person chose for another."""
+    rows = connection.execute(
+        "SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND status='proposed' AND proposal->>'alike'=%s "
+        "ORDER BY id FOR UPDATE", (run["id"], ROW, record["proposal"]["alike"])).fetchall()
+    for row in rows:
+        _approve(connection, run, row, actor=actor)
+    return {"status": "writing", "approved": len(rows)}
 
 
 def _recheck(connection, run, record, *, actor):
@@ -1040,9 +1201,11 @@ def written(connection, run, record, write, receipt):
         except ValueError as error:
             raise ServiceError("invalid", str(error)) from error
         work.update_record(connection, record, status=outcome, current=current, hold_codes=[], review_reasons=[])
-        # A verified row a person approved is how its payee's rows are booked.
+        # A verified row a person approved, or whose treatment they chose, is how its payee's rows are booked.
         memory.learn_routing(connection, run, record, write["plan"], current["guid"],
                              actor_id=memory.approver(connection, run, record))
+        if record["proposal"].get("chosen") and not record["proposal"].get("alike"):
+            _alike(connection, run, record)
         follow = {"status": "duplicate", "hold_codes": [], "review_reasons": []}
     else:
         code = receipt.get("hold") if receipt.get("hold") in SAVE_HOLDS else "statement_save_held"
@@ -1055,6 +1218,42 @@ def written(connection, run, record, write, receipt):
             (run["id"], str(record["id"]), str(record["id"]))).fetchall():
         work.update_record(connection, follower, **follow)
     return {"verified": outcome in ("saved", "duplicate"), "outcome": outcome if outcome != "attention" else "held"}
+
+
+def _alike(connection, run, chosen):
+    """After a treatment a person chose is saved, the run's other rows with that payee that wait on the same question
+    are proposed again booked the same way, each to its own statement's bank. Each is noted, so standing approval
+    never writes it unseen; one click approves them all. A row whose bills need a person's choice stays held."""
+    proposal = chosen["proposal"]
+    selection, held = proposal["selection"], proposal["chosen"]["held"]
+    payee = memory.payee_key(selection.get("payee") or "")
+    if held is None or len(payee) < 4:
+        return
+    desk, company = _company(connection, run, chosen)
+    note = f"Booked as you chose for row {chosen['facts'].get('row')} of {chosen['facts'].get('file')}."
+    for other in connection.execute(
+            """SELECT * FROM run_records WHERE run_id=%s AND kind=%s AND id<>%s AND company_id=%s AND status='held'
+                   AND hold_codes=%s ORDER BY id FOR UPDATE""",
+            (run["id"], ROW, chosen["id"], chosen["company_id"], [held])).fetchall():
+        established = _established(connection, other)
+        theirs = memory.payee_key(established["payee"] or "")
+        if len(theirs) < 4 or not (payee in theirs or theirs in payee):
+            continue
+        bank = established["bank"] or (selection["bank_ledger_guid"] if _same_account(
+            _account(connection, chosen), _account(connection, other)) else None)
+        if bank is None:
+            continue
+        try:
+            rebooked, resolved = _rebooked(connection, desk, company, other, bank=bank,
+                                           counter=selection["counter_ledger_guid"],
+                                           voucher_type=selection["voucher_type_guid"], payee=established["payee"],
+                                           evidence=note)
+            settled = _settled(connection, desk, company, other, resolved, None)
+        except (ValueError, ToolError, settlement.Unresolved):
+            continue
+        work.update_record(connection, other, status="proposed", hold_codes=[], review_reasons=[note],
+                           proposal={"selection": rebooked, "resolved": settled, "alike": str(chosen["id"]),
+                                     "chosen": proposal["chosen"]})
 
 
 def stopped(connection, run):
@@ -1087,6 +1286,7 @@ class StatementEntry:
     approve_ready = staticmethod(approve_ready)
     written = staticmethod(written)
     stopped = staticmethod(stopped)
+    ledgers = staticmethod(ledgers)
 
 
 HANDLER = StatementEntry()

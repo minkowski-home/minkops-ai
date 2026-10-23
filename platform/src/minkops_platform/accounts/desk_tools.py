@@ -433,6 +433,52 @@ class Desk:
         }.items() if value is not None}
 
 
+# Where each role's ledgers sit in Tally's group tree, by its reserved group names; `any` is every ledger.
+ROLE_GROUPS = {
+    "supplier": ("Sundry Creditors", "Sundry Debtors"),
+    "expense": ("Purchase Accounts", "Direct Expenses", "Indirect Expenses", "Fixed Assets", "Misc. Expenses (ASSET)"),
+    "tax": ("Duties & Taxes",),
+    "bank": ("Bank Accounts",),
+}
+ROLES = (*ROLE_GROUPS, "any")
+# Ledgers a picker lists at once: what the session weighed first, then what the search finds.
+CHOICES = 20
+
+
+def ledger_choices(connection, run, company_id, role, query="", *, first=(), exclude=()):
+    """The ledgers a person may choose for a role in one company of the run's books, as its pinned copy holds them.
+
+    `first` (the session's candidates, then the record's current choice) lead, marked `suggested`; then every ledger
+    of the role, by name. A query keeps only the ledgers it matches, suggested ones still first. `exclude` names
+    GUIDs never offered, such as a bank row's own bank. At most CHOICES; never another client's company, nor one
+    this run did not read.
+    """
+    if role not in ROLES:
+        raise ServiceError("invalid", f"Choose a role among {', '.join(ROLES)}.")
+    desk = Desk(connection, run)
+    company = next((part for parts in desk.parts.values() for part in parts if str(part["id"]) == str(company_id)),
+                   None)
+    if company is None:
+        raise ServiceError("not_found", "This entry's company is not one of its run's books.")
+    version = company["version"]
+    groups = {row["name_key"]: row["parent"] for row in mirror.masters(connection, company["id"], version,
+                                                                      types=["GROUP"])}
+    fits = lambda row: row["guid"] not in exclude and (  # noqa: E731
+        role == "any" or mirror.under(row["parent"], ROLE_GROUPS[role], groups))
+    wanted = list(dict.fromkeys(guid for guid in first if guid))
+    by_guid = {row["guid"]: row for row in mirror.ledger_list(connection, company["id"], version, guids=wanted)}
+    found = (mirror.search_masters(connection, company["id"], version, ["LEDGER"], query, limit=200) if query.strip()
+             else mirror.ledger_list(connection, company["id"], version))
+    matched = {row["guid"] for row in found} if query.strip() else set(by_guid)
+    suggested = [by_guid[guid] for guid in wanted if guid in by_guid and guid in matched and fits(by_guid[guid])]
+    seen = {row["guid"] for row in suggested}
+    listed = [*suggested, *(row for row in found if row["guid"] not in seen and fits(row))][:CHOICES]
+    return {"company": company["name"], "role": role, "ledgers": [{key: value for key, value in {
+        "guid": row["guid"], "name": row["name"], "group": desk.path(connection, company, row["parent"]),
+        "gstin": row["gstin"], "suggested": row["guid"] in seen or None}.items() if value is not None}
+        for row in listed]}
+
+
 def entries(data):
     """A voucher's ledger lines as {ledger, debit|credit} in rupees."""
     return [{"ledger": ledger, ("debit" if cents < 0 else "credit"): f"{abs(cents) / 100:.2f}"}
@@ -644,7 +690,7 @@ TOOLS = {tool.name: tool for tool in (
     Tool("memory", "What Minkops learnt about these subjects in a company, from saves a person approved: how a "
          "supplier's bills were booked (subject: the supplier ledger's reference), how a payee's bank rows were booked "
          "(subject: the payee's name), and how the company keeps its books (subject: a practice name). A demoted "
-         "entry was changed in Tally since it was learnt; an unconfirmed one was a best guess.",
+         "entry was changed in Tally since it was learnt.",
          schema({"company": COMPANY, "subjects": SUBJECTS, "kinds": {
              "type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["booking", "routing", "practice"]}}},
              ["company", "subjects"]), remembered),

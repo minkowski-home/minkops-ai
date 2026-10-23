@@ -117,6 +117,11 @@ def line(role, ledger_guid, amount, *, side="debit", tax=None, supply=None):
             "evidence": f"Printed {role} {amount}"}
 
 
+def exception(detail, *candidates, code="classification_uncertain"):
+    """A session's exception: what remains uncertain, and the ledgers it weighed for it, by GUID."""
+    return {"code": code, "detail": detail, "candidate_guids": list(candidates)}
+
+
 def proposal(company, n=1, **changes):
     """The scripted model's reading of B01: taxable 160,000.00, CGST and SGST 14,400.00 each, total 188,800.00."""
     entry = {
@@ -307,14 +312,14 @@ def companion(desk, respond=saved):
     return job["operation"], plan
 
 
-def decide(desk, row, action):
+def decide(desk, row, action, detail=None):
     db = desk["db"]
     current = record(desk, row)
     run = work.get_run(db, desk["tenant"]["id"], current["run_id"])
     try:
         receipt = work.decide(db, tenant_id=desk["tenant"]["id"], record_id=current["id"], version=current["version"],
-                              actor_id=desk["operator"]["id"], action=action,
-                              apply=lambda locked: bill_entry.HANDLER.decide(db, run, locked, action, {},
+                              actor_id=desk["operator"]["id"], action=action, detail=detail,
+                              apply=lambda locked: bill_entry.HANDLER.decide(db, run, locked, action, detail or {},
                                                                              {"user": desk["operator"]}))
     except ServiceError:
         db.rollback()
@@ -378,7 +383,7 @@ def test_a_bill_waits_for_the_refresh_then_is_read_from_its_pages_and_checked_as
                   {"ledger": "Office Cabins", "side": "debit", "amount": 160000.0},
                   {"ledger": "Input CGST 9%", "side": "debit", "amount": 14400.0},
                   {"ledger": "Input SGST 9%", "side": "debit", "amount": 14400.0}]}
-    assert actions(bill) == ["approve", "nothing"]
+    assert actions(bill) == ["approve", "choose", "nothing"]
     assert work.get_run(desk["db"], desk["tenant"]["id"], run["id"])["state"] == "review"
 
 
@@ -574,7 +579,7 @@ def test_a_bill_held_in_one_file_and_proposed_in_another_names_its_copy_and_wait
     """Read twice, one copy held and one proposed: each says where the other is, and neither is approved unasked."""
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
+    unsure = proposal(company, exception=exception("Asset or repairs?"))
     fake = by_file(**{"a-sunrise.pdf": proposing(names, proposal(company)),
                       "b-sunrise-copy.pdf": proposing(names, unsure)})
     run = launch(desk, {"a-sunrise.pdf": B01, "b-sunrise-copy.pdf": B01}, review_mode="only_exceptions")
@@ -592,7 +597,7 @@ def test_a_bill_held_in_two_files_names_its_copy_in_each(desk):
     on its own after a person settles the first."""
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
+    unsure = proposal(company, exception=exception("Asset or repairs?"))
     fake = by_file(**{"a-sunrise.pdf": proposing(names, unsure), "b-sunrise-scan.pdf": proposing(names, unsure)})
     run = launch(desk, {"a-sunrise.pdf": B01, "b-sunrise-scan.pdf": B01})
     read(desk, fake, run)
@@ -608,7 +613,7 @@ def test_a_bill_held_for_its_own_exception_also_shows_what_the_checks_find_in_it
     """A person resolving the session's question sees every other problem with the proposed voucher at once."""
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"},
+    unsure = proposal(company, exception=exception("Asset or repairs?"),
                       **{"voucher.lines.1.ledger_guid": "g-sgst"})
     run = launch(desk, {"a-sunrise.pdf": B01})
     read(desk, by_file(**{"a-sunrise.pdf": proposing(names, unsure)}), run)
@@ -702,7 +707,8 @@ def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(de
     assert (first["hold_codes"], first["review_reasons"]) == (["supplier_missing"], [
         "Supplier 'Cabin Services UAT' has no ledger in Rehearsal Infra Private Limited. Create it, then this bill "
         "can be saved."])
-    assert actions(first) == ["supplier", "nothing", "retry"]
+    # The supplier may also be one of the company's ledgers under another name: a person may choose it instead.
+    assert actions(first) == ["supplier", "choose", "nothing", "retry"]
     detail = bill_entry.HANDLER.detail(desk["db"], work.get_run(desk["db"], desk["tenant"]["id"], run["id"]), first)
     assert (detail["new_supplier"]["name"], detail["new_supplier"]["gstin"]) == ("Cabin Services UAT", CABINS)
     assert desk["db"].execute("SELECT count(*) AS n FROM native_writes WHERE run_id=%s", (run["id"],)).fetchone()["n"] == 0
@@ -715,7 +721,7 @@ def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(de
     assert (first["status"], first["hold_codes"], first["review_reasons"]) == (
         "held", ["supplier_missing"], ["The supplier's GST details in Tally differ from the bill. Review the ledger "
                                        "there."])
-    assert actions(first) == ["supplier", "nothing", "retry"] and companion(desk) is None
+    assert actions(first) == ["supplier", "choose", "nothing", "retry"] and companion(desk) is None
     # Verified, the new ledger becomes the party: this bill is written, and the other bill from it is proposed.
     decide(desk, first, "supplier")
     companion(desk, created())
@@ -729,19 +735,19 @@ def test_a_new_supplier_is_created_only_on_approval_and_its_bills_then_follow(de
     assert second["proposal"]["preview"]["party"] == "Cabin Services UAT"
 
 
-def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the_gate(desk):
+def test_exceptions_hold_with_their_reasons_and_a_chosen_treatment_must_still_pass_the_gate(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
     unaddressed = {"bill": 1, "document": None, "company_guid": None, "company_evidence": None, "voucher": None,
                    "supplier_details": None, "rules": [],
                    "evidence": [{"field": "buyer", "page": 1, "quote": "Billed to: Unknown"}],
-                   "exception": {"code": "company_unresolved", "detail": "The buyer is none of the client's companies."}}
+                   "exception": exception("The buyer is none of the client's companies.", code="company_unresolved")}
     # The model writes its detail by reference; the reviewer reads names.
-    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "L2 or repairs, in C1?"})
+    unsure = proposal(company, exception=exception("L2 or repairs, in C1?"))
     early = proposal(company, **{"document.date": "2026-03-31"})
     # Told the date is before the books begin, the model tries to hold the bill for something weaker.
     reframed = proposal(company, **{"document.date": "2026-03-31"},
-                        exception={"code": "classification_uncertain", "detail": "How to book a bill outside the books?"})
+                        exception=exception("How to book a bill outside the books?"))
     unbalanced = proposal(company, **{"document.number": "SOS/26/0413", "document.date": "2026-09-02",
                                       "document.total": 188801.0})
     short = second_bill(company)
@@ -749,7 +755,7 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
     # Told the lines fall a rupee short, the model invents a round-off: no round-off line prints one.
     invented = copy.deepcopy(unbalanced)
     invented["voucher"]["lines"].append(line("round_off", "g-round", 1.0))
-    conflict = {**unbalanced, "exception": {"code": "source_values_conflict", "detail": "Total is 188,801.00."}}
+    conflict = {**unbalanced, "exception": exception("Total is 188,801.00.", code="source_values_conflict")}
     fake = by_file(**{"unaddressed.pdf": proposing(names, unaddressed),
                       "unsure.pdf": proposing(names, unsure),
                       # The second bill is refused, and answering again the model tries to recast the first.
@@ -760,12 +766,13 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
                                          reproposing(names, conflict)]})
     run = launch(desk, {"unaddressed.pdf": B01, "unsure.pdf": B01, "early.pdf": SECOND, "unbalanced.pdf": B06})
     read(desk, fake, run)
-    nobody, guessable, before_books, corrected, contradicted = records(desk, run)
+    nobody, unsure_bill, before_books, corrected, contradicted = records(desk, run)
     assert (nobody["hold_codes"], nobody["review_reasons"], actions(nobody)) == (
         ["company_unresolved"], ["The buyer is none of the client's companies."], ["nothing", "retry"])
-    # A complete candidate held for its treatment may be written as a best guess; the gate has checked it.
-    assert (guessable["hold_codes"], actions(guessable)) == (["classification_uncertain"], ["guess", "nothing", "retry"])
-    assert guessable["review_reasons"] == ["Office Cabins or repairs, in Rehearsal Infra Private Limited?"]
+    # A complete reading held for its treatment: a person may choose that treatment and approve it.
+    assert (unsure_bill["hold_codes"], actions(unsure_bill)) == (["classification_uncertain"],
+                                                                 ["choose", "nothing", "retry"])
+    assert unsure_bill["review_reasons"] == ["Office Cabins or repairs, in Rehearsal Infra Private Limited?"]
     # A date before the books begin holds at once: no resubmission can change a printed date, nor recast the hold.
     assert (before_books["hold_codes"], before_books["checks"]["submissions"]) == (["date_before_books"], 1)
     session = next(s for s in fake.created if header(s)["file"] == "early.pdf")
@@ -778,12 +785,70 @@ def test_exceptions_hold_with_their_reasons_and_a_best_guess_must_still_pass_the
     assert (contradicted["hold_codes"], contradicted["review_reasons"]) == (["source_values_conflict"],
                                                                             ["Total is 188,801.00."])
     assert actions(contradicted) == ["nothing", "retry"]
-    decide(desk, guessable, "guess")
-    companion(desk)
-    guessed = record(desk, guessable)
-    assert (guessed["status"], guessed["review_reasons"]) == ("saved", [bill_entry.GUESSED])
+    # A choice the gate refuses says why and changes nothing.
+    crossed = {"voucher_type": "g-purchase", "party": "g-cabins", "lines": ["g-cabins", "g-cgst", "g-sgst"]}
+    with pytest.raises(ServiceError, match="Office Cabins is the supplier's ledger"):
+        decide(desk, unsure_bill, "choose", crossed)
+    assert {key: record(desk, unsure_bill)[key] for key in ("version", "status", "proposal")} == {
+        key: unsure_bill[key] for key in ("version", "status", "proposal")}
+    # The person's choice is checked, approved, saved and verified, and teaches the booking as theirs.
+    repairs_ = {"voucher_type": "g-purchase", "party": "g-sunrise", "lines": ["g-repairs", "g-cgst", "g-sgst"]}
+    assert decide(desk, unsure_bill, "choose", repairs_)["status"] == "writing"
+    operation, plan = companion(desk)
+    assert [ln["ledger"] for ln in plan["lines"]] == ["Sunrise Office Systems", "Repairs and Maintenance",
+                                                      "Input CGST 9%", "Input SGST 9%"]
+    assert record(desk, unsure_bill)["status"] == "saved"
+    from minkops_platform.accounts import memory
+    [learnt] = memory.entries(desk["db"], desk["tenant"]["id"], desk["client"]["id"], company_ids=[desk["company"]["id"]],
+                              kinds=["booking"], subjects=["g-sunrise"])
+    assert (learnt["status"], learnt["value"]["ledgers"], learnt["evidence"][-1]["kind"],
+            learnt["evidence"][-1]["actor"]) == ("confirmed", ["Repairs and Maintenance"], "choice",
+                                                 str(desk["operator"]["id"]))
     with pytest.raises(ServiceError, match="not available"):
-        decide(desk, nobody, "guess")
+        decide(desk, nobody, "choose", repairs_)
+
+
+def test_a_chosen_treatment_is_offered_for_the_runs_other_bills_of_that_supplier_in_one_click(desk):
+    """Two of Sunrise's bills hold for the same question. The person chooses Repairs for one; once that bill is saved,
+    the other is proposed booked the same way, noted, and one click approves every bill booked so. The picker lists
+    the ledgers the session weighed first, and only the bill's own company's ledgers."""
+    db, names, guid = desk["db"], names_of(desk["company"]), desk["company"]["guid"]
+    # Another client's company in the workspace, with a ledger the search would otherwise also find.
+    other_client = factory.client(db, desk["tenant"])
+    elsewhere = factory.company(db, desk["tenant"], desk["device"], other_client, name="Elsewhere Ltd")
+    factory.books(db, elsewhere, [ledger("g-hire", "Cabin Hire", "Indirect Expenses")])
+    db.commit()
+    asked = exception("Office Cabins or Repairs and Maintenance?", "g-cabins", "g-repairs")
+    fake = by_file(**{"a-sunrise.pdf": proposing(names, proposal(guid, exception=asked)),
+                      "b-sunrise.pdf": proposing(names, {**repairs(guid, "SOS/26/0420"), "exception": asked})})
+    run = launch(desk, {"a-sunrise.pdf": B01, "b-sunrise.pdf": repairs_pdf("SOS/26/0420")})
+    read(desk, fake, run)
+    first, second = records(desk, run)
+    assert [offered(desk, r) for r in (first, second)] == [["choose", "nothing", "retry"]] * 2
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    choice = bill_entry.HANDLER.detail(db, current, first)["choice"]
+    assert ([c["name"] for c in choice["candidates"]], [t["name"] for t in choice["voucher_types"]]) == (
+        ["Office Cabins", "Repairs and Maintenance"], ["Journal", "Purchase"])
+    assert [(ln["role"], ln["ledger"]["name"], ln["picker"]) for ln in choice["lines"]] == [
+        ("expense", "Office Cabins", "expense"), ("tax", "Input CGST 9%", "tax"), ("tax", "Input SGST 9%", "tax")]
+    picked = bill_entry.HANDLER.ledgers(db, current, first, "expense", "")["ledgers"]
+    assert [(p["name"], p.get("suggested")) for p in picked] == [
+        ("Office Cabins", True), ("Repairs and Maintenance", True), ("Round Off", None)]
+    assert [p["name"] for p in bill_entry.HANDLER.ledgers(db, current, first, "expense", "cabin")["ledgers"]] == [
+        "Office Cabins"]
+    assert [p["name"] for p in bill_entry.HANDLER.ledgers(db, current, first, "supplier", "")["ledgers"]] == [
+        "Sunrise Office Systems"]
+    chosen = {"voucher_type": "g-purchase", "party": "g-sunrise", "lines": ["g-repairs", "g-cgst", "g-sgst"]}
+    decide(desk, first, "choose", chosen)
+    companion(desk)
+    second = record(desk, second)
+    assert (second["status"], second["review_reasons"], offered(desk, second)) == (
+        "proposed", ["Booked as you chose for a-sunrise.pdf."], ["alike", "approve", "choose", "nothing"])
+    assert second["proposal"]["preview"]["lines"][1]["ledger"] == "Repairs and Maintenance"
+    receipt = decide(desk, second, "alike")
+    assert (receipt["status"], receipt["approved"]) == ("writing", 1)
+    operation, plan = companion(desk)
+    assert (plan["header"]["reference"], record(desk, second)["status"]) == ("SOS/26/0420", "saved")
 
 
 SECOND = factory.text_pdf(invoice(), invoice(number="SOS/26/0420", day="02-Sep-2026", taxable="10,000.00",
@@ -804,7 +869,7 @@ def second_bill(company, n=2):
 def test_a_file_of_several_bills_keeps_its_decided_bills_through_a_recheck(desk):
     names = names_of(desk["company"])
     company = desk["company"]["guid"]
-    unsure = proposal(company, exception={"code": "classification_uncertain", "detail": "Asset or repairs?"})
+    unsure = proposal(company, exception=exception("Asset or repairs?"))
     # First taken for three bills, the third refused as the file prints no such total; corrected, the file is read
     # as two: the third, untouched by anyone, goes.
     phantom = second_bill(company, 3)
@@ -853,8 +918,7 @@ def test_a_recheck_reads_the_books_again_so_a_ledger_created_in_tally_since_is_f
     factory.books(db, company, [r for r in masters(company) if r["data"]["GUID"] != "g-cabins"], [PRIOR])
     db.commit()
     names, guid = names_of(company), company["guid"]
-    unsure = proposal(guid, voucher=None, exception={"code": "classification_uncertain",
-                                                      "detail": "No ledger records office cabins."})
+    unsure = proposal(guid, voucher=None, exception=exception("No ledger records office cabins."))
     readings = {"a-cabin.pdf": iter([proposing(names, unsure), proposing(names, proposal(guid))]),
                 "b-repairs.pdf": iter([proposing(names, repairs(guid, "SOS/26/0420"))])}
     fake = FakeAgents(script_for=lambda metadata, content: Script(*next(readings[header_of(content)["file"]])))
@@ -943,7 +1007,7 @@ def test_a_locked_run_enters_bills_into_its_company_and_a_year_split_routes_by_d
     names = names_of(company, earlier, sister)
     march = proposal(company["guid"], **{"document.date": "2026-03-02"})
     elsewhere = proposal(sister["guid"])
-    held = {**elsewhere, "exception": {"code": "company_unresolved", "detail": "Addressed to Sister Infra."}}
+    held = {**elsewhere, "exception": exception("Addressed to Sister Infra.", code="company_unresolved")}
     fake = by_file(**{"march.pdf": proposing(names, march),
                       "sister.pdf": [*proposing(names, elsewhere), reproposing(names, held)]})
     run = launch(desk, {"march.pdf": B01, "sister.pdf": B01}, company_mode="locked",
@@ -985,7 +1049,7 @@ def test_a_bill_addressed_to_another_of_the_clients_companies_is_never_entered_i
     db.commit()
     names = names_of(desk["company"], sister)
     wrong = proposal(desk["company"]["guid"], **{"document.buyer_gstin": SISTER})
-    held = {**wrong, "exception": {"code": "company_unresolved", "detail": "Addressed to Sister Infra."}}
+    held = {**wrong, "exception": exception("Addressed to Sister Infra.", code="company_unresolved")}
     fake = by_file(**{"sister.pdf": [*proposing(names, wrong), reproposing(names, held)]})
     run = launch(desk, {"sister.pdf": B01})
     read(desk, fake, run)

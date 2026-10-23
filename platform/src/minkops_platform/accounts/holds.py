@@ -4,8 +4,9 @@ A hold is a typed reason a bill or statement row cannot be saved as proposed,
 raised by the model's coded exceptions, a server check or the native writer.
 The server owns this matrix: renderers display it and decision paths enforce
 it. The actions are a ceiling. Record-specific gates may remove one (Create
-this ledger needs evidenced supplier details), never add one. A code outside
-the list keeps only the actions that cannot write.
+this ledger needs evidenced supplier details; Choose and approve needs a
+complete reading, so only the treatment is in question), never add one. A code
+outside the list keeps only the actions that cannot write.
 """
 
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 ACTIONS = {
     "nothing": "Do nothing",
     "retry": "Recheck",
-    "guess": "Best guess write",
+    "choose": "Choose and approve",
     "supplier": "Create this ledger",
     "retry_save": "Retry save",
     "settle": "Settle",
@@ -51,7 +52,8 @@ def _holds(scopes, actions, entries):
     return [Hold(code, kind, label, reason, actions, frozenset(scopes)) for code, kind, label, reason in entries]
 
 
-_INTERPRETATION = ("guess", "nothing", "retry")
+# Holds about a record's treatment: a person may choose its ledgers and voucher type, and approve.
+_INTERPRETATION = ("choose", "nothing", "retry")
 _DESTINATION = ("retry_save", "nothing")
 _CATALOG = [
     *_holds((BILL, STATEMENT), NON_WRITING, [
@@ -76,8 +78,7 @@ _CATALOG = [
         ("required_value_missing", EXCEPTION, "Missing bill value",
          "A required bill value could not be confirmed from the source."),
         ("source_values_conflict", EXCEPTION, "Bill values conflict", "The source contains conflicting bill values."),
-        ("supplier_unresolved", EXCEPTION, "Supplier unclear",
-         "The supplier could not be matched to exactly one Tally ledger."),
+        ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
         ("date_before_books", EXCEPTION, "Before books begin",
          "The bill date is before the company's books beginning date."),
         ("identity_rule_unknown", EXCEPTION, "Foreign supplier",
@@ -93,9 +94,11 @@ _CATALOG = [
          "The appropriate accounting ledger could not be confirmed."),
     ]),
     *_holds((BILL,), _INTERPRETATION, [
-        ("source_unreadable", EXCEPTION, "Unreadable bill", "The bill could not be read reliably."),
+        ("supplier_unresolved", EXCEPTION, "Supplier unclear",
+         "The supplier could not be matched to exactly one Tally ledger."),
     ]),
-    *_holds((BILL,), ("supplier", "nothing", "retry"), [
+    # A missing supplier is created, or found under another name among the company's ledgers.
+    *_holds((BILL,), ("supplier", "choose", "nothing", "retry"), [
         ("supplier_missing", EXCEPTION, "Missing supplier",
          "The supplier is missing from the company's confirmed Tally ledgers."),
     ]),

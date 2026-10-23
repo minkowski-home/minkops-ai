@@ -866,6 +866,12 @@ def check(record, view, company, *, created=(), until=None, assume_new_supplier=
             if stock and name in stock.identities:
                 raise HoldReason("classification_uncertain", f"{name} is on more than one line: give it one line with the "
                                                              "sum of the bill's amounts it carries.")
+            if item["role"] in TAXABLE_ROLES and gst.is_duty(ledger):
+                # Tally's returns read a duty ledger as tax: a taxable value posted to one is claimed as input tax.
+                what = item["role"].replace("_", " ")
+                raise HoldReason("classification_uncertain", f"{name} is a GST duty ledger: it carries the bill's tax, "
+                                                             f"never its {what}. Book the {what} to the ledger the "
+                                                             "company uses for it.")
             identities.setdefault(name, masters.identity(ledger))
             allocation = None
             if item.get("cost_centre_guid") or item.get("cost_category_guid"):

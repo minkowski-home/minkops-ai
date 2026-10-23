@@ -208,10 +208,11 @@ whatever the review mode, when:
   voucher type or expense ledger, or without the stock items they carried). The
   note names what the supplier's last bill was booked to beside this one. One
   approval confirms the booking, which memory then holds as a precedent;
-- it books the supplier the way someone changed in Tally since Minkops saved it,
-  or the way a best guess first did;
+- it books the supplier the way someone changed in Tally since Minkops saved it;
 - its reading changed after a refusal;
-- it is a copy of a bill in another file, or a best guess;
+- it is a copy of a bill in another file;
+- it was proposed again booked as a person chose for another bill of the same
+  supplier in the run (below);
 - the same bill (buyer, supplier, number, date and total as printed) is held in
   another file. Each copy names the other, so the proposed one is not written while
   its copy waits for a reason no one has seen. Two held copies name each other
@@ -227,17 +228,30 @@ offers only Do nothing and Recheck.
 
 | Codes | Actions |
 | --- | --- |
-| `company_unresolved`, `supplier_unresolved`, `not_a_bill`, `multiple_bills_unclear`, `required_value_missing`, `source_values_conflict`, `unsupported_structure`, `date_before_books`, `date_outside_company_period`, `identity_rule_unknown`, `voucher_type_unresolved`, `extraction_failed` | Do nothing, Recheck |
-| `classification_uncertain`, `source_unreadable` | Best guess write, Do nothing, Recheck |
-| `supplier_missing` | Create this ledger, Do nothing, Recheck |
+| `company_unresolved`, `not_a_bill`, `multiple_bills_unclear`, `required_value_missing`, `source_values_conflict`, `source_unreadable`, `unsupported_structure`, `date_before_books`, `date_outside_company_period`, `identity_rule_unknown`, `voucher_type_unresolved`, `extraction_failed` | Do nothing, Recheck |
+| `classification_uncertain`, `supplier_unresolved` | Choose and approve, Do nothing, Recheck |
+| `supplier_missing` | Create this ledger, Choose and approve, Do nothing, Recheck |
 | `company_not_open`, `no_company`, `duplicate_company`, `not_running`, `port_closed`, `busy`, `too_many`, `invalid_response`, `rejected`, `save_waiting`, `save_interrupted`, `save_held` | Retry save, Do nothing |
 | `destination_changed` | Do nothing, Recheck |
 | `run_stopped` | Do nothing |
 | `practice_question` | Do nothing; the answer in Attention releases it |
 
-Best guess write is offered only when the held bill's complete candidate passes
-the gate, and Create this ledger only when the supplier can be created safely
-(below). Recheck reads the books afresh first: it asks the PC holding the bill's
+Every proposal also offers Choose and approve, and a held bill offers it when its
+reading is complete, addressed to its company and agrees with what the file
+prints, so only its treatment is in question. The person chooses the voucher type,
+the supplier and each line's ledger (and an item-wise bill's purchase ledgers)
+from a picker that lists the ledgers the session weighed (`candidates`) first,
+then the company's ledgers of that role in the run's books
+(`GET .../records/{id}/ledgers?role=&q=`). The amounts stay as the bill prints
+them. The server rebuilds the proposal with those GUIDs and runs every gate a
+session's proposal meets; a choice a gate refuses answers why and changes
+nothing, and one it accepts is approved and saved. Once that save is verified,
+the run's other bills of the same supplier, held for the same question or
+proposed unlike how the books booked the supplier, are proposed again booked the
+same way, noted "Booked as you chose for …"; one click, Approve all booked this
+way, approves them, and the note keeps standing approval from writing them
+unseen. Create this ledger is offered only when the supplier can be created
+safely (below). Recheck reads the books afresh first: it asks the PC holding the bill's
 company (every company in the run's scope, for a bill with none) to refresh, and
 the file's next session waits for that refresh, which must start after the
 recheck, then pins the copy it published (`runs.repin`, `desk_tools.ready`). A
@@ -261,9 +275,9 @@ desk employee (`accounts/memory.py`):
 
 - **Bookings.** A verified save a person approved is one way its supplier's bills
   are booked: the voucher type and expense ledgers, by GUID, and whether it was
-  booked item-wise. Approving the same
-  booking again uses its entry; a supplier booked two ways has two. A best guess
-  stays unconfirmed until a person approves a bill booked that way.
+  booked item-wise. Approving the same booking again uses its entry; a supplier
+  booked two ways has two. A treatment a person chose in review is learnt the same
+  way, its evidence of kind `choice` naming them.
 - **Upkeep.** Every sync revalidates the entries. An edit made in Tally to a voucher
   an entry was learnt from, or its deletion, demotes the entry, and the next bill
   booked that way goes to review. An entry whose ledgers are missing from three

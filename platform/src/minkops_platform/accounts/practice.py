@@ -42,18 +42,6 @@ def _groups(rows):
     return {row["name_key"]: row["parent"] for row in rows if row["type"] == "GROUP"}
 
 
-def _under(parent, wanted, groups):
-    """Is this parent group, or any group above it, one of `wanted`?"""
-    wanted = {group.casefold() for group in wanted}
-    for _ in range(50):
-        if not parent:
-            return False
-        if parent.casefold() in wanted:
-            return True
-        parent = groups.get(mirror.normalized(parent))
-    return False
-
-
 # Each question a probe may ask: its prompt, and each answer's label and the practice it records.
 QUESTIONS = {
     "receipt_notes": ("Does this company record goods received as Receipt Notes in Tally before the purchase?", (
@@ -127,8 +115,8 @@ def invoice_number_field(purchases, **_):
 
 
 def bank_payments(payments, ledgers, groups, **_):
-    banks = {row["name"] for row in ledgers if _under(row["parent"], ["Bank Accounts"], groups)}
-    parties = {row["name"] for row in ledgers if _under(row["parent"], ["Sundry Creditors", "Sundry Debtors"], groups)}
+    banks = {row["name"] for row in ledgers if mirror.under(row["parent"], ["Bank Accounts"], groups)}
+    parties = {row["name"] for row in ledgers if mirror.under(row["parent"], ["Sundry Creditors", "Sundry Debtors"], groups)}
     counters, to_parties, with_centres = Counter(), 0, 0
     considered = 0
     for voucher in payments:
@@ -153,7 +141,7 @@ def bank_payments(payments, ledgers, groups, **_):
 
 
 def billwise(ledgers, groups, purchases, **_):
-    suppliers = [row for row in ledgers if _under(row["parent"], ["Sundry Creditors"], groups)]
+    suppliers = [row for row in ledgers if mirror.under(row["parent"], ["Sundry Creditors"], groups)]
     on = [row for row in suppliers if str(row["data"].get("ISBILLWISEON", "")).casefold() == "yes"]
     evidence = {"suppliers": len(suppliers), "bill_by_bill": len(on)}
     if not suppliers:
@@ -168,7 +156,7 @@ def gst_ledgers(ledgers, groups, purchases, **_):
     """Whether purchases post GST to the ledgers Tally sets up as GST duties, which its returns read, or to others
     named for the tax. Books with only one kind settle it; books with both ask, unless they always use the duty
     ledgers."""
-    taxes = [row for row in ledgers if _under(row["parent"], ["Duties & Taxes"], groups)]
+    taxes = [row for row in ledgers if mirror.under(row["parent"], ["Duties & Taxes"], groups)]
     duty = {row["name"] for row in taxes if str(row["data"].get("TAXTYPE", "")).casefold() == "gst"}
     named = {row["name"] for row in taxes if row["name"] not in duty and GST_WORDS & set(mirror.words(row["name"]))}
     if not duty and not named:
@@ -191,7 +179,7 @@ DISCOUNT_GROUPS = ("Indirect Incomes", "Direct Incomes", "Purchase Accounts")
 def discounts(ledgers, groups, purchases, **_):
     """Whether a printed discount is booked net or to a discount ledger: a company without one books net."""
     named = {row["name"]: row for row in ledgers
-             if "discount" in mirror.words(row["name"]) and _under(row["parent"], DISCOUNT_GROUPS, groups)}
+             if "discount" in mirror.words(row["name"]) and mirror.under(row["parent"], DISCOUNT_GROUPS, groups)}
     used = Counter(name for v in purchases for name in v["ledgers"] if name in named)
     evidence = {"discount_ledgers": len(named), "purchases_with_discount": sum(used.values())}
     if not named:

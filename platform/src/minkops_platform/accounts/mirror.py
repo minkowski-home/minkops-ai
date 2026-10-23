@@ -501,6 +501,30 @@ def search_masters(connection, company_id, version, types, subject, *, limit=8):
          "limit": limit}).fetchall()
 
 
+def under(parent, wanted, groups):
+    """Is this parent group, or any group above it, one of `wanted` (Tally's group names)?
+
+    `groups` maps each group's normalized name to its parent's name, as the GROUP masters record it.
+    """
+    wanted = {group.casefold() for group in wanted}
+    for _ in range(50):
+        if not parent:
+            return False
+        if parent.casefold() in wanted:
+            return True
+        parent = groups.get(normalized(parent))
+    return False
+
+
+def ledger_list(connection, company_id, version, *, guids=None, limit=5000):
+    """A company's ledgers at a version, light: GUID, name, parent group and GSTIN, by name; or these GUIDs'."""
+    return connection.execute(
+        f"""SELECT guid, name, parent, gstin FROM mirror_masters WHERE company_id=%(c)s AND {_VISIBLE}
+                AND type='LEDGER' AND (%(guids)s::text[] IS NULL OR guid = ANY(%(guids)s))
+            ORDER BY name_key, guid LIMIT %(limit)s""",
+        {"c": company_id, "v": version, "guids": guids, "limit": limit}).fetchall()
+
+
 def named(connection, company_id, version, kind, subjects):
     """Masters of one type whose GUID, or whose name ignoring case and spacing, is one of these subjects."""
     return connection.execute(

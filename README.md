@@ -5,9 +5,10 @@
 Minkops completes what it can truthfully automate. It never becomes an accounting
 data-entry screen or a correction-prompt chat. Exceptions use short labels and
 clear bill/file/voucher/cell identifiers, with contextual buttons such as
-**Do nothing**, **Best guess write**, or **Create this ledger** when supported.
-Do nothing preserves an attention item without writing. A best-guess write stays
-pending human review even after a verified save. Manual changes happen in Tally,
+**Do nothing**, **Choose and approve**, or **Create this ledger** when supported.
+Do nothing preserves an attention item without writing. Choose and approve lets a
+reviewer pick, from the client's own ledgers, where an entry goes; the amounts
+stay as the source prints them. Manual changes happen in Tally,
 Excel or the original system. Detailed diagnostics stay in internal audit records.
 
 Attention is shared across workflows and employees, tenant-scoped and durable.
@@ -40,7 +41,7 @@ workflow implementation remains Git history, not a parallel methodology to
 preserve. Existing deterministic adapters and checks remain where they enforce
 real integration or correctness requirements.
 
-Typically, we want to use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred and best-guess outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are currently internal; independent AI steps should use bounded parallelism without weakening correctness.
+Typically, we want to use concise one-click decisions, and keep manual business data entry/corrections in the original systems. Never add accounting value editors or correction-prompt chat to Minkops. Deferred outcomes stay in shared attention with clear source/destination identifiers and actor audit. Detailed logs are currently internal; independent AI steps should use bounded parallelism without weakening correctness.
 
 ### Workflow methods and current scope
 

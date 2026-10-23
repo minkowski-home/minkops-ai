@@ -110,7 +110,10 @@ A bank row never opens a bill (New Ref): purchases and sales do.
 
 When the company, bank, counter ledger or classification remains genuinely
 uncertain, answer the row with an `exception` instead of a `selection`, and
-explain the competing evidence plainly. The codes are:
+explain the competing evidence plainly. Give with it what you did establish (the
+company, the bank ledger and the `payee`), and list in `candidates`, by
+reference and most likely first, the ledgers you weighed for the other side: a
+person chooses the row's treatment from them and approves it. The codes are:
 
 - `company_unresolved`;
 - `ledger_unresolved`;

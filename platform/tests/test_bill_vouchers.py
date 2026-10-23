@@ -615,6 +615,19 @@ def test_a_company_that_posts_gst_to_its_duty_ledgers_refuses_one_merely_named_f
     assert vouchers.check(proposal(), practised({"gst_ledgers": {"use": "history"}}, DUTY_CGST), COMPANY)
 
 
+def test_a_gst_duty_ledger_never_carries_a_bills_taxable_value():
+    """Tally's returns read a GST duty ledger as tax: an expense or freight posted to one would be claimed as input
+    tax. A session's reading, or a person's choice of ledger, is refused for it."""
+    for index, role in ((0, "expense"), (6, "freight")):
+        taxed = proposal()
+        taxed["voucher"]["lines"][index]["ledger_guid"] = DUTY_CGST["GUID"]
+        with pytest.raises(HoldReason) as refused:
+            vouchers.check(taxed, practised({}, DUTY_CGST), COMPANY)
+        assert (refused.value.code, str(refused.value)) == ("classification_uncertain", (
+            f"CGST Input 9% (GST) is a GST duty ledger: it carries the bill's tax, never its {role}. Book the "
+            f"{role} to the ledger the company uses for it."))
+
+
 def test_a_company_that_books_discounts_net_refuses_a_discount_line():
     discounted = proposal(**{"voucher.lines.0.amount": 4100.00})
     discounted["voucher"]["lines"].append(line("discount", "Trade Discount", "credit", 100.00))

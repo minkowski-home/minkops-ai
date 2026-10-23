@@ -27,8 +27,7 @@ interface MemoryPage { can_edit: boolean; entries: Entry[]; rules: Rule[] }
 interface Named { id: string; slug?: string; name: string }
 
 const STATUS: Record<string, string> = {
-  confirmed: "Confirmed", unconfirmed: "A best guess, not yet confirmed", demoted: "Changed in Tally since",
-  disabled: "Disabled",
+  confirmed: "Confirmed", demoted: "Changed in Tally since", disabled: "Disabled",
 };
 const WORKFLOWS: Record<string, string> = { "bill-entry": "Bill entry", "statement-entry": "Statement entry" };
 const KINDS: Record<string, string> = {

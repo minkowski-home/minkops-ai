@@ -88,7 +88,9 @@ def answered(entry, amounts):
     amount = entry.get("amount", amounts.get(entry["ref"]))
     entry = {key: value for key, value in entry.items() if key != "amount"}
     if "exception" in entry:
-        return {"ref": entry["ref"], "amount": amount, "selection": None, "exception": entry["exception"]}
+        # What the session established besides its doubt; a scenario names only what matters to it.
+        held = {"company": None, "bank_ledger": None, "payee": None, "candidates": [], **entry["exception"]}
+        return {"ref": entry["ref"], "amount": amount, "selection": None, "exception": held}
     selection = {"family": None, "cost_centre": None, "lines": None, "pair": None, "bills": None, "rules": [],
                  "payee": None, **{key: value for key, value in entry.items() if key != "ref"}}
     if selection["lines"]:
@@ -791,6 +793,7 @@ def test_payments_settle_the_bills_the_books_make_evident_and_never_one_balance_
     # A recheck pins a newer copy of the books, which holds the saved payment: it settles SM/102 there, and its claim
     # no longer counts, so no balance is settled twice.
     import factory
+
     from minkops_platform.accounts import desk_tools, settlement
     db, steel = desk["db"], desk["company"]
     current = work.get_run(db, desk["tenant"]["id"], run["id"])
@@ -935,6 +938,73 @@ def test_a_rechecked_row_is_proposed_afresh_once_its_pc_has_read_the_books_again
     assert work.get_run(db, desk["tenant"]["id"], run["id"])["pins"][str(company["id"])] == fresh["version"]
     # Only the rechecked row went to the new session; the others kept their proposals.
     assert attempts == [4, 1]
+
+
+ACME = b"""Account Number,000405001234
+Statement period,01/09/2026 to 30/09/2026
+Date,Narration,Ref,Withdrawal,Deposit,Balance
+01/09/2026,NEFT ACME STEEL UTR111,UTR111,1180.00,,98820.00
+02/09/2026,NEFT ACME STEEL UTR222,UTR222,2000.00,,96820.00
+15/09/2026,BANK CHARGES,,118.00,,96702.00
+"""
+
+
+def test_a_chosen_other_side_is_saved_learnt_and_offered_for_the_payees_other_rows_in_one_click(desk):
+    """The session cannot tell Acme Steel from Steel Mart for two of Acme's payments. The person chooses Acme Steel
+    for one, from the ledgers the session weighed; a choice the checks refuse changes nothing. Once saved, the choice
+    is learnt as theirs and the other payment is proposed booked the same way, approved with one click."""
+    from minkops_platform.accounts import memory
+    db, company = desk["db"], desk["company"]["guid"]
+
+    def unsure_of_acme(answers, session):
+        return [("propose", {"rows": [
+            {"ref": row["ref"], "exception": {
+                "code": "ledger_unresolved", "detail": "Acme Steel or Steel Mart?", "company_guid": company,
+                "bank_ledger_guid": "g-icici", "payee": "ACME STEEL", "candidate_guids": ["g-acme", "g-steel"]}}
+            if "ACME" in row["narration"] else booked(row, company) for row in rows_of(session)]})]
+
+    fake = FakeAgents(script_for=lambda m, content: chunk_session(desk, unsure_of_acme) if is_chunk(content)
+                      else Script(layouts))
+    run = launch(desk, {"acme.csv": ACME})
+    learned(desk, run, fake)
+    with host(desk, fake):
+        until(lambda: all(i["state"] == "done" for i in items(desk, run)))
+    first, second, charges = records(desk, run)
+    current = work.get_run(db, desk["tenant"]["id"], run["id"])
+    actions = lambda row: [a["action"] for a in statement_entry.HANDLER.summarize(  # noqa: E731
+        current, work.get_record(db, desk["tenant"]["id"], row["id"]))["actions"]]
+    assert (first["hold_codes"], actions(first), actions(charges)) == (
+        ["ledger_unresolved"], ["choose", "nothing", "retry"], ["approve", "choose", "nothing"])
+    choice = statement_entry.HANDLER.detail(db, current, first)["choice"]
+    assert (choice["payee"], choice["bank_ledger"]["name"], [c["name"] for c in choice["candidates"]],
+            [t["name"] for t in choice["voucher_types"]]) == (
+        "ACME STEEL", "ICICI Current A/c", ["Acme Steel", "Steel Mart"], ["Contra", "Payment", "Receipt"])
+    # The other side is any ledger but the row's own bank; the session's candidates come first.
+    assert [(p["name"], p.get("suggested")) for p in statement_entry.HANDLER.ledgers(db, current, first, "any", "")[
+        "ledgers"]] == [("Acme Steel", True), ("Steel Mart", True), ("Bank Charges", None), ("HDFC Current A/c", None)]
+    assert [p["name"] for p in statement_entry.HANDLER.ledgers(db, current, first, "bank", "")["ledgers"]] == [
+        "ICICI Current A/c", "HDFC Current A/c"]
+    # A payment entered as a Receipt is refused, with why, and nothing changes.
+    with pytest.raises(ServiceError, match="active Payment type"):
+        decide(desk, first, "choose", {"bank_ledger": "g-icici", "counter_ledger": "g-acme", "voucher_type": "g-receipt"})
+    db.rollback()
+    assert work.get_record(db, desk["tenant"]["id"], first["id"])["version"] == first["version"]
+    assert decide(desk, first, "choose", {"bank_ledger": "g-icici", "counter_ledger": "g-acme",
+                                          "voucher_type": "g-payment"})["status"] == "writing"
+    companion(desk)
+    assert work.get_record(db, desk["tenant"]["id"], first["id"])["status"] == "saved"
+    [learnt] = memory.entries(db, desk["tenant"]["id"], desk["client"]["id"], company_ids=[desk["company"]["id"]],
+                              kinds=["routing"], subjects=["ACME STEEL"])
+    assert (learnt["value"]["counter_ledger"], learnt["evidence"][-1]["kind"], learnt["evidence"][-1]["actor"]) == (
+        "Acme Steel", "choice", str(desk["operator"]["id"]))
+    second = work.get_record(db, desk["tenant"]["id"], second["id"])
+    assert (second["status"], second["review_reasons"], actions(second)) == (
+        "proposed", [f"Booked as you chose for row {first['facts']['row']} of acme.csv."],
+        ["alike", "approve", "choose", "nothing"])
+    assert decide(desk, second, "alike")["approved"] == 1
+    plan = companion(desk)
+    assert (plan["lines"][1]["ledger"], work.get_record(db, desk["tenant"]["id"], second["id"])["status"]) == (
+        "Acme Steel", "saved")
 
 
 def test_a_mapping_file_is_consulted_through_its_tool_and_never_read_as_transactions(desk):

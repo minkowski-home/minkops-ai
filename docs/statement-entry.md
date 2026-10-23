@@ -168,7 +168,14 @@ each settlement choice as its own button. The runs API serves:
 - a small status DTO;
 - pages of record summaries;
 - each record's detail;
-- idempotent decisions per record version: `approve`, `nothing` (Do nothing),
+- the ledgers a reviewer may choose for a row's bank or other side
+  (`GET .../records/{id}/ledgers?role=&q=`), the session's candidates first, never
+  the row's own bank as its other side;
+- idempotent decisions per record version: `approve`, `choose` (Choose and
+  approve: the person's bank ledger, other side and voucher type, checked as a
+  session's proposal is, then approved and saved; a refusal changes nothing),
+  `alike` (approve every row of the run proposed again as a person chose for
+  another row of that payee), `nothing` (Do nothing),
   `retry` (Recheck: the row's PC reads the books afresh, then the row is proposed
   again in a new attempt of its chunk against that copy; a row left as is offers it
   too), `retry_save`, and

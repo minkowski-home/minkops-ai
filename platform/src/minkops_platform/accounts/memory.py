@@ -9,7 +9,7 @@ it; nothing is loaded into context up front.
   keeps its books, from the sync's probes or a person's one-click answer.
   `booking` entries say how a supplier's bills are booked, and `routing`
   entries how a payee's bank rows are, each learnt from saves that were
-  verified and approved.
+  verified and approved, or whose treatment a person chose in review.
 - Every sync revalidates them: an edit made in Tally to a voucher an entry was
   learnt from demotes it, and an entry whose GUIDs are missing from three syncs
   in a row retires.
@@ -33,7 +33,10 @@ from . import mirror
 EMPLOYEE = "accounts-desk"
 EVIDENCE_LIMIT = 20
 # What lookups and checks see; a disabled or retired entry is never offered.
-LIVE = ("unconfirmed", "confirmed", "demoted")
+LIVE = ("confirmed", "demoted")
+# Evidence that names the voucher an entry was learnt from: a save a person approved, or one whose treatment a person
+# chose in review. A later Tally edit to that voucher demotes the entry.
+VOUCHERED = ("outcome", "choice")
 MISSES = 3
 # Sessions read every active rule in one answer, so a client keeps at most this many per employee.
 RULES = 30
@@ -61,7 +64,7 @@ def live(connection, tenant_id, client_id, *, company_id, kind, subject, employe
 STANDING = 2
 
 
-def _key(name):
+def payee_key(name):
     """A payee's name as an entry subject: spacing and case never make two payees."""
     return mirror.normalized(name).replace(":", " ")
 
@@ -74,7 +77,7 @@ def entries(connection, tenant_id, client_id, *, company_ids, kinds=None, subjec
     name), or any GUID the entry names. A payee's name also matches when one contains the other, as narrations
     print names with codes or suffixes around them.
     """
-    wanted = None if subjects is None else sorted({*subjects, *(_key(subject) for subject in subjects)})
+    wanted = None if subjects is None else sorted({*subjects, *(payee_key(subject) for subject in subjects)})
     return connection.execute(
         """SELECT * FROM memory_entries WHERE tenant_id=%s AND client_id=%s AND employee_key=%s
            AND (company_id IS NULL OR company_id = ANY(%s::uuid[])) AND status = ANY(%s)
@@ -107,9 +110,9 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
 
     An entry a person answered is never silently replaced by a derived fact;
     the new evidence is kept on it instead, unless `overrule_answers`. A
-    confirmed outcome that agrees with a demoted or unconfirmed entry confirms
-    it: one approval confirms what a bill relied on. A disabled entry only
-    gathers evidence until an admin enables it.
+    confirmed outcome that agrees with a demoted entry confirms it: one
+    approval confirms what a bill relied on. A disabled entry only gathers
+    evidence until an admin enables it.
     """
     entry = live(connection, tenant_id, client_id, company_id=company_id, kind=kind, subject=subject, employee=employee)
     if entry is None:
@@ -125,7 +128,7 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
     history = [*entry["evidence"], evidence][-EVIDENCE_LIMIT:]
     disabled = entry["status"] == "disabled"
     if entry["value"] == value or (answered and not overrule_answers) or disabled:
-        confirm = entry["value"] == value and status == "confirmed" and entry["status"] in ("unconfirmed", "demoted")
+        confirm = entry["value"] == value and status == "confirmed" and entry["status"] == "demoted"
         updated = connection.execute(
             """UPDATE memory_entries SET evidence=%s, uses=uses+%s, updated_at=now(),
                status=CASE WHEN %s THEN 'confirmed' ELSE status END, misses=CASE WHEN %s THEN 0 ELSE misses END,
@@ -145,15 +148,15 @@ def record(connection, *, tenant_id, client_id, company_id, kind, subject, value
     return updated
 
 
-def learn_booking(connection, run, record_row, plan, voucher_guid, *, actor_id, guessed):
+def learn_booking(connection, run, record_row, plan, voucher_guid, *, actor_id):
     """A verified save a person approved becomes one way this supplier's bills are booked.
 
     A booking is the treatment the approval bound (vouchers.Bill.booking): the
     voucher type, the expense ledgers and whether the bill was booked item-wise,
     not the taxes or round-off a bill happened to print. Each distinct booking
     of a supplier is its own entry, its GUIDs the supplier's, the voucher type's
-    and the ledgers'. A best guess is kept unconfirmed: it stays under review
-    until a person approves a bill booked the same way.
+    and the ledgers'. A treatment a person chose in review is evidence of kind
+    `choice`, naming them.
     """
     references, party = plan["references"]["ledgers"], plan["header"]["party_ledger"]
     booking = record_row["proposal"].get("booking") or {}
@@ -166,9 +169,8 @@ def learn_booking(connection, run, record_row, plan, voucher_guid, *, actor_id, 
                   kind="booking", subject=f"{guid}:{_treatment([*treatment, 'items'] if items else treatment)}",
                   value={"supplier": party, "voucher_type": plan["voucher_type"]["NAME"], "ledgers": expense,
                          **({"items": True} if items else {})},
-                  guids=[guid, *treatment], evidence={"kind": "outcome", "voucher": voucher_guid,
-                                                      "run": str(run["id"]), "record": str(record_row["id"])},
-                  status="unconfirmed" if guessed else "confirmed", actor_id=actor_id, use=True)
+                  guids=[guid, *treatment], evidence=_evidence(run, record_row, voucher_guid),
+                  status="confirmed", actor_id=actor_id, use=True)
 
 
 def learn_routing(connection, run, record_row, plan, voucher_guid, *, actor_id):
@@ -176,7 +178,8 @@ def learn_routing(connection, run, record_row, plan, voucher_guid, *, actor_id):
 
     The payee is the counterparty the row's narration names; the treatment is
     the counter ledger and voucher type, one entry for each way a payee's rows
-    are booked.
+    are booked. A treatment a person chose in review is evidence of kind
+    `choice`, naming them.
     """
     proposal = record_row["proposal"] or {}
     payee = (proposal.get("selection") or {}).get("payee")
@@ -187,11 +190,17 @@ def learn_routing(connection, run, record_row, plan, voucher_guid, *, actor_id):
     treatment = [references[counter]["GUID"], plan["voucher_type"]["GUID"]]
     return record(connection, tenant_id=run["tenant_id"], client_id=run["client_id"],
                   company_id=record_row["company_id"], kind="routing",
-                  subject=f"{_key(payee)}:{_treatment(treatment)}",
+                  subject=f"{payee_key(payee)}:{_treatment(treatment)}",
                   value={"payee": payee, "counter_ledger": counter, "voucher_type": plan["voucher_type"]["NAME"]},
-                  guids=treatment, evidence={"kind": "outcome", "voucher": voucher_guid, "run": str(run["id"]),
-                                             "record": str(record_row["id"])},
+                  guids=treatment, evidence=_evidence(run, record_row, voucher_guid),
                   status="confirmed", actor_id=actor_id, use=True)
+
+
+def _evidence(run, record_row, voucher_guid):
+    """What a verified save teaches from: the voucher, and who chose its treatment when a person did."""
+    chosen = (record_row["proposal"] or {}).get("chosen")
+    return {"kind": "choice" if chosen else "outcome", "voucher": voucher_guid, "run": str(run["id"]),
+            "record": str(record_row["id"]), **({"actor": chosen["by"]} if chosen else {})}
 
 
 def revalidate(connection, company, version):
@@ -206,7 +215,7 @@ def revalidate(connection, company, version):
     names = {row["guid"]: row["name"] for row in mirror.masters(connection, company["id"], version["version"],
                                                                  guids=named)}
     learnt = sorted({item["voucher"] for row in rows if row["kind"] in LEDGERS for item in row["evidence"]
-                     if item.get("kind") == "outcome" and item.get("voucher")})
+                     if item.get("kind") in VOUCHERED and item.get("voucher")})
     vouchers = {row["guid"]: row for row in mirror.vouchers(connection, company["id"], version["version"], guids=learnt)}
     for entry in rows:
         missing = [guid for guid in entry["guids"] if guid not in names]
@@ -242,7 +251,7 @@ def _rebooked(entry, vouchers, names):
     wanted = {names.get(guid) for guid in ledgers} if all(guid in names for guid in ledgers) else (
         set(entry["value"].get("ledgers") or [entry["value"].get("counter_ledger")]))
     for item in entry["evidence"]:
-        if item.get("kind") != "outcome" or not item.get("voucher"):
+        if item.get("kind") not in VOUCHERED or not item.get("voucher"):
             continue
         voucher = vouchers.get(item["voucher"])
         if voucher is None or voucher["cancelled"]:

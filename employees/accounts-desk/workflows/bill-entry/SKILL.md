@@ -240,8 +240,11 @@ When something remains genuinely uncertain, propose the bill with an
 - `classification_uncertain`, `unsupported_structure`.
 
 Keep every value and identity you did establish in the proposal, because a
-person can write a held bill's complete best candidate as a best guess. Never
-invent an amount, date or identity to complete a proposal.
+person can choose a held bill's treatment and approve it: list in `candidates`,
+by reference and most likely first, the ledgers you weighed for what is
+uncertain (the supplier ledgers for `supplier_unresolved`, the expense ledgers
+for `classification_uncertain`), so the person sees them first. Never invent an
+amount, date or identity to complete a proposal.
 
 ## Working well
 
