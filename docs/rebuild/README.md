@@ -16,7 +16,8 @@ on from another machine. The evidence behind each decision is in
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
 - **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
 - **[Demo readiness and learning loops](demo-readiness.md) is built and regression-checked live** (23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, and batched uploads ([progress](#progress)). The checks ran on a synthetic pack and books built for it; accuracy on a client's own books is unproven until PR Infra's bills and statements run against them.
-- **Next: the cut-over** by [cutover.md](cutover.md), once the account flows land: sign-up, profile and password reset, email verification, and members' access.
+- **[Workspace access](../workspace-access.md) is built** (23 October 2026): joining only by invitation, one workspace per person, workflow assignments, removal, and each person's profile, password reset and sessions ([progress](#progress)).
+- **Next: the cut-over** by [cutover.md](cutover.md).
 
 ## Continue on Windows
 
@@ -408,6 +409,15 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 
 Versions: Bill entry 1.11.0, Statement entry 1.6.0, companion 0.11.5 (plan protocol 8). 356 platform tests, 91 API, 130 companion and Windows app, 24 web unit and 18 browser; lint and ruff clean. The live regression checks, their limits, and what they found and fixed, are in the [evidence](evidence.md#demo-readiness-regression-checked-live-23-october-2026).
 
+**Workspace access** (23 October 2026; branch `workspace/account-flows`; [doc](../workspace-access.md)). People join only by invitation, and admins decide what members run:
+
+- **Joining.** There is no public sign-up. The operator command creates a client's workspace and prints its first admin's one-time sign-up link; admins invite everyone else, as admins or members. A link works once for seven days, a resend replaces it, and accepting it creates the verified account and signs it in. A person belongs to one workspace (migrations 0040–0041).
+- **Assignments.** A member launches, sees and decides only the workflows an admin assigns them. Memory, rules and practice stay shared by the desk, and a practice question reaches the members whose workflow its answer changes. Execution never reads access, so changing it never stops work.
+- **People.** Admins change roles, with an admin always kept, and remove people: their sessions end and their PCs disconnect through the owner's own disconnect path, while the runs they started carry on.
+- **Each person.** Name, password (with the current one, ending the other sessions), the sessions to sign out of, and a reset link by email that works once within the hour.
+
+369 platform tests, 97 API, 24 web unit and 22 browser; lint and ruff clean. Live on the local stack, an invited member joined, ran one bill to review under their assignment, reset their password and was removed, and a real browser accepted an invitation into the workspace.
+
 **Carried into later slices:**
 
 - **Upkeep:** the pinned e-invoice signing keys. IRPs 3–5 are not pinned: Clear's published certificate link refuses downloads, and the other two portals list their keys only in the browser. IRIS's newest listed key expired on 20 June 2026, and NIC's current keys run to 1 May 2027. Each new key is added as the bill entry doc describes.
@@ -415,6 +425,7 @@ Versions: Bill entry 1.11.0, Statement entry 1.6.0, companion 0.11.5 (plan proto
 
 **For the next manual testing phase** (steps that need a person at Tally or Windows):
 
+- **Emails in production.** The local stack sends no email. After the cut-over, invite someone and ask for a password reset: expect both emails from the console's address, each link working once.
 - **Create a ledger in Tally, then Recheck** (demo readiness, workstream 1).
   1. Run a bill whose expense head the company lacks, so it holds.
   2. Create that ledger in Tally's UI, then press Recheck on the held bill.
