@@ -135,3 +135,83 @@ test('a run starts from its workflow with the client, the files and the settings
   expect(launch).toEqual({workflow:'bill-entry', file_ids:['f-1'], config:{company_mode:'infer'},
     request_key:expect.stringMatching(/^[0-9a-f-]{36}$/)});
 });
+
+test('a held bill is approved with the ledgers a person chooses, from those its session weighed first', async ({page, context}) => {
+  const errors = [], calls = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const base = '/api/tenants/mock-tenant/clients/rehearsal';
+  let held = {id:'b-9', version:3, kind:'bill', status:'held', file:'cabin.pdf', bill:1, supplier:'Sunrise Office Systems',
+    number:'SOS/26/0412', date:'2026-09-01', total:188800, company:'Test Company',
+    holds:[{code:'classification_uncertain', label:'Ledger unclear', reason:'The appropriate accounting ledger could not be confirmed.'}],
+    review:['Office Cabins or Repairs and Maintenance?'],
+    actions:[{action:'choose', label:'Choose and approve'}, {action:'nothing', label:'Do nothing'}, {action:'retry', label:'Recheck'}]};
+  const choice = {company:'Test Company', supplier:'Sunrise Office Systems',
+    voucher_types:[{guid:'g-journal', name:'Journal'}, {guid:'g-purchase', name:'Purchase'}], voucher_type:'g-purchase',
+    party:{guid:'g-sunrise', name:'Sunrise Office Systems'},
+    lines:[{role:'expense', side:'debit', amount:160000, ledger:{guid:'g-cabins', name:'Office Cabins'}, picker:'expense'},
+      {role:'tax', side:'debit', amount:14400, ledger:{guid:'g-cgst', name:'Input CGST 9%'}, picker:'tax'},
+      {role:'tax', side:'debit', amount:14400, ledger:{guid:'g-sgst', name:'Input SGST 9%'}, picker:'tax'}],
+    items:[], candidates:[{guid:'g-cabins', name:'Office Cabins'}, {guid:'g-repairs', name:'Repairs and Maintenance'}]};
+  const ledgers = {
+    expense:[{guid:'g-cabins', name:'Office Cabins', group:'Fixed Assets', suggested:true},
+      {guid:'g-repairs', name:'Repairs and Maintenance', group:'Indirect Expenses', suggested:true},
+      {guid:'g-round', name:'Round Off', group:'Indirect Expenses'}],
+    tax:[{guid:'g-cgst', name:'Input CGST 9%', group:'Duties & Taxes'}, {guid:'g-sgst', name:'Input SGST 9%', group:'Duties & Taxes'}],
+    supplier:[{guid:'g-sunrise', name:'Sunrise Office Systems', group:'Sundry Creditors'}]};
+  await context.route(/https:\/\/(fonts.googleapis.com|fonts.gstatic.com)/, route => route.fulfill({body:'', contentType:'text/css'}));
+  await context.route('**/api/**', async route => {
+    const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
+    let body, status = 200;
+    if (path === '/api/auth/session') body = {id:'user', name:'QA', memberships:[{slug:'mock-tenant', role:'admin'}], csrf_token:'csrf'};
+    else if (path.endsWith('/workspace')) body = {tenant:{slug:'mock-tenant', name:'QA'}, can_edit:true,
+      clients:[{id:'c-1', slug:'rehearsal', name:'Rehearsal companies'}], employees:[], workflows:[workflow], tasks:[task]};
+    else if (path === '/api/tenants/mock-tenant/tasks/t-1') body = {...task, can_control:true, events:[], run:{id:'r-1', client:'rehearsal'}};
+    else if (path === `${base}/runs/r-1/status`) body = {run:{id:'r-1', task_id:'t-1', workflow_key:'bill-entry', state:'review',
+      control_state:'active'}, items:{done:1}, records:{[held.status]:1}, blockers:[], activity:held.status};
+    else if (path === `${base}/runs/r-1/records`) body = {records:[held], next:null};
+    else if (path === `${base}/records/b-9`) body = {...held, facts:{}, choice};
+    else if (path === `${base}/records/b-9/ledgers`) {
+      const role = url.searchParams.get('role'), query = (url.searchParams.get('q') ?? '').toLowerCase();
+      calls.push(['ledgers', role, query]);
+      body = {company:'Test Company', role, ledgers:ledgers[role].filter(ledger => ledger.name.toLowerCase().includes(query))};
+    } else if (path === `${base}/records/b-9/decisions` && method === 'POST') {
+      const decision = request.postDataJSON();
+      calls.push(['decide', decision]);
+      if (decision.detail.lines[0] === 'g-round') {
+        status = 422;
+        body = {detail:'Round Off is not where this bill goes. Choose again.'};
+      } else {
+        held = {...held, version:4, status:'writing', holds:undefined, review:undefined, actions:[]};
+        body = {status:'writing', record_id:'b-9', decided_version:3, action:'choose', replayed:false};
+      }
+    } else throw Error(`${method} ${path}`);
+    await route.fulfill({status, json:body});
+  });
+  await page.goto('http://127.0.0.1:3000/mock-tenant/tasks/t-1');
+  const row = page.getByRole('region', {name:'Review'}).getByRole('listitem').filter({hasText:'Sunrise Office Systems'});
+  await row.getByRole('button', {name:'Choose and approve'}).click();
+  const form = row.getByRole('form', {name:'Choose and approve'});
+  await expect(form).toContainText('Minkops weighed Office Cabins and Repairs and Maintenance; they are listed first.');
+  await expect(form.getByLabel('Voucher type')).toHaveValue('g-purchase');
+  const expense = form.getByRole('combobox', {name:'Expense 1,60,000.00 Dr'});
+  await expect(expense).toHaveValue('g-cabins');
+  await expect(expense.locator('option')).toHaveText(['Choose a ledger', 'Office Cabins · Fixed Assets · suggested',
+    'Repairs and Maintenance · Indirect Expenses · suggested', 'Round Off · Indirect Expenses']);
+  // A search narrows the ledgers offered; the server refuses a choice its checks reject, and says why.
+  await form.getByRole('searchbox', {name:'Search ledgers for Expense 1,60,000.00 Dr'}).fill('round');
+  await expect(expense.locator('option')).toHaveText(['Choose a ledger', 'Office Cabins', 'Round Off · Indirect Expenses']);
+  await expense.selectOption('g-round');
+  await form.getByRole('button', {name:'Approve with these ledgers'}).click();
+  await expect(page.getByRole('status').filter({hasText:'Round Off is not where this bill goes.'})).toBeVisible();
+  await form.getByRole('searchbox', {name:'Search ledgers for Expense 1,60,000.00 Dr'}).fill('');
+  await expense.selectOption('g-repairs');
+  await form.getByRole('button', {name:'Approve with these ledgers'}).click();
+  await expect(page.getByRole('status').filter({hasText:'Approved. Saving it in Tally.'})).toBeVisible();
+  await expect(row).toContainText('Saving');
+  const decisions = calls.filter(([kind]) => kind === 'decide').map(([, decision]) => decision);
+  expect(decisions).toEqual([
+    {action:'choose', version:3, detail:{voucher_type:'g-purchase', party:'g-sunrise', lines:['g-round', 'g-cgst', 'g-sgst']}},
+    {action:'choose', version:3, detail:{voucher_type:'g-purchase', party:'g-sunrise', lines:['g-repairs', 'g-cgst', 'g-sgst']}}]);
+  expect(calls).toContainEqual(['ledgers', 'supplier', '']);
+  expect(errors).toEqual([]);
+});

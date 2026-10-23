@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { LoadingIndicator, RetryMessage, Spinner } from "../components/Feedback";
 import { reads } from "../readCache";
 import { useRead } from "../useRead";
+import { ChooseAndApprove } from "./ChooseAndApprove";
 import { OUTCOME, RECORD_STATUS, recordCounts, recordLine, rupees, settled, settles, type BillReference,
   type RecordAction, type RecordPage, type RecordSummary, type RunStatus } from "./review";
 
@@ -125,6 +126,8 @@ function RecordRow({ record, pending, open, onToggle, detailPath, scope, onDecid
   onDecide: (choice: RecordAction) => void;
 }) {
   const line = recordLine(record);
+  // Choose and approve opens its form; the decision is sent from there, with the ledgers chosen.
+  const [choosing, setChoosing] = useState(false);
   return <li className={`review-row review-row--${record.status}`}>
     <div className="review-row__main">
       <div className="review-row__heading">
@@ -139,12 +142,17 @@ function RecordRow({ record, pending, open, onToggle, detailPath, scope, onDecid
     <div className="review-row__actions">
       {record.actions?.map((choice) => {
         const key = actionKey(record, choice);
+        if (choice.action === "choose") return <button key={key} disabled={Boolean(pending)} aria-expanded={choosing}
+          className="button button-ghost" onClick={() => setChoosing(!choosing)}>{choice.label}</button>;
         return <button key={key} disabled={Boolean(pending)} onClick={() => onDecide(choice)}
           className={choice.action === "approve" ? "button button-primary" : "button button-ghost"}>
           {pending === key && <Spinner />}{pending === key ? "Confirming…" : choice.label}</button>;
       })}
       <button className="button button-ghost" aria-expanded={open} onClick={onToggle}>{open ? "Hide details" : "Details"}</button>
     </div>
+    {choosing && record.actions?.some((choice) => choice.action === "choose") && <ChooseAndApprove scope={scope}
+      recordPath={detailPath} pending={pending.startsWith(`${record.id}:choose:`)}
+      onApprove={(detail) => onDecide({ action: "choose", label: "Choose and approve", detail })} />}
     {open && <RecordDetail path={detailPath} scope={scope} />}
   </li>;
 }
