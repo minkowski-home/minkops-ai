@@ -15,7 +15,8 @@ on from another machine. The evidence behind each decision is in
   - The state before the retirement is commit `2781c60`, an ancestor of this branch, so it stays reachable after that branch is deleted.
   - A local tag, `archive/2026-10-21/before-legacy-retirement`, exists only on the original Mac.
 - **Every slice is built; the cut-over waits for the owner.** [Progress](#progress) records each slice's state and evidence, and the manual testing still to run. [design.md](design.md) maps the modules, tables and protocols, and [cutover.md](cutover.md) is the runbook for going live.
-- **Next: [demo readiness and learning loops](demo-readiness.md)** (agreed 23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, batched uploads, and the acceptance runs before deployment.
+- **[Demo readiness and learning loops](demo-readiness.md) is built and accepted live** (23 October 2026): review that corrects and teaches, ledger creation in Tally's terms, learning from fixes made in Tally, and batched uploads ([progress](#progress)).
+- **Next: the cut-over** by [cutover.md](cutover.md), once the account flows land: sign-up, profile and password reset, email verification, and members' access.
 
 ## Continue on Windows
 
@@ -395,12 +396,38 @@ Built on Windows through WSL 2 (Ubuntu 26.04) against TallyPrime Edit Log 1.1.7.
 
 **After the slices: replacing a PC** (22 October 2026). A disconnected PC's companies leave the client's books, and the PC that replaces it continues them. One click on the found company's card moves the client's company there, keeping its memory, rules, practice, statement continuity and save history (`clients.authorise_company`, migration 0034). Each mirror version records the PC it was read from (migration 0033), so the first refresh there reads the books in full, and no run pins the old copy. Vouchers an older copy lacks are named on one card, and memory learnt from them is demoted. A save the old PC had begun holds as interrupted; saves it had not begun go to the new PC. Some books are never continued: another client's, a year-split part, and books another connected PC holds, even when two admins decide at once. The console's card now decides found companies, which before needed the API (`test_clients.py`, `test_sync.py`, `test_mirror.py`, `test_statement_entry.py`, `test_sync_api.py`, `company-cards.spec.js`). Live, two headless companions reading the same Tally moved the five rehearsal companies from one to the other. Each was rebuilt in full in 10 s and matched the old copy exactly ([evidence](evidence.md#replacing-a-pc-rehearsed-live-22-october-2026)). See [Replacing a PC](../accounts-desk.md#replacing-a-pc). 487 Python tests pass.
 
+**Demo readiness and learning loops** (23 October 2026; [plan](demo-readiness.md), branch `accounts-desk/demo-readiness`). Review now corrects and teaches, and Minkops learns from what people do in Tally:
+
+- **Recheck reads the books afresh.** A recheck asks the PC holding the company to refresh, and the run pins that company's newly published copy once the refresh is done, so a ledger created in Tally since is found (migration 0035). A deferred bill or row offers Recheck too.
+- **Choose and approve.** "Which ledger?" holds carry their candidates. A person picks from the company's own ledgers for that role, the suggested ones first, and approves; or approves every bill of the run booked the same way. Best guesses are gone, and memory holds only what people confirmed (migration 0036; `ChooseAndApprove.tsx`).
+- **Create this ledger, in Tally's terms.** A new supplier, or a bank row's other side, is created from a form laid out like Tally's ledger creation: its group, bill-by-bill and credit period, mailing details and GST registration, filled from the source and the company's books, then validated by the server. Companion 0.11.5 writes exactly those fields and reads them back, and the bill or row is entered with the ledger (plan protocol 8, migration 0037; `party_ledgers.py`, `CreateLedger.tsx`).
+- **Learning from Tally.** An edit made in Tally to a voucher Minkops saved teaches the corrected treatment, once per alteration. A held or left-as-is bill or row later found in Tally is reconciled after the next sync, noted as entered by hand or as Minkops's own save from another run, and only a hand entry teaches (migration 0039). A bill already in the books when proposed is a duplicate at once, or holds naming what differs. A person's choice of supplier teaches what the printed name stands for.
+- **Precedent.** Statements count the books' own history as precedent, and a booking or routing confirmed twice binds the next bill or row unless a stated departure goes to review.
+- **Uploads in batches.** A run's files upload in batches of up to 25 MB, and a run is bounded by its file count (50 bills), so the 50-bill pack starts (migration 0038).
+- **Build.** `scripts/windows_build.ps1` builds the Windows installer from the repository, and fails unless it wrote exactly one new installer of plausible size.
+
+Versions: Bill entry 1.10.0, Statement entry 1.6.0, companion 0.11.5 (plan protocol 8). 360 platform tests, 91 API, 130 companion and Windows app, 24 web unit and 18 browser; lint and ruff clean. Live acceptance, and what it found and fixed, is in the [evidence](evidence.md#demo-readiness-accepted-live-23-october-2026).
+
 **Carried into later slices:**
 
 - **Upkeep:** the pinned e-invoice signing keys. IRPs 3–5 are not pinned: Clear's published certificate link refuses downloads, and the other two portals list their keys only in the browser. IRIS's newest listed key expired on 20 June 2026, and NIC's current keys run to 1 May 2027. Each new key is added as the bill entry doc describes.
 - **Deferred: admins disconnecting a member's PC.** Only a PC's owner can disconnect it (`desktop.revoke` checks ownership). A client's books continue on a replacing PC only once the old one is disconnected, so a PC whose owner has left blocks the move. The decision to let workspace admins disconnect any member's PC was deferred on 22 October 2026.
 
 **For the next manual testing phase** (steps that need a person at Tally or Windows):
+
+- **Create a ledger in Tally, then Recheck** (demo readiness, workstream 1).
+  1. Run a bill whose expense head the company lacks, so it holds.
+  2. Create that ledger in Tally's UI, then press Recheck on the held bill.
+  3. Expect "Reading this bill again once the PC has refreshed its Tally copy", then the bill proposed with the new
+     ledger.
+- **Correct a saved voucher in Tally** (workstream 5a).
+  1. Approve a bill and let Minkops save it.
+  2. In Tally, alter that voucher's expense ledger, then sync.
+  3. Expect Memory to show the old booking demoted and the corrected one confirmed, with evidence `tally_edit`. An
+     edit to amounts alone changes nothing.
+- **Enter a held bill by hand** (workstream 5b).
+  1. Leave a bill held, and enter it in Tally yourself.
+  2. Sync. Expect the held bill to become a duplicate noted "Entered in Tally by hand", and its booking learnt once.
 
 - **A first pass of the UAT bills.** The PR Infra UAT company already holds B01–B03 and B03's supplier from the staged build.
   1. Restore the pre-UAT backup the pack records, or a copy of the company without them.

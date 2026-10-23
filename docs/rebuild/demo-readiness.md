@@ -6,6 +6,10 @@ produced it: each workstream says what is wrong now (with file references), what
 to build, which tests prove it, and how it is accepted live. Deployment follows
 it, by the [cut-over runbook](cutover.md), only when the owner asks.
 
+- **Status:** built and accepted live on `accounts-desk/demo-readiness`, 23
+  October 2026: see [progress](README.md#progress) and the
+  [evidence](evidence.md#demo-readiness-accepted-live-23-october-2026). The rest
+  of this page is the plan as agreed.
 - **Branch:** everything on `accounts-desk/demo-test`, this plan included, was
   merged into `staging` on 23 October 2026. Execute the plan on a new branch from
   `staging`, such as `accounts-desk/demo-readiness`.
@@ -435,8 +439,10 @@ Deployment is the owner's call, by [cutover.md](cutover.md). Before it:
   (India's DPDP Act) and the terms of service are an open To Do for a later
   sprint, by the owner's decision on 23 October 2026. They no longer block the
   cut-over, and stay listed until done.
-- Companion 0.11.5 is packaged signed with the organization's certificate and
-  recorded in `windows-release.json`; the runbook names 0.11.5.
+- Companion 0.11.5 is packaged and recorded in `windows-release.json`; the
+  runbook names 0.11.5. The owner decided on 23 October 2026 to publish it as an
+  unsigned release candidate (`scripts/windows_build.ps1 -Kind candidate`); a
+  signed release stays on the manual testing list.
 - **History.** 43 commits on this branch carry an assistant `Co-Authored-By`
   trailer that the working agreements forbid (22 from 21 October, 21 from 23
   October), and two early diffs hold a real-looking Windows hostname. The owner
@@ -457,9 +463,6 @@ Deployment is the owner's call, by [cutover.md](cutover.md). Before it:
 - The companion's folder-refresh batching (see workstream 8).
 - Admins disconnecting a member's PC (deferred on 22 October).
 - Wage batches beyond holding them.
-- The local Windows build script reports success when packaging fails; it lives
-  outside the repository. Moving it into `scripts/` with size and exit checks is
-  worth doing before the signed build.
 
 ## Owner's decisions (23 October 2026)
 

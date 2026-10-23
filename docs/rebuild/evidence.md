@@ -588,3 +588,84 @@ after the other.
 
 Restoring an older backup on the new PC, and a bill saved through Minkops Dev after the move, need a person at
 Windows. Both are on the manual testing list.
+
+## Demo readiness, accepted live (23 October 2026)
+
+Workstream 10 of the [plan](demo-readiness.md) ran on the local stack: the API, a worker with 12 lanes, the console,
+Minkops Dev 0.11.5 on Windows, TallyPrime in Educational mode and `gpt-6-luna` at medium effort. Runs used
+`all_outputs` unless noted, and were scored as the plan's appendix says, the answer keys read only after each run.
+
+- **Bills: 50 in 7 min 17 s** (target 10 min), upload included, in two batches (Bill entry 1.9.0). Every printed
+  date, total, company and number matched the key, except B17, a proforma held as not a bill as the key wants.
+  The 15 added bills B31–B45 were proposed to the key's ledgers, and the five expected holds held: B46 as a copy
+  of B31 (naming it), B47's overstated total, B48's unregistered new supplier (offering Create this ledger), B49's
+  buyer GSTIN and B50's date before the books begin. B02, B03, B09 and B11, entered earlier, were found in Tally.
+- **Unattended exposure.** 15 bill proposals had no review note and at least two precedents; each was on the
+  key's ledger. One, B22, an annual maintenance contract running past 31 March, is one the key leaves to a person:
+  fixed below.
+- **Statements: S01 and S02 in one run**, 2,180 rows in 20 min 51 s, sharing the lanes with two other runs
+  (Statement entry 1.6.0). No date or amount differed from the key, no answer landed on another row, no transfer
+  held, and the nine R K Supplies rows held, none booked to another creditor (the earlier run booked five to MKQA
+  GST Supplies). Of the 1,417 rows the key resolves, 1,408 were booked to its ledger, 8 held and 1 booked to
+  another supplier (fixed below). Of the 763 rows the key sends to review, 600 held. The other 163 were booked:
+  81 bank charges split into the fee and the tax their narrations itemise, 73 payments to the supplier a short
+  narration names, and 9 single cases, among them a part payment, a refund and a returned transfer, each booked to
+  the party it names or reverses. Under standing approval 183 rows would be written unattended: 182 on the key's
+  ledger, and one intercompany advance booked as five earlier ones were, which the key leaves to a person.
+- **A client's real statement** (1,232 rows, kept outside git): 16 min 27 s with the lanes shared. 1,217 held as
+  other side unclear, because the synthetic books lack its payees; 12 were proposed and 3 found already in Tally,
+  each naming the ledger booked in its narration; no transfer held (the earlier run held two for a same-account
+  pairing).
+- **Protocol 7 in Tally.** B11 (a 60/40 split on a ledger keeping cost centres) and B03 (one head at three GST
+  rates), saved earlier, read back from Tally exactly as approved through a fresh read-only export, as did every
+  save below.
+- **Learning loops.**
+  - Recheck: B09, held after its supplier was created, was rechecked. The PC refreshed, the run pinned the new copy
+    and cleared its request, and the bill was read again against it.
+  - Choose and approve: B02's supplier had been booked away from its history in all four earlier runs. A person
+    chose its historical head and B02 was saved. The next run proposed the same supplier's B32, B36, B40 and B44
+    to that head unprompted, with two precedents each.
+  - Create this ledger: B09's supplier was created bill by bill with a 30-day credit period under Sundry
+    Creditors, and read back. R K Supplies, a payee new to Pradeepraj Infra, was created from its 1 October row
+    under the group chosen, and the payment entered with it. The run's eight other R K Supplies rows were
+    proposed to it as chosen.
+  - Learning from Tally: bills saved earlier were found in Tally when proposed again, and held copies in older runs
+    were reconciled after the next sync.
+- **Standing approval.** B01–B30 rerun under `only_exceptions` (Bill entry 1.10.0): seven bills with two to six
+  precedents and no note were written unattended (B06, B18, B19, B24, B25, B27, B30). Each read back from Tally as
+  approved, on the key's ledger. B25, a supplier's debit note for a price increase, was entered as a Purchase,
+  which raises what is owed; a note for such bills is still [not in this plan](demo-readiness.md#not-in-this-plan).
+  B20's adjusted advance, B22's service past the year end, B08's copy and three new bookings waited for a person.
+
+**Usage.**
+
+- Bills, 50: 50 sessions, 4,829,138 input tokens (75% cached) and 233,441 output.
+- S01 and S02: 45 sessions, 8,102,493 input tokens (81% cached) and 608,079 output.
+- The client's statement: 25 sessions, 2,997,331 input tokens (79% cached) and 235,809 output.
+- Bills, standing approval: 30 sessions, 2,670,598 input tokens (73% cached) and 118,740 output.
+
+**Found and fixed along the way:**
+
+- **A new supplier's bill without its bill reference.** B09's supplier was created bill by bill, but the server
+  kept only the created ledger's identity, so the plan carried no New Ref. Tally took the voucher and kept it on
+  account, and the companion, finding a voucher other than the approved one, held the save as uncertain; nothing
+  was imported twice. The whole master is now kept as Tally holds it (`79e5f07`).
+- **"Booked as proposed" when it was not.** Found in Tally later, B09 was called booked as proposed though Tally
+  kept it on account. A bill already in Tally is now a duplicate only when its date, voucher type, ledgers and
+  amounts, cost allocations and bill references all match; otherwise it holds naming the difference (`22058a4`).
+- **Minkops's own saves taught twice.** Held copies, in older runs, of bills saved from other runs were noted
+  "Entered in Tally by hand" and taught their bookings again, inflating the precedent standing approval counts.
+  They are now noted as Minkops's own saves, and no voucher teaches twice (`8647256`, migration 0039).
+- **An annual service written unattended.** B22's maintenance contract runs to the next October. In four earlier
+  runs the session held it; in this one it proposed it with no note. A bill now reads the period it prints, and
+  one past 31 March is booked in full with a note for a person (`6d4b0ec`, Bill entry 1.10.0).
+- **A payee the row never printed.** In S01, a payment naming QA18 Cement Depot was booked to QA18 Coastal
+  Equipment Hire, its answer naming that supplier as payee. An answer naming a payee its row does not print is
+  now refused, as one restating another row's amount is (`efd24e0`).
+- **A tax group offered for a payee.** The form for a payee's new ledger listed Duties & Taxes, a sub-group of
+  Current Liabilities. Tax groups are no longer offered (`db4a987`).
+- **A test that depended on others.** The migration test for ledger jobs validated an old constraint against jobs
+  other tests had left in the shared database (`018d4de`).
+- **On the local stack only:** the standing-approval run waited 23 minutes after code changed under a running
+  worker, which then imported a new module against an old one. Each lane left its items for a successor, as it
+  must during a deployment, and a restart resumed the run. A deployed image never changes under its worker.
