@@ -74,6 +74,7 @@ test("the plain identity file never holds the credential", async (t) => {
   assert.deepEqual(JSON.parse(plain), {
     server_origin: origin,
     installation_id: pairing.state.installation_id,
+    machine: null,
     device: { id: device.id, tenant: device.tenant, owner_id: device.owner_id },
   });
 });
@@ -180,4 +181,89 @@ test("an unpaired profile connects with the machine identity; a paired one keeps
   const once = await openPairing({ directory: unpaired, origin, cipher });
   await once.save();
   assert.equal((await openPairing({ directory: unpaired, origin, cipher, machine })).state.installation_id, machine);
+});
+
+test("a connection saved on another PC is set aside and never used or reconnected here", async (t) => {
+  const pcA = "55555555-5555-5555-8555-555555555555";
+  const pcB = "66666666-6666-5666-8666-666666666666";
+  const directory = await profile(t);
+  const onA = await openPairing({ directory, origin, cipher, machine: pcA });
+  onA.state.device = device;
+  await onA.save();
+  // Every save records the machine it was made on, in the credential and in the plain identity.
+  assert.equal(JSON.parse(await readFile(join(directory, "installation.json"), "utf8")).machine, pcA);
+  assert.equal((await openPairing({ directory, origin, cipher, machine: pcA })).state.device.credential, device.credential);
+
+  // The profile reaches PC B: a profile container, a restored backup or a copied folder.
+  const onB = await openPairing({ directory, origin, cipher, machine: pcB, now: () => new Date("2026-10-23T05:00:00Z") });
+  assert.match(onB.problem, /another PC/);
+  assert.equal(onB.state.device, null, "PC A's credential would claim its jobs and write to another Tally");
+  assert.equal(onB.previous, null, "nor is PC A's record reconnected from here");
+  assert.equal(onB.state.installation_id, pcB, "connecting registers PC B as itself");
+  await onB.save();
+  const files = (await readdir(directory)).sort();
+  assert.deepEqual(files, ["companion.bin", "companion.bin.other-pc-2026-10-23T05-00-00Z", "installation.json"]);
+  assert.equal(JSON.parse(cipher.decrypt(await readFile(join(directory, files[1])))).device.credential, device.credential,
+    "set aside, never overwritten");
+});
+
+test("another PC's identity is never used to reconnect, even when its credential cannot be read", async (t) => {
+  const directory = await profile(t);
+  const onA = await openPairing({ directory, origin, cipher, machine: "55555555-5555-5555-8555-555555555555" });
+  onA.state.device = device;
+  await onA.save();
+  await writeFile(join(directory, "companion.bin"), "garbage");
+  const onB = await openPairing({ directory, origin, cipher, machine: "66666666-6666-5666-8666-666666666666" });
+  assert.equal(onB.previous, null);
+  assert.equal(onB.state.installation_id, "66666666-6666-5666-8666-666666666666");
+});
+
+test("a connection saved by 0.11.2 on another PC is recognised by its machine installation ID", async (t) => {
+  const directory = await profile(t);
+  // 0.11.2 recorded no machine, but a version 5 installation ID is the machine it was derived on.
+  const legacy = { server_origin: origin, installation_id: "55555555-5555-5555-8555-555555555555", device, bindings: {}, pending: null };
+  await writeFile(join(directory, "companion.bin"), cipher.encrypt(JSON.stringify(legacy)));
+  await writeFile(join(directory, "installation.json"), JSON.stringify({ server_origin: origin, installation_id: legacy.installation_id, device: null }));
+  const elsewhere = await openPairing({ directory, origin, cipher, machine: "66666666-6666-5666-8666-666666666666" });
+  assert.equal(elsewhere.state.device, null);
+  assert.match(elsewhere.problem, /another PC/);
+  const home = await profile(t);
+  await writeFile(join(home, "companion.bin"), cipher.encrypt(JSON.stringify(legacy)));
+  assert.deepEqual((await openPairing({ directory: home, origin, cipher, machine: legacy.installation_id })).state, legacy);
+});
+
+test("a connection whose machine is unknown is kept, and records this PC from its next save", async (t) => {
+  const directory = await profile(t);
+  // Paired before 0.11.2 under a random ID, not yet moved to the machine identity.
+  const legacy = { server_origin: origin, installation_id: "33333333-3333-4333-8333-333333333333", device, bindings: {}, pending: null };
+  await writeFile(join(directory, "companion.bin"), cipher.encrypt(JSON.stringify(legacy)));
+  const here = await openPairing({ directory, origin, cipher, machine: "55555555-5555-5555-8555-555555555555" });
+  assert.deepEqual(here.state, legacy);
+  await here.save();
+  assert.equal((await openPairing({ directory, origin, cipher, machine: "66666666-6666-5666-8666-666666666666" })).state.device, null);
+});
+
+test("a start that cannot read the machine keeps the connection and the machine it recorded", async (t) => {
+  const directory = await profile(t);
+  const pcA = "55555555-5555-5555-8555-555555555555";
+  const first = await openPairing({ directory, origin, cipher, machine: pcA });
+  first.state.device = device;
+  await first.save();
+  const unknown = await openPairing({ directory, origin, cipher, machine: null });
+  assert.equal(unknown.state.device.credential, device.credential);
+  unknown.state.pending = { job: "j" };
+  await unknown.save();
+  assert.equal(JSON.parse(await readFile(join(directory, "installation.json"), "utf8")).machine, pcA);
+  assert.equal((await openPairing({ directory, origin, cipher, machine: "66666666-6666-5666-8666-666666666666" })).state.device, null);
+});
+
+test("a credential that recorded no machine belongs to the machine its identity file names", async (t) => {
+  const directory = await profile(t);
+  const legacy = { server_origin: origin, installation_id: "33333333-3333-4333-8333-333333333333", device, bindings: {}, pending: null };
+  await writeFile(join(directory, "companion.bin"), cipher.encrypt(JSON.stringify(legacy)));
+  // Opening on PC A records it in the identity at once, before the credential is next saved.
+  await openPairing({ directory, origin, cipher, machine: "55555555-5555-5555-8555-555555555555" });
+  const onB = await openPairing({ directory, origin, cipher, machine: "66666666-6666-5666-8666-666666666666" });
+  assert.equal(onB.state.device, null);
+  assert.equal(onB.previous, null);
 });
